@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 
+_SUPPORTED_BOOK_LANGUAGE = ['en','zh','ru','es','fr','de','it','pt','pl','bg','nl','ja','ar','he','hu','la','cs','ko','tr','uk','id','ro','el','lt','bn','zh‑Hant','af','ca','sv','th','hi','ga','lv','kn','sr','bo','da','fa','hr','sk','jv','vi','ur','fi','no','rw','ta','be','kk','mn','ka','sl','eo','gl','mr','fil','gu','ml','ky','qu','az','sw','ba','pa','ms','te','sq','ug','hy','shn']
+
 # Directory settings
 BASE_DIR = Path(__file__).resolve().parent
 LOG_DIR =  "/var/logs"
@@ -30,6 +32,10 @@ SUPPORTED_FORMATS = os.getenv("SUPPORTED_FORMATS", "epub,mobi,azw3,fb2,djvu,cbz,
 SUPPORTED_FORMATS = SUPPORTED_FORMATS.split(",")
 
 BOOK_LANGUAGE = os.getenv("BOOK_LANGUAGE", "en")
+BOOK_LANGUAGE = BOOK_LANGUAGE.lower().split(',')
+BOOK_LANGUAGE = [l for l in BOOK_LANGUAGE if l in _SUPPORTED_BOOK_LANGUAGE]
+if len(BOOK_LANGUAGE) == 0:
+    BOOK_LANGUAGE = ['en']
 
 # API settings
 FLASK_HOST = os.getenv("FLASK_HOST",  "0.0.0.0")
