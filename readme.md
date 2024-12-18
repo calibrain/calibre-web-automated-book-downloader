@@ -60,6 +60,7 @@ An intuitive web interface for searching and requesting book downloads, designed
 | `DEFAULT_SLEEP` | Retry delay (seconds) | `5` |
 | `MAIN_LOOP_SLEEP_TIME` | Processing loop delay (seconds) | `5` |
 | `SUPPORTED_FORMATS` | Supported book formats | `epub,mobi,azw3,fb2,djvu,cbz,cbr` |
+| `BOOK_LANGUAGE` | Preferred language for books | `en` |
 
 Note that PDF are NOT supported at the moment (they do not get ingested by CWA, but if you want to just dowload them loclaly, you can add `pdf` to the `SUPPORTED_FORMATS` env
 

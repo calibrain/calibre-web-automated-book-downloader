@@ -29,6 +29,8 @@ CLOUDFLARE_PROXY = os.getenv("CLOUDFLARE_PROXY_URL", "http://localhost:8000")
 SUPPORTED_FORMATS = os.getenv("SUPPORTED_FORMATS", "epub,mobi,azw3,fb2,djvu,cbz,cbr")
 SUPPORTED_FORMATS = SUPPORTED_FORMATS.split(",")
 
+BOOK_LANGUAGE = os.getenv("BOOK_LANGUAGE", "en")
+
 # API settings
 FLASK_HOST = os.getenv("FLASK_HOST",  "0.0.0.0")
 FLASK_PORT = int(os.getenv("FLASK_PORT", 5003))

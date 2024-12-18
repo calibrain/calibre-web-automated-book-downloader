@@ -6,6 +6,7 @@ services:
       FLASK_DEBUG: false
       CLOUDFLARE_PROXY_URL: http://cloudflarebypassforscraping:8000
       INGEST_DIR: /cwa-book-ingest
+      BOOK_LANGUAGE: en
     ports:
       - "${FLASK_PORT:-8084}:${FLASK_PORT:-8084}"
     healthcheck:

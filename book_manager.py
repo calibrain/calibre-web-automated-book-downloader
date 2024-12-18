@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from io import BytesIO
 
 from logger import setup_logger
-from config import SUPPORTED_FORMATS
+from config import SUPPORTED_FORMATS, BOOK_LANGUAGE
 from models import BookInfo
 import network
 
@@ -28,8 +28,8 @@ def search_books(query: str) -> List[BookInfo]:
     query_html = quote(query)
     url = (
         f"https://annas-archive.org/search?index=&page=1&display=table"
-        f"&acc=aa_download&acc=external_download&lang=en&sort="
-        f"&ext={'&ext='.join(SUPPORTED_FORMATS)}&lang=en&q={query_html}"
+        f"&acc=aa_download&acc=external_download&lang={BOOK_LANGUAGE}&sort="
+        f"&ext={'&ext='.join(SUPPORTED_FORMATS)}&lang={BOOK_LANGUAGE}&q={query_html}"
     )
     
     html = network.html_get_page(url)
