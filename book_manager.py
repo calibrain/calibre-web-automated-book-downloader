@@ -28,8 +28,8 @@ def search_books(query: str) -> List[BookInfo]:
     query_html = quote(query)
     url = (
         f"https://annas-archive.org/search?index=&page=1&display=table"
-        f"&acc=aa_download&acc=external_download&lang={BOOK_LANGUAGE}&sort="
-        f"&ext={'&ext='.join(SUPPORTED_FORMATS)}&lang={BOOK_LANGUAGE}&q={query_html}"
+        f"&acc=aa_download&acc=external_download&sort="
+        f"&ext={'&ext='.join(SUPPORTED_FORMATS)}&lang={'&lang='.join(BOOK_LANGUAGE)}&q={query_html}"
     )
     
     html = network.html_get_page(url)
