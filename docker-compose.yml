@@ -1,3 +1,4 @@
+# If you change the FLASK_PORT, do not forget to change it in ports and healthcheck as well.
 services:
   calibre-web-automated-book-downloader:
     image: ghcr.io/calibrain/calibre-web-automated-book-downloader:latest
@@ -8,9 +9,9 @@ services:
       INGEST_DIR: /cwa-book-ingest
       BOOK_LANGUAGE: en
     ports:
-      - "${FLASK_PORT:-8084}:${FLASK_PORT:-8084}"
+      - 8084:8084
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${FLASK_PORT:-8084}/request/api/status"]
+      test: ["CMD", "curl", "-f", "http://localhost:8084/request/api/status"]
       interval: 30s
       timeout: 30s
       retries: 3
@@ -24,4 +25,3 @@ services:
   cloudflarebypassforscraping:
     image: ghcr.io/sarperavci/cloudflarebypassforscraping:latest
     restart: unless-stopped
-  
