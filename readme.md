@@ -52,6 +52,8 @@ An intuitive web interface for searching and requesting book downloads, designed
 | `FLASK_DEBUG` | Debug mode toggle | `false` |
 | `FLASK_HOST` | Web interface binding | `0.0.0.0` |
 | `INGEST_DIR` | Book download directory | `/cwa-book-ingest` |
+| `UID` | Runtime user ID | `1000` |
+| `GID` | Runtime group ID | `100` |
 
 #### Download Settings
 | Variable | Description | Default Value |
