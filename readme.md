@@ -51,27 +51,29 @@ An intuitive web interface for searching and requesting book downloads, designed
 
 #### Application Settings
 
-| Variable            | Description                                                                      | Default Value      |
-| ------------------- | -------------------------------------------------------------------------------- | ------------------ |
-| `FLASK_PORT`        | Web interface port                                                               | `8084`             |
-| `FLASK_DEBUG`       | Debug mode toggle                                                                | `false`            |
-| `FLASK_HOST`        | Web interface binding                                                            | `0.0.0.0`          |
-| `INGEST_DIR`        | Book download directory                                                          | `/cwa-book-ingest` |
-| `UID`               | Runtime user ID                                                                  | `1000`             |
-| `GID`               | Runtime group ID                                                                 | `100`              |
-| `ANNAS_ARCHIVE_KEY` | Optional. If set, enables premium downloads via Anna's Archive fast download API | `None`             |
+| Variable      | Description             | Default Value      |
+| ------------- | ----------------------- | ------------------ |
+| `FLASK_PORT`  | Web interface port      | `8084`             |
+| `FLASK_DEBUG` | Debug mode toggle       | `false`            |
+| `FLASK_HOST`  | Web interface binding   | `0.0.0.0`          |
+| `INGEST_DIR`  | Book download directory | `/cwa-book-ingest` |
+| `UID`         | Runtime user ID         | `1000`             |
+| `GID`         | Runtime group ID        | `100`              |
 
 #### Download Settings
 
-| Variable               | Description                     | Default Value                     |
-| ---------------------- | ------------------------------- | --------------------------------- |
-| `MAX_RETRY`            | Maximum retry attempts          | `3`                               |
-| `DEFAULT_SLEEP`        | Retry delay (seconds)           | `5`                               |
-| `MAIN_LOOP_SLEEP_TIME` | Processing loop delay (seconds) | `5`                               |
-| `SUPPORTED_FORMATS`    | Supported book formats          | `epub,mobi,azw3,fb2,djvu,cbz,cbr` |
-| `BOOK_LANGUAGE`        | Preferred language for books    | `en`                              |
+| Variable               | Description                                               | Default Value                     |
+| ---------------------- | --------------------------------------------------------- | --------------------------------- |
+| `MAX_RETRY`            | Maximum retry attempts                                    | `3`                               |
+| `DEFAULT_SLEEP`        | Retry delay (seconds)                                     | `5`                               |
+| `MAIN_LOOP_SLEEP_TIME` | Processing loop delay (seconds)                           | `5`                               |
+| `SUPPORTED_FORMATS`    | Supported book formats                                    | `epub,mobi,azw3,fb2,djvu,cbz,cbr` |
+| `BOOK_LANGUAGE`        | Preferred language for books                              | `en`                              |
+| `AA_DONATOR_KEY`       | Optional Donator key for Anna's Archive fast download API | ``                                |
 
 Note that PDF are NOT supported at the moment (they do not get ingested by CWA, but if you want to just dowload them loclaly, you can add `pdf` to the `SUPPORTED_FORMATS` env
+
+If you are a donator on AA, you can use your Key in `AA_DONATOR_API_KEY` to speed up downloads and bypass the wait times.
 
 #### Network Settings
 
