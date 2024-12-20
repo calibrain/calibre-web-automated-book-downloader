@@ -71,7 +71,7 @@ An intuitive web interface for searching and requesting book downloads, designed
 | `BOOK_LANGUAGE`        | Preferred language for books                              | `en`                              |
 | `AA_DONATOR_KEY`       | Optional Donator key for Anna's Archive fast download API | ``                                |
 
-Note that PDF are NOT supported at the moment (they do not get ingested by CWA, but if you want to just dowload them loclaly, you can add `pdf` to the `SUPPORTED_FORMATS` env
+Note that PDF are NOT supported at the moment (they do not get ingested by CWA, but if you want to just download them locally, you can add `pdf` to the `SUPPORTED_FORMATS` env
 
 If you are a donator on AA, you can use your Key in `AA_DONATOR_API_KEY` to speed up downloads and bypass the wait times.
 
