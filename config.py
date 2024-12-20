@@ -41,6 +41,7 @@ if len(BOOK_LANGUAGE) == 0:
 FLASK_HOST = os.getenv("FLASK_HOST",  "0.0.0.0")
 FLASK_PORT = int(os.getenv("FLASK_PORT", 5003))
 FLASK_DEBUG = os.getenv("FLASK_DEBUG", "False").lower() == "true"
+AA_DONATOR_API_KEY = os.getenv("AA_DONATOR_API_KEY", None)
 
 # Logging settings
 LOG_FILE = f"{LOG_DIR}/cwa-bookd-ownloader.log"

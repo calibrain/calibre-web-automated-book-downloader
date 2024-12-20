@@ -6,7 +6,6 @@ services:
       FLASK_PORT: 8084
       FLASK_DEBUG: false
       CLOUDFLARE_PROXY_URL: http://cloudflarebypassforscraping:8000
-      INGEST_DIR: /cwa-book-ingest
       BOOK_LANGUAGE: en
     ports:
       - 8084:8084
@@ -20,7 +19,7 @@ services:
     volumes:
     # This is where the books will be downloaded to, usually it would be 
     # the same as whatever you gave in "calibre-web-automated"
-      - /tmp/data/calibre-web/ingest:${INGEST_DIR:-/cwa-book-ingest}
+      - /tmp/data/calibre-web/ingest:/cwa-book-ingest
 
   cloudflarebypassforscraping:
     image: ghcr.io/sarperavci/cloudflarebypassforscraping:latest

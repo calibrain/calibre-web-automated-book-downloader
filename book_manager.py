@@ -5,9 +5,10 @@ from urllib.parse import urlparse, quote
 from typing import List, Optional, Dict
 from bs4 import BeautifulSoup
 from io import BytesIO
+import json
 
 from logger import setup_logger
-from config import SUPPORTED_FORMATS, BOOK_LANGUAGE
+from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_DONATOR_API_KEY
 from models import BookInfo
 import network
 
@@ -215,6 +216,10 @@ def download_book(book_id: str, title: str) -> Optional[BytesIO]:
         f"https://annas-archive.org/slow_download/{book_id}/0/0",
         f"https://annas-archive.org/slow_download/{book_id}/0/1"
     ]
+    if AA_DONATOR_API_KEY is not None:
+        download_links.insert(0, 
+            f"https://annas-archive.org/dyn/api/fast_download.json?md5={book_id}&key={AA_DONATOR_API_KEY}"
+        )
 
     for link in download_links:
         try:
@@ -230,6 +235,11 @@ def download_book(book_id: str, title: str) -> Optional[BytesIO]:
 
 def _get_download_url(link: str, title: str) -> Optional[str]:
     """Extract actual download URL from various source pages."""
+
+    if link.startswith("https://annas-archive.org/dyn/api/fast_download.json"):
+        page = network.html_get_page(link)
+        return json.loads(page).get("download_url")
+
     html = network.html_get_page_cf(link)
     if not html:
         return None

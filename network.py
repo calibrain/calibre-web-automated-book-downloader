@@ -68,10 +68,13 @@ def html_get_page_cf(url: str, retry: int = MAX_RETRY) -> Optional[str]:
     Returns:
         str: HTML content if successful, None otherwise
     """
+    if CLOUDFLARE_PROXY is None:
+        return html_get_page(url, retry)
+    
     try:
         logger.info(f"GET_CF: {url}")
         response = requests.get(
-            f"{CLOUDFLARE_PROXY}//html?url={url}&retries=3"
+            f"{CLOUDFLARE_PROXY}/html?url={url}&retries=3"
         )
         time.sleep(1)
         return response.text
