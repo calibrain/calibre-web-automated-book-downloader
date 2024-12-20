@@ -17,7 +17,6 @@ ENV CLOUDFLARE_PROXY_URL=http://localhost:8000
 ENV INGEST_DIR=/cwa-book-ingest
 ENV STATUS_TIMEOUT=3600
 ENV PYTHONPATH=/app
-ENV AA_DONATOR_KEY=
 
 # Default UID and GID (can be overridden at runtime)
 ENV UID=1000
