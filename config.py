@@ -26,6 +26,7 @@ INGEST_DIR.mkdir(exist_ok=True)
 MAX_RETRY = int(os.getenv("MAX_RETRY", 3))
 DEFAULT_SLEEP = int(os.getenv("DEFAULT_SLEEP", 5))
 CLOUDFLARE_PROXY = os.getenv("CLOUDFLARE_PROXY_URL", "http://localhost:8000")
+ANNAS_ARCHIVE_KEY = os.getenv("ANNAS_ARCHIVE_KEY", None)
 
 # File format settings
 SUPPORTED_FORMATS = os.getenv("SUPPORTED_FORMATS", "epub,mobi,azw3,fb2,djvu,cbz,cbr")

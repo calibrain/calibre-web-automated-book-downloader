@@ -7,7 +7,7 @@ import urllib.request
 from typing import Optional
 
 from logger import setup_logger
-from config import MAX_RETRY, DEFAULT_SLEEP, CLOUDFLARE_PROXY
+from config import MAX_RETRY, DEFAULT_SLEEP, CLOUDFLARE_PROXY, ANNAS_ARCHIVE_KEY
 
 logger = setup_logger(__name__)
 
@@ -22,7 +22,39 @@ def setup_urllib_opener():
     urllib.request.install_opener(opener)
 
 setup_urllib_opener()
+        
+def get_donator_download_url(md5: str, retry: int = MAX_RETRY) -> Optional[str]:
+    """Get donator download URL if ANNAS_ARCHIVE_KEY is set"""
+    if not ANNAS_ARCHIVE_KEY:
+        return None
+        
+    url = f"https://annas-archive.org/dyn/api/fast_download.json"
+    params = {
+        'md5': md5,
+        'key': ANNAS_ARCHIVE_KEY
+    }
+    try:
+        logger.info(f"GET: {url}")
+        response = requests.get(url, params=params)
+        if response.status_code != 200:
+            logger.warning(f"{response.status_code} error for donator download URL: {url}")
+            return None
+                
+        data = response.json()
+        return data.get('download_url')
 
+    except requests.exceptions.RequestException as e:
+        if retry == 0:
+            logger.error(f"Failed to fetch donator download API: {url}, error: {e}")
+            return None
+            
+        sleep_time = DEFAULT_SLEEP * (MAX_RETRY - retry + 1)
+        logger.warning(
+            f"Retrying GET {url} in {sleep_time} seconds due to error: {e}"
+        )
+        time.sleep(sleep_time)
+        return get_donator_download_url(url, retry - 1)
+    
 def html_get_page(url: str, retry: int = MAX_RETRY, skip_404: bool = False) -> Optional[str]:
     """Fetch HTML content from a URL with retry mechanism.
     

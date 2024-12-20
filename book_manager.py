@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from io import BytesIO
 
 from logger import setup_logger
-from config import SUPPORTED_FORMATS, BOOK_LANGUAGE
+from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, ANNAS_ARCHIVE_KEY
 from models import BookInfo
 import network
 
@@ -207,6 +207,18 @@ def download_book(book_id: str, title: str) -> Optional[BytesIO]:
     Returns:
         Optional[BytesIO]: Book content buffer if successful
     """
+
+    """If ANNAS_ARCHIVE_KEY is set, use the fast download URL. Else try other sources."""
+    if ANNAS_ARCHIVE_KEY:
+        try:
+            download_url = network.get_donator_download_url(book_id, title)
+            if download_url:
+                logger.info(f"Downloading {title} from {download_url}")
+                return network.download_url(download_url)
+        except Exception as e:
+            logger.error(f"Failed to download from donator API {link}: {e}. Trying other sources.")
+
+    """Not a donator. Try other sources."""
     download_links = [
         f"https://annas-archive.org/slow_download/{book_id}/0/2",
         f"https://libgen.li/ads.php?md5={book_id}",
