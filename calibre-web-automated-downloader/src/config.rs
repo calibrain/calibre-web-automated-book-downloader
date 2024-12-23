@@ -26,8 +26,8 @@ pub struct Config {
     pub status_timeout: u64,
 
     // Network settings
-    pub max_retry: u32,
-    pub default_sleep: u64,
+    pub max_retry: u64,
+    pub retry_wait_duration: u64,
     pub cloudflare_proxy: String,
     pub use_cf_bypass: bool,
 
@@ -74,12 +74,12 @@ impl Config {
         // Network settings
         let max_retry = env::var("MAX_RETRY")
             .unwrap_or_else(|_| "3".to_string())
-            .parse::<u32>()
+            .parse::<u64>()
             .expect("MAX_RETRY must be a valid integer");
-        let default_sleep = env::var("DEFAULT_SLEEP")
+        let retry_wait_duration = env::var("RETRY_WAIT_DURATION")
             .unwrap_or_else(|_| "5".to_string())
             .parse::<u64>()
-            .expect("DEFAULT_SLEEP must be a valid integer");
+            .expect("RETRY_WAIT_DURATION must be a valid integer");
         let cloudflare_proxy = env::var("CLOUDFLARE_PROXY_URL")
             .unwrap_or_else(|_| "http://localhost:8000".to_string());
         let use_cf_bypass = env::var("USE_CF_BYPASS")
@@ -141,7 +141,7 @@ impl Config {
             ingest_dir,
             status_timeout,
             max_retry,
-            default_sleep,
+            retry_wait_duration,
             cloudflare_proxy,
             use_cf_bypass,
             aa_donator_key,
