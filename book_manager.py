@@ -1,14 +1,14 @@
 """Book download manager handling search and retrieval operations."""
 
 import time
-from urllib.parse import urlparse, quote
+from urllib.parse import quote
 from typing import List, Optional, Dict
 from bs4 import BeautifulSoup
 from io import BytesIO
 import json
 
 from logger import setup_logger
-from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_DONATOR_KEY
+from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_DONATOR_KEY, AA_BASE_URL, USE_CF_BYPASS
 from models import BookInfo
 import network
 
@@ -28,7 +28,8 @@ def search_books(query: str) -> List[BookInfo]:
     """
     query_html = quote(query)
     url = (
-        f"https://annas-archive.org/search?index=&page=1&display=table"
+        f"{AA_BASE_URL}"
+        f"/search?index=&page=1&display=table"
         f"&acc=aa_download&acc=external_download&sort="
         f"&ext={'&ext='.join(SUPPORTED_FORMATS)}&lang={'&lang='.join(BOOK_LANGUAGE)}&q={query_html}"
     )
@@ -98,22 +99,23 @@ def get_book_info(book_id: str) -> BookInfo:
     Returns:
         BookInfo: Detailed book information
     """
-    url = f"https://annas-archive.org/md5/{book_id}"
+    url = f"{AA_BASE_URL}/md5/{book_id}"
     html = network.html_get_page(url)
     
     if not html:
         raise Exception(f"Failed to fetch book info for ID: {book_id}")
 
     soup = BeautifulSoup(html, 'html.parser')
+
+    return _parse_book_info_page(soup, book_id)
+
+def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
+    """Parse the book info page HTML into a BookInfo object."""
     data = soup.select_one('body > main > div:nth-of-type(1)')
     
     if not data:
         raise Exception(f"Failed to parse book info for ID: {book_id}")
-
-    return _parse_book_info_page(data, book_id)
-
-def _parse_book_info_page(data, book_id: str) -> BookInfo:
-    """Parse the book info page HTML into a BookInfo object."""
+    
     preview = data.select_one(
         'div:nth-of-type(1) > img'
     )['src']
@@ -138,6 +140,44 @@ def _parse_book_info_page(data, book_id: str) -> BookInfo:
         None
     )
 
+    every_url = soup.find_all('a')
+    slow_urls_no_waitlist = set()
+    slow_urls_with_waitlist = set()
+    external_urls_libgen = set()
+    external_urls_z_lib = set()
+
+
+    for url in every_url:
+        try:
+            if url.parent.text.strip().lower().startswith("option #"):
+                if url.text.strip().lower().startswith("slow partner server"):
+                    if url.next is not None and url.next.next is not None and "waitlist" in url.next.next.strip().lower():
+                        internal_text = url.next.next.strip().lower()
+                        if "no waitlist" in internal_text:
+                            slow_urls_no_waitlist.add(url['href'])
+                        else:
+                            slow_urls_with_waitlist.add(url['href'])
+                elif url.next is not None and url.next.next is not None and "click “GET” at the top" in url.next.next.text.strip():
+                    external_urls_libgen.add(url['href'])
+                elif url.text.strip().lower().startswith("z-lib"):
+                    if ".onion/" not in url['href']:
+                        external_urls_z_lib.add(url['href'])
+        except:
+            pass
+        
+    
+    slow_urls_no_waitlist = list(slow_urls_no_waitlist)
+    slow_urls_with_waitlist = list(slow_urls_with_waitlist)
+    external_urls_libgen = list(external_urls_libgen)
+    external_urls_z_lib = list(external_urls_z_lib)
+
+    if USE_CF_BYPASS:
+        urls = slow_urls_no_waitlist + external_urls_libgen + slow_urls_with_waitlist + external_urls_z_lib
+    else:
+        urls = external_urls_libgen + external_urls_z_lib + slow_urls_no_waitlist + slow_urls_with_waitlist
+    for i in range(len(urls)):
+        urls[i] = network.get_absolute_url(AA_BASE_URL, urls[i])
+
     # Extract basic information
     book_info = BookInfo(
         id=book_id,
@@ -146,7 +186,8 @@ def _parse_book_info_page(data, book_id: str) -> BookInfo:
         publisher=divs[start_div_id + 1].next,
         author=divs[start_div_id + 2].next,
         format=format,
-        size=size
+        size=size,
+        download_urls=urls
     )
 
     # Extract additional metadata
@@ -198,7 +239,7 @@ def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
         and "filename" not in k.lower()
     }
 
-def download_book(book_id: str, title: str) -> Optional[BytesIO]:
+def download_book(book_info: BookInfo) -> Optional[BytesIO]:
     """Download a book from available sources.
     
     Args:
@@ -209,27 +250,24 @@ def download_book(book_id: str, title: str) -> Optional[BytesIO]:
         Optional[BytesIO]: Book content buffer if successful
     """
 
-    download_links = [
-        f"https://annas-archive.org/slow_download/{book_id}/0/2",
-        f"https://libgen.li/ads.php?md5={book_id}",
-        f"https://library.lol/fiction/{book_id}",
-        f"https://library.lol/main/{book_id}",
-        f"https://annas-archive.org/slow_download/{book_id}/0/0",
-        f"https://annas-archive.org/slow_download/{book_id}/0/1"
-    ]
 
-    """If AA_DONATOR_KEY is set, use the fast download URL. Else try other sources."""
+
+    if len(book_info.download_urls) == 0:
+        book_info = get_book_info(book_info.id)
+    download_links = book_info.download_urls
+
+    # If AA_DONATOR_KEY is set, use the fast download URL. Else try other sources.
     if AA_DONATOR_KEY is not None:
         download_links.insert(0, 
-            f"https://annas-archive.org/dyn/api/fast_download.json?md5={book_id}&key={AA_DONATOR_KEY}"
+            f"{AA_BASE_URL}/dyn/api/fast_download.json?md5={book_info.id}&key={AA_DONATOR_KEY}"
         )
-
+    
     for link in download_links:
         try:
-            download_url = _get_download_url(link, title)
+            download_url = _get_download_url(link, book_info.title)
             if download_url:
-                logger.info(f"Downloading {title} from {download_url}")
-                return network.download_url(download_url)
+                logger.info(f"Downloading {book_info.title} from {download_url}")
+                return network.download_url(download_url, book_info.size)
         except Exception as e:
             logger.error(f"Failed to download from {link}: {e}")
             continue
@@ -239,35 +277,27 @@ def download_book(book_id: str, title: str) -> Optional[BytesIO]:
 def _get_download_url(link: str, title: str) -> Optional[str]:
     """Extract actual download URL from various source pages."""
 
-    if link.startswith("https://annas-archive.org/dyn/api/fast_download.json"):
+    if link.startswith(f"{AA_BASE_URL}/dyn/api/fast_download.json"):
         page = network.html_get_page(link)
         return json.loads(page).get("download_url")
     
-    html = network.html_get_page_cf(link)
+
+    try:
+        html = network.html_get_page(link, retry=0, skip_403=True)
+    except:
+        html = network.html_get_page_cf(link)
+    
     if not html:
         return None
-
+    
     soup = BeautifulSoup(html, 'html.parser')
+    url = None
     
     if link.startswith("https://z-lib.gs"):
         download_link = soup.find_all('a', href=True, class_="addDownloadedBook")
         if download_link:
-            parsed = urlparse(download_link[0]['href'])
-            return f"{parsed.scheme}://{parsed.netloc}{download_link[0]['href']}"
-            
-    elif link.startswith("https://libgen.li"):
-        get_section = soup.find_all('h2', string="GET")
-        if get_section:
-            href = get_section[0].parent['href']
-            parsed = urlparse(href)
-            return f"{parsed.scheme}://{parsed.netloc}/{href}"
-            
-    elif link.startswith("https://library.lol/fiction/"):
-        get_section = soup.find_all('h2', string="GET")
-        if get_section:
-            return get_section[0].parent['href']
-            
-    elif link.startswith("https://annas-archive.org/slow_download/"):
+            url = download_link[0]['href']            
+    elif link.startswith(f"{AA_BASE_URL}/slow_download/"):
         download_links = soup.find_all('a', href=True, string="📚 Download now")
         if not download_links:
             countdown = soup.find_all('span', class_="js-partner-countdown")
@@ -277,6 +307,8 @@ def _get_download_url(link: str, title: str) -> Optional[str]:
                 time.sleep(sleep_time + 5)
                 return _get_download_url(link, title)
         else:
-            return download_links[0]['href']
-            
-    return None
+            url = download_links[0]['href']
+    else:
+        url = soup.find_all('a', string="GET")[0]['href']
+
+    return network.get_absolute_url(link, url)

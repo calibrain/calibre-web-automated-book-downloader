@@ -1,6 +1,6 @@
 """Data structures and models used across the application."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from enum import Enum
 from config import INGEST_DIR, STATUS_TIMEOUT
@@ -27,6 +27,7 @@ class BookInfo:
     format: Optional[str] = None
     size: Optional[str] = None
     info: Optional[Dict[str, List[str]]] = None
+    download_urls: Optional[List[str]] = field(default_factory=list)
 
 class BookQueue:
     """Thread-safe book queue manager."""

@@ -73,7 +73,15 @@ An intuitive web interface for searching and requesting book downloads, designed
 
 Note that PDF are NOT supported at the moment (they do not get ingested by CWA, but if you want to just download them locally, you can add `pdf` to the `SUPPORTED_FORMATS` env
 
+#### AA 
+
+| Variable               | Description                                               | Default Value                     |
+| ---------------------- | --------------------------------------------------------- | --------------------------------- |
+| `AA_BASE_URL`          | Base URL of Annas-Archive (could be changed for a proxy)  | `https://annas-archive.org`       |
+| `USE_CF_BYPASS`        | Disable CF bypass and use alternative links instead       | `true`                           |
+
 If you are a donator on AA, you can use your Key in `AA_DONATOR_API_KEY` to speed up downloads and bypass the wait times.
+If diabling the cloduflare bypass, you will be using alternative download hosts, such as libgen or z-lib, but they usually have a delay before getting the more recent books and their collection is not as big as aa's. But this setting should work for the majority of books.
 
 #### Network Settings
 
@@ -81,6 +89,8 @@ If you are a donator on AA, you can use your Key in `AA_DONATOR_API_KEY` to spee
 | ---------------------- | ----------------------------- | ----------------------- |
 | `CLOUDFLARE_PROXY_URL` | Cloudflare bypass service URL | `http://localhost:8000` |
 | `PORT`                 | Container external port       | `8084`                  |
+
+`CLOUDFLARE_PROXY_URL` is ignored if `USE_CF_BYPASS` is set to `false`
 
 ### Volume Configuration
 

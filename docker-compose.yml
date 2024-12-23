@@ -10,12 +10,13 @@ services:
       BOOK_LANGUAGE: en
     ports:
       - 8084:8084
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8084/request/api/status"]
-      interval: 30s
-      timeout: 30s
-      retries: 3
-      start_period: 5s
+    # Uncomment the following lines if you want to enable healthcheck
+    #healthcheck:
+    #  test: ["CMD", "curl", "-f", "http://localhost:8084/request/api/status"]
+    #  interval: 30s
+    #  timeout: 30s
+    #  retries: 3
+    #  start_period: 5s
     restart: unless-stopped
     volumes:
     # This is where the books will be downloaded to, usually it would be 

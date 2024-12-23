@@ -132,7 +132,7 @@ def _download_book(book_id: str) -> bool:
     """
     try:
         book_info = book_queue._book_data[book_id]
-        data = book_manager.download_book(book_id, book_info.title)
+        data = book_manager.download_book(book_info)
         
         if not data:
             raise Exception("No data received")

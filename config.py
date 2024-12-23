@@ -26,7 +26,12 @@ INGEST_DIR.mkdir(exist_ok=True)
 MAX_RETRY = int(os.getenv("MAX_RETRY", 3))
 DEFAULT_SLEEP = int(os.getenv("DEFAULT_SLEEP", 5))
 CLOUDFLARE_PROXY = os.getenv("CLOUDFLARE_PROXY_URL", "http://localhost:8000")
+USE_CF_BYPASS = os.getenv("USE_CF_BYPASS", "false").lower()
+USE_CF_BYPASS = USE_CF_BYPASS.lower() in ["true", "yes", "1", "y"]
+
+# Anna's Archive settings
 AA_DONATOR_KEY = os.getenv("AA_DONATOR_KEY", None)
+AA_BASE_URL = os.getenv("AA_BASE_URL", "https://annas-archive.org").strip("/")
 
 # File format settings
 SUPPORTED_FORMATS = os.getenv("SUPPORTED_FORMATS", "epub,mobi,azw3,fb2,djvu,cbz,cbr")
