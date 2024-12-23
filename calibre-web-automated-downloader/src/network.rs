@@ -160,12 +160,3 @@ async fn test_html_get_page_invalid_url() {
         "Expected a builder error for invalid URL, got a different error"
     );
 }
-
-
-#[tokio::test]
-async fn test_actual_url() {
-    let valid_url = "https://qtermin.de/bahnhofplatzkatschhof?calendarid=57003,57091,57092,57093,57094,71058,71059,71060,71061,71062,77257,77289,77291,77292,133608,133610,133607,133612".to_string();
-    let result = html_get_page(valid_url).await;
-
-    println!("{}",result.unwrap());
-}
