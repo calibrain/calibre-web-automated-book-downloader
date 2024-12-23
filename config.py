@@ -7,14 +7,11 @@ _SUPPORTED_BOOK_LANGUAGE = ['en','zh','ru','es','fr','de','it','pt','pl','bg','n
 
 # Directory settings
 BASE_DIR = Path(__file__).resolve().parent
-LOG_DIR =  "/var/logs"
-LOG_DIR = Path(LOG_DIR)
+LOG_DIR = Path("/var/logs")
 
-TMP_DIR = os.getenv("TMP_DIR", "/tmp/cwa-book-downloader")
-TMP_DIR = Path(TMP_DIR)
+TMP_DIR = Path(os.getenv("TMP_DIR", "/tmp/cwa-book-downloader"))
 
-INGEST_DIR = os.getenv("INGEST_DIR", "/cwa-book-ingest")
-INGEST_DIR = Path(INGEST_DIR)
+INGEST_DIR = Path(os.getenv("INGEST_DIR", "/tmp/cwa-book-ingest"))
 STATUS_TIMEOUT = int(os.getenv("STATUS_TIMEOUT", 3600))
 
 # Create necessary directories
@@ -26,19 +23,16 @@ INGEST_DIR.mkdir(exist_ok=True)
 MAX_RETRY = int(os.getenv("MAX_RETRY", 3))
 DEFAULT_SLEEP = int(os.getenv("DEFAULT_SLEEP", 5))
 CLOUDFLARE_PROXY = os.getenv("CLOUDFLARE_PROXY_URL", "http://localhost:8000")
-USE_CF_BYPASS = os.getenv("USE_CF_BYPASS", "false").lower()
-USE_CF_BYPASS = USE_CF_BYPASS.lower() in ["true", "yes", "1", "y"]
+USE_CF_BYPASS = os.getenv("USE_CF_BYPASS", "true").lower() in ["true", "yes", "1", "y"]
 
 # Anna's Archive settings
-AA_DONATOR_KEY = os.getenv("AA_DONATOR_KEY", None)
+AA_DONATOR_KEY = os.getenv("AA_DONATOR_KEY", "").strip()
 AA_BASE_URL = os.getenv("AA_BASE_URL", "https://annas-archive.org").strip("/")
 
 # File format settings
-SUPPORTED_FORMATS = os.getenv("SUPPORTED_FORMATS", "epub,mobi,azw3,fb2,djvu,cbz,cbr")
-SUPPORTED_FORMATS = SUPPORTED_FORMATS.split(",")
+SUPPORTED_FORMATS = os.getenv("SUPPORTED_FORMATS", "epub,mobi,azw3,fb2,djvu,cbz,cbr").split(",")
 
-BOOK_LANGUAGE = os.getenv("BOOK_LANGUAGE", "en")
-BOOK_LANGUAGE = BOOK_LANGUAGE.lower().split(',')
+BOOK_LANGUAGE = os.getenv("BOOK_LANGUAGE", "en").lower().split(',')
 BOOK_LANGUAGE = [l for l in BOOK_LANGUAGE if l in _SUPPORTED_BOOK_LANGUAGE]
 if len(BOOK_LANGUAGE) == 0:
     BOOK_LANGUAGE = ['en']

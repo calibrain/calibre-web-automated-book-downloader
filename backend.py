@@ -3,7 +3,7 @@
 import threading, time
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 from logger import setup_logger
 from config import TMP_DIR, MAIN_LOOP_SLEEP_TIME, INGEST_DIR
@@ -75,14 +75,14 @@ def queue_status() -> Dict[str, Dict[str, Any]]:
         for status_type, books in status.items()
     }
 
-def get_book_data(book_id: str) -> Optional[bytes]:
-    """Get book data for a specific book.
+def get_book_data(book_id: str) -> Tuple[Optional[bytes], str] :
+    """Get book data for a specific book, including its title.
     
     Args:
         book_id: Book identifier
         
     Returns:
-        Optional[bytes]: Book data if available
+        Tuple[Optional[bytes], str]: Book data if available, and the book title
     """
     try:
         book_info = book_queue._book_data[book_id]
@@ -91,7 +91,7 @@ def get_book_data(book_id: str) -> Optional[bytes]:
             return f.read(), book_info.title
     except Exception as e:
         logger.error(f"Error getting book data: {e}")
-        return None
+        return None, ""
 
 def _book_info_to_dict(book: BookInfo) -> Dict[str, Any]:
     """Convert BookInfo object to dictionary representation."""
@@ -110,12 +110,14 @@ def _process_book(book_path: str) -> bool:
         bool: True if book is valid
     """
     try:
+        logger.info(f"Verifying book health: {book_path}")
         script_path = Path(__file__).parent / "check_health.sh"
         result = subprocess.run(
             [str(script_path), book_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
+        logger.info(f"Health check result: {result.stdout.decode()}")
         return result.returncode == 0
     except Exception as e:
         logger.error(f"Error checking book health: {e}")
@@ -132,15 +134,10 @@ def _download_book(book_id: str) -> bool:
     """
     try:
         book_info = book_queue._book_data[book_id]
-        data = book_manager.download_book(book_info)
-        
-        if not data:
-            raise Exception("No data received")
-            
         book_path = TMP_DIR / f"{book_id}.{book_info.format}"
-        with open(book_path, "wb") as f:
-            f.write(data.getbuffer())
-            
+        success = book_manager.download_book(book_info, book_path)
+        if not success:
+            raise Exception("Unkown error downloading book")
         return _process_book(str(book_path))
         
     except Exception as e:

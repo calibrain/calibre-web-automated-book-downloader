@@ -1,11 +1,11 @@
 """Book download manager handling search and retrieval operations."""
 
-import time
+import time, json
+from pathlib import Path
 from urllib.parse import quote
 from typing import List, Optional, Dict
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag, NavigableString
 from io import BytesIO
-import json
 
 from logger import setup_logger
 from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_DONATOR_KEY, AA_BASE_URL, USE_CF_BYPASS
@@ -43,20 +43,21 @@ def search_books(query: str) -> List[BookInfo]:
         raise Exception("No books found. Please try another query.")
 
     soup = BeautifulSoup(html, 'html.parser')
-    tbody = soup.find('table')
+    tbody: Tag | NavigableString | None = soup.find('table')
     
     if not tbody:
         logger.warning(f"No results table found for query: {query}")
         raise Exception("No books found. Please try another query.")
 
     books = []
-    for line_tr in tbody.find_all('tr'):
-        try:
-            book = _parse_search_result_row(line_tr)
-            if book:
-                books.append(book)
-        except Exception as e:
-            logger.error(f"Failed to parse search result row: {e}")
+    if  isinstance(tbody, Tag):
+        for line_tr in tbody.find_all('tr'):
+            try:
+                book = _parse_search_result_row(line_tr)
+                if book:
+                    books.append(book)
+            except Exception as e:
+                logger.error(f"Failed to parse search result row: {e}")
 
     books.sort(
         key=lambda x: (
@@ -116,9 +117,17 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     if not data:
         raise Exception(f"Failed to parse book info for ID: {book_id}")
     
-    preview = data.select_one(
+    preview: str = ""
+
+    node = data.select_one(
         'div:nth-of-type(1) > img'
-    )['src']
+    )
+    if node:
+        preview_value = node.get('src', "")
+        if isinstance(preview_value, list):
+            preview = preview_value[0]
+        else:
+            preview  = preview_value
 
     # Find the start of book information
     divs = data.find_all('div')
@@ -164,17 +173,12 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                         external_urls_z_lib.add(url['href'])
         except:
             pass
-        
-    
-    slow_urls_no_waitlist = list(slow_urls_no_waitlist)
-    slow_urls_with_waitlist = list(slow_urls_with_waitlist)
-    external_urls_libgen = list(external_urls_libgen)
-    external_urls_z_lib = list(external_urls_z_lib)
 
     if USE_CF_BYPASS:
-        urls = slow_urls_no_waitlist + external_urls_libgen + slow_urls_with_waitlist + external_urls_z_lib
+        urls = list(slow_urls_no_waitlist) + list(external_urls_libgen) + list(slow_urls_with_waitlist) + list(external_urls_z_lib)
     else:
-        urls = external_urls_libgen + external_urls_z_lib + slow_urls_no_waitlist + slow_urls_with_waitlist
+        urls = list(external_urls_libgen) + list(external_urls_z_lib) + list(slow_urls_no_waitlist) + list(slow_urls_with_waitlist)
+
     for i in range(len(urls)):
         urls[i] = network.get_absolute_url(AA_BASE_URL, urls[i])
 
@@ -204,7 +208,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
 def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
     """Extract metadata from book info divs."""
-    info = {}
+    info : Dict[str, List[str]] = {}
     
     # Process the first set of metadata
     sub_data = metadata_divs[0].find_all('div')
@@ -239,7 +243,7 @@ def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
         and "filename" not in k.lower()
     }
 
-def download_book(book_info: BookInfo) -> Optional[BytesIO]:
+def download_book(book_info: BookInfo, book_path: Path) -> bool:
     """Download a book from available sources.
     
     Args:
@@ -250,14 +254,12 @@ def download_book(book_info: BookInfo) -> Optional[BytesIO]:
         Optional[BytesIO]: Book content buffer if successful
     """
 
-
-
     if len(book_info.download_urls) == 0:
         book_info = get_book_info(book_info.id)
     download_links = book_info.download_urls
 
     # If AA_DONATOR_KEY is set, use the fast download URL. Else try other sources.
-    if AA_DONATOR_KEY is not None:
+    if AA_DONATOR_KEY != "":
         download_links.insert(0, 
             f"{AA_BASE_URL}/dyn/api/fast_download.json?md5={book_info.id}&key={AA_DONATOR_KEY}"
         )
@@ -265,33 +267,40 @@ def download_book(book_info: BookInfo) -> Optional[BytesIO]:
     for link in download_links:
         try:
             download_url = _get_download_url(link, book_info.title)
-            if download_url:
+            if download_url != "":
                 logger.info(f"Downloading {book_info.title} from {download_url}")
-                return network.download_url(download_url, book_info.size)
+                data = network.download_url(download_url, book_info.size or "")
+                if not data:
+                    raise Exception("No data received")
+
+                logger.info(f"Download finished. Writing to {book_path}")
+                with open(book_path, "wb") as f:
+                    f.write(data.getbuffer())
+                logger.info(f"Writing {book_info.title} successfully")
+                return True
+            
         except Exception as e:
             logger.error(f"Failed to download from {link}: {e}")
             continue
     
-    return None
+    return False
 
-def _get_download_url(link: str, title: str) -> Optional[str]:
+def _get_download_url(link: str, title: str) -> str:
     """Extract actual download URL from various source pages."""
 
     if link.startswith(f"{AA_BASE_URL}/dyn/api/fast_download.json"):
         page = network.html_get_page(link)
         return json.loads(page).get("download_url")
     
-
-    try:
-        html = network.html_get_page(link, retry=0, skip_403=True)
-    except:
+    html = network.html_get_page(link, retry=0, skip_403=True)
+    if html == "":
         html = network.html_get_page_cf(link)
     
-    if not html:
-        return None
+    if html == "":
+        return ""
     
     soup = BeautifulSoup(html, 'html.parser')
-    url = None
+    url = ""
     
     if link.startswith("https://z-lib.gs"):
         download_link = soup.find_all('a', href=True, class_="addDownloadedBook")

@@ -5,7 +5,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from config import FLASK_DEBUG
 
-def setup_logger(name: str, log_file: str = None) -> logging.Logger:
+def setup_logger(name: str, log_file: str = "") -> logging.Logger:
     """Set up and configure a logger instance.
     
     Args:
@@ -39,9 +39,9 @@ def setup_logger(name: str, log_file: str = None) -> logging.Logger:
     logger.addHandler(error_handler)
     
     # File handler if log file is specified
-    if log_file:
+    if log_file.strip() != "":
         file_handler = RotatingFileHandler(
-            log_file,
+            log_file.strip(),
             maxBytes=10485760,  # 10MB
             backupCount=5
         )

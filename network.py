@@ -25,7 +25,7 @@ def setup_urllib_opener():
 
 setup_urllib_opener()
 
-def html_get_page(url: str, retry: int = MAX_RETRY, skip_404: bool = False, skip_403: bool = False) -> Optional[str]:
+def html_get_page(url: str, retry: int = MAX_RETRY, skip_404: bool = False, skip_403: bool = False) -> str:
     """Fetch HTML content from a URL with retry mechanism.
     
     Args:
@@ -39,15 +39,7 @@ def html_get_page(url: str, retry: int = MAX_RETRY, skip_404: bool = False, skip
     try:
         logger.info(f"GET: {url}")
         response = requests.get(url)
-        
-        if skip_404 and response.status_code == 404:
-            logger.warning(f"404 error for URL: {url}")
-            return None
-        
-        if skip_403 and response.status_code == 403:
-            logger.warning(f"403 error for URL: {url}. Should retry using cloudflare bypass.")
-            return None
-            
+    
         response.raise_for_status()
         time.sleep(1)
         return response.text
@@ -55,7 +47,16 @@ def html_get_page(url: str, retry: int = MAX_RETRY, skip_404: bool = False, skip
     except requests.exceptions.RequestException as e:
         if retry == 0:
             logger.error(f"Failed to fetch page: {url}, error: {e}")
-            return None
+            return ""
+        
+        if skip_404 and response.status_code == 404:
+            logger.warning(f"404 error for URL: {url}")
+            return ""
+        
+        if skip_403 and response.status_code == 403:
+            logger.warning(f"403 error for URL: {url}. Should retry using cloudflare bypass.")
+            return ""
+            
             
         sleep_time = DEFAULT_SLEEP * (MAX_RETRY - retry + 1)
         logger.warning(
@@ -64,7 +65,7 @@ def html_get_page(url: str, retry: int = MAX_RETRY, skip_404: bool = False, skip
         time.sleep(sleep_time)
         return html_get_page(url, retry - 1)
 
-def html_get_page_cf(url: str, retry: int = MAX_RETRY) -> Optional[str]:
+def html_get_page_cf(url: str, retry: int = MAX_RETRY) -> str:
     """Fetch HTML content through Cloudflare proxy.
     
     Args:
@@ -88,7 +89,7 @@ def html_get_page_cf(url: str, retry: int = MAX_RETRY) -> Optional[str]:
     except Exception as e:
         if retry == 0:
             logger.error(f"Failed to fetch page through CF: {url}, error: {e}")
-            return None
+            return ""
             
         sleep_time = DEFAULT_SLEEP * (MAX_RETRY - retry + 1)
         logger.warning(
@@ -97,7 +98,7 @@ def html_get_page_cf(url: str, retry: int = MAX_RETRY) -> Optional[str]:
         time.sleep(sleep_time)
         return html_get_page_cf(url, retry - 1)
 
-def download_url(link: str, size: str = None) -> Optional[BytesIO]:
+def download_url(link: str, size: str = "") -> Optional[BytesIO]:
     """Download content from URL into a BytesIO buffer.
     
     Args:
@@ -111,19 +112,23 @@ def download_url(link: str, size: str = None) -> Optional[BytesIO]:
         response = requests.get(link, stream=True)
         response.raise_for_status()
 
+        total_size : float = 0.0
         try:
-            total_size = size.strip().replace(" ", "").replace(",", ".").upper()
             # we assume size is in MB
-            total_size = int(float(total_size[:-2].strip()) * 1024 * 1024)
+            total_size = float(size.strip().replace(" ", "").replace(",", ".").upper()[:-2].strip()) * 1024 * 1024
         except:
-            total_size = int(response.headers.get('content-length', 0))
+            total_size = float(response.headers.get('content-length', 0))
         
         buffer = BytesIO()
-        for chunk in tqdm(response.iter_content(chunk_size=1024), total=total_size, unit='B', unit_scale=True, unit_divisor=1024):
+
+        # Initialize the progress bar with your guess
+        pbar = tqdm(total=total_size, unit='B', unit_scale=True, desc='Downloading')
+        for chunk in response.iter_content(chunk_size=1000):
             buffer.write(chunk)
-        buffer.seek(0)
+            pbar.update(len(chunk))
+            
+        pbar.close()
         return buffer
-        
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to download from {link}: {e}")
         return None
@@ -135,8 +140,8 @@ def get_absolute_url(base_url: str, url: str) -> str:
         base_url: Base URL
         url: Relative URL
     """
-    if url == None or url.strip() == "":
-        return None
+    if url.strip() == "":
+        return ""
     if url.startswith("http"):
         return url
     parsed_url = urlparse(url)

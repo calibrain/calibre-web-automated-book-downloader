@@ -35,30 +35,11 @@ for file in "${files[@]}"; do
     fileextension="${filenamewithext##*.}"
 
     case "$fileextension" in
-        epub)
-            # Check if the EPUB file is a valid archive
-            7z t "$file" >/dev/null 2>&1;
-            exit_code=$?
-            if [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 1 ]; then
-                mv "$file" "$OUTPUTFOLDER/$filenamewithext"
-                good=$((good + 1))
-            else
-                ebook-convert "$file" /tmp/tmpepub.epub >/dev/null 2>&1
-                exit_code=$?
-                rm -f /tmp/tmpepub.epub 
-                if [ "$exit_code" -eq 0 ]; then
-                    mv "$file" "$OUTPUTFOLDER/$filenamewithext"
-                    good=$((good + 1))
-                else
-                    rm "$file"
-                    bad=$((bad + 1))
-                fi
-            fi
-            ;;
-        mobi|azw3|fb2|djvu|cbz|cbr)
+        epub|mobi|azw3|fb2|djvu|cbz|cbr)
             # Attempt to convert the file to EPUB
             ebook-convert "$file" "$OUTPUTFOLDER/$filename.epub" >/dev/null 2>&1
-            if [ "$exit_code" -eq 0 ]; then
+            # if file exists in $OUTPUTFOLDER/$filename.epub then it is a good file
+            if [ -f "$OUTPUTFOLDER/$filename.epub" ]; then
                 good=$((good + 1))
             else
                 bad=$((bad + 1))
@@ -82,6 +63,6 @@ if [ "$bad" -gt 0 ]; then
     exit 2
 fi
 if [ "$manual" -gt 0 ]; then
-    exut 1
+    exit 1
 fi
 exit 0

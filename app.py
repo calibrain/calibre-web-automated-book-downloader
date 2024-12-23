@@ -12,7 +12,7 @@ import backend
 
 logger = setup_logger(__name__)
 app = Flask(__name__)
-app.wsgi_app = ProxyFix(app.wsgi_app)
+app.wsgi_app = ProxyFix(app.wsgi_app)  # type: ignore
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching
 app.config['APPLICATION_ROOT'] = '/'
 
@@ -171,12 +171,10 @@ def api_local_download():
         return jsonify({"error": "No book ID provided"}), 400
 
     try:
-        file_data = backend.get_book_data(book_id)
+        file_data, file_name = backend.get_book_data(book_id)
         if file_data is None:
             # Book data not found or not available
             return jsonify({"error": "File not found"}), 404
-
-        file_data, file_name = file_data
         # Santize the file name
         file_name = re.sub(r'[\\/:*?"<>|]', '_', file_name.strip())[:255]
         # Prepare the file for sending to the client
