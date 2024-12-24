@@ -2,7 +2,10 @@
 name = "calibre-web-automated-downloader"
 version = "0.1.0"
 edition = "2021"
-authors = ["Mustafa Soylu <mohkargan@gmail.com", "Siddik Acil <sddk.acil@gmail.com>"]
+authors = [
+    "Mustafa Soylu <mohkargan@gmail.com",
+    "Siddik Acil <sddk.acil@gmail.com>",
+]
 description = "Rust implementation of calibre-automated-web-downloader."
 license = "MIT"
 keywords = ['calibre', 'automation', 'e-book']
@@ -19,3 +22,4 @@ anyhow = "1.0.95"
 reqwest = "0.12.9"
 tokio = "1.42.0"
 wiremock = "0.6.2"
+url = "2.5.4"
