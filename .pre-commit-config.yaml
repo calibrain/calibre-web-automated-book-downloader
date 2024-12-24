@@ -1,0 +1,43 @@
+repos:
+    - repo: https://github.com/pre-commit/pre-commit-hooks
+      rev: v5.0.0
+      hooks:
+          - id: check-byte-order-marker
+          - id: check-case-conflict
+          - id: check-merge-conflict
+          - id: check-symlinks
+          - id: check-yaml
+          - id: end-of-file-fixer
+          - id: mixed-line-ending
+          - id: trailing-whitespace
+      files: ^calibre-web-automated-downloader/.*
+    - repo: https://github.com/pre-commit/pre-commit
+      rev: v4.0.1
+      hooks:
+          - id: validate_manifest
+    - repo: local
+      hooks:
+          - id: cargo-fmt
+            name: cargo fmt
+            entry: cargo fmt --
+            language: system
+            types: [rust]
+            pass_filenames: false
+            args:
+                [
+                    '--manifest-path',
+                    'calibre-web-automated-downloader/Cargo.toml'
+                ]
+            files: ^calibre-web-automated-downloader/.*\.rs$
+    # Prettier
+    - repo: https://github.com/rbubley/mirrors-prettier
+      rev: v3.4.2
+      hooks:
+          - id: prettier
+            files: ^asd/.*\.(yaml|toml)$
+
+    # zizmor detects security vulnerabilities in GitHub Actions workflows.
+    - repo: https://github.com/woodruffw/zizmor-pre-commit
+      rev: v0.10.0
+      hooks:
+          - id: zizmor
