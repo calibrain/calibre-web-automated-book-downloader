@@ -1,11 +1,10 @@
 use crate::config::CONFIG;
 use reqwest;
+use reqwest::Client;
+use std::time::Duration;
 use tokio;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-use std::time::Duration;
-use reqwest::Client;
-
 
 static APP_USER_AGENT: &str = concat!(
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ",
@@ -31,12 +30,15 @@ pub async fn html_get_page(url: String) -> Result<String, reqwest::Error> {
         match result {
             Ok(body) => return Ok(body),
             Err(e) => {
-                if n >= CONFIG.max_retry {
+                if n + 1 >= CONFIG.max_retry {
                     return Err(e);
                 }
                 let delay = Duration::from_secs(CONFIG.retry_wait_duration);
 
-                println!("Error: {}. Retrying in {} seconds...", e, CONFIG.retry_wait_duration);
+                println!(
+                    "Error: {}. Retrying in {} seconds...",
+                    e, CONFIG.retry_wait_duration
+                );
                 tokio::time::sleep(delay).await;
             }
         }
@@ -104,7 +106,7 @@ async fn test_html_get_page_retry_then_success() {
     // Call the `html_get_page` function
     let result = html_get_page(url).await;
     let result_str = result.unwrap();
-    println!("{}",result_str);
+    println!("{}", result_str);
 
     // Assert that the result matches the expected body
     assert_eq!(result_str, expected_body);
@@ -131,7 +133,10 @@ async fn test_html_get_page_retry_exhausted() {
     let result = html_get_page(url).await;
 
     // Assert that the result is an error
-    assert!(result.is_err(), "Expected an error after exhausting retries");
+    assert!(
+        result.is_err(),
+        "Expected an error after exhausting retries"
+    );
 
     // Optionally, verify the error type or message
     let error = result.unwrap_err();

@@ -1,0 +1,2 @@
+[default]
+extend-ignore-identifiers-re = ["^[a-zA-Z]{1,3}$"]

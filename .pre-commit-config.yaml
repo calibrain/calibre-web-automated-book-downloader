@@ -3,14 +3,36 @@ repos:
       rev: v5.0.0
       hooks:
           - id: check-byte-order-marker
+            files: ^calibre-web-automated-downloader/
+            exclude: ^calibre-web-automated-downloader/target/
+
           - id: check-case-conflict
+            files: ^calibre-web-automated-downloader/
+            exclude: ^calibre-web-automated-downloader/target/
+
           - id: check-merge-conflict
+            files: ^calibre-web-automated-downloader/
+            exclude: ^calibre-web-automated-downloader/target/
+
           - id: check-symlinks
+            files: ^calibre-web-automated-downloader/
+            exclude: ^calibre-web-automated-downloader/target/
+
           - id: check-yaml
+            files: ^calibre-web-automated-downloader/
+            exclude: ^calibre-web-automated-downloader/target/
+
           - id: end-of-file-fixer
+            files: ^calibre-web-automated-downloader/
+            exclude: ^calibre-web-automated-downloader/target/
+
           - id: mixed-line-ending
+            files: ^calibre-web-automated-downloader/
+            exclude: ^calibre-web-automated-downloader/target/
+
           - id: trailing-whitespace
-      files: ^calibre-web-automated-downloader/.*
+            files: ^calibre-web-automated-downloader/
+            exclude: ^calibre-web-automated-downloader/target/
     - repo: https://github.com/pre-commit/pre-commit
       rev: v4.0.1
       hooks:
@@ -19,15 +41,10 @@ repos:
       hooks:
           - id: cargo-fmt
             name: cargo fmt
-            entry: cargo fmt --
+            entry: cargo fmt --manifest-path calibre-web-automated-downloader/Cargo.toml
             language: system
             types: [rust]
             pass_filenames: false
-            args:
-                [
-                    '--manifest-path',
-                    'calibre-web-automated-downloader/Cargo.toml'
-                ]
             files: ^calibre-web-automated-downloader/.*\.rs$
     # Prettier
     - repo: https://github.com/rbubley/mirrors-prettier

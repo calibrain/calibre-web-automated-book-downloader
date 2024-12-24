@@ -1,17 +1,82 @@
 use dotenv::dotenv;
 use once_cell::sync::Lazy;
 use std::env;
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
 /// List of supported book languages.
 static SUPPORTED_BOOK_LANGUAGE: Lazy<Vec<&'static str>> = Lazy::new(|| {
     vec![
-        "en","zh","ru","es","fr","de","it","pt","pl","bg","nl","ja","ar","he","hu",
-        "la","cs","ko","tr","uk","id","ro","el","lt","bn","zh‑Hant","af","ca","sv",
-        "th","hi","ga","lv","kn","sr","bo","da","fa","hr","sk","jv","vi","ur","fi",
-        "no","rw","ta","be","kk","mn","ka","sl","eo","gl","mr","fil","gu","ml","ky",
-        "qu","az","sw","ba","pa","ms","te","sq","ug","hy","shn"
+        "en",
+        "zh",
+        "ru",
+        "es",
+        "fr",
+        "de",
+        "it",
+        "pt",
+        "pl",
+        "bg",
+        "nl",
+        "ja",
+        "ar",
+        "he",
+        "hu",
+        "la",
+        "cs",
+        "ko",
+        "tr",
+        "uk",
+        "id",
+        "ro",
+        "el",
+        "lt",
+        "bn",
+        "zh‑Hant",
+        "af",
+        "ca",
+        "sv",
+        "th",
+        "hi",
+        "ga",
+        "lv",
+        "kn",
+        "sr",
+        "bo",
+        "da",
+        "fa",
+        "hr",
+        "sk",
+        "jv",
+        "vi",
+        "ur",
+        "fi",
+        "no",
+        "rw",
+        "ta",
+        "be",
+        "kk",
+        "mn",
+        "ka",
+        "sl",
+        "eo",
+        "gl",
+        "mr",
+        "fil",
+        "gu",
+        "ml",
+        "ky",
+        "qu",
+        "az",
+        "sw",
+        "ba",
+        "pa",
+        "ms",
+        "te",
+        "sq",
+        "ug",
+        "hy",
+        "shn",
     ]
 });
 
@@ -59,8 +124,12 @@ impl Config {
         let base_dir = PathBuf::from(env::current_dir().expect("Failed to get current directory"));
         let log_dir = PathBuf::from("/var/logs");
 
-        let tmp_dir = PathBuf::from(env::var("TMP_DIR").unwrap_or_else(|_| "/tmp/cwa-book-downloader".to_string()));
-        let ingest_dir = PathBuf::from(env::var("INGEST_DIR").unwrap_or_else(|_| "/tmp/cwa-book-ingest".to_string()));
+        let tmp_dir = PathBuf::from(
+            env::var("TMP_DIR").unwrap_or_else(|_| "/tmp/cwa-book-downloader".to_string()),
+        );
+        let ingest_dir = PathBuf::from(
+            env::var("INGEST_DIR").unwrap_or_else(|_| "/tmp/cwa-book-ingest".to_string()),
+        );
         let status_timeout = env::var("STATUS_TIMEOUT")
             .unwrap_or_else(|_| "3600".to_string())
             .parse::<u64>()
@@ -89,7 +158,10 @@ impl Config {
             .unwrap_or(true);
 
         // Anna's Archive settings
-        let aa_donator_key = env::var("AA_DONATOR_KEY").unwrap_or_else(|_| "".to_string()).trim().to_string();
+        let aa_donator_key = env::var("AA_DONATOR_KEY")
+            .unwrap_or_else(|_| "".to_string())
+            .trim()
+            .to_string();
         let aa_base_url = env::var("AA_BASE_URL")
             .unwrap_or_else(|_| "https://annas-archive.org".to_string())
             .trim_end_matches('/')
