@@ -3,8 +3,10 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 from enum import Enum
-from config import INGEST_DIR, STATUS_TIMEOUT
 from datetime import datetime, timedelta
+from threading import Lock
+
+from config import INGEST_DIR, STATUS_TIMEOUT
 
 class QueueStatus(str, Enum):
     """Enum for possible book queue statuses."""
@@ -31,13 +33,12 @@ class BookInfo:
 
 class BookQueue:
     """Thread-safe book queue manager."""
-    def __init__(self):
-        from threading import Lock
-        self._queue = set()
+    def __init__(self) -> None:
+        self._queue: set[str] = set()
         self._lock = Lock()
-        self._status = {}
-        self._book_data = {}
-        self._status_timestamps = {}  # Track when each status was last updated
+        self._status: dict[str, QueueStatus] = {}
+        self._book_data: dict[str, BookInfo]= {}
+        self._status_timestamps: dict[str, datetime] = {}  # Track when each status was last updated
         self._status_timeout = timedelta(seconds=STATUS_TIMEOUT)  # 1 hour timeout
     
     def add(self, book_id: str, book_data: BookInfo) -> None:

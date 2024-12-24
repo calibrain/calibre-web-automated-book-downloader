@@ -3,9 +3,8 @@
 import time, json
 from pathlib import Path
 from urllib.parse import quote
-from typing import List, Optional, Dict
-from bs4 import BeautifulSoup, Tag, NavigableString
-from io import BytesIO
+from typing import List, Optional, Dict, Union
+from bs4 import BeautifulSoup, Tag, NavigableString, ResultSet
 
 from logger import setup_logger
 from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_DONATOR_KEY, AA_BASE_URL, USE_CF_BYPASS
@@ -69,15 +68,15 @@ def search_books(query: str) -> List[BookInfo]:
     
     return books
 
-def _parse_search_result_row(row) -> Optional[BookInfo]:
+def _parse_search_result_row(row: Tag) -> Optional[BookInfo]:
     """Parse a single search result row into a BookInfo object."""
     try:
         cells = row.find_all('td')
         preview_img = cells[0].find('img')
         preview = preview_img['src'] if preview_img else None
-        
+             
         return BookInfo(
-            id=row.find('a')['href'].split('/')[-1],
+            id=row.find_all('a')[0]['href'].split('/')[-1],
             preview=preview,
             title=cells[1].find('span').next,
             author=cells[2].find('span').next,
@@ -206,7 +205,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     return book_info
 
-def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
+def _extract_book_metadata(metadata_divs: Union[ResultSet[Tag], List[Tag]]) -> Dict[str, List[str]]:
     """Extract metadata from book info divs."""
     info : Dict[str, List[str]] = {}
     
@@ -221,7 +220,7 @@ def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
 
     # Process the second set of metadata (spans)
     # Find elements where aria-label="code tabs"
-    meta_spans = []
+    meta_spans: List[Tag] = []
     for div in metadata_divs:
         if div.find_all('div', {'aria-label': 'code tabs'}):
             meta_spans = div.find_all('span')
@@ -268,7 +267,7 @@ def download_book(book_info: BookInfo, book_path: Path) -> bool:
         try:
             download_url = _get_download_url(link, book_info.title)
             if download_url != "":
-                logger.info(f"Downloading {book_info.title} from {download_url}")
+                logger.info(f"Downloading `{book_info.title}` from `{download_url}`")
                 data = network.download_url(download_url, book_info.size or "")
                 if not data:
                     raise Exception("No data received")
@@ -276,7 +275,7 @@ def download_book(book_info: BookInfo, book_path: Path) -> bool:
                 logger.info(f"Download finished. Writing to {book_path}")
                 with open(book_path, "wb") as f:
                     f.write(data.getbuffer())
-                logger.info(f"Writing {book_info.title} successfully")
+                logger.info(f"Writing `{book_info.title}` successfully")
                 return True
             
         except Exception as e:
@@ -288,16 +287,12 @@ def download_book(book_info: BookInfo, book_path: Path) -> bool:
 def _get_download_url(link: str, title: str) -> str:
     """Extract actual download URL from various source pages."""
 
-    if link.startswith(f"{AA_BASE_URL}/dyn/api/fast_download.json"):
-        page = network.html_get_page(link)
-        return json.loads(page).get("download_url")
-    
-    html = network.html_get_page(link, retry=0, skip_403=True)
-    if html == "":
-        html = network.html_get_page_cf(link)
-    
+    html = network.html_get_page(link)
     if html == "":
         return ""
+    
+    if link.startswith(f"{AA_BASE_URL}/dyn/api/fast_download.json"):
+        return str(json.loads(html).get("download_url", ""))
     
     soup = BeautifulSoup(html, 'html.parser')
     url = ""
