@@ -1,7 +1,7 @@
 #!/bin/bash
 # set -e
 
-mkdir -p /var/logs
+mkdir -p /var/log/cwa-book-downloader
 mkdir -p "$INGEST_DIR"
 
 # Create group if it doesn't exist
@@ -19,4 +19,3 @@ chown -R $UID:$GID /app "$INGEST_DIR" /var/log/cwa-book-downloader
 
 # Switch to the created user and execute the main command
 exec gosu $UID "$@"
-
