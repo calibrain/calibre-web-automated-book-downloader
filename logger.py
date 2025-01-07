@@ -2,10 +2,11 @@
 
 import logging
 import sys
+from pathlib import Path
 from logging.handlers import RotatingFileHandler
-from config import FLASK_DEBUG
+from config import FLASK_DEBUG, LOG_FILE, ENABLE_LOGGING
 
-def setup_logger(name: str, log_file: str = "") -> logging.Logger:
+def setup_logger(name: str, log_file: Path = LOG_FILE) -> logging.Logger:
     """Set up and configure a logger instance.
     
     Args:
@@ -39,13 +40,16 @@ def setup_logger(name: str, log_file: str = "") -> logging.Logger:
     logger.addHandler(error_handler)
     
     # File handler if log file is specified
-    if log_file.strip() != "":
-        file_handler = RotatingFileHandler(
-            log_file.strip(),
-            maxBytes=10485760,  # 10MB
-            backupCount=5
-        )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-    
+    try:
+        if ENABLE_LOGGING:
+            file_handler = RotatingFileHandler(
+                log_file,
+                maxBytes=10485760,  # 10MB
+                backupCount=5
+            )
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+    except Exception as e:
+        logger.error(f"Failed to create log file: {e}")
+
     return logger

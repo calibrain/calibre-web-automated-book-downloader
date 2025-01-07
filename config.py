@@ -7,7 +7,8 @@ _SUPPORTED_BOOK_LANGUAGE = ['en','zh','ru','es','fr','de','it','pt','pl','bg','n
 
 # Directory settings
 BASE_DIR = Path(__file__).resolve().parent
-LOG_DIR = Path("/var/logs")
+LOG_DIR = Path("/var/log/cwa-book-downloader")
+LOG_DIR.mkdir(exist_ok=True)
 
 TMP_DIR = Path(os.getenv("TMP_DIR", "/tmp/cwa-book-downloader"))
 
@@ -43,5 +44,6 @@ FLASK_PORT = int(os.getenv("FLASK_PORT", 5003))
 FLASK_DEBUG = os.getenv("FLASK_DEBUG", "False").lower() == "true"
 
 # Logging settings
-LOG_FILE = f"{LOG_DIR}/cwa-bookd-ownloader.log"
+ENABLE_LOGGING = os.getenv("ENABLE_LOGGING", "true").lower() in ["true", "yes", "1", "y"]
+LOG_FILE = LOG_DIR / "cwa-bookd-downloader.log"
 MAIN_LOOP_SLEEP_TIME = int(os.getenv("MAIN_LOOP_SLEEP_TIME", 5))

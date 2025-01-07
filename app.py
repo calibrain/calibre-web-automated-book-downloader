@@ -1,5 +1,6 @@
 """Flask web application for book download service with URL rewrite support."""
 
+import logging
 import io, re, os
 from flask import Flask, request, jsonify, render_template, send_file, send_from_directory
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -16,6 +17,13 @@ app.wsgi_app = ProxyFix(app.wsgi_app)  # type: ignore
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching
 app.config['APPLICATION_ROOT'] = '/'
 
+# Flask logger
+app.logger.handlers = logger.handlers
+app.logger.setLevel(logger.level)
+# Also handle Werkzeug's logger
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.handlers = logger.handlers
+werkzeug_logger.setLevel(logger.level)
 
 def register_dual_routes(app):
     """

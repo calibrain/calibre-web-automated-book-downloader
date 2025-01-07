@@ -15,7 +15,7 @@ if ! id -u "$UID" >/dev/null 2>&1; then
 fi
 
 # Adjust ownership of application directories
-chown -R $UID:$GID /app "$INGEST_DIR" /var/logs
+chown -R $UID:$GID /app "$INGEST_DIR" /var/log/cwa-book-downloader
 
 # Switch to the created user and execute the main command
 exec gosu $UID "$@"

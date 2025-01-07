@@ -51,14 +51,17 @@ An intuitive web interface for searching and requesting book downloads, designed
 
 #### Application Settings
 
-| Variable      | Description             | Default Value      |
-| ------------- | ----------------------- | ------------------ |
-| `FLASK_PORT`  | Web interface port      | `8084`             |
-| `FLASK_DEBUG` | Debug mode toggle       | `false`            |
-| `FLASK_HOST`  | Web interface binding   | `0.0.0.0`          |
-| `INGEST_DIR`  | Book download directory | `/cwa-book-ingest` |
-| `UID`         | Runtime user ID         | `1000`             |
-| `GID`         | Runtime group ID        | `100`              |
+| Variable          | Description             | Default Value      |
+| ----------------- | ----------------------- | ------------------ |
+| `FLASK_PORT`      | Web interface port      | `8084`             |
+| `FLASK_DEBUG`     | Debug mode toggle       | `false`            |
+| `FLASK_HOST`      | Web interface binding   | `0.0.0.0`          |
+| `INGEST_DIR`      | Book download directory | `/cwa-book-ingest` |
+| `UID`             | Runtime user ID         | `1000`             |
+| `GID`             | Runtime group ID        | `100`              |
+| `ENABLE_LOGGING`  | Enable log file         | `true`             |
+
+If logging is enabld, log folder default location is `var/log/cwa-book-downloader`
 
 #### Download Settings
 
@@ -71,7 +74,8 @@ An intuitive web interface for searching and requesting book downloads, designed
 | `BOOK_LANGUAGE`        | Preferred language for books                              | `en`                              |
 | `AA_DONATOR_KEY`       | Optional Donator key for Anna's Archive fast download API | ``                                |
 
-Note that PDF are NOT supported at the moment (they do not get ingested by CWA, but if you want to just download them locally, you can add `pdf` to the `SUPPORTED_FORMATS` env
+Note that PDF are NOT supported at the moment (they do not get ingested by CWA, but if you want to just download them locally, you can add `pdf` to the `SUPPORTED_FORMATS` env)  
+If you change `BOOK_LANGUAGE`, you can add multiple comma separated languages, such as `en,fr,ru` etc.  
 
 #### AA 
 
