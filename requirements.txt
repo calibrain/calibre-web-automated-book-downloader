@@ -2,6 +2,8 @@ flask
 requests
 beautifulsoup4
 tqdm
+DrissionPage
+pyvirtualdisplay
 types-requests
 types-beautifulsoup4
 types-tqdm

@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "docker-compose up (dev)",
+      "type": "shell",
+      "command": "docker-compose -f docker-compose.dev.yml up --build -d",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker-compose down (dev)",
+      "type": "shell",
+      "command": "docker-compose -f docker-compose.dev.yml down",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker-compose up (prod)",
+      "type": "shell",
+      "command": "docker-compose -f docker-compose.yml up -d",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker-compose down (prod)",
+      "type": "shell",
+      "command": "docker-compose -f docker-compose.yml down",
+      "problemMatcher": []
+    }
+  ]
+}
