@@ -90,8 +90,7 @@ class BookQueue:
                 # Check for stale status entries
                 last_update = self._status_timestamps.get(book_id)
                 if last_update and (current_time - last_update) > self._status_timeout:
-                    # Don't remove DONE status
-                    if status == QueueStatus.DONE:
+                    if status == QueueStatus.DONE or status == QueueStatus.ERROR or status == QueueStatus.AVAILABLE:
                         to_remove.append(book_id)
             
             # Remove stale entries
