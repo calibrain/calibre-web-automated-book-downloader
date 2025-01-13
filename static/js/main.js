@@ -113,8 +113,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const books = bookIds.map((bookId) => {
                 const row = document.querySelector(`#book-${bookId}`).closest('tr');
                 return {
-                    title: row.querySelector('td:nth-child(4)').textContent, // Title column
-                    author: row.querySelector('td:nth-child(5)').textContent // Author column
+                    title: row.querySelector('td:nth-child(4)').textContent,
+                    author: row.querySelector('td:nth-child(5)').textContent
                 };
             });
 
@@ -541,19 +541,20 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        // Download selected books
         elements.downloadSelectedButton.addEventListener('click', utils.handleDownloadSelected);
 
+        // Check/uncheck all book checkboxes
         elements.selectAllCheckbox.addEventListener('change', (event) => {
             const isChecked = event.target.checked;
 
-            // Check/uncheck all book checkboxes
             document.querySelectorAll('.uk-checkbox').forEach((checkbox) => {
                 if (checkbox !== elements.selectAllCheckbox) {
                     checkbox.checked = isChecked;
                     if (isChecked) {
-                        selectedBooks.add(checkbox.value); // Add to selected books
+                        selectedBooks.add(checkbox.value);
                     } else {
-                        selectedBooks.delete(checkbox.value); // Remove from selected books
+                        selectedBooks.delete(checkbox.value);
                     }
                 }
             });
