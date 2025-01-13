@@ -233,19 +233,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const search = {
         async performSearch(query) {
             if (STATE.isSearching) return;
-            
+
             try {
                 STATE.isSearching = true;
                 utils.showLoading(elements.searchLoading);
 
-                if (!elements.searchAccordion.classList.contains('uk-open'))
-                {
+                if (!elements.searchAccordion.classList.contains('uk-open')) {
                     utils.showAccordion(elements.resultsSectionAccordion);
                 };
                 const data = await utils.fetchJson(
                     `${API_ENDPOINTS.search}?query=${encodeURIComponent(query)}`
                 );
-                
+
                 this.displayResults(data);
             } catch (error) {
                 this.handleSearchError(error);
@@ -257,7 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         displayResults(books) {
             elements.resultsTableBody.innerHTML = '';
-            
+
             if (!books.length) {
                 this.displayNoResults();
                 return;
@@ -360,7 +359,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const book = await utils.fetchJson(
                     `${API_ENDPOINTS.info}?id=${encodeURIComponent(bookId)}`
                 );
-                
+
                 modalDetails = book;
                 this.displayDetails(book);
             } catch (error) {
@@ -372,7 +371,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         displayDetails(book) {
             elements.detailsContainer.innerHTML = this.generateDetailsHTML(book);
-            
+
             // Add event listeners
             document.getElementById('download-button')
                 .addEventListener('click', () => this.downloadBook(book));
@@ -432,7 +431,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 await utils.fetchJson(
                     `${API_ENDPOINTS.download}?id=${encodeURIComponent(book.id)}`
                 );
-                
+
                 modal.close();
                 status.fetch();
             } catch (error) {
@@ -471,7 +470,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         display(data) {
             elements.statusTableBody.innerHTML = '';
-            
+
             // Handle each status type
             Object.entries(data).forEach(([status, booksInStatus]) => {
                 // If the status section has books
@@ -516,7 +515,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         createPreviewCell(previewUrl) {
             const cell = utils.createElement('td');
-            
+
             if (previewUrl) {
                 const img = utils.createElement('img', {
                     src: previewUrl,
@@ -527,14 +526,14 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 cell.textContent = 'N/A';
             }
-            
+
             return cell;
         },
 
         handleError(error) {
             console.error('Status error:', error);
             elements.statusTableBody.innerHTML = '';
-            
+
             const errorRow = utils.createElement('tr', {}, [
                 utils.createElement('td', {
                     colSpan: '4',
@@ -542,7 +541,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     textContent: 'Error loading status. Will retry automatically.'
                 })
             ]);
-            
+
             elements.statusTableBody.appendChild(errorRow);
         }
     };

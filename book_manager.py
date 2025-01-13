@@ -288,36 +288,37 @@ def download_book(book_info: BookInfo, book_path: Path) -> bool:
 def _get_download_url(link: str, title: str) -> str:
     """Extract actual download URL from various source pages."""
 
+    url = ""
+
     if link.startswith(f"{AA_BASE_URL}/dyn/api/fast_download.json"):
         page = network.html_get_page(link)
-        return json.loads(page).get("download_url")
-    
-    html = network.html_get_page(link, retry=0, skip_403=True)
-    if html == "":
-        html = network.html_get_page_cf(link)
-    
-    if html == "":
-        return ""
-    
-    soup = BeautifulSoup(html, 'html.parser')
-    url = ""
-    
-    if link.startswith("https://z-lib.gs"):
-        download_link = soup.find_all('a', href=True, class_="addDownloadedBook")
-        if download_link:
-            url = download_link[0]['href']            
-    elif link.startswith(f"{AA_BASE_URL}/slow_download/"):
-        download_links = soup.find_all('a', href=True, string="📚 Download now")
-        if not download_links:
-            countdown = soup.find_all('span', class_="js-partner-countdown")
-            if countdown:
-                sleep_time = int(countdown[0].text)
-                logger.info(f"Waiting {sleep_time}s for {title}")
-                time.sleep(sleep_time + 5)
-                return _get_download_url(link, title)
-        else:
-            url = download_links[0]['href']
+        url = json.loads(page).get("download_url")
     else:
-        url = soup.find_all('a', string="GET")[0]['href']
+        html = network.html_get_page(link, retry=0, skip_403=True)
+        if html == "":
+            html = network.html_get_page_cf(link)
+        
+        if html == "":
+            return ""
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        if link.startswith("https://z-lib.gs"):
+            download_link = soup.find_all('a', href=True, class_="addDownloadedBook")
+            if download_link:
+                url = download_link[0]['href']            
+        elif link.startswith(f"{AA_BASE_URL}/slow_download/"):
+            download_links = soup.find_all('a', href=True, string="📚 Download now")
+            if not download_links:
+                countdown = soup.find_all('span', class_="js-partner-countdown")
+                if countdown:
+                    sleep_time = int(countdown[0].text)
+                    logger.info(f"Waiting {sleep_time}s for {title}")
+                    time.sleep(sleep_time + 5)
+                    url = _get_download_url(link, title)
+            else:
+                url = download_links[0]['href']
+        else:
+            url = soup.find_all('a', string="GET")[0]['href']
 
     return network.get_absolute_url(link, url)
