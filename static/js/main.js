@@ -109,10 +109,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const columnName = headers[column].textContent.trim().toLowerCase();
 
             const getCellValue = (row, column) => {
-                const cell = row.querySelector(`td:nth-child(${column + 2})`);
+                const cell = row.querySelector(`td:nth-child(${column + 1})`);
                 const text = cell ? cell.textContent.trim() : '';
                 if (columnName === 'size') return parseFileSize(text);
                 if (columnName === 'title') return parseTitle(text);
+                return text;
             };
 
             rows.sort((a, b) => {
@@ -608,11 +609,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         function setupSorting() {
-            const headers = document.querySelectorAll('#results-table thead th');
-            headers.forEach((header, index) => {
+            const headers = document.querySelectorAll('#results-table thead th[data-sort]');
+            headers.forEach((header) => {
                 let sortOrder = 'asc';
                 header.addEventListener('click', () => {
-                    utils.sortResultsTable(index, sortOrder);
+                    const allHeaders = Array.from(document.querySelectorAll('#results-table thead th'));
+                    const columnIndex = allHeaders.indexOf(header);
+                    utils.sortResultsTable(columnIndex, sortOrder);
                     sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
                 });
             });
