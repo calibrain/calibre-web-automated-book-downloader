@@ -43,10 +43,14 @@
                         <span>Loading...</span>
                     </div>
                     <div class="results-content">
+                    <button class="uk-button uk-button-primary uk-margin-small" id="download-selected-button" disabled>Download Selected</button>
                         <div class="uk-overflow-auto">
                             <table id="results-table" class="uk-table uk-table-hover uk-table-divider" role="grid">
                                 <thead>
                                     <tr>
+                                        <th>
+                                            <input type="checkbox" id="select-all-checkbox" class="uk-checkbox" />
+                                        </th>
                                         <th scope="col">#</th>
                                         <th scope="col">Preview</th>
                                         <th scope="col">Title</th>
@@ -69,7 +73,7 @@
                 </li>
             </ul>
 
-            <!-- Book Details Modal -->
+            <!-- Modal -->
             <div class="modal-overlay" id="modal-overlay" role="dialog" aria-modal="true">
                 <div class="details-container" id="details-container">
                     <!-- Details will be dynamically injected here -->
