@@ -93,7 +93,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         updateDownloadSelectedButton() {
             elements.downloadSelectedButton.disabled = selectedBooks.size === 0;
-            console.log(selectedBooks);
         },
 
         handleCheckboxChange(event) {
@@ -157,27 +156,22 @@ document.addEventListener('DOMContentLoaded', () => {
         },
 
         async confirmDownload(bookIds) {
-            try {
-                bookIds.map((bookId) =>
-                    utils.fetchJson(`${API_ENDPOINTS.download}?id=${encodeURIComponent(bookId)}`)
-                );
+            bookIds.map((bookId) =>
+                utils.fetchJson(`${API_ENDPOINTS.download}?id=${encodeURIComponent(bookId)}`)
+            );
 
-                // Uncheck all selected checkboxes
-                selectedBooks.forEach((bookId) => {
-                    const checkbox = document.getElementById(`book-${bookId}`);
-                    if (checkbox) checkbox.checked = false;
-                });
+            // Uncheck all selected checkboxes
+            selectedBooks.forEach((bookId) => {
+                const checkbox = document.getElementById(`book-${bookId}`);
+                if (checkbox) checkbox.checked = false;
+            });
 
-                const selectAllCheckbox = document.getElementById('select-all-checkbox');
-                if (selectAllCheckbox) selectAllCheckbox.checked = false;
+            const selectAllCheckbox = document.getElementById('select-all-checkbox');
+            if (selectAllCheckbox) selectAllCheckbox.checked = false;
 
-                selectedBooks.clear();
-                utils.updateDownloadSelectedButton();
-            } catch (error) {
-                console.error('Error downloading selected books:', error);
-            } finally {
-                modal.close();
-            }
+            selectedBooks.clear();
+            utils.updateDownloadSelectedButton();
+            modal.close();
         }
     };
 
