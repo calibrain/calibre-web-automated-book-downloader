@@ -90,9 +90,26 @@ document.addEventListener('DOMContentLoaded', () => {
         sortResultsTable(column, order = 'asc') {
             const rows = Array.from(elements.resultsTableBody.querySelectorAll('tr'));
             const headers = document.querySelectorAll('#results-table thead th');
+
+            const parseFileSize = (size) => {
+                const match = size.match(/([\d.]+)([KMGT]B)/i);
+                if (!match) return 0;
+                const [_, value, unit] = match;
+                const multiplier = { KB: 1, MB: 1024, GB: 1024 * 1024, TB: 1024 * 1024 * 1024 };
+                return parseFloat(value) * (multiplier[unit.toUpperCase()] || 1);
+            };
+
+            const parseTitle = (title) => {
+                return title.replace(/^(The)\s+/i, '').trim();
+            }
+
+            const columnName = headers[column].textContent.trim().toLowerCase();
+
             const getCellValue = (row, column) => {
                 const cell = row.querySelector(`td:nth-child(${column + 1})`);
-                return cell ? cell.textContent.trim() : '';
+                const text = cell ? cell.textContent.trim() : '';
+                if (columnName === 'size') return parseFileSize(text);
+                if (columnName === 'title') return parseTitle(text);
             };
 
             rows.sort((a, b) => {

@@ -146,6 +146,10 @@ tbody tr:hover {
     overflow: hidden;
 }
 
+th[data-sort="index"] {
+    min-width: 60px;
+}
+
 /* Loading Indicator */
 .loading-indicator {
     display: none;
