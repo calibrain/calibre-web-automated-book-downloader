@@ -85,6 +85,43 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
             return element;
+        },
+
+        sortResultsTable(column, order = 'asc') {
+            const rows = Array.from(elements.resultsTableBody.querySelectorAll('tr'));
+            const headers = document.querySelectorAll('#results-table thead th');
+            const getCellValue = (row, column) => {
+                const cell = row.querySelector(`td:nth-child(${column + 1})`);
+                return cell ? cell.textContent.trim() : '';
+            };
+
+            rows.sort((a, b) => {
+                const valA = getCellValue(a, column);
+                const valB = getCellValue(b, column);
+
+                if (!isNaN(valA) && !isNaN(valB)) {
+                    return order === 'asc' ? valA - valB : valB - valA;
+                }
+                return order === 'asc'
+                    ? valA.localeCompare(valB)
+                    : valB.localeCompare(valA);
+            });
+
+            elements.resultsTableBody.innerHTML = '';
+            rows.forEach(row => elements.resultsTableBody.appendChild(row));
+
+            headers.forEach(header => {
+                const icon = header.querySelector('.sort-icon');
+                if (icon) {
+                    icon.removeAttribute('uk-icon');
+                }
+            });
+
+            const currentHeader = headers[column];
+            const icon = currentHeader.querySelector('.sort-icon');
+            if (icon) {
+                icon.setAttribute('uk-icon', `icon: ${order === 'asc' ? 'triangle-up' : 'triangle-down'}`);
+            }
         }
     };
 
@@ -435,6 +472,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 modal.close();
             }
         });
+
+        function setupSorting() {
+            const headers = document.querySelectorAll('#results-table thead th');
+            headers.forEach((header, index) => {
+                let sortOrder = 'asc';
+                header.addEventListener('click', () => {
+                    utils.sortResultsTable(index, sortOrder);
+                    sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+                });
+            });
+        }
+
+        setupSorting();
     }
 
     // Initialize
