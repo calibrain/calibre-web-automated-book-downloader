@@ -91,10 +91,8 @@ If disabling the cloudflare bypass, you will be using alternative download hosts
 
 | Variable               | Description                   | Default Value           |
 | ---------------------- | ----------------------------- | ----------------------- |
-| `CLOUDFLARE_PROXY_URL` | Cloudflare bypass service URL | `http://localhost:8000` |
 | `PORT`                 | Container external port       | `8084`                  |
 
-`CLOUDFLARE_PROXY_URL` is ignored if `USE_CF_BYPASS` is set to `false`
 
 ### Volume Configuration
 

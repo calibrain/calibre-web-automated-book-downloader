@@ -4,8 +4,9 @@ import logging
 import io, re, os
 from flask import Flask, request, jsonify, render_template, send_file, send_from_directory
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.wrappers import Response 
 from flask import url_for as flask_url_for
-from functools import partial
+import typing
 
 from logger import setup_logger
 from config import FLASK_HOST, FLASK_PORT, FLASK_DEBUG
@@ -25,7 +26,7 @@ werkzeug_logger = logging.getLogger('werkzeug')
 werkzeug_logger.handlers = logger.handlers
 werkzeug_logger.setLevel(logger.level)
 
-def register_dual_routes(app):
+def register_dual_routes(app : Flask) -> None:
     """
     Register each route both with and without the /request prefix.
     This function should be called after all routes are defined.
@@ -56,7 +57,7 @@ def register_dual_routes(app):
                                methods=rule.methods)
     app.jinja_env.globals['url_for'] = url_for_with_request
 
-def url_for_with_request(endpoint, **values):
+def url_for_with_request(endpoint : str, **values : typing.Any) -> str:
     """Generate URLs with /request prefix by default."""
     if endpoint == 'static':
         # For static files, add /request prefix
@@ -65,7 +66,7 @@ def url_for_with_request(endpoint, **values):
     return flask_url_for(endpoint, **values)
 
 @app.route('/')
-def index():
+def index() -> str:
     """
     Render main page with search and status table.
     """
@@ -74,12 +75,14 @@ def index():
 @app.route('/favico<path:_>')
 @app.route('/request/favico<path:_>')
 @app.route('/request/static/favico<path:_>')
-def favicon(_):
+def favicon(_ : typing.Any) -> Response:
     return send_from_directory(os.path.join(app.root_path, 'static', 'media'),
         'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
+from typing import Union, Tuple
+
 @app.route('/api/search', methods=['GET'])
-def api_search():
+def api_search() -> Union[Response, Tuple[Response, int]]:
     """
     Search for books matching the provided query.
 
@@ -87,7 +90,7 @@ def api_search():
         query (str): Search term (ISBN, title, author, etc.)
 
     Returns:
-        flask.Response: JSON array of matching books or empty array if no query.
+        flask.Response: JSON array of matching books or error response.
     """
     query = request.args.get('query', '')
     if not query:
@@ -101,7 +104,7 @@ def api_search():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/info', methods=['GET'])
-def api_info():
+def api_info() -> Union[Response, Tuple[Response, int]]:
     """
     Get detailed book information.
 
@@ -125,7 +128,7 @@ def api_info():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/download', methods=['GET'])
-def api_download():
+def api_download() -> Union[Response, Tuple[Response, int]]:
     """
     Queue a book for download.
 
@@ -149,7 +152,7 @@ def api_download():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/status', methods=['GET'])
-def api_status():
+def api_status() -> Union[Response, Tuple[Response, int]]:
     """
     Get current download queue status.
 
@@ -164,7 +167,7 @@ def api_status():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/localdownload', methods=['GET'])
-def api_local_download():
+def api_local_download() -> Union[Response, Tuple[Response, int]]:
     """
     Download an EPUB file from local storage if available.
 
@@ -200,7 +203,7 @@ def api_local_download():
         return jsonify({"error": str(e)}), 500
 
 @app.errorhandler(404)
-def not_found_error(error):
+def not_found_error(error: Exception) -> Union[Response, Tuple[Response, int]]:
     """
     Handle 404 (Not Found) errors.
 
@@ -210,11 +213,11 @@ def not_found_error(error):
     Returns:
         flask.Response: JSON error message with 404 status.
     """
-    logger.warning(f"404 error: {request.url}")
+    logger.warning(f"404 error: {request.url} : {error}")
     return jsonify({"error": "Resource not found"}), 404
 
 @app.errorhandler(500)
-def internal_error(error):
+def internal_error(error: Exception) -> Union[Response, Tuple[Response, int]]:
     """
     Handle 500 (Internal Server) errors.
 
