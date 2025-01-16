@@ -7,22 +7,23 @@ from typing import Dict, List, Optional, Any, Tuple
 
 from logger import setup_logger
 from config import TMP_DIR, MAIN_LOOP_SLEEP_TIME, INGEST_DIR
-from models import book_queue, BookInfo, QueueStatus
+from models import book_queue, BookInfo, QueueStatus, SearchFilters
 import book_manager
 
 logger = setup_logger(__name__)
 
-def search_books(query: str) -> List[Dict[str, Any]]:
+def search_books(query: str, filters: SearchFilters) -> List[Dict[str, Any]]:
     """Search for books matching the query.
     
     Args:
         query: Search term
+        filters: Search filters object
         
     Returns:
         List[Dict]: List of book information dictionaries
     """
     try:
-        books = book_manager.search_books(query)
+        books = book_manager.search_books(query, filters)
         return [_book_info_to_dict(book) for book in books]
     except Exception as e:
         logger.error(f"Error searching books: {e}")

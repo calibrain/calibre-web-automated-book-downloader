@@ -67,6 +67,10 @@ footer {
     outline: none;
 }
 
+.search-filter {
+    max-width: 210px;
+}
+
 /* Table Styles */
 .table-responsive {
     margin-bottom: 1rem;
