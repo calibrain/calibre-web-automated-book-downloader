@@ -214,7 +214,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 utils.fetchJson(`${API_ENDPOINTS.download}?id=${encodeURIComponent(bookId)}`)
             );
 
-            // Uncheck all selected checkboxes
+            this.clearAllCheckboxes();
+            modal.close();
+        },
+
+        clearAllCheckboxes() {
             selectedBooks.forEach((bookId) => {
                 const checkbox = document.getElementById(`book-${bookId}`);
                 if (checkbox) checkbox.checked = false;
@@ -225,13 +229,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             selectedBooks.clear();
             utils.updateDownloadSelectedButton();
-            modal.close();
         }
     };
 
     // Search Functions
     const search = {
         async performSearch(query) {
+            utils.clearAllCheckboxes();
             if (STATE.isSearching) return;
 
             try {
