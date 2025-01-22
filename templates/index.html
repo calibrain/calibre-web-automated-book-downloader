@@ -30,6 +30,76 @@
                         <input class="uk-search-input" type="search" placeholder="Search by ISBN, title, author..." aria-label="Search books" id="search-input">
                         <button class="uk-search-icon-flip" uk-search-icon id="search-button" type="button"></button>
                     </form>
+                    <button class="uk-button uk-button-default uk-float-right" uk-toggle="target: #search-filters" type="button">Advanced Search</button>
+                    <form hidden id="search-filters" class="uk-search uk-search-default uk-inline uk-width-expand uk-flex uk-flex-wrap">
+                        <div class="search-filter">
+                            <label for="isbn-input">ISBN</label>
+                            <div class="uk-flex uk-flex-wrap">
+                                <input class="uk-search-input uk-width-4-5" type="search" placeholder="ISBN..." aria-label="Search by ISBN" id="isbn-input">
+                            </div>
+                        </div>
+                        <div class="search-filter">
+                            <label for="author-input">Author</label>
+                            <div class="uk-flex uk-flex-wrap">
+                                <input class="uk-search-input uk-width-4-5" type="search" placeholder="Author..." aria-label="Search by author" id="author-input">
+                            </div>
+                        </div>
+                        <div class="search-filter">
+                            <label for="title-input">Title</label>
+                            <div class="uk-flex uk-flex-wrap">
+                                <input class="uk-search-input uk-width-4-5" type="search" placeholder="Title" aria-label="Search by title" id="title-input">
+                            </div>
+                        </div>
+                        <div class="search-filter">
+                            <label for="lang-input">Language</label>
+                            <div class="uk-flex uk-flex-wrap">
+                                <select class="uk-select uk-width-4-5" id="lang-input">
+                                    <option value="all">All</option>
+                                    {% for lang in book_languages %}
+                                        <option value="{{ lang.code }}"
+                                            {% if lang.code == default_language[0] %}selected{% endif %}>
+                                            {{ lang.language }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="search-filter">
+                            <label for="sort-input">Sort</label>
+                            <div class="uk-flex uk-flex-wrap">
+                                <select class="uk-select uk-width-4-5" id="sort-input">
+                                    <option value="">Most relevant</option>
+                                    <option value="newest">Newest (publication year)</option>
+                                    <option value="oldest">Oldest (publication year)</option>
+                                    <option value="largest">Largest (filesize)</option>
+                                    <option value="smallest">Smallest (filesize)</option>
+                                    <option value="newest_added">Newest (open sourced)</option>
+                                    <option value="oldest_added">Oldest (open sourced)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="search-filter">
+                            <label for="content-input">Content</label>
+                            <div class="uk-flex uk-flex-wrap">
+                                <select class="uk-select uk-width-4-5" id="content-input">
+                                    <option value="">All</option>
+                                    <option value="book_nonfiction">Book (non-fiction)</option>
+                                    <option value="book_fiction">Book (fiction)</option>
+                                    <option value="book_unknown">Book (unkown)</option>
+                                    <option value="magazine">Magazine</option>
+                                    <option value="book_comic">Comic Book</option>
+                                    <option value="standards_document">Standards document</option>
+                                    <option value="other">Other</option>
+                                    <option value="musical_score">Musical score</option>
+                                    <option value="audiobook">Audiobook</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="uk-flex uk-margin-auto-top uk-margin-auto-left">
+                            <button class="uk-button uk-button-default uk-margin-small-top" id="adv-search-button" type="button">Search</button>
+                        </div>
+                    </form>
                 </div>
             </section>
 

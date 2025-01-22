@@ -2,8 +2,14 @@
 document.addEventListener('DOMContentLoaded', () => {
     // DOM Elements
     const elements = {
-        searchInput: document.getElementById('search-input'),
-        searchButton: document.getElementById('search-button'),
+        search: {
+            searchInput: document.getElementById('search-input'),
+            searchButton: document.getElementById('search-button'),
+            advanced: {
+                advSearchButton: document.getElementById('adv-search-button'),
+                searchFiltersForm: document.getElementById('search-filters')
+            }
+        },
         selectAllCheckbox: document.getElementById('select-all-checkbox'),
         downloadSelectedButton: document.getElementById('download-selected-button'),
         resultsSectionAccordion: document.getElementById('results-section-accordion'),
@@ -24,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectedBooks = new Set();
     const STATE = {
         isSearching: false,
-        isLoadingDetails: false
+        isLoadingDetails: false,
     };
 
     // Constants
@@ -35,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
         download: '/request/api/download',
         status: '/request/api/status'
     };
+    const FILTERS = ['isbn', 'author', 'title', 'lang' , 'sort', "content"];
 
     // Utility Functions
     const utils = {
@@ -245,8 +252,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!elements.searchAccordion.classList.contains('uk-open')) {
                     utils.showAccordion(elements.resultsSectionAccordion);
                 };
+                
                 const data = await utils.fetchJson(
-                    `${API_ENDPOINTS.search}?query=${encodeURIComponent(query)}`
+                    `${API_ENDPOINTS.search}?${query}`
                 );
 
                 this.displayResults(data);
@@ -256,6 +264,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 STATE.isSearching = false;
                 utils.hideLoading(elements.searchLoading);
             }
+        },
+
+        buildQuery() {
+            let queryParams = [];
+
+            if(elements.search.searchInput.value.trim()) {
+                queryParams.push(`query=${encodeURIComponent(elements.search.searchInput.value.trim())}`);
+            }
+
+            if(elements.search.advanced.searchFiltersForm.hasAttribute('hidden')) {
+                //Not advanced search
+                return queryParams.join('&');
+            }
+
+            FILTERS.forEach(filterType => {
+                const inputs = document.querySelectorAll(`[id^="${filterType}-input"]`);
+            
+                inputs.forEach(input => {
+                    const value = input.value.trim();
+                    if (value) {  
+                        queryParams.push(`${filterType}=${encodeURIComponent(value.trim())}`);
+                    }
+                });
+            });
+
+            return queryParams.join('&');
         },
 
         displayResults(books) {
@@ -565,16 +599,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // Event Listeners
     function setupEventListeners() {
         // Search events
-        elements.searchButton.addEventListener('click', () => {
-            const query = elements.searchInput.value.trim();
-            if (query) search.performSearch(query);
+        elements.search.searchButton.addEventListener('click', () => {
+            const query = search.buildQuery();
+            if(query) search.performSearch(query);
         });
 
-        elements.searchInput.addEventListener('keydown', (e) => {
+        elements.search.advanced.advSearchButton.addEventListener('click', () => {
+            const query = search.buildQuery();
+            if(query) search.performSearch(query);
+        });
+        
+        elements.search.searchInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                const query = elements.searchInput.value.trim();
-                if (query) search.performSearch(query);
+
+                const query = search.buildQuery();
+                if(query) search.performSearch(query);
             }
         });
 

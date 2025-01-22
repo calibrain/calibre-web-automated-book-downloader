@@ -2,8 +2,11 @@
 
 import os
 from pathlib import Path
+import json
 
-_SUPPORTED_BOOK_LANGUAGE = ['en','zh','ru','es','fr','de','it','pt','pl','bg','nl','ja','ar','he','hu','la','cs','ko','tr','uk','id','ro','el','lt','bn','zh‑Hant','af','ca','sv','th','hi','ga','lv','kn','sr','bo','da','fa','hr','sk','jv','vi','ur','fi','no','rw','ta','be','kk','mn','ka','sl','eo','gl','mr','fil','gu','ml','ky','qu','az','sw','ba','pa','ms','te','sq','ug','hy','shn']
+
+with open("data/book-languages.json") as file:
+    _SUPPORTED_BOOK_LANGUAGE = json.load(file)
 
 # Directory settings
 BASE_DIR = Path(__file__).resolve().parent
@@ -34,7 +37,7 @@ AA_BASE_URL = os.getenv("AA_BASE_URL", "https://annas-archive.org").strip("/")
 SUPPORTED_FORMATS = os.getenv("SUPPORTED_FORMATS", "epub,mobi,azw3,fb2,djvu,cbz,cbr").split(",")
 
 BOOK_LANGUAGE = os.getenv("BOOK_LANGUAGE", "en").lower().split(',')
-BOOK_LANGUAGE = [l for l in BOOK_LANGUAGE if l in _SUPPORTED_BOOK_LANGUAGE]
+BOOK_LANGUAGE = [l for l in BOOK_LANGUAGE if l in [lang['code'] for lang in _SUPPORTED_BOOK_LANGUAGE]]
 if len(BOOK_LANGUAGE) == 0:
     BOOK_LANGUAGE = ['en']
 

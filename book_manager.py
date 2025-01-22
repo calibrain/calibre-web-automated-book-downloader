@@ -9,12 +9,12 @@ from io import BytesIO
 
 from logger import setup_logger
 from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_DONATOR_KEY, AA_BASE_URL, USE_CF_BYPASS
-from models import BookInfo
+from models import BookInfo, SearchFilters
 import network
 
 logger = setup_logger(__name__)
 
-def search_books(query: str) -> List[BookInfo]:
+def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
     """Search for books matching the query.
     
     Args:
@@ -27,11 +27,37 @@ def search_books(query: str) -> List[BookInfo]:
         Exception: If no books found or parsing fails
     """
     query_html = quote(query)
+
+    if filters.isbn:
+        #ISBNs are included in query string
+        isbns = " || ".join([f"('isbn13:{isbn}' || 'isbn10:{isbn}')" for isbn in filters.isbn])
+        query_html = quote(f"({isbns}) {query}")
+    
+    filters_query = ""
+    
+    for value in filters.lang or BOOK_LANGUAGE:
+        if value != "all":
+            filters_query += f"&lang={quote(value)}"
+    
+    if filters.sort:
+        filters_query += f"&sort={quote(filters.sort)}"
+    
+    for value in filters.content:
+        filters_query += f"&content={quote(value)}"
+
+    index = 1
+    for filter_type, filter_values in vars(filters).items():
+        if filter_type == 'author' or filter_type == 'title' and filter_values:
+            for value in filter_values:
+                filters_query += f"&termtype_{index}={filter_type}&termval_{index}={quote(value)}"
+                index += 1
+
     url = (
         f"{AA_BASE_URL}"
         f"/search?index=&page=1&display=table"
         f"&acc=aa_download&acc=external_download&sort="
-        f"&ext={'&ext='.join(SUPPORTED_FORMATS)}&lang={'&lang='.join(BOOK_LANGUAGE)}&q={query_html}"
+        f"&ext={'&ext='.join(SUPPORTED_FORMATS)}&q={query_html}"
+        f"{filters_query}" 
     )
     
     html = network.html_get_page(url)

@@ -8,8 +8,10 @@ from flask import url_for as flask_url_for
 from functools import partial
 
 from logger import setup_logger
-from config import FLASK_HOST, FLASK_PORT, FLASK_DEBUG
+from config import FLASK_HOST, FLASK_PORT, FLASK_DEBUG, _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE
 import backend
+
+from models import SearchFilters
 
 logger = setup_logger(__name__)
 app = Flask(__name__)
@@ -69,7 +71,7 @@ def index():
     """
     Render main page with search and status table.
     """
-    return render_template('index.html')
+    return render_template('index.html', book_languages=_SUPPORTED_BOOK_LANGUAGE, default_language=BOOK_LANGUAGE)
 
 @app.route('/favico<path:_>')
 @app.route('/request/favico<path:_>')
@@ -85,16 +87,32 @@ def api_search():
 
     Query Parameters:
         query (str): Search term (ISBN, title, author, etc.)
+        isbn (str): Book ISBN
+        author (str): Book Author
+        title (str): Book Title
+        lang (str): Book Language
+        sort (str): Order to sort results
+        content (str): Content type of book
 
     Returns:
         flask.Response: JSON array of matching books or empty array if no query.
     """
     query = request.args.get('query', '')
-    if not query:
+
+    filters = SearchFilters(
+        isbn = request.args.getlist('isbn'),
+        author = request.args.getlist('author'),
+        title = request.args.getlist('title'),
+        lang = request.args.getlist('lang'),
+        sort = request.args.get('sort'),
+        content = request.args.getlist('content'),
+    )
+
+    if not query and not any(vars(filters).values()):
         return jsonify([])
 
     try:
-        books = backend.search_books(query)
+        books = backend.search_books(query, filters)
         return jsonify(books)
     except Exception as e:
         logger.error(f"Search error: {e}")
