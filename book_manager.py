@@ -320,8 +320,6 @@ def _get_download_url(link: str, title: str) -> str:
         url = json.loads(page).get("download_url")
     else:
         html = network.html_get_page(link, retry=0)
-        if html == "":
-            html = network.html_get_page_cf(link)
         
         if html == "":
             return ""
