@@ -1,0 +1,12 @@
+.git
+.github
+.vscode
+.mypy_cache
+README_images
+.gitignore
+Dockerfile
+.dockerignore
+.DS_Store
+docker-compose.yml
+docker-compose.*.yml
+readme.md

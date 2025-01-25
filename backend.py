@@ -1,7 +1,7 @@
 """Backend logic for the book download application."""
 
 import threading, time
-import subprocess
+import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
@@ -101,29 +101,6 @@ def _book_info_to_dict(book: BookInfo) -> Dict[str, Any]:
         if value is not None
     }
 
-def _process_book(book_path: str) -> bool:
-    """Check if downloaded book is valid.
-    
-    Args:
-        book_path: Path to downloaded book file
-        
-    Returns:
-        bool: True if book is valid
-    """
-    try:
-        logger.info(f"Verifying book health: {book_path}")
-        script_path = Path(__file__).parent / "check_health.sh"
-        result = subprocess.run(
-            [str(script_path), book_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        logger.info(f"Health check result: {result.stdout.decode()}")
-        return result.returncode == 0
-    except Exception as e:
-        logger.error(f"Error checking book health: {e}")
-        return False
-
 def _download_book(book_id: str) -> bool:
     """Download and process a book.
     
@@ -136,16 +113,20 @@ def _download_book(book_id: str) -> bool:
     try:
         book_info = book_queue._book_data[book_id]
         book_path = TMP_DIR / f"{book_id}.{book_info.format}"
+
         success = book_manager.download_book(book_info, book_path)
         if not success:
             raise Exception("Unkown error downloading book")
-        return _process_book(str(book_path))
+
+        final_path = INGEST_DIR /  f"{book_id}.{book_info.format}"
         
+        shutil.move(book_path, final_path)
+        return True
     except Exception as e:
         logger.error(f"Error downloading book: {e}")
         return False
 
-def download_loop():
+def download_loop() -> None:
     """Background thread for processing download queue."""
     logger.info("Starting download loop")
     

@@ -8,24 +8,22 @@ from typing import Optional
 from urllib.parse import urlparse
 from tqdm import tqdm
 
+import cloudflare_bypasser
 from logger import setup_logger
-from config import MAX_RETRY, DEFAULT_SLEEP, CLOUDFLARE_PROXY, USE_CF_BYPASS
+from config import MAX_RETRY, DEFAULT_SLEEP, USE_CF_BYPASS
 
 logger = setup_logger(__name__)
+"""Configure urllib opener with appropriate headers."""
+opener = urllib.request.build_opener()
+opener.addheaders = [
+    ('User-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Chrome/129.0.0.0 Safari/537.3')
+]
+urllib.request.install_opener(opener)
 
-def setup_urllib_opener():
-    """Configure urllib opener with appropriate headers."""
-    opener = urllib.request.build_opener()
-    opener.addheaders = [
-        ('User-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-         'AppleWebKit/537.36 (KHTML, like Gecko) '
-         'Chrome/129.0.0.0 Safari/537.3')
-    ]
-    urllib.request.install_opener(opener)
 
-setup_urllib_opener()
-
-def html_get_page(url: str, retry: int = MAX_RETRY, skip_404: bool = False, skip_403: bool = False) -> str:
+def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) -> str:
     """Fetch HTML content from a URL with retry mechanism.
     
     Args:
@@ -37,25 +35,37 @@ def html_get_page(url: str, retry: int = MAX_RETRY, skip_404: bool = False, skip
         str: HTML content if successful, None otherwise
     """
     try:
+
+        if use_bypasser and USE_CF_BYPASS:
+            logger.info(f"GET Using Cloudflare Bypasser for: {url}")
+            response = cloudflare_bypasser.get(url)
+            logger.debug(f"Cloudflare Bypasser response: {response}")
+            if response:
+                return str(response.html)
+            else:
+                raise requests.exceptions.RequestException("Failed to bypass Cloudflare")
+            
         logger.info(f"GET: {url}")
         response = requests.get(url)
-    
         response.raise_for_status()
+        logger.debug(f"Success getting: {url}")
         time.sleep(1)
-        return response.text
+        return str(response.text)
         
     except requests.exceptions.RequestException as e:
         if retry == 0:
             logger.error(f"Failed to fetch page: {url}, error: {e}")
             return ""
         
-        if skip_404 and response.status_code == 404:
+        if response.status_code == 404:
             logger.warning(f"404 error for URL: {url}")
             return ""
         
-        if skip_403 and response.status_code == 403:
+        if response.status_code == 403:
             logger.warning(f"403 error for URL: {url}. Should retry using cloudflare bypass.")
-            return ""
+            if use_bypasser:
+                return ""
+            use_bypasser = True
             
             
         sleep_time = DEFAULT_SLEEP * (MAX_RETRY - retry + 1)
@@ -63,40 +73,7 @@ def html_get_page(url: str, retry: int = MAX_RETRY, skip_404: bool = False, skip
             f"Retrying GET {url} in {sleep_time} seconds due to error: {e}"
         )
         time.sleep(sleep_time)
-        return html_get_page(url, retry - 1)
-
-def html_get_page_cf(url: str, retry: int = MAX_RETRY) -> str:
-    """Fetch HTML content through Cloudflare proxy.
-    
-    Args:
-        url: Target URL
-        retry: Number of retry attempts
-        
-    Returns:
-        str: HTML content if successful, None otherwise
-    """
-    if USE_CF_BYPASS == False:
-        logger.warning("Cloudflare bypass is disabled, trying without it.")
-        return html_get_page(url, retry, skip_403=True)
-    try:
-        logger.info(f"GET_CF: {url}")
-        response = requests.get(
-            f"{CLOUDFLARE_PROXY}/html?url={url}&retries=3"
-        )
-        time.sleep(1)
-        return response.text
-        
-    except Exception as e:
-        if retry == 0:
-            logger.error(f"Failed to fetch page through CF: {url}, error: {e}")
-            return ""
-            
-        sleep_time = DEFAULT_SLEEP * (MAX_RETRY - retry + 1)
-        logger.warning(
-            f"Retrying GET_CF {url} in {sleep_time} seconds due to error: {e}"
-        )
-        time.sleep(sleep_time)
-        return html_get_page_cf(url, retry - 1)
+        return html_get_page(url, retry - 1, use_bypasser)
 
 def download_url(link: str, size: str = "") -> Optional[BytesIO]:
     """Download content from URL into a BytesIO buffer.
