@@ -1,0 +1,59 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Docker-compose Dev",
+      "type": "debugpy",          // or "debugpy", Node, etc.
+      "request": "launch",
+      "program": "${workspaceFolder}/app.py",
+      "preLaunchTask": "docker-compose up (dev)",   // Spin up dev containers
+      "postDebugTask": "docker-compose down (dev)", // Optional: tear them down
+      "env": {
+        "INGEST_DIR": "/tmp/cwa-book-downloader"
+      },
+    },
+    {
+      "name": "Docker-compose Prod",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/app.py",
+      "preLaunchTask": "docker-compose up (prod)",   
+      "postDebugTask": "docker-compose down (prod)",
+      "env": {
+        "INGEST_DIR": "/tmp/cwa-book-downloader"
+      },
+    },
+    {
+      "type": "debugpy",
+      "request": "launch",
+      "name": "Launch cwa-bd app.py",
+      "program": "${workspaceFolder}/app.py",
+      "env": {
+        "DOCKERMODE": "false",
+        "INGEST_DIR": "/tmp/cwa-book-downloader"
+      },
+      "presentation": {
+        "hidden": true
+      }
+    },
+    {
+      "type": "chrome",
+      "request": "launch",
+      "name": "Launch Browser",
+      "url": "http://localhost:8000",
+      "webRoot": "${workspaceFolder}",
+      "presentation": {
+        "hidden": true
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Launch CWA-BD",
+      "configurations": [
+        "Launch cwa-bd app.py",
+        "Launch Browser"
+      ]
+    }
+  ]
+}
