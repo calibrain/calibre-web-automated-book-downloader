@@ -8,6 +8,9 @@ from typing import Optional
 from urllib.parse import urlparse
 from tqdm import tqdm
 
+import os
+proxy = os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
+
 from logger import setup_logger
 from config import MAX_RETRY, DEFAULT_SLEEP, CLOUDFLARE_PROXY, USE_CF_BYPASS
 
@@ -80,11 +83,15 @@ def html_get_page_cf(url: str, retry: int = MAX_RETRY) -> str:
         return html_get_page(url, retry, skip_403=True)
     try:
         logger.info(f"GET_CF: {url}")
-        response = requests.get(
-            f"{CLOUDFLARE_PROXY}/html?url={url}&retries=3"
-        )
-        time.sleep(1)
-        return response.text
+        
+        if proxy:
+            response = requests.get(
+                f"{CLOUDFLARE_PROXY}/html?url={url}&proxy={proxy}&retries=3"
+            )
+        else:
+            response = requests.get(
+                f"{CLOUDFLARE_PROXY}/html?url={url}&retries=3"
+            )
         
     except Exception as e:
         if retry == 0:
