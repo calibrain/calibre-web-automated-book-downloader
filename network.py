@@ -80,11 +80,16 @@ def html_get_page_cf(url: str, retry: int = MAX_RETRY) -> str:
         return html_get_page(url, retry, skip_403=True)
     try:
         logger.info(f"GET_CF: {url}")
-        response = requests.get(
-            f"{CLOUDFLARE_PROXY}/html?url={url}&retries=3"
-        )
-        time.sleep(1)
-        return response.text
+        
+        if proxy:
+            response = requests.get(
+                f"{CLOUDFLARE_PROXY}/html?url={url}&proxy={proxy}&retries=3"
+            )
+        else:
+            response = requests.get(
+                f"{CLOUDFLARE_PROXY}/html?url={url}&retries=3"
+            )
+            
         
     except Exception as e:
         if retry == 0:
