@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
 from logger import setup_logger
-from config import TMP_DIR, MAIN_LOOP_SLEEP_TIME, INGEST_DIR
+from config import TMP_DIR, MAIN_LOOP_SLEEP_TIME, INGEST_DIR, CUSTOM_SCRIPT
 from models import book_queue, BookInfo, QueueStatus, SearchFilters
 import book_manager
 
@@ -118,9 +118,13 @@ def _download_book(book_id: str) -> bool:
         if not success:
             raise Exception("Unkown error downloading book")
 
+        if CUSTOM_SCRIPT:
+            subprocess.run([CUSTOM_SCRIPT, book_path])
+
         final_path = INGEST_DIR /  f"{book_id}.{book_info.format}"
         
-        shutil.move(book_path, final_path)
+        if os.path.exists(book_path):
+            shutil.move(book_path, final_path)
         return True
     except Exception as e:
         logger.error(f"Error downloading book: {e}")

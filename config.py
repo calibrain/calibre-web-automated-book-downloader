@@ -66,6 +66,17 @@ BOOK_LANGUAGE = [l for l in BOOK_LANGUAGE if l in [lang['code'] for lang in _SUP
 if len(BOOK_LANGUAGE) == 0:
     BOOK_LANGUAGE = ['en']
 
+# Custom script settings
+CUSTOM_SCRIPT = os.getenv("CUSTOM_SCRIPT", None).strip()
+# check if the script is valid
+if CUSTOM_SCRIPT:
+    if not os.path.exists(CUSTOM_SCRIPT):
+        logger.error(f"Custom script {CUSTOM_SCRIPT} does not exist")
+        CUSTOM_SCRIPT = None
+    elif not os.access(CUSTOM_SCRIPT, os.X_OK):
+        logger.error(f"Custom script {CUSTOM_SCRIPT} is not executable")
+        CUSTOM_SCRIPT = None
+
 # API settings
 FLASK_HOST = os.getenv("FLASK_HOST",  "0.0.0.0")
 FLASK_PORT = int(os.getenv("FLASK_PORT", 5003))

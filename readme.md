@@ -105,6 +105,29 @@ HTTP_PROXY=http://username:password@proxy.example.com:8080
 HTTPS_PROXY=http://username:password@proxy.example.com:8080
 ```
 
+
+#### Custom configuration
+
+| Variable               | Description                                                 | Default Value           |
+| ---------------------- | ----------------------------------------------------------- | ----------------------- |
+| `CUSTOM_SCRIPT`        | Path to an executable script that tuns after each download  | ``                      |
+
+If `CUSTOM_SCRIPT` is set, it will be executed after each successful download but before the file is moved to the ingest directory. This allows for custom processing like format conversion or validation.
+
+The script is called with the full path of the downloaded file as its argument. Important notes:
+- The script must preserve the original filename for proper processing
+- The file can be modified or even deleted if needed
+- The file will be moved to `/cwa-book-ingest` after the script execution (if not deleted)
+
+You can specify these configuration in this format :
+```
+environment:
+  - CUSTOM_SCRIPT=/scripts/process-book.sh
+
+volumes:
+  - local/scripts/custom_script.sh:/scripts/process-book.sh
+```
+
 ### Volume Configuration
 
 ```yaml
