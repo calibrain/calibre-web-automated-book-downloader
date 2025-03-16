@@ -4,6 +4,8 @@ import threading, time
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
+import subprocess
+import os
 
 from logger import setup_logger
 from config import TMP_DIR, MAIN_LOOP_SLEEP_TIME, INGEST_DIR, CUSTOM_SCRIPT
@@ -119,6 +121,7 @@ def _download_book(book_id: str) -> bool:
             raise Exception("Unkown error downloading book")
 
         if CUSTOM_SCRIPT:
+            logger.info(f"Running custom script: {CUSTOM_SCRIPT}")
             subprocess.run([CUSTOM_SCRIPT, book_path])
 
         final_path = INGEST_DIR /  f"{book_id}.{book_info.format}"

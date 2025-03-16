@@ -8,16 +8,18 @@ from config import MAX_RETRY, DOCKERMODE, DEFAULT_SLEEP, PROXIES
 
 logger = setup_logger(__name__)
 
+_defaultTab : ChromiumTab | None = None
+
 def _search_recursively_shadow_root_with_iframe(ele : ChromiumElementsList) -> ChromiumElementsList | None:
-        if ele.shadow_root:
-            if ele.shadow_root.child().tag == "iframe":
-                return ele.shadow_root.child()
-        else:
-            for child in ele.children():
-                result = _search_recursively_shadow_root_with_iframe(child)
-                if result:
-                    return result
-        return None
+    if ele.shadow_root:
+        if ele.shadow_root.child().tag == "iframe":
+            return ele.shadow_root.child()
+    else:
+        for child in ele.children():
+            result = _search_recursively_shadow_root_with_iframe(child)
+            if result:
+                return result
+    return None
 
 def _search_recursively_shadow_root_with_cf_input(ele : ChromiumElementsList) -> ChromiumElementsList | None:
     if ele.shadow_root:
@@ -68,8 +70,20 @@ def _is_bypassed(driver: ChromiumTab) -> bool:
     try:
         title = driver.title.lower()
         body = driver.ele("tag:body").text.lower()
-        # TODO check body
-        return "just a moment" not in title
+        
+        # Check both title and body for verification messages
+        verification_texts = [
+            "just a moment",
+            "verify you are human",
+            "verifying you are human",
+            "needs to review the security of your connection before proceeding"
+        ]
+        
+        for text in verification_texts:
+            if text in title.lower() or text in body.lower():
+                return False
+                
+        return True
     except Exception as e:
         logger.debug(f"Error checking page title: {e}")
         return False
@@ -134,9 +148,9 @@ def _genScraper() -> ChromiumPage:
     driver = ChromiumPage(addr_or_opts=options)
     return driver
 
-_defaultTab = None
 
 def _reset_browser() -> None:
+    logger.info("Resetting chromiumbrowser")
     if not DOCKERMODE:
         return
     global _defaultTab
@@ -157,10 +171,12 @@ def _init_browser(retry : int = MAX_RETRY) -> ChromiumTab:
         try:
             driver = _genScraper()
             _defaultTab = driver.get_tabs()[0]
+            return _defaultTab
         except Exception as e:
             if retry > 0:
                 _reset_browser()
             else:
+                logger.error(f"Failed to initialize browser: {e}")
                 raise e
     return _init_browser(retry - 1)
 
@@ -172,5 +188,6 @@ def get(url : str, retry : int = MAX_RETRY) -> ChromiumTab:
     except Exception as e:
         if retry > 0:
             return get(url, retry - 1)
+        logger.error(f"Failed to bypass Cloudflare for {url}: {e}")
         raise e
     return defaultTab

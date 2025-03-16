@@ -41,8 +41,9 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
     if filters.sort:
         filters_query += f"&sort={quote(filters.sort)}"
     
-    for value in filters.content:
-        filters_query += f"&content={quote(value)}"
+    if filters.content:
+        for value in filters.content:
+            filters_query += f"&content={quote(value)}"
 
     index = 1
     for filter_type, filter_values in vars(filters).items():

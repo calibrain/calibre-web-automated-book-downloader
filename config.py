@@ -37,7 +37,7 @@ if http_proxy:
 if https_proxy:
     PROXIES["https"] = https_proxy
 if not PROXIES:
-    PROXIES = None
+    PROXIES = {}
 
 # Anna's Archive settings
 aa_available_urls = ["https://annas-archive.org", "https://annas-archive.se", "https://annas-archive.li"]
@@ -46,16 +46,14 @@ AA_BASE_URL = os.getenv("AA_BASE_URL", "auto").strip("/")
 if AA_BASE_URL == "auto":
     for url in aa_available_urls:
         try:
-            logger.debug(f"Checking {url}")
+            import requests
             response = requests.get(url)
             if response.status_code == 200:
-                logger.debug(f"Found good url: {url}")
                 AA_BASE_URL = url
                 break
         except Exception as e:
-            logger.debug(f"Error checking {url}: {e}")
+            print(f"Error checking {url}: {e}")
 if AA_BASE_URL == "auto":
-    logger.error("No good url found for Anna's Archive, falling back to default")
     AA_BASE_URL = aa_available_urls[0]
 
 # File format settings
@@ -71,10 +69,8 @@ CUSTOM_SCRIPT = os.getenv("CUSTOM_SCRIPT", "").strip()
 # check if the script is valid
 if CUSTOM_SCRIPT:
     if not os.path.exists(CUSTOM_SCRIPT):
-        logger.error(f"Custom script {CUSTOM_SCRIPT} does not exist")
         CUSTOM_SCRIPT = ""
     elif not os.access(CUSTOM_SCRIPT, os.X_OK):
-        logger.error(f"Custom script {CUSTOM_SCRIPT} is not executable")
         CUSTOM_SCRIPT = ""
 
 # API settings
@@ -90,6 +86,6 @@ MAIN_LOOP_SLEEP_TIME = int(os.getenv("MAIN_LOOP_SLEEP_TIME", 5))
 # Docker settings
 DOCKERMODE = os.getenv('DOCKERMODE', 'false').lower().strip() in ['true', '1', 'yes', 'y']
 if DOCKERMODE:
-    from pyvirtualdisplay import Display # type: ignore
+    from pyvirtualdisplay import Display
     display = Display(visible=False, size=(800, 600))
     display.start()
