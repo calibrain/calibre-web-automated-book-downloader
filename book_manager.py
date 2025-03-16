@@ -54,7 +54,7 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
     url = (
         f"{AA_BASE_URL}"
         f"/search?index=&page=1&display=table"
-        f"&acc=aa_download&acc=external_download&sort="
+        f"&acc=aa_download&acc=external_download"
         f"&ext={'&ext='.join(SUPPORTED_FORMATS)}&q={query_html}"
         f"{filters_query}" 
     )
