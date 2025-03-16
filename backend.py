@@ -8,11 +8,16 @@ import subprocess
 import os
 
 from logger import setup_logger
-from config import TMP_DIR, MAIN_LOOP_SLEEP_TIME, INGEST_DIR, CUSTOM_SCRIPT
+from config import TMP_DIR, MAIN_LOOP_SLEEP_TIME, INGEST_DIR, CUSTOM_SCRIPT, USE_BOOK_TITLE
 from models import book_queue, BookInfo, QueueStatus, SearchFilters
 import book_manager
 
 logger = setup_logger(__name__)
+
+def _sanitize_filename(filename: str) -> str:
+    """Sanitize a filename by replacing spaces with underscores and removing invalid characters."""
+    keepcharacters = (' ','.','_')
+    return "".join(c for c in filename if c.isalnum() or c in keepcharacters).rstrip()
 
 def search_books(query: str, filters: SearchFilters) -> List[Dict[str, Any]]:
     """Search for books matching the query.
@@ -114,7 +119,13 @@ def _download_book(book_id: str) -> bool:
     """
     try:
         book_info = book_queue._book_data[book_id]
-        book_path = TMP_DIR / f"{book_id}.{book_info.format}"
+
+        if USE_BOOK_TITLE:
+            book_name = _sanitize_filename(book_info.title)
+        else:
+            book_name = book_id
+        book_name += f".{book_info.format}"
+        book_path = TMP_DIR / book_name
 
         success = book_manager.download_book(book_info, book_path)
         if not success:
@@ -124,7 +135,7 @@ def _download_book(book_id: str) -> bool:
             logger.info(f"Running custom script: {CUSTOM_SCRIPT}")
             subprocess.run([CUSTOM_SCRIPT, book_path])
 
-        final_path = INGEST_DIR /  f"{book_id}.{book_info.format}"
+        final_path = INGEST_DIR /  book_name
         
         if os.path.exists(book_path):
             shutil.move(book_path, final_path)

@@ -8,6 +8,7 @@ services:
       FLASK_PORT: 8084
       FLASK_DEBUG: false
       BOOK_LANGUAGE: en
+      USE_BOOK_TITLE: true
     ports:
       - 8084:8084
     restart: unless-stopped

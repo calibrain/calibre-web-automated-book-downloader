@@ -18,6 +18,8 @@ TMP_DIR = Path(os.getenv("TMP_DIR", "/tmp/cwa-book-downloader"))
 INGEST_DIR = Path(os.getenv("INGEST_DIR", "/cwa-book-ingest"))
 STATUS_TIMEOUT = int(os.getenv("STATUS_TIMEOUT", 3600))
 
+USE_BOOK_TITLE = os.getenv("USE_BOOK_TITLE", "false").lower() in ["true", "yes", "1", "y"]
+
 # Create necessary directories
 TMP_DIR.mkdir(exist_ok=True)
 LOG_DIR.mkdir(exist_ok=True)

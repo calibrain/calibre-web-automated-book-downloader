@@ -73,6 +73,7 @@ If logging is enabld, log folder default location is `/var/log/cwa-book-download
 | `SUPPORTED_FORMATS`    | Supported book formats                                    | `epub,mobi,azw3,fb2,djvu,cbz,cbr` |
 | `BOOK_LANGUAGE`        | Preferred language for books                              | `en`                              |
 | `AA_DONATOR_KEY`       | Optional Donator key for Anna's Archive fast download API | ``                                |
+| `USE_BOOK_TITLE`       | Use book title as filename instead of ID                  | `false`                           |
 
 If you change `BOOK_LANGUAGE`, you can add multiple comma separated languages, such as `en,fr,ru` etc.  
 
