@@ -22,7 +22,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends --no-install-suggests \
     curl \
-    gosu \
     xvfb \
     chromium-driver \
     dumb-init && \
@@ -36,7 +35,10 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     rm -rf /root/.cache /app/.cache
 
 COPY . .
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh && \
+    # Create necessary directories
+    mkdir -p /var/log/cwa-book-downloader && \
+    mkdir -p /cwa-book-ingest
 
 EXPOSE ${FLASK_PORT}
 

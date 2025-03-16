@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 import cloudflare_bypasser
 from logger import setup_logger
-from config import MAX_RETRY, DEFAULT_SLEEP, USE_CF_BYPASS
+from config import MAX_RETRY, DEFAULT_SLEEP, USE_CF_BYPASS, PROXIES
 
 logger = setup_logger(__name__)
 """Configure urllib opener with appropriate headers."""
@@ -46,7 +46,7 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) 
                 raise requests.exceptions.RequestException("Failed to bypass Cloudflare")
             
         logger.info(f"GET: {url}")
-        response = requests.get(url)
+        response = requests.get(url, proxies=PROXIES)
         response.raise_for_status()
         logger.debug(f"Success getting: {url}")
         time.sleep(1)
@@ -86,7 +86,7 @@ def download_url(link: str, size: str = "") -> Optional[BytesIO]:
     """
     try:
         logger.info(f"Downloading from: {link}")
-        response = requests.get(link, stream=True)
+        response = requests.get(link, stream=True, proxies=PROXIES)
         response.raise_for_status()
 
         total_size : float = 0.0

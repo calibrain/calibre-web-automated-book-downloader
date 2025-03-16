@@ -4,7 +4,7 @@ from DrissionPage import ChromiumOptions
 from DrissionPage._functions.elements import ChromiumElementsList # type: ignore
 from DrissionPage._pages.chromium_tab import ChromiumTab # type: ignore
 from logger import setup_logger
-from config import MAX_RETRY, DOCKERMODE, DEFAULT_SLEEP
+from config import MAX_RETRY, DOCKERMODE, DEFAULT_SLEEP, PROXIES
 
 logger = setup_logger(__name__)
 
@@ -78,8 +78,8 @@ def _bypass(driver: ChromiumTab, max_retries: int = MAX_RETRY) -> None:
     try_count = 0
 
     while not _is_bypassed(driver):
-        logger.info(f"Starting Cloudflare bypass... Rey : {max_retries + 1} / {try_count}")
-        if 0 < max_retries + 1 <= try_count:
+        logger.info(f"Starting Cloudflare bypass... Retry: {try_count + 1} / {max_retries}")
+        if try_count >= max_retries:
             logger.warning("Exceeded maximum retries. Bypass failed.")
             break
 
@@ -98,6 +98,16 @@ def _get_chromium_options(arguments: list[str]) -> ChromiumOptions:
     options = ChromiumOptions()
     for argument in arguments:
         options.set_argument(argument)
+    
+    # Add proxy settings if configured
+    if PROXIES:
+        if 'http' in PROXIES:
+            options.set_argument(f'--proxy-server={PROXIES["http"]}')
+            logger.debug(f"Setting HTTP proxy: {PROXIES['http']}")
+        elif 'https' in PROXIES:
+            options.set_argument(f'--proxy-server={PROXIES["https"]}')
+            logger.debug(f"Setting HTTPS proxy: {PROXIES['https']}")
+    
     return options
 
 def _genScraper() -> ChromiumPage:
