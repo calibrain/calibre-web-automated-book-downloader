@@ -18,7 +18,22 @@
 </head>
 <body>
     <header>
-        <h1 class="uk-heading-medium" style="color: white;">Book Search & Download</h1>
+        <div class="uk-flex uk-flex-between uk-flex-middle">
+            <h1 class="uk-heading-medium" style="color: white;">Book Search & Download</h1>
+            <div class="uk-margin-right">
+                <button class="uk-button uk-button-default" type="button" id="theme-toggle">
+                    <span uk-icon="icon: paint-bucket"></span>
+                    <span id="theme-text">Theme</span>
+                </button>
+                <div uk-dropdown="mode: click">
+                    <ul class="uk-nav uk-dropdown-nav">
+                        <li><a href="#" data-theme="light">Light</a></li>
+                        <li><a href="#" data-theme="dark">Dark</a></li>
+                        <li><a href="#" data-theme="auto">Auto (System)</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
     </header>
 
     <main>

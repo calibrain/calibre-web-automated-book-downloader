@@ -67,15 +67,15 @@ if len(BOOK_LANGUAGE) == 0:
     BOOK_LANGUAGE = ['en']
 
 # Custom script settings
-CUSTOM_SCRIPT = os.getenv("CUSTOM_SCRIPT", None).strip()
+CUSTOM_SCRIPT = os.getenv("CUSTOM_SCRIPT", "").strip()
 # check if the script is valid
 if CUSTOM_SCRIPT:
     if not os.path.exists(CUSTOM_SCRIPT):
         logger.error(f"Custom script {CUSTOM_SCRIPT} does not exist")
-        CUSTOM_SCRIPT = None
+        CUSTOM_SCRIPT = ""
     elif not os.access(CUSTOM_SCRIPT, os.X_OK):
         logger.error(f"Custom script {CUSTOM_SCRIPT} is not executable")
-        CUSTOM_SCRIPT = None
+        CUSTOM_SCRIPT = ""
 
 # API settings
 FLASK_HOST = os.getenv("FLASK_HOST",  "0.0.0.0")

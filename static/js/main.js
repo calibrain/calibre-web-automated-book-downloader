@@ -22,7 +22,12 @@ document.addEventListener('DOMContentLoaded', () => {
         statusTable: document.getElementById('status-table'),
         statusTableBody: document.querySelector('#status-table tbody'),
         modalOverlay: document.getElementById('modal-overlay'),
-        detailsContainer: document.getElementById('details-container')
+        detailsContainer: document.getElementById('details-container'),
+        theme: {
+            toggle: document.getElementById('theme-toggle'),
+            text: document.getElementById('theme-text'),
+            dropdown: document.querySelector('[uk-dropdown]'),
+        }
     };
 
     // State
@@ -596,6 +601,61 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // Theme Management
+    const theme = {
+        STORAGE_KEY: 'preferred-theme',
+        
+        init() {
+            this.loadTheme();
+            this.setupListeners();
+        },
+
+        loadTheme() {
+            const savedTheme = localStorage.getItem(this.STORAGE_KEY) || 'auto';
+            this.applyThemePreference(savedTheme);
+            this.updateButtonText(savedTheme);
+        },
+
+        applyThemePreference(preference) {
+            if (preference === 'auto') {
+                const isDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                document.documentElement.setAttribute('data-theme', isDarkMode ? 'dark' : 'light');
+            } else {
+                document.documentElement.setAttribute('data-theme', preference);
+            }
+        },
+
+        setupListeners() {
+            // Listen for system theme changes
+            const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+            darkModeMediaQuery.addEventListener('change', (e) => {
+                if (localStorage.getItem(this.STORAGE_KEY) === 'auto') {
+                    document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+                }
+            });
+            
+            // Theme selection listeners
+            const themeLinks = document.querySelectorAll('.uk-dropdown-nav a[data-theme]');
+            themeLinks.forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const selectedTheme = e.target.getAttribute('data-theme');
+                    localStorage.setItem(this.STORAGE_KEY, selectedTheme);
+                    this.applyThemePreference(selectedTheme);
+                    this.updateButtonText(selectedTheme);
+                });
+            });
+        },
+
+        updateButtonText(currentTheme) {
+            const themeText = currentTheme.charAt(0).toUpperCase() + currentTheme.slice(1);
+            const themeTextElement = document.getElementById('theme-text');
+            if (themeTextElement) {
+                themeTextElement.textContent = themeText;
+            }
+        }
+    };
+
     // Event Listeners
     function setupEventListeners() {
         // Search events
@@ -671,6 +731,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize
     function init() {
         setupEventListeners();
+        theme.init();  // Initialize theme management
         status.fetch();
         setInterval(() => status.fetch(), REFRESH_INTERVAL);
     }

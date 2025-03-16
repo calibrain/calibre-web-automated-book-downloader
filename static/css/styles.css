@@ -1,13 +1,33 @@
 /* Base styles and CSS reset */
 :root {
+    /* Light theme variables */
     --primary-color: #0073e6;
     --primary-dark: #005bb5;
     --text-color: #333;
-    --background-color: #fdfdfd;
-    --border-color: #ccc;
+    --background-color: #f8f8f8;
+    --border-color: #e5e5e5;
     --header-bg: #333;
     --header-text: #fff;
     --loading-overlay: rgba(0, 0, 0, 0.5);
+    --card-background: #fff;
+    --table-background: #fff;
+    --table-hover-background: #f8f8f8;
+    --table-border-color: #e5e5e5;
+    --input-background: #fff;
+    --heading-color: #333;
+}
+
+[data-theme="dark"] {
+    /* Dark theme variables with improved contrast */
+    --background-color: #121212;
+    --text-color: #ffffff;
+    --heading-color: #ffffff;
+    --card-background: #1e1e1e;
+    --border-color: #404040;
+    --table-background: #1e1e1e;
+    --table-hover-background: #2d2d2d;
+    --table-border-color: #404040;
+    --input-background: #2d2d2d;
 }
 
 * {
@@ -17,10 +37,25 @@
 }
 
 /* Typography */
+html, body {
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     line-height: 1.6;
     color: var(--text-color);
+    background: var(--background-color);
+    transition: background-color 0.3s ease, color 0.3s ease;
+    display: flex;
+    flex-direction: column;
+}
+
+main {
+    flex: 1;
+    min-height: 100%;
     background: var(--background-color);
 }
 
@@ -36,9 +71,9 @@ header {
 footer {
     text-align: center;
     padding: 1rem;
-    margin-top: 2rem;
     background: var(--header-bg);
     color: var(--header-text);
+    margin-top: auto;
 }
 
 /* Search Section */
@@ -340,4 +375,170 @@ th[data-sort="index"] {
     color: #e74c3c;
     text-align: center;
     padding: 1rem !important;
+}
+
+/* Dark mode specific styles */
+[data-theme="dark"] .uk-card,
+[data-theme="dark"] .uk-modal-dialog {
+    background-color: var(--card-background);
+    color: var(--text-color);
+}
+
+[data-theme="dark"] .uk-table {
+    color: var(--text-color);
+}
+
+[data-theme="dark"] .uk-table-hover tbody tr:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .uk-button-default {
+    background-color: var(--card-background);
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+
+[data-theme="dark"] .uk-search-input {
+    background-color: var(--card-background);
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+
+[data-theme="dark"] .uk-select {
+    background-color: var(--card-background);
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+
+/* Table styles */
+.uk-table {
+    background-color: var(--table-background);
+    color: var(--text-color);
+    border-color: var(--table-border-color);
+}
+
+.uk-table th {
+    color: var(--text-color);
+    background-color: var(--table-background);
+    border-bottom-color: var(--table-border-color);
+}
+
+.uk-table td {
+    color: var(--text-color);
+    background-color: var(--table-background);
+    border-bottom-color: var(--table-border-color);
+}
+
+.uk-table-hover tbody tr:hover,
+.uk-table-hover tbody tr:hover td {
+    background-color: var(--table-hover-background);
+}
+
+/* Input styles */
+.uk-search-input,
+.uk-input,
+.uk-select,
+.uk-textarea {
+    background-color: var(--input-background);
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+
+/* Button styles */
+.uk-button-default {
+    background-color: var(--card-background);
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+
+.uk-button-default:hover {
+    background-color: var(--table-hover-background);
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+
+/* Dropdown styles */
+.uk-dropdown {
+    background-color: var(--card-background);
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+
+.uk-dropdown-nav > li > a {
+    color: var(--text-color);
+}
+
+.uk-dropdown-nav > li > a:hover {
+    background-color: var(--table-hover-background);
+}
+
+/* Modal styles */
+.modal-overlay {
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.details-container {
+    background-color: var(--card-background);
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+
+/* Status colors - ensure they remain visible in dark mode */
+.status-downloading {
+    color: #4CAF50 !important;
+}
+
+.status-available {
+    color: #2196F3 !important;
+}
+
+.status-error {
+    color: #f44336 !important;
+}
+
+/* Header specific button styles */
+header .uk-button-default {
+    color: var(--header-text) !important;
+    background-color: transparent;
+    border-color: var(--header-text);
+}
+
+header .uk-button-default:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-color: var(--header-text);
+    color: var(--header-text) !important;
+}
+
+/* Ensure dropdown text is visible when opened */
+header .uk-dropdown {
+    background-color: var(--card-background);
+}
+
+header .uk-dropdown-nav > li > a {
+    color: var(--text-color);
+}
+
+header .uk-dropdown-nav > li > a:hover {
+    color: var(--text-color);
+    background-color: var(--table-hover-background);
+}
+
+/* Update headings to use heading color */
+h1, h2, h3, h4, h5, h6,
+.uk-heading-small,
+.uk-heading-medium,
+.uk-heading-large,
+.uk-heading-xlarge,
+.uk-heading-2xlarge {
+    color: var(--heading-color) !important;
+}
+
+/* Ensure accordion titles are visible */
+.uk-accordion-title {
+    color: var(--heading-color) !important;
+}
+
+/* Ensure search results heading is visible */
+#results-section-accordion .uk-accordion-title h1 {
+    color: var(--heading-color) !important;
 }
