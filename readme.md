@@ -74,7 +74,6 @@ If logging is enabld, log folder default location is `var/log/cwa-book-downloade
 | `BOOK_LANGUAGE`        | Preferred language for books                              | `en`                              |
 | `AA_DONATOR_KEY`       | Optional Donator key for Anna's Archive fast download API | ``                                |
 
-Note that PDF are NOT supported at the moment (they do not get ingested by CWA, but if you want to just download them locally, you can add `pdf` to the `SUPPORTED_FORMATS` env)  
 If you change `BOOK_LANGUAGE`, you can add multiple comma separated languages, such as `en,fr,ru` etc.  
 
 #### AA 
