@@ -24,7 +24,14 @@ fi
 USERNAME=$(getent passwd "$UID" | cut -d: -f1)
 
 # Ensure proper ownership of application directories
-chown -R "${UID}:${GID}" /app /var/log/cwa-book-downloader /cwa-book-ingest
+change_ownership() {
+  folder=$1
+  chown -R "${UID}:${GID}" "${folder}" || echo "Failed to change ownership for ${folder}, continuing..."
+}
+
+change_ownership /app
+change_ownership /var/log/cwa-book-downloader
+change_ownership /cwa-book-ingest
 
 # Switch to the user (either newly created or existing) and execute the main command
 exec su -s /bin/bash "$USERNAME" -c "python -m app" 
