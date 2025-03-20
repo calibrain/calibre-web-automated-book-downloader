@@ -6,7 +6,7 @@ from enum import Enum
 from datetime import datetime, timedelta
 from threading import Lock
 
-from config import INGEST_DIR, STATUS_TIMEOUT
+from env import INGEST_DIR, STATUS_TIMEOUT
 
 class QueueStatus(str, Enum):
     """Enum for possible book queue statuses."""

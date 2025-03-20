@@ -7,7 +7,8 @@ from typing import List, Optional, Dict, Union
 from bs4 import BeautifulSoup, Tag, NavigableString, ResultSet
 
 from logger import setup_logger
-from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_DONATOR_KEY, AA_BASE_URL, USE_CF_BYPASS
+from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_BASE_URL
+from env import AA_DONATOR_KEY, USE_CF_BYPASS 
 from models import BookInfo, SearchFilters
 import network
 

@@ -8,7 +8,8 @@ import subprocess
 import os
 
 from logger import setup_logger
-from config import TMP_DIR, MAIN_LOOP_SLEEP_TIME, INGEST_DIR, CUSTOM_SCRIPT, USE_BOOK_TITLE
+from config import CUSTOM_SCRIPT, CROSS_FILE_SYSTEM
+from env import INGEST_DIR, TMP_DIR, MAIN_LOOP_SLEEP_TIME, USE_BOOK_TITLE
 from models import book_queue, BookInfo, QueueStatus, SearchFilters
 import book_manager
 
@@ -138,7 +139,14 @@ def _download_book(book_id: str) -> bool:
         final_path = INGEST_DIR /  book_name
         
         if os.path.exists(book_path):
-            shutil.move(book_path, final_path)
+            if CROSS_FILE_SYSTEM:
+                logger.info(f"Copying book to ingest directory then renaming: {book_path} -> {final_path}.crdownload -> {final_path}")
+                tmp_path = final_path.with_name(final_path.name + ".crdownload")
+                shutil.move(book_path, tmp_path)
+                os.rename(tmp_path, final_path)
+            else:
+                logger.info(f"Moving book to ingest directory: {book_path} -> {final_path}")
+                shutil.move(book_path, final_path)
         return True
     except Exception as e:
         logger.error(f"Error downloading book: {e}")

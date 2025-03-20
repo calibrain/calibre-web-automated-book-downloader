@@ -3,49 +3,46 @@
 import os
 from pathlib import Path
 import json
+import env
+from logger import setup_logger
 
+logger = setup_logger(__name__)
 
 with open("data/book-languages.json") as file:
     _SUPPORTED_BOOK_LANGUAGE = json.load(file)
 
 # Directory settings
 BASE_DIR = Path(__file__).resolve().parent
-LOG_DIR = Path("/var/log/cwa-book-downloader")
-LOG_DIR.mkdir(exist_ok=True)
-
-TMP_DIR = Path(os.getenv("TMP_DIR", "/tmp/cwa-book-downloader"))
-
-INGEST_DIR = Path(os.getenv("INGEST_DIR", "/cwa-book-ingest"))
-STATUS_TIMEOUT = int(os.getenv("STATUS_TIMEOUT", 3600))
-
-USE_BOOK_TITLE = os.getenv("USE_BOOK_TITLE", "false").lower() in ["true", "yes", "1", "y"]
+logger.info(f"BASE_DIR: {BASE_DIR}")
+env.LOG_DIR.mkdir(exist_ok=True)
 
 # Create necessary directories
-TMP_DIR.mkdir(exist_ok=True)
-LOG_DIR.mkdir(exist_ok=True)
-INGEST_DIR.mkdir(exist_ok=True)
+env.TMP_DIR.mkdir(exist_ok=True)
+env.INGEST_DIR.mkdir(exist_ok=True)
+
+CROSS_FILE_SYSTEM = os.stat(env.TMP_DIR).st_dev != os.stat(env.INGEST_DIR).st_dev
+logger.info(f"STAT TMP_DIR: {os.stat(env.TMP_DIR)}")
+logger.info(f"STAT INGEST_DIR: {os.stat(env.INGEST_DIR)}")
+logger.info(f"CROSS_FILE_SYSTEM: {CROSS_FILE_SYSTEM}")
 
 # Network settings
-MAX_RETRY = int(os.getenv("MAX_RETRY", 3))
-DEFAULT_SLEEP = int(os.getenv("DEFAULT_SLEEP", 5))
-USE_CF_BYPASS = os.getenv("USE_CF_BYPASS", "true").lower() in ["true", "yes", "1", "y"]
 
 # Proxy settings
 PROXIES = {}
-http_proxy = os.getenv("HTTP_PROXY", "").strip()
-https_proxy = os.getenv("HTTPS_PROXY", "").strip()
-if http_proxy:
-    PROXIES["http"] = http_proxy
-if https_proxy:
-    PROXIES["https"] = https_proxy
-if not PROXIES:
-    PROXIES = {}
+if env.HTTP_PROXY:
+    PROXIES["http"] = env.HTTP_PROXY
+if env.HTTPS_PROXY:
+    PROXIES["https"] = env.HTTPS_PROXY
+logger.info(f"PROXIES: {PROXIES}")
 
 # Anna's Archive settings
 aa_available_urls = ["https://annas-archive.org", "https://annas-archive.se", "https://annas-archive.li"]
-AA_DONATOR_KEY = os.getenv("AA_DONATOR_KEY", "").strip()
-AA_BASE_URL = os.getenv("AA_BASE_URL", "auto").strip("/")
+aa_additional_urls = env.AA_ADDITIONAL_URLS.split(",")
+aa_available_urls.extend(aa_additional_urls)
+
+AA_BASE_URL = env._AA_BASE_URL
 if AA_BASE_URL == "auto":
+    logger.info(f"AA_BASE_URL: auto, checking available urls {aa_available_urls}")
     for url in aa_available_urls:
         try:
             import requests
@@ -54,40 +51,33 @@ if AA_BASE_URL == "auto":
                 AA_BASE_URL = url
                 break
         except Exception as e:
-            print(f"Error checking {url}: {e}")
-if AA_BASE_URL == "auto":
-    AA_BASE_URL = aa_available_urls[0]
+            logger.error(f"Error checking {url}: {e}")
+    if AA_BASE_URL == "auto":
+        AA_BASE_URL = aa_available_urls[0]
+logger.info(f"AA_BASE_URL: {AA_BASE_URL}")
 
 # File format settings
-SUPPORTED_FORMATS = os.getenv("SUPPORTED_FORMATS", "epub,mobi,azw3,fb2,djvu,cbz,cbr").split(",")
+SUPPORTED_FORMATS = env._SUPPORTED_FORMATS.split(",")
+logger.info(f"SUPPORTED_FORMATS: {SUPPORTED_FORMATS}")
 
-BOOK_LANGUAGE = os.getenv("BOOK_LANGUAGE", "en").lower().split(',')
+# Complex language processing logic kept in config.py
+BOOK_LANGUAGE = env._BOOK_LANGUAGE.split(',')
 BOOK_LANGUAGE = [l for l in BOOK_LANGUAGE if l in [lang['code'] for lang in _SUPPORTED_BOOK_LANGUAGE]]
 if len(BOOK_LANGUAGE) == 0:
     BOOK_LANGUAGE = ['en']
 
-# Custom script settings
-CUSTOM_SCRIPT = os.getenv("CUSTOM_SCRIPT", "").strip()
-# check if the script is valid
+# Custom script settings with validation logic
+CUSTOM_SCRIPT = env._CUSTOM_SCRIPT
 if CUSTOM_SCRIPT:
     if not os.path.exists(CUSTOM_SCRIPT):
+        logger.error(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} does not exist")
         CUSTOM_SCRIPT = ""
     elif not os.access(CUSTOM_SCRIPT, os.X_OK):
+        logger.error(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} is not executable")
         CUSTOM_SCRIPT = ""
 
-# API settings
-FLASK_HOST = os.getenv("FLASK_HOST",  "0.0.0.0")
-FLASK_PORT = int(os.getenv("FLASK_PORT", 5003))
-FLASK_DEBUG = os.getenv("FLASK_DEBUG", "False").lower() == "true"
-
-# Logging settings
-ENABLE_LOGGING = os.getenv("ENABLE_LOGGING", "true").lower() in ["true", "yes", "1", "y"]
-LOG_FILE = LOG_DIR / "cwa-bookd-downloader.log"
-MAIN_LOOP_SLEEP_TIME = int(os.getenv("MAIN_LOOP_SLEEP_TIME", 5))
-
 # Docker settings
-DOCKERMODE = os.getenv('DOCKERMODE', 'false').lower().strip() in ['true', '1', 'yes', 'y']
-if DOCKERMODE:
+if env.DOCKERMODE and env.USE_CF_BYPASS:
     from pyvirtualdisplay import Display
     display = Display(visible=False, size=(800, 600))
     display.start()

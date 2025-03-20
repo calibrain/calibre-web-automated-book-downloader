@@ -4,7 +4,8 @@ from DrissionPage import ChromiumOptions
 from DrissionPage._functions.elements import ChromiumElementsList # type: ignore
 from DrissionPage._pages.chromium_tab import ChromiumTab # type: ignore
 from logger import setup_logger
-from config import MAX_RETRY, DOCKERMODE, DEFAULT_SLEEP, PROXIES
+from env import MAX_RETRY, DOCKERMODE, DEFAULT_SLEEP
+from config import PROXIES
 
 logger = setup_logger(__name__)
 

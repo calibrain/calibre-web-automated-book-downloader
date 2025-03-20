@@ -4,7 +4,7 @@ import logging
 import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
-from config import FLASK_DEBUG, LOG_FILE, ENABLE_LOGGING
+from env import FLASK_DEBUG, LOG_FILE, ENABLE_LOGGING
 
 def setup_logger(name: str, log_file: Path = LOG_FILE) -> logging.Logger:
     """Set up and configure a logger instance.

@@ -8,9 +8,11 @@ from typing import Optional
 from urllib.parse import urlparse
 from tqdm import tqdm
 
-import cloudflare_bypasser
 from logger import setup_logger
-from config import MAX_RETRY, DEFAULT_SLEEP, USE_CF_BYPASS, PROXIES
+from config import PROXIES
+from env import MAX_RETRY, DEFAULT_SLEEP, USE_CF_BYPASS
+if USE_CF_BYPASS:
+    import cloudflare_bypasser
 
 logger = setup_logger(__name__)
 """Configure urllib opener with appropriate headers."""

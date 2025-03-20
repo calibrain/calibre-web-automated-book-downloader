@@ -9,7 +9,8 @@ from flask import url_for as flask_url_for
 import typing
 
 from logger import setup_logger
-from config import FLASK_HOST, FLASK_PORT, FLASK_DEBUG, _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE
+from config import _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE
+from env import FLASK_HOST, FLASK_PORT, FLASK_DEBUG
 import backend
 
 from models import SearchFilters
