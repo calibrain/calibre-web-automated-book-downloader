@@ -177,7 +177,7 @@ def _init_browser(retry : int = MAX_RETRY) -> ChromiumTab:
             if retry > 0:
                 _reset_browser()
             else:
-                logger.error(f"Failed to initialize browser: {e}")
+                logger.error_trace(f"Failed to initialize browser: {e}")
                 raise e
     return _init_browser(retry - 1)
 
@@ -189,6 +189,6 @@ def get(url : str, retry : int = MAX_RETRY) -> ChromiumTab:
     except Exception as e:
         if retry > 0:
             return get(url, retry - 1)
-        logger.error(f"Failed to bypass Cloudflare for {url}: {e}")
+        logger.error_trace(f"Failed to bypass Cloudflare for {url}: {e}")
         raise e
     return defaultTab

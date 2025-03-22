@@ -119,7 +119,7 @@ def api_search() -> Union[Response, Tuple[Response, int]]:
         books = backend.search_books(query, filters)
         return jsonify(books)
     except Exception as e:
-        logger.error(f"Search error: {e}")
+        logger.error_trace(f"Search error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/info', methods=['GET'])
@@ -143,7 +143,7 @@ def api_info() -> Union[Response, Tuple[Response, int]]:
             return jsonify(book)
         return jsonify({"error": "Book not found"}), 404
     except Exception as e:
-        logger.error(f"Info error: {e}")
+        logger.error_trace(f"Info error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/download', methods=['GET'])
@@ -167,7 +167,7 @@ def api_download() -> Union[Response, Tuple[Response, int]]:
             return jsonify({"status": "queued"})
         return jsonify({"error": "Failed to queue book"}), 500
     except Exception as e:
-        logger.error(f"Download error: {e}")
+        logger.error_trace(f"Download error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/status', methods=['GET'])
@@ -182,7 +182,7 @@ def api_status() -> Union[Response, Tuple[Response, int]]:
         status = backend.queue_status()
         return jsonify(status)
     except Exception as e:
-        logger.error(f"Status error: {e}")
+        logger.error_trace(f"Status error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/localdownload', methods=['GET'])
@@ -218,7 +218,7 @@ def api_local_download() -> Union[Response, Tuple[Response, int]]:
         )
 
     except Exception as e:
-        logger.error(f"Local download error: {e}")
+        logger.error_trace(f"Local download error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.errorhandler(404)
@@ -246,7 +246,7 @@ def internal_error(error: Exception) -> Union[Response, Tuple[Response, int]]:
     Returns:
         flask.Response: JSON error message with 500 status.
     """
-    logger.error(f"500 error: {error}")
+    logger.error_trace(f"500 error: {error}")
     return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == '__main__':

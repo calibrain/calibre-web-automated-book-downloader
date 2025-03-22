@@ -36,8 +36,9 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) 
     Returns:
         str: HTML content if successful, None otherwise
     """
+    response = None
     try:
-
+        logger.debug(f"html_get_page: {url}, retry: {retry}, use_bypasser: {use_bypasser}")
         if use_bypasser and USE_CF_BYPASS:
             logger.info(f"GET Using Cloudflare Bypasser for: {url}")
             response = cloudflare_bypasser.get(url)
@@ -56,19 +57,19 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) 
         
     except requests.exceptions.RequestException as e:
         if retry == 0:
-            logger.error(f"Failed to fetch page: {url}, error: {e}")
+            logger.error_trace(f"Failed to fetch page: {url}, error: {e}")
             return ""
         
-        if response.status_code == 404:
+        if response is not None and response.status_code == 404:
             logger.warning(f"404 error for URL: {url}")
             return ""
-        
-        if response.status_code == 403:
-            logger.warning(f"403 error for URL: {url}. Should retry using cloudflare bypass.")
+
+        if response is not None and response.status_code == 403:
             if use_bypasser:
+                logger.warning(f"403 error while using cloudflare bypass for URL: {url}")
                 return ""
-            use_bypasser = True
-            
+            logger.warning(f"403 detected for URL: {url}. Should retry using cloudflare bypass.")
+            return html_get_page(url, retry - 1, True)
             
         sleep_time = DEFAULT_SLEEP * (MAX_RETRY - retry + 1)
         logger.warning(
@@ -107,9 +108,14 @@ def download_url(link: str, size: str = "") -> Optional[BytesIO]:
             pbar.update(len(chunk))
             
         pbar.close()
+        if buffer.tell() * 0.1 < total_size * 0.9:
+            # Check the content of the buffer if its HTML or binary
+            if response.headers.get('content-type', '').startswith('text/html'):
+                logger.warn(f"Failed to download content for {link}. Found HTML content instead.")
+                return None
         return buffer
     except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to download from {link}: {e}")
+        logger.error_trace(f"Failed to download from {link}: {e}")
         return None
 
 def get_absolute_url(base_url: str, url: str) -> str:

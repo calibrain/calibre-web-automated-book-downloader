@@ -8,6 +8,10 @@ from logger import setup_logger
 
 logger = setup_logger(__name__)
 
+for key, value in env.__dict__.items():
+    if not key.startswith('_'):
+        logger.info(f"{key}: {value}")
+
 with open("data/book-languages.json") as file:
     _SUPPORTED_BOOK_LANGUAGE = json.load(file)
 
@@ -51,7 +55,7 @@ if AA_BASE_URL == "auto":
                 AA_BASE_URL = url
                 break
         except Exception as e:
-            logger.error(f"Error checking {url}: {e}")
+            logger.error_trace(f"Error checking {url}: {e}")
     if AA_BASE_URL == "auto":
         AA_BASE_URL = aa_available_urls[0]
 logger.info(f"AA_BASE_URL: {AA_BASE_URL}")
@@ -70,10 +74,10 @@ if len(BOOK_LANGUAGE) == 0:
 CUSTOM_SCRIPT = env._CUSTOM_SCRIPT
 if CUSTOM_SCRIPT:
     if not os.path.exists(CUSTOM_SCRIPT):
-        logger.error(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} does not exist")
+        logger.warn(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} does not exist")
         CUSTOM_SCRIPT = ""
     elif not os.access(CUSTOM_SCRIPT, os.X_OK):
-        logger.error(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} is not executable")
+        logger.warn(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} is not executable")
         CUSTOM_SCRIPT = ""
 
 # Docker settings
@@ -81,3 +85,4 @@ if env.DOCKERMODE and env.USE_CF_BYPASS:
     from pyvirtualdisplay import Display
     display = Display(visible=False, size=(800, 600))
     display.start()
+    logger.info("Display started")

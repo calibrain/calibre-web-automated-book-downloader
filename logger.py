@@ -19,8 +19,16 @@ def setup_logger(name: str, log_file: Path = LOG_FILE) -> logging.Logger:
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
     
+    # Add helper method for error logging with stack trace
+    def error_trace(self, msg, *args, **kwargs):
+        """Log an error message with full stack trace."""
+        self.error(msg, *args, exc_info=True, **kwargs)
+    
+    # Attach the helper method to the logger
+    logger.error_trace = error_trace.__get__(logger)
+    
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
     )
 
     # Console handler for Docker output
@@ -50,6 +58,6 @@ def setup_logger(name: str, log_file: Path = LOG_FILE) -> logging.Logger:
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
     except Exception as e:
-        logger.error(f"Failed to create log file: {e}")
+        logger.error_trace(f"Failed to create log file: {e}", exc_info=True)
 
     return logger

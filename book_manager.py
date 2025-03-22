@@ -84,7 +84,7 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
                 if book:
                     books.append(book)
             except Exception as e:
-                logger.error(f"Failed to parse search result row: {e}")
+                logger.error_trace(f"Failed to parse search result row: {e}")
 
     books.sort(
         key=lambda x: (
@@ -115,7 +115,7 @@ def _parse_search_result_row(row: Tag) -> Optional[BookInfo]:
             size=cells[10].find('span').next
         )
     except Exception as e:
-        logger.error(f"Error parsing search result row: {e}")
+        logger.error_trace(f"Error parsing search result row: {e}")
         return None
 
 def get_book_info(book_id: str) -> BookInfo:
@@ -307,7 +307,7 @@ def download_book(book_info: BookInfo, book_path: Path) -> bool:
                 return True
             
         except Exception as e:
-            logger.error(f"Failed to download from {link}: {e}")
+            logger.error_trace(f"Failed to download from {link}: {e}")
             continue
     
     return False
@@ -321,7 +321,7 @@ def _get_download_url(link: str, title: str) -> str:
         page = network.html_get_page(link)
         url = json.loads(page).get("download_url")
     else:
-        html = network.html_get_page(link, retry=0)
+        html = network.html_get_page(link)
         
         if html == "":
             return ""

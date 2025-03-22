@@ -34,7 +34,7 @@ def search_books(query: str, filters: SearchFilters) -> List[Dict[str, Any]]:
         books = book_manager.search_books(query, filters)
         return [_book_info_to_dict(book) for book in books]
     except Exception as e:
-        logger.error(f"Error searching books: {e}")
+        logger.error_trace(f"Error searching books: {e}")
         return []
 
 def get_book_info(book_id: str) -> Optional[Dict[str, Any]]:
@@ -50,7 +50,7 @@ def get_book_info(book_id: str) -> Optional[Dict[str, Any]]:
         book = book_manager.get_book_info(book_id)
         return _book_info_to_dict(book)
     except Exception as e:
-        logger.error(f"Error getting book info: {e}")
+        logger.error_trace(f"Error getting book info: {e}")
         return None
 
 def queue_book(book_id: str) -> bool:
@@ -68,7 +68,7 @@ def queue_book(book_id: str) -> bool:
         logger.info(f"Book queued: {book_info.title}")
         return True
     except Exception as e:
-        logger.error(f"Error queueing book: {e}")
+        logger.error_trace(f"Error queueing book: {e}")
         return False
 
 def queue_status() -> Dict[str, Dict[str, Any]]:
@@ -99,7 +99,7 @@ def get_book_data(book_id: str) -> Tuple[Optional[bytes], str] :
         with open(path, "rb") as f:
             return f.read(), book_info.title
     except Exception as e:
-        logger.error(f"Error getting book data: {e}")
+        logger.error_trace(f"Error getting book data: {e}")
         return None, ""
 
 def _book_info_to_dict(book: BookInfo) -> Dict[str, Any]:
@@ -149,7 +149,7 @@ def _download_book(book_id: str) -> bool:
                 shutil.move(book_path, final_path)
         return True
     except Exception as e:
-        logger.error(f"Error downloading book: {e}")
+        logger.error_trace(f"Error downloading book: {e}")
         return False
 
 def download_loop() -> None:
@@ -176,7 +176,7 @@ def download_loop() -> None:
             )
             
         except Exception as e:
-            logger.error(f"Error in download loop: {e}")
+            logger.error_trace(f"Error in download loop: {e}")
             book_queue.update_status(book_id, QueueStatus.ERROR)
 
 # Start download loop in background thread
