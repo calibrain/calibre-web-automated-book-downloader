@@ -6,11 +6,11 @@ from urllib.parse import quote
 from typing import List, Optional, Dict, Union
 from bs4 import BeautifulSoup, Tag, NavigableString, ResultSet
 
+import downloader
 from logger import setup_logger
 from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_BASE_URL
 from env import AA_DONATOR_KEY, USE_CF_BYPASS 
 from models import BookInfo, SearchFilters
-import downloader
 
 logger = setup_logger(__name__)
 
@@ -60,7 +60,7 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
         f"&ext={'&ext='.join(SUPPORTED_FORMATS)}&q={query_html}"
         f"{filters_query}" 
     )
-    
+
     html = downloader.html_get_page(url)
     if not html:
         raise Exception("Failed to fetch search results")

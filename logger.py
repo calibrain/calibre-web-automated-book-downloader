@@ -4,8 +4,8 @@ import logging
 import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
-from env import FLASK_DEBUG, LOG_FILE, ENABLE_LOGGING, LOG_LEVEL
-from typing import Any, Optional
+from env import LOG_FILE, ENABLE_LOGGING, LOG_LEVEL
+from typing import Any
 
 class CustomLogger(logging.Logger):
     """Custom logger class with additional error_trace method."""

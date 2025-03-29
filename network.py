@@ -11,6 +11,7 @@ import ssl
 
 from logger import setup_logger
 from config import PROXIES, AA_BASE_URL, CUSTOM_DNS, AA_AVAILABLE_URLS, DOH_SERVER
+import config
 
 logger = setup_logger(__name__)
 
@@ -275,6 +276,7 @@ if AA_BASE_URL == "auto":
             logger.error_trace(f"Error checking {url}: {e}")
     if AA_BASE_URL == "auto":
         AA_BASE_URL = AA_AVAILABLE_URLS[0]
+config.AA_BASE_URL = AA_BASE_URL
 logger.info(f"AA_BASE_URL: {AA_BASE_URL}")
 
 # Configure urllib opener with appropriate headers
