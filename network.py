@@ -8,6 +8,7 @@ import dns.resolver
 from socket import AddressFamily, SocketKind
 import urllib.parse
 import ssl
+import ipaddress
 
 from logger import setup_logger
 from config import PROXIES, AA_BASE_URL, CUSTOM_DNS, AA_AVAILABLE_URLS, DOH_SERVER
@@ -58,6 +59,14 @@ def _is_local_address(host_str: str) -> bool:
     
     return False
 
+def _is_ip_address(host_str: str) -> bool:
+    """Check if a string is a valid IP address (IPv4 or IPv6)."""
+    try:
+        ipaddress.ip_address(host_str)
+        return True
+    except ValueError:
+        return False
+
 # Store the original getaddrinfo function
 original_getaddrinfo = socket.getaddrinfo
 
@@ -90,6 +99,16 @@ class DoHResolver:
         Returns:
             List of resolved IP addresses
         """
+        # Check if hostname is already an IP address, no need to resolve
+        if _is_ip_address(hostname):
+            logger.debug(f"Skipping DoH resolution for IP address: {hostname}")
+            return [hostname]
+            
+        # Check if hostname is a private IP address, and skip DoH if it is
+        if _is_local_address(hostname):
+            logger.debug(f"Skipping DoH resolution for private IP: {hostname}")
+            return [hostname]
+            
         # Skip resolution for the DoH server itself to prevent recursion
         if hostname == self.hostname:
             logger.debug(f"Skipping DoH resolution for DoH server itself: {hostname}")
@@ -174,8 +193,9 @@ def create_custom_getaddrinfo(
         host_str = _decode_host(host)
         port_int = _decode_port(port)
         
-        # Skip custom resolution for local addresses or if skip check passes
-        if _is_local_address(host_str) or (skip_check and skip_check(host_str)):
+        # Skip custom resolution for IP addresses, local addresses, or if skip check passes
+        if _is_ip_address(host_str) or _is_local_address(host_str) or (skip_check and skip_check(host_str)):
+            logger.debug(f"Using system DNS for IP address or local/private address: {host_str}")
             return original_getaddrinfo(host, port, family, type, proto, flags)
         
         results: list[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]] = []
@@ -229,8 +249,23 @@ def init_doh_resolver(doh_server: str = DOH_SERVER):
     # Pre-resolve the DoH server hostname to prevent recursion
     url = urllib.parse.urlparse(doh_server)
     server_hostname = url.hostname if url.hostname else ''
-    server_ip = socket.gethostbyname(server_hostname)
-    logger.info(f"DoH server {server_hostname} resolved to IP: {server_ip}")
+    
+    # Use system DNS for DoH server to prevent circular dependencies
+    try:
+        # Temporarily restore original getaddrinfo to resolve DoH server
+        temp_getaddrinfo = socket.getaddrinfo
+        socket.getaddrinfo = original_getaddrinfo
+        
+        server_ip = socket.gethostbyname(server_hostname)
+        logger.info(f"DoH server {server_hostname} resolved to IP: {server_ip}")
+        
+        # Restore custom getaddrinfo if it was previously set
+        socket.getaddrinfo = temp_getaddrinfo
+    except Exception as e:
+        logger.error(f"Failed to resolve DoH server {server_hostname}: {e}")
+        # Fall back to a known public DNS if resolution fails
+        server_ip = "1.1.1.1"
+        logger.info(f"Using fallback IP for DoH server: {server_ip}")
     
     # Create DoH resolver
     doh_resolver = DoHResolver(doh_server, server_hostname, server_ip)
@@ -242,9 +277,12 @@ def init_doh_resolver(doh_server: str = DOH_SERVER):
     def resolve_ipv6(hostname: str) -> List[str]:
         return doh_resolver.resolve(hostname, 'AAAA')
     
-    # Skip DoH resolution for the DoH server itself
+    # Skip DoH resolution for the DoH server itself, IP addresses, and private addresses
     def skip_doh(hostname: str) -> bool:
-        return hostname == server_hostname or hostname == server_ip
+        return (hostname == server_hostname or 
+                hostname == server_ip or 
+                _is_ip_address(hostname) or 
+                _is_local_address(hostname))
     
     # Replace socket.getaddrinfo with our DoH-enabled version
     socket.getaddrinfo = cast(Any, create_custom_getaddrinfo(
