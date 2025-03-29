@@ -2,7 +2,7 @@
 
 import requests
 import urllib.request
-from typing import Sequence, Tuple, Any, Union, cast, List
+from typing import Sequence, Tuple, Any, Union, cast, List, Optional, Callable
 import socket
 import dns.resolver
 from socket import AddressFamily, SocketKind
@@ -14,219 +14,135 @@ from config import PROXIES, AA_BASE_URL, CUSTOM_DNS, AA_AVAILABLE_URLS, DOH_SERV
 
 logger = setup_logger(__name__)
 
-# DoH resolver class
-def init_doh_resolver(doh_server: str = DOH_SERVER):
-    # Pre-resolve the DoH server hostname to prevent recursion
-    url = urllib.parse.urlparse(DOH_SERVER)
-    server_hostname = url.hostname
-    server_ip = socket.gethostbyname(server_hostname)
-    logger.info(f"DoH server {server_hostname} resolved to IP: {server_ip}")
-    
-    class DoHResolver:
-        """DNS over HTTPS resolver implementation."""
-        def __init__(self, provider_url: str, hostname: str, ip: str):
-            """Initialize DoH resolver with specified provider."""
-            self.base_url = provider_url.lower().strip()
-            self.hostname = hostname  # Store the hostname for hostname-based skipping
-            self.ip = ip              # Store IP for direct connections
-            self.session = requests.Session()
-            
-            # Custom SSL context for SNI
-            # Create a custom adapter with SNI support for IP-based connections
-            class SNIAdapter(requests.adapters.HTTPAdapter):
-                def __init__(self, server_hostname):
-                    self.server_hostname = server_hostname
-                    super().__init__()
-                
-                def init_poolmanager(self, *args, **kwargs):
-                    # Use a custom SSL context that includes the SNI hostname
-                    context = ssl.create_default_context()
-                    context.check_hostname = True
-                    kwargs["ssl_context"] = context
-                    kwargs["server_hostname"] = self.server_hostname
-                    return super().init_poolmanager(*args, **kwargs)
-            
-            # Use the original hostname URL for requests
-            # This handles SNI properly while still using the correct hostname for verification
-            
-            # Different headers based on provider
-            if 'google' in self.base_url:
-                self.session.headers.update({
-                    'Accept': 'application/json',
-                })
-            else:
-                self.session.headers.update({
-                    'Accept': 'application/dns-json',
-                })
-        
-        def resolve(self, hostname: str, record_type: str) -> List[str]:
-            """Resolve a hostname using DoH.
-            
-            Args:
-                hostname: The hostname to resolve
-                record_type: The DNS record type (A or AAAA)
-                
-            Returns:
-                List of resolved IP addresses
-            """
-            # Skip resolution for the DoH server itself to prevent recursion
-            if hostname == self.hostname:
-                logger.debug(f"Skipping DoH resolution for DoH server itself: {hostname}")
-                return [self.ip]
-                
-            try:
-                params = {
-                    'name': hostname,
-                    'type': 'AAAA' if record_type == 'AAAA' else 'A'
-                }
-                
-                # Just use the original URL - no need for IP-based URL with Host header
-                # This is simpler and more reliable for TLS certificate validation
-                response = self.session.get(
-                    self.base_url,
-                    params=params,
-                    proxies=PROXIES,
-                    timeout=5
-                )
-                response.raise_for_status()
-                
-                data = response.json()
-                if 'Answer' not in data:
-                    logger.warning(f"DoH resolution failed for {hostname}: {data}")
-                    return []
-                
-                # Extract IP addresses from the response    
-                answers = [answer['data'] for answer in data['Answer'] 
-                        if answer.get('type') == (28 if record_type == 'AAAA' else 1)]
-                logger.debug(f"Resolved {hostname} to {len(answers)} addresses using DoH: {answers}")
-                return answers
-                
-            except Exception as e:
-                logger.warning(f"DoH resolution failed for {hostname}: {e}")
-                return []
-    
-    # Check if the DOH_SERVER is a valid preset provider
-    logger.info(f"Initializing DoH resolver with provider: {doh_server}")
-    doh_resolver = DoHResolver(doh_server, server_hostname, server_ip)
-    
-    # Helper functions for DoH-enabled socket.getaddrinfo
-    def _decode_host(host: Union[str, bytes, None]) -> str:
-        """Convert host to string, handling bytes and None cases."""
-        if host is None:
-            return ""
-        if isinstance(host, bytes):
-            return host.decode('utf-8')
-        return str(host)
+# Common helper functions for DNS resolution
+def _decode_host(host: Union[str, bytes, None]) -> str:
+    """Convert host to string, handling bytes and None cases."""
+    if host is None:
+        return ""
+    if isinstance(host, bytes):
+        return host.decode('utf-8')
+    return str(host)
 
-    def _decode_port(port: Union[str, bytes, int, None]) -> int:
-        """Convert port to integer, handling various input types."""
-        if port is None:
-            return 0
-        if isinstance(port, (str, bytes)):
-            return int(port)
+def _decode_port(port: Union[str, bytes, int, None]) -> int:
+    """Convert port to integer, handling various input types."""
+    if port is None:
+        return 0
+    if isinstance(port, (str, bytes)):
         return int(port)
-    
-    # Store the original getaddrinfo function
-    original_getaddrinfo = socket.getaddrinfo
-    
-    # Create a DoH-enabled getaddrinfo function
-    def doh_getaddrinfo(
-        host: Union[str, bytes, None],
-        port: Union[str, bytes, int, None],
-        family: int = 0,
-        type: int = 0,
-        proto: int = 0,
-        flags: int = 0
-    ) -> Sequence[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]]:
-        """Resolve addresses using DoH before falling back to system DNS."""
-        host_str = _decode_host(host)
-        port_int = _decode_port(port)
-        
-        # Skip DoH for local addresses and the DoH server itself
-        if (host_str == 'localhost' or 
+    return int(port)
+
+def _is_local_address(host_str: str) -> bool:
+    """Check if an address is local and should bypass custom DNS."""
+    return (host_str == 'localhost' or 
             host_str.startswith('127.') or 
             host_str.startswith('::1') or 
-            host_str.startswith('0.0.0.0') or
-            host_str == server_hostname or
-            host_str == server_ip):
-            return original_getaddrinfo(host, port, family, type, proto, flags)
+            host_str.startswith('0.0.0.0'))
+
+# Store the original getaddrinfo function
+original_getaddrinfo = socket.getaddrinfo
+
+class DoHResolver:
+    """DNS over HTTPS resolver implementation."""
+    def __init__(self, provider_url: str, hostname: str, ip: str):
+        """Initialize DoH resolver with specified provider."""
+        self.base_url = provider_url.lower().strip()
+        self.hostname = hostname  # Store the hostname for hostname-based skipping
+        self.ip = ip              # Store IP for direct connections
+        self.session = requests.Session()
         
-        # Handle the DoH server directly with pre-resolved IP
-        if host_str == server_hostname:
-            if family == 0 or family == socket.AF_INET:
-                logger.debug(f"Using pre-resolved IP for DoH server: {server_ip}")
-                return [(socket.AF_INET, cast(SocketKind, type), proto, '', (server_ip, port_int))]
-            else:
-                return original_getaddrinfo(host, port, family, type, proto, flags)
+        # Different headers based on provider
+        if 'google' in self.base_url:
+            self.session.headers.update({
+                'Accept': 'application/json',
+            })
+        else:
+            self.session.headers.update({
+                'Accept': 'application/dns-json',
+            })
+    
+    def resolve(self, hostname: str, record_type: str) -> List[str]:
+        """Resolve a hostname using DoH.
         
-        results: list[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]] = []
-        
-        # Try DoH resolution first
+        Args:
+            hostname: The hostname to resolve
+            record_type: The DNS record type (A or AAAA)
+            
+        Returns:
+            List of resolved IP addresses
+        """
+        # Skip resolution for the DoH server itself to prevent recursion
+        if hostname == self.hostname:
+            logger.debug(f"Skipping DoH resolution for DoH server itself: {hostname}")
+            return [self.ip]
+            
         try:
-            # Try IPv6 first if family allows it
-            if family == 0 or family == socket.AF_INET6:
-                logger.debug(f"Resolving IPv6 address for {host_str} using DoH")
-                ipv6_answers = doh_resolver.resolve(host_str, 'AAAA')
-                for answer in ipv6_answers:
-                    results.append((socket.AF_INET6, cast(SocketKind, type), proto, '', (answer, port_int, 0, 0)))
+            params = {
+                'name': hostname,
+                'type': 'AAAA' if record_type == 'AAAA' else 'A'
+            }
             
-            # Then try IPv4
-            if family == 0 or family == socket.AF_INET:
-                logger.debug(f"Resolving IPv4 address for {host_str} using DoH")
-                ipv4_answers = doh_resolver.resolve(host_str, 'A')
-                for answer in ipv4_answers:
-                    results.append((socket.AF_INET, cast(SocketKind, type), proto, '', (answer, port_int)))
+            response = self.session.get(
+                self.base_url,
+                params=params,
+                proxies=PROXIES,
+                timeout=5
+            )
+            response.raise_for_status()
             
-            if results:
-                logger.debug(f"Successfully resolved {host_str} using DoH")
-                return results
+            data = response.json()
+            if 'Answer' not in data:
+                logger.warning(f"DoH resolution failed for {hostname}: {data}")
+                return []
+            
+            # Extract IP addresses from the response    
+            answers = [answer['data'] for answer in data['Answer'] 
+                    if answer.get('type') == (28 if record_type == 'AAAA' else 1)]
+            logger.debug(f"Resolved {hostname} to {len(answers)} addresses using DoH: {answers}")
+            return answers
             
         except Exception as e:
-            logger.warning(f"DoH resolution failed for {host_str}: {e}, falling back to system DNS")
-        
-        # Fall back to system DNS if DoH resolution fails
-        try:
-            logger.debug(f"Falling back to system DNS for {host_str}")
-            return original_getaddrinfo(host, port, family, type, proto, flags)
-        except Exception as e:
-            logger.error(f"System DNS resolution also failed for {host_str}: {e}")
-            # Last resort: Try to connect to the hostname directly
-            if family == 0 or family == socket.AF_INET:
-                logger.warning(f"Using direct hostname as last resort for {host_str}")
-                return [(socket.AF_INET, cast(SocketKind, type), proto, '', (host_str, port_int))]
-            else:
-                raise  # Re-raise the exception if we can't provide a last resort
-    
-    # Replace the system's getaddrinfo with our DoH-enabled version
-    socket.getaddrinfo = cast(Any, doh_getaddrinfo)
-    logger.info("DoH resolver successfully configured and activated")
-    
-    return doh_resolver
+            logger.warning(f"DoH resolution failed for {hostname}: {e}")
+            return []
 
-
-def init_custom_resolver():
+def create_custom_resolver():
+    """Create a custom DNS resolver using the configured DNS servers."""
     custom_resolver = dns.resolver.Resolver()
     custom_resolver.nameservers = CUSTOM_DNS
+    return custom_resolver
 
-    # Custom resolver function using Custom DNS
-    original_getaddrinfo = socket.getaddrinfo
+def resolve_with_custom_dns(resolver, hostname: str, record_type: str) -> List[str]:
+    """Resolve hostname using custom DNS resolver.
+    
+    Args:
+        resolver: The DNS resolver to use
+        hostname: The hostname to resolve
+        record_type: The DNS record type (A or AAAA)
+        
+    Returns:
+        List of resolved IP addresses
+    """
+    try:
+        answers = resolver.resolve(hostname, record_type)
+        return [str(answer) for answer in answers]
+    except Exception as e:
+        logger.debug(f"{record_type} resolution failed for {hostname}: {e}")
+        return []
 
-    def _decode_host(host: Union[str, bytes, None]) -> str:
-        """Convert host to string, handling bytes and None cases."""
-        if host is None:
-            return ""
-        if isinstance(host, bytes):
-            return host.decode('utf-8')
-        return str(host)
-
-    def _decode_port(port: Union[str, bytes, int, None]) -> int:
-        """Convert port to integer, handling various input types."""
-        if port is None:
-            return 0
-        if isinstance(port, (str, bytes)):
-            return int(port)
-        return int(port)
-
+def create_custom_getaddrinfo(
+    resolve_ipv4: Callable[[str], List[str]],
+    resolve_ipv6: Callable[[str], List[str]],
+    skip_check: Optional[Callable[[str], bool]] = None
+):
+    """Create a custom getaddrinfo function that uses the provided resolvers.
+    
+    Args:
+        resolve_ipv4: Function to resolve IPv4 addresses
+        resolve_ipv6: Function to resolve IPv6 addresses
+        skip_check: Optional function to check if custom resolution should be skipped
+        
+    Returns:
+        A custom getaddrinfo function
+    """
     def custom_getaddrinfo(
         host: Union[str, bytes, None],
         port: Union[str, bytes, int, None],
@@ -238,57 +154,115 @@ def init_custom_resolver():
         host_str = _decode_host(host)
         port_int = _decode_port(port)
         
-        if host_str == 'localhost' or host_str.startswith('127.') or host_str.startswith('::1') or host_str.startswith('0.0.0.0'):
+        # Skip custom resolution for local addresses or if skip check passes
+        if _is_local_address(host_str) or (skip_check and skip_check(host_str)):
             return original_getaddrinfo(host, port, family, type, proto, flags)
         
         results: list[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]] = []
         
         try:
-            try:
-                logger.debug(f"Resolving IPv6 address for {host_str} using Custom DNS")
-                ipv6_answers = custom_resolver.resolve(host_str, 'AAAA')
+            # Try IPv6 first if family allows it
+            if family == 0 or family == socket.AF_INET6:
+                logger.debug(f"Resolving IPv6 address for {host_str}")
+                ipv6_answers = resolve_ipv6(host_str)
                 for answer in ipv6_answers:
-                    results.append((socket.AF_INET6, cast(SocketKind, type), proto, '', (str(answer), port_int, 0, 0)))
-                logger.debug(f"Found {len(results)} IPv6 addresses for {host_str} : {results}")
-            except Exception as e:
-                logger.debug(f"IPv6 resolution skipped or failed for {host_str}: {e}")
-
-            try:
-                logger.debug(f"Resolving IPv4 address for {host_str} using Custom DNS")
-                ipv4_answers = custom_resolver.resolve(host_str, 'A')
+                    results.append((socket.AF_INET6, cast(SocketKind, type), proto, '', (answer, port_int, 0, 0)))
+                if ipv6_answers:
+                    logger.debug(f"Found {len(ipv6_answers)} IPv6 addresses for {host_str}")
+            
+            # Then try IPv4
+            if family == 0 or family == socket.AF_INET:
+                logger.debug(f"Resolving IPv4 address for {host_str}")
+                ipv4_answers = resolve_ipv4(host_str)
                 for answer in ipv4_answers:
-                    results.append((socket.AF_INET, cast(SocketKind, type), proto, '', (str(answer), port_int)))
-                logger.debug(f"Found {len(results)} IPv4 addresses for {host_str} : {results}")
-            except Exception as e:
-                logger.warning(f"IPv4 resolution failed for {host_str}: {e}")
-
+                    results.append((socket.AF_INET, cast(SocketKind, type), proto, '', (answer, port_int)))
+                if ipv4_answers:
+                    logger.debug(f"Found {len(ipv4_answers)} IPv4 addresses for {host_str}")
+            
             if results:
-                logger.debug(f"Resolved {host_str} to {len(results)} addresses: {results}")
+                logger.debug(f"Resolved {host_str} to {len(results)} addresses")
                 return results
                 
         except Exception as e:
-            logger.warning(f"DNS resolution failed for {host_str}: {e}, falling back to system DNS")
+            logger.warning(f"Custom DNS resolution failed for {host_str}: {e}, falling back to system DNS")
         
-        # Fall back to system DNS if Custom DNS resolution fails
+        # Fall back to system DNS if custom resolution fails
         try:
             return original_getaddrinfo(host, port, family, type, proto, flags)
         except Exception as e:
             logger.error(f"System DNS resolution also failed for {host_str}: {e}")
             # Last resort: Try to connect to the hostname directly
             if family == 0 or family == socket.AF_INET:
+                logger.warning(f"Using direct hostname as last resort for {host_str}")
                 return [(socket.AF_INET, cast(SocketKind, type), proto, '', (host_str, port_int))]
             else:
                 raise  # Re-raise the exception if we can't provide a last resort
+    
+    return custom_getaddrinfo
 
+def init_doh_resolver(doh_server: str = DOH_SERVER):
+    """Initialize DNS over HTTPS resolver.
+    
+    Args:
+        doh_server: The DoH server URL
+    """
+    # Pre-resolve the DoH server hostname to prevent recursion
+    url = urllib.parse.urlparse(doh_server)
+    server_hostname = url.hostname if url.hostname else ''
+    server_ip = socket.gethostbyname(server_hostname)
+    logger.info(f"DoH server {server_hostname} resolved to IP: {server_ip}")
+    
+    # Create DoH resolver
+    doh_resolver = DoHResolver(doh_server, server_hostname, server_ip)
+    
+    # Create resolver functions
+    def resolve_ipv4(hostname: str) -> List[str]:
+        return doh_resolver.resolve(hostname, 'A')
+    
+    def resolve_ipv6(hostname: str) -> List[str]:
+        return doh_resolver.resolve(hostname, 'AAAA')
+    
+    # Skip DoH resolution for the DoH server itself
+    def skip_doh(hostname: str) -> bool:
+        return hostname == server_hostname or hostname == server_ip
+    
+    # Replace socket.getaddrinfo with our DoH-enabled version
+    socket.getaddrinfo = cast(Any, create_custom_getaddrinfo(
+        resolve_ipv4, resolve_ipv6, skip_doh
+    ))
+    
+    logger.info("DoH resolver successfully configured and activated")
+    return doh_resolver
+
+def init_custom_resolver():
+    """Initialize custom DNS resolver using configured DNS servers."""
+    custom_resolver = create_custom_resolver()
+    
+    # Create resolver functions
+    def resolve_ipv4(hostname: str) -> List[str]:
+        return resolve_with_custom_dns(custom_resolver, hostname, 'A')
+    
+    def resolve_ipv6(hostname: str) -> List[str]:
+        return resolve_with_custom_dns(custom_resolver, hostname, 'AAAA')
+    
     # Replace socket.getaddrinfo with our custom resolver
-    socket.getaddrinfo = cast(Any, custom_getaddrinfo)
+    socket.getaddrinfo = cast(Any, create_custom_getaddrinfo(resolve_ipv4, resolve_ipv6))
+    
+    logger.info("Custom DNS resolver successfully configured and activated")
+    return custom_resolver
 
-# Configure DNS resolver to use Custom DNS
-if len(CUSTOM_DNS) > 0:
-    init_custom_resolver()
-    if DOH_SERVER:
-        init_doh_resolver()
-        
+# Initialize DNS resolvers based on configuration
+def init_dns_resolvers():
+    """Initialize DNS resolvers based on configuration."""
+    if len(CUSTOM_DNS) > 0:
+        init_custom_resolver()
+        if DOH_SERVER:
+            init_doh_resolver()
+
+# Initialize DNS resolvers
+init_dns_resolvers()
+
+# Check available AA_BASE_URLs if set to auto
 if AA_BASE_URL == "auto":
     logger.info(f"AA_BASE_URL: auto, checking available urls {AA_AVAILABLE_URLS}")
     for url in AA_AVAILABLE_URLS:
@@ -302,7 +276,6 @@ if AA_BASE_URL == "auto":
     if AA_BASE_URL == "auto":
         AA_BASE_URL = AA_AVAILABLE_URLS[0]
 logger.info(f"AA_BASE_URL: {AA_BASE_URL}")
-
 
 # Configure urllib opener with appropriate headers
 opener = urllib.request.build_opener()
