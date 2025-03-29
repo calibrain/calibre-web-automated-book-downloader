@@ -10,7 +10,7 @@ from logger import setup_logger
 from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_BASE_URL
 from env import AA_DONATOR_KEY, USE_CF_BYPASS 
 from models import BookInfo, SearchFilters
-import network
+import downloader
 
 logger = setup_logger(__name__)
 
@@ -61,7 +61,7 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
         f"{filters_query}" 
     )
     
-    html = network.html_get_page(url)
+    html = downloader.html_get_page(url)
     if not html:
         raise Exception("Failed to fetch search results")
         
@@ -128,7 +128,7 @@ def get_book_info(book_id: str) -> BookInfo:
         BookInfo: Detailed book information
     """
     url = f"{AA_BASE_URL}/md5/{book_id}"
-    html = network.html_get_page(url)
+    html = downloader.html_get_page(url)
     
     if not html:
         raise Exception(f"Failed to fetch book info for ID: {book_id}")
@@ -207,7 +207,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         urls = list(external_urls_libgen) + list(external_urls_z_lib) + list(slow_urls_no_waitlist) + list(slow_urls_with_waitlist)
 
     for i in range(len(urls)):
-        urls[i] = network.get_absolute_url(AA_BASE_URL, urls[i])
+        urls[i] = downloader.get_absolute_url(AA_BASE_URL, urls[i])
 
     # Extract basic information
     book_info = BookInfo(
@@ -296,7 +296,7 @@ def download_book(book_info: BookInfo, book_path: Path) -> bool:
             download_url = _get_download_url(link, book_info.title)
             if download_url != "":
                 logger.info(f"Downloading `{book_info.title}` from `{download_url}`")
-                data = network.download_url(download_url, book_info.size or "")
+                data = downloader.download_url(download_url, book_info.size or "")
                 if not data:
                     raise Exception("No data received")
 
@@ -318,10 +318,10 @@ def _get_download_url(link: str, title: str) -> str:
     url = ""
     
     if link.startswith(f"{AA_BASE_URL}/dyn/api/fast_download.json"):
-        page = network.html_get_page(link)
+        page = downloader.html_get_page(link)
         url = json.loads(page).get("download_url")
     else:
-        html = network.html_get_page(link)
+        html = downloader.html_get_page(link)
         
         if html == "":
             return ""
@@ -346,4 +346,4 @@ def _get_download_url(link: str, title: str) -> str:
         else:
             url = soup.find_all('a', string="GET")[0]['href']
 
-    return network.get_absolute_url(link, url)
+    return downloader.get_absolute_url(link, url)
