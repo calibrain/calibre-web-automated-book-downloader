@@ -34,10 +34,29 @@ def _decode_port(port: Union[str, bytes, int, None]) -> int:
 
 def _is_local_address(host_str: str) -> bool:
     """Check if an address is local and should bypass custom DNS."""
-    return (host_str == 'localhost' or 
-            host_str.startswith('127.') or 
-            host_str.startswith('::1') or 
-            host_str.startswith('0.0.0.0'))
+    """Check if an address is local or private and should bypass custom DNS."""
+    # Localhost checks
+    if (host_str == 'localhost' or 
+        host_str.startswith('127.') or 
+        host_str == '::1' or 
+        host_str == '0.0.0.0'):
+        return True
+        
+    # IPv4 private ranges (RFC 1918)
+    if (host_str.startswith('10.') or 
+        (host_str.startswith('172.') and 
+         len(host_str.split('.')) > 1 and 
+         16 <= int(host_str.split('.')[1]) <= 31) or
+        host_str.startswith('192.168.')):
+        return True
+        
+    # IPv6 private ranges
+    if (host_str.startswith('fc') or 
+        host_str.startswith('fd') or  # Unique local addresses (fc00::/7)
+        host_str.startswith('fe80:')):  # Link-local addresses (fe80::/10)
+        return True
+    
+    return False
 
 # Store the original getaddrinfo function
 original_getaddrinfo = socket.getaddrinfo
