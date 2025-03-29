@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile
     environment:
       FLASK_PORT: 8084
-      DEBUG: true
+      LOG_LEVEL: debug
       BOOK_LANGUAGE: en
       USE_BOOK_TITLE: true
       CUSTOM_DNS: cloudflare
