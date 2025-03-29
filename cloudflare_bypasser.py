@@ -1,15 +1,19 @@
-import time, os
+import time, os, socket
+import network
+from urllib.parse import urlparse
 from DrissionPage import ChromiumPage # type: ignore
 from DrissionPage import ChromiumOptions
 from DrissionPage._functions.elements import ChromiumElementsList # type: ignore
 from DrissionPage._pages.chromium_tab import ChromiumTab # type: ignore
 from logger import setup_logger
 from env import MAX_RETRY, DOCKERMODE, DEFAULT_SLEEP
-from config import PROXIES
+from config import PROXIES, CUSTOM_DNS, DOH_SERVER, AA_BASE_URL
 
 logger = setup_logger(__name__)
 
 _defaultTab : ChromiumTab | None = None
+
+network.init()
 
 def _search_recursively_shadow_root_with_iframe(ele : ChromiumElementsList) -> ChromiumElementsList | None:
     if ele.shadow_root:
@@ -60,6 +64,7 @@ def _click_verification_button(driver: ChromiumTab) -> None:
         button = _locate_cf_button(driver)
         if button:
             logger.debug("Verification button found. Attempting to click.")
+            button.wait.displayed(timeout=DEFAULT_SLEEP) 
             button.click()
         else:
             logger.debug("Verification button not found.")
@@ -99,9 +104,12 @@ def _bypass(driver: ChromiumTab, max_retries: int = MAX_RETRY) -> None:
             break
 
         logger.info(f"Attempt {try_count + 1}: Verification page detected. Trying to bypass...")
-        _click_verification_button(driver)
 
         try_count += 1
+        time.sleep(DEFAULT_SLEEP)
+
+        _click_verification_button(driver)
+
         time.sleep(DEFAULT_SLEEP)
 
     if _is_bypassed(driver):
@@ -122,7 +130,42 @@ def _get_chromium_options(arguments: list[str]) -> ChromiumOptions:
         elif 'https' in PROXIES:
             options.set_argument(f'--proxy-server={PROXIES["https"]}')
             logger.debug(f"Setting HTTPS proxy: {PROXIES['https']}")
-    
+
+    # --- Add Custom DNS settings ---
+    try:
+        if  len(CUSTOM_DNS) > 0:
+            if DOH_SERVER:
+                logger.info(f"Configuring DNS over HTTPS (DoH) with server: {DOH_SERVER}")
+
+                # Enable the DoH feature
+                options.set_argument(f'--enable-features=DnsOverHttps')
+
+                # TODO: This is probably broken and a halucination,
+                # but it should still default to google DOH so its fine...
+                options.set_argument(f'--dns-over-https-mode="secure"')
+                options.set_argument(f'--dns-over-https-servers="{DOH_SERVER}"')
+
+                doh_hostname = urlparse(DOH_SERVER).hostname
+                if doh_hostname:
+                    doh_ip = socket.gethostbyname(doh_hostname)
+                    options.set_argument(f'--host-resolver-rules=MAP {doh_hostname} {doh_ip}')
+                    logger.debug(f"Setting Chromium --host-resolver-rules='MAP {doh_hostname} {doh_ip}'")
+            else:
+                logger.info(f"Applying custom DNS servers: {CUSTOM_DNS}")
+                # Format: "MAP * <dns1>, MAP * <dns2>, ..."
+                # We create a separate MAP rule for each DNS server.
+                # Chromium should try them based on its internal logic (likely order/availability).
+                resolver_rules = []
+                for dns_server in CUSTOM_DNS:
+                    resolver_rules.append(f"MAP * {dns_server}")
+
+                if resolver_rules:
+                    # Join the rules with " , " (comma and space is a common separator)
+                    host_resolver_rules_value = " , ".join(resolver_rules)
+                    options.set_argument(f'--host-resolver-rules={host_resolver_rules_value}')
+                    logger.debug(f"Setting Chromium --host-resolver-rules='{host_resolver_rules_value}'")   
+    except Exception as e:
+        logger.error_trace(f"Error configuring DNS settings: {e}")
     return options
 
 def _genScraper() -> ChromiumPage:
@@ -160,8 +203,9 @@ def _reset_browser() -> None:
         _defaultTab.close()
     _defaultTab = None
     # Force kill the browser
-    os.system("pkill -f -i *chrom*")
-    os.system("pkill -f -i xvfb")
+    os.system("pkill -f -i 'chromium'")
+    os.system("pkill -f -i 'chrom'")
+    os.system("pkill -f -i 'xvfb'")
     time.sleep(1)
 
 def _init_browser(retry : int = MAX_RETRY) -> ChromiumTab:
@@ -192,3 +236,5 @@ def get(url : str, retry : int = MAX_RETRY) -> ChromiumTab:
         logger.error_trace(f"Failed to bypass Cloudflare for {url}: {e}")
         raise e
     return defaultTab
+
+get(AA_BASE_URL)
