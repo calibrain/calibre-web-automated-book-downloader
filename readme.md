@@ -60,8 +60,10 @@ An intuitive web interface for searching and requesting book downloads, designed
 | `UID`             | Runtime user ID         | `1000`             |
 | `GID`             | Runtime group ID        | `100`              |
 | `ENABLE_LOGGING`  | Enable log file         | `true`             |
+| `LOG_LEVEL`       | Log level to use        | `info`             |
 
 If logging is enabld, log folder default location is `/var/log/cwa-book-downloader`
+TODO : LOG_LEVEL
 
 #### Download Settings
 
@@ -95,6 +97,7 @@ If disabling the cloudflare bypass, you will be using alternative download hosts
 | `HTTP_PROXY`           | HTTP proxy URL                | ``                      |
 | `HTTPS_PROXY`          | HTTPS proxy URL               | ``                      |
 | `CUSTOM_DNS`           | Custom DNS IP                 | ``                      |
+| `USE_DOH`              | Use DNS over HTTPS            | `false`                 |
 
 For proxy configuration, you can specify URLs in the following format:
 ```bash
@@ -121,6 +124,10 @@ The `CUSTOM_DNS` setting supports two formats:
    - `opendns` - OpenDNS
 
 For users experiencing ISP-level website blocks (such as Virgin Media in the UK), using alternative DNS providers like Cloudflare may help bypass these restrictions
+
+If a `CUSTOM_DNS` is specified from the preset providers, you can also set a `USE_DOH=true` to force using DNS over HTTPS,
+which might also help in certain network situations. Note that only `google`, `quad9`, `cloudflare` and `opendns` are 
+supported for now, and any other value in `CUSTOM_DNS` will make the `USE_DOH` flag ignored.
 
 #### Custom configuration
 

@@ -23,10 +23,12 @@ _CUSTOM_SCRIPT = os.getenv("CUSTOM_SCRIPT", "").strip()
 FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = int(os.getenv("FLASK_PORT", "5003"))
 FLASK_DEBUG = string_to_bool(os.getenv("FLASK_DEBUG", "False"))
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 ENABLE_LOGGING = string_to_bool(os.getenv("ENABLE_LOGGING", "true"))
 MAIN_LOOP_SLEEP_TIME = int(os.getenv("MAIN_LOOP_SLEEP_TIME", "5"))
 DOCKERMODE = string_to_bool(os.getenv("DOCKERMODE", "false"))
 _CUSTOM_DNS = os.getenv("CUSTOM_DNS", "").strip()
+USE_DOH = string_to_bool(os.getenv("USE_DOH", "false"))
 
 # Logging settings
 LOG_FILE = LOG_DIR / "cwa-bookd-downloader.log"

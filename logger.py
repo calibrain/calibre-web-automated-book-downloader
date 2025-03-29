@@ -4,7 +4,7 @@ import logging
 import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
-from env import FLASK_DEBUG, LOG_FILE, ENABLE_LOGGING
+from env import FLASK_DEBUG, LOG_FILE, ENABLE_LOGGING, LOG_LEVEL
 from typing import Any, Optional
 
 class CustomLogger(logging.Logger):
@@ -29,10 +29,18 @@ def setup_logger(name: str, log_file: Path = LOG_FILE) -> CustomLogger:
     
     # Create logger as CustomLogger instance
     logger = CustomLogger(name)
-    if FLASK_DEBUG:
-        logger.setLevel(logging.DEBUG)
-    else:
-        logger.setLevel(logging.INFO)
+    log_level = logging.INFO
+    if LOG_LEVEL == "DEBUG":
+        log_level = logging.DEBUG
+    elif LOG_LEVEL == "INFO":
+        log_level = logging.INFO
+    elif LOG_LEVEL == "WARNING":
+        log_level = logging.WARNING
+    elif LOG_LEVEL == "ERROR":
+        log_level = logging.ERROR
+    elif LOG_LEVEL == "CRITICAL":
+        log_level = logging.CRITICAL
+    logger.setLevel(log_level)
     
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
@@ -41,16 +49,13 @@ def setup_logger(name: str, log_file: Path = LOG_FILE) -> CustomLogger:
     # Console handler for Docker output
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
-    if FLASK_DEBUG:
-        console_handler.setLevel(logging.DEBUG)
-    else:
-        console_handler.setLevel(logging.INFO)
-    console_handler.addFilter(lambda record: record.levelno < logging.ERROR)  # Only allow logs below ERROR
+    console_handler.setLevel(log_level)
+    console_handler.addFilter(lambda record: record.levelno < logging.ERROR)  # Only allow logs below ERROR to stdout
     logger.addHandler(console_handler)
     
     # Error handler for stderr
     error_handler = logging.StreamHandler(sys.stderr)
-    error_handler.setLevel(logging.ERROR)
+    error_handler.setLevel(logging.ERROR) # Error and above go to stderr
     error_handler.setFormatter(formatter)
     logger.addHandler(error_handler)
     
