@@ -6,9 +6,10 @@ services:
       dockerfile: Dockerfile
     environment:
       FLASK_PORT: 8084
-      FLASK_DEBUG: false
+      FLASK_DEBUG: true
       BOOK_LANGUAGE: en
       USE_BOOK_TITLE: true
+      CUSTOM_DNS: cloudflare
     ports:
       - 8084:8084
     restart: unless-stopped

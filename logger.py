@@ -5,8 +5,16 @@ import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from env import FLASK_DEBUG, LOG_FILE, ENABLE_LOGGING
+from typing import Any, Optional
 
-def setup_logger(name: str, log_file: Path = LOG_FILE) -> logging.Logger:
+class CustomLogger(logging.Logger):
+    """Custom logger class with additional error_trace method."""
+    
+    def error_trace(self, msg: Any, *args: Any, **kwargs: Any) -> None:
+        """Log an error message with full stack trace."""
+        self.error(msg, *args, exc_info=True, **kwargs)
+
+def setup_logger(name: str, log_file: Path = LOG_FILE) -> CustomLogger:
     """Set up and configure a logger instance.
     
     Args:
@@ -14,18 +22,17 @@ def setup_logger(name: str, log_file: Path = LOG_FILE) -> logging.Logger:
         log_file: Optional path to log file. If None, logs only to stdout/stderr
         
     Returns:
-        logging.Logger: Configured logger instance
+        CustomLogger: Configured logger instance with error_trace method
     """
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
+    # Register our custom logger class
+    logging.setLoggerClass(CustomLogger)
     
-    # Add helper method for error logging with stack trace
-    def error_trace(self, msg, *args, **kwargs):
-        """Log an error message with full stack trace."""
-        self.error(msg, *args, exc_info=True, **kwargs)
-    
-    # Attach the helper method to the logger
-    logger.error_trace = error_trace.__get__(logger)
+    # Create logger as CustomLogger instance
+    logger = CustomLogger(name)
+    if FLASK_DEBUG:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
     
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'

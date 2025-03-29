@@ -94,6 +94,7 @@ If disabling the cloudflare bypass, you will be using alternative download hosts
 | `PORT`                 | Container external port       | `8084`                  |
 | `HTTP_PROXY`           | HTTP proxy URL                | ``                      |
 | `HTTPS_PROXY`          | HTTPS proxy URL               | ``                      |
+| `CUSTOM_DNS`           | Custom DNS IP                 | ``                      |
 
 For proxy configuration, you can specify URLs in the following format:
 ```bash
@@ -106,6 +107,20 @@ HTTP_PROXY=http://username:password@proxy.example.com:8080
 HTTPS_PROXY=http://username:password@proxy.example.com:8080
 ```
 
+
+The `CUSTOM_DNS` setting supports two formats:
+
+1. **Custom DNS Servers**: A comma-separated list of DNS server IP addresses
+   - Example: `127.0.0.53,127.0.1.53` (useful for PiHole)
+   - Supports both IPv4 and IPv6 addresses in the same string
+
+2. **Preset DNS Providers**: Use one of these predefined options:
+   - `google` - Google DNS
+   - `quad9` - Quad9 DNS
+   - `cloudflare` - Cloudflare DNS
+   - `opendns` - OpenDNS
+
+For users experiencing ISP-level website blocks (such as Virgin Media in the UK), using alternative DNS providers like Cloudflare may help bypass these restrictions
 
 #### Custom configuration
 
@@ -191,3 +206,4 @@ Please note that the current version:
 ## 💬 Support
 
 For issues or questions, please file an issue on the GitHub repository.
+

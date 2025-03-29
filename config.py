@@ -30,6 +30,19 @@ logger.info(f"STAT INGEST_DIR: {os.stat(env.INGEST_DIR)}")
 logger.info(f"CROSS_FILE_SYSTEM: {CROSS_FILE_SYSTEM}")
 
 # Network settings
+_custom_dns = env._CUSTOM_DNS.lower().strip()
+if _custom_dns == "google":
+    CUSTOM_DNS = ["8.8.8.8", "8.8.4.4", "2001:4860:4860::8888", "2001:4860:4860::8844"]
+elif _custom_dns == "quad9":
+    CUSTOM_DNS = ["9.9.9.9", "149.112.112.112", "2620:fe::fe", "26620:fe::9"]
+elif _custom_dns == "cloudflare":
+    CUSTOM_DNS = ["1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001"]
+elif _custom_dns == "opendns":
+    CUSTOM_DNS = ["208.67.222.222", "208.67.220.220", "2620:119:35::35", "2620:119:53::53"]
+else:
+    _custom_dns_ip = _custom_dns.split(",")
+    CUSTOM_DNS = [dns.strip() for dns in _custom_dns_ip if dns.replace(":", "").replace(".", "").strip().isdigit()]
+logger.info(f"CUSTOM_DNS: {CUSTOM_DNS}")
 
 # Proxy settings
 PROXIES = {}
@@ -40,25 +53,10 @@ if env.HTTPS_PROXY:
 logger.info(f"PROXIES: {PROXIES}")
 
 # Anna's Archive settings
-aa_available_urls = ["https://annas-archive.org", "https://annas-archive.se", "https://annas-archive.li"]
-aa_additional_urls = env.AA_ADDITIONAL_URLS.split(",")
-aa_available_urls.extend(aa_additional_urls)
-
 AA_BASE_URL = env._AA_BASE_URL
-if AA_BASE_URL == "auto":
-    logger.info(f"AA_BASE_URL: auto, checking available urls {aa_available_urls}")
-    for url in aa_available_urls:
-        try:
-            import requests
-            response = requests.get(url)
-            if response.status_code == 200:
-                AA_BASE_URL = url
-                break
-        except Exception as e:
-            logger.error_trace(f"Error checking {url}: {e}")
-    if AA_BASE_URL == "auto":
-        AA_BASE_URL = aa_available_urls[0]
-logger.info(f"AA_BASE_URL: {AA_BASE_URL}")
+AA_AVAILABLE_URLS = ["https://annas-archive.org", "https://annas-archive.se", "https://annas-archive.li"]
+AA_AVAILABLE_URLS.extend(env._AA_ADDITIONAL_URLS.split(","))
+AA_AVAILABLE_URLS = [url.strip() for url in AA_AVAILABLE_URLS if url.strip()]
 
 # File format settings
 SUPPORTED_FORMATS = env._SUPPORTED_FORMATS.split(",")

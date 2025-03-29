@@ -16,7 +16,7 @@ HTTP_PROXY = os.getenv("HTTP_PROXY", "").strip()
 HTTPS_PROXY = os.getenv("HTTPS_PROXY", "").strip()
 AA_DONATOR_KEY = os.getenv("AA_DONATOR_KEY", "").strip()
 _AA_BASE_URL = os.getenv("AA_BASE_URL", "auto").strip()
-AA_ADDITIONAL_URLS = os.getenv("AA_ADITIINAL_URLS", "")
+_AA_ADDITIONAL_URLS = os.getenv("AA_ADITIINAL_URLS", "").strip()
 _SUPPORTED_FORMATS = os.getenv("SUPPORTED_FORMATS", "epub,mobi,azw3,fb2,djvu,cbz,cbr").lower()
 _BOOK_LANGUAGE = os.getenv("BOOK_LANGUAGE", "en").lower()
 _CUSTOM_SCRIPT = os.getenv("CUSTOM_SCRIPT", "").strip()
@@ -26,6 +26,7 @@ FLASK_DEBUG = string_to_bool(os.getenv("FLASK_DEBUG", "False"))
 ENABLE_LOGGING = string_to_bool(os.getenv("ENABLE_LOGGING", "true"))
 MAIN_LOOP_SLEEP_TIME = int(os.getenv("MAIN_LOOP_SLEEP_TIME", "5"))
 DOCKERMODE = string_to_bool(os.getenv("DOCKERMODE", "false"))
+_CUSTOM_DNS = os.getenv("CUSTOM_DNS", "").strip()
 
 # Logging settings
 LOG_FILE = LOG_DIR / "cwa-bookd-downloader.log"

@@ -1,5 +1,5 @@
 flask
-requests
+requests[socks]
 beautifulsoup4
 tqdm
 DrissionPage
@@ -7,3 +7,4 @@ pyvirtualdisplay
 types-requests
 types-beautifulsoup4
 types-tqdm
+dnspython
