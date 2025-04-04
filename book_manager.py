@@ -328,7 +328,7 @@ def _get_download_url(link: str, title: str) -> str:
         
         soup = BeautifulSoup(html, 'html.parser')
         
-        if link.startswith("https://z-lib.gs"):
+        if link.startswith("https://z-lib."):
             download_link = soup.find_all('a', href=True, class_="addDownloadedBook")
             if download_link:
                 url = download_link[0]['href']            
