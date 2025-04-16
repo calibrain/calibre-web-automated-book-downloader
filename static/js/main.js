@@ -535,7 +535,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             let titleElement;
-            if (status.toLowerCase().includes('available')) {
+            if (book.download_path != null) {
                 titleElement = utils.createElement('a', {
                     href: `/request/api/localdownload?id=${book.id}`,
                     target: '_blank',

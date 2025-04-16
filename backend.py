@@ -95,11 +95,12 @@ def get_book_data(book_id: str) -> Tuple[Optional[bytes], str] :
     """
     try:
         book_info = book_queue._book_data[book_id]
-        path = INGEST_DIR / f"{book_id}.epub"
+        path = book_info.download_path
         with open(path, "rb") as f:
             return f.read(), book_info.title
     except Exception as e:
         logger.error_trace(f"Error getting book data: {e}")
+        book_info.download_path = None
         return None, ""
 
 def _book_info_to_dict(book: BookInfo) -> Dict[str, Any]:
@@ -109,14 +110,14 @@ def _book_info_to_dict(book: BookInfo) -> Dict[str, Any]:
         if value is not None
     }
 
-def _download_book(book_id: str) -> bool:
+def _download_book(book_id: str) -> Optional[str]:
     """Download and process a book.
     
     Args:
         book_id: Book identifier
         
     Returns:
-        bool: True if download and processing successful
+        str: Path to the downloaded book if successful, None otherwise
     """
     try:
         book_info = book_queue._book_data[book_id]
@@ -136,26 +137,27 @@ def _download_book(book_id: str) -> bool:
             logger.info(f"Running custom script: {CUSTOM_SCRIPT}")
             subprocess.run([CUSTOM_SCRIPT, book_path])
 
+        intermediate_path = INGEST_DIR /  book_id # Without extension
         final_path = INGEST_DIR /  book_name
         
         if os.path.exists(book_path):
             if CROSS_FILE_SYSTEM:
-                logger.info(f"Copying book to ingest directory then renaming: {book_path} -> {final_path}.crdownload -> {final_path}")
-                tmp_path = final_path.with_name(final_path.name + ".crdownload")
+                logger.info(f"Copying book to ingest directory then renaming: {book_path} -> {intermediate_path} -> {final_path}")
                 try:
-                    shutil.move(book_path, tmp_path)
+                    shutil.move(book_path, intermediate_path)
                 except Exception as e:
                     logger.debug(f"Error moving book: {e}, will try copying instead")
-                    shutil.copy(book_path, tmp_path)
+                    shutil.copy(book_path, intermediate_path)
                     os.remove(book_path)
-                os.rename(tmp_path, final_path)
             else:
-                logger.info(f"Moving book to ingest directory: {book_path} -> {final_path}")
-                shutil.move(book_path, final_path)
-        return True
+                logger.info(f"Moving book to ingest directory: {book_path} -> {intermediate_path}")
+                shutil.move(book_path, intermediate_path)
+            logger.info(f"Renaming book: {intermediate_path} -> {final_path}")
+            os.rename(intermediate_path, final_path)
+        return str(final_path)
     except Exception as e:
         logger.error_trace(f"Error downloading book: {e}")
-        return False
+        return None
 
 def download_loop() -> None:
     """Background thread for processing download queue."""
@@ -169,15 +171,17 @@ def download_loop() -> None:
             
         try:
             book_queue.update_status(book_id, QueueStatus.DOWNLOADING)
-            success = _download_book(book_id)
-            
+            download_path = _download_book(book_id)
+            if download_path:
+                book_queue.update_download_path(book_id, download_path)
+
             new_status = (
-                QueueStatus.AVAILABLE if success else QueueStatus.ERROR
+                QueueStatus.AVAILABLE if download_path else QueueStatus.ERROR
             )
             book_queue.update_status(book_id, new_status)
             
             logger.info(
-                f"Book {book_id} download {'successful' if success else 'failed'}"
+                f"Book {book_id} download {'successful' if download_path else 'failed'}"
             )
             
         except Exception as e:

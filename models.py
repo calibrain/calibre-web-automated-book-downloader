@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 from enum import Enum
 from datetime import datetime, timedelta
 from threading import Lock
-
+from pathlib import Path
 from env import INGEST_DIR, STATUS_TIMEOUT
 
 class QueueStatus(str, Enum):
@@ -30,6 +30,7 @@ class BookInfo:
     size: Optional[str] = None
     info: Optional[Dict[str, List[str]]] = None
     download_urls: List[str] = field(default_factory=list)
+    download_path: Optional[str] = None
 
 class BookQueue:
     """Thread-safe book queue manager."""
@@ -62,6 +63,11 @@ class BookQueue:
         """Update status of a book in the queue."""
         with self._lock:
             self._update_status(book_id, status)
+    
+    def update_download_path(self, book_id: str, download_path: str) -> None:
+        """Update the download path of a book in the queue."""
+        with self._lock:
+            self._book_data[book_id].download_path = download_path
             
     def get_status(self) -> Dict[QueueStatus, Dict[str, BookInfo]]:
         """Get current queue status."""
@@ -82,10 +88,14 @@ class BookQueue:
             to_remove = []
             
             for book_id, status in self._status.items():
+                path = self._book_data[book_id].download_path
+                if path and not Path(path).exists():
+                    self._book_data[book_id].download_path = None
+                    path = None
+                
                 # Check for completed downloads
                 if status == QueueStatus.AVAILABLE:
-                    path = INGEST_DIR / f"{book_id}.epub"
-                    if not path.exists():
+                    if not path:
                         self._update_status(book_id, QueueStatus.DONE)
                 
                 # Check for stale status entries
