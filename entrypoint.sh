@@ -126,4 +126,4 @@ echo "Running command: '$command' as '$USERNAME' in '$APP_ENV' mode"
 exec 1>&3 2>&4
 exec 3>&- 4>&-
 
-exec sudo -E -u "$USERNAME" $command
+exec sudo -E -u "$USERNAME" HOME=/app $command
