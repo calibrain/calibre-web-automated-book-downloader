@@ -49,6 +49,7 @@ change_ownership() {
 change_ownership /app
 change_ownership /var/log/cwa-book-downloader
 change_ownership /cwa-book-ingest
+change_ownership /tmp/cwa-book-downloader
 
 # Set the command to run based on the environment
 is_prod=$(echo "$APP_ENV" | tr '[:upper:]' '[:lower:]')
