@@ -94,6 +94,6 @@ if CUSTOM_SCRIPT:
 
 # Debugging settings
 VIRTUAL_SCREEN_SIZE = (1024, 768)
+RECORDING_DIR = env.LOG_DIR / "recording"
 if env.DEBUG:
-    recording_dir = env.LOG_DIR / "recording"
-    recording_dir.mkdir(parents=True, exist_ok=True)
+    RECORDING_DIR.mkdir(parents=True, exist_ok=True)

@@ -19,7 +19,7 @@ from selenium.common.exceptions import TimeoutException
 import network
 from logger import setup_logger
 from env import MAX_RETRY, DEFAULT_SLEEP
-from config import PROXIES, CUSTOM_DNS, DOH_SERVER, VIRTUAL_SCREEN_SIZE, recording_dir
+from config import PROXIES, CUSTOM_DNS, DOH_SERVER, VIRTUAL_SCREEN_SIZE, RECORDING_DIR
 
 logger = setup_logger(__name__)
 network.init()
@@ -202,7 +202,7 @@ def _get_driver():
 
         if env.DEBUG:
             timestamp = datetime.now().strftime("%y%m%d-%H%M%S")
-            output_file = recording_dir / f"screen_recording_{timestamp}.mp4"
+            output_file = RECORDING_DIR / f"screen_recording_{timestamp}.mp4"
 
             ffmpeg_cmd = [
                 "ffmpeg",
