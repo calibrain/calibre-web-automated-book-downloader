@@ -120,7 +120,11 @@ ENV USING_TOR=true
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     # --- Tor ---
-    tor iptables && \
+    tor \
+    # --- iptables ---
+    iptables && \
+    update-alternatives --set iptables /usr/sbin/iptables-legacy && \
+    update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy && \
     # Cleanup APT cache *after* all installs in this layer
     apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false && \
     apt-get clean && \
