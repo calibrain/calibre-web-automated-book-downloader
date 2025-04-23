@@ -31,11 +31,15 @@ fi
 # Set PUID if not set
 if [ -z "$PUID" ]; then
     UID=1000
+else
+    UID="$PUID"
 fi
 
 # Set PGID if not set
 if [ -z "$PGID" ]; then
     GID=100
+else
+    GID="$PGID"
 fi
 
 if ! getent group "$GID" >/dev/null; then
