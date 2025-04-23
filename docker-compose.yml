@@ -8,8 +8,8 @@ services:
       USE_BOOK_TITLE: true
       TZ: America/New_York
       APP_ENV: prod
-      UID: 1000
-      GID: 100
+      PUID: 1000
+      PGID: 100
     ports:
       - 8084:8084
     restart: unless-stopped

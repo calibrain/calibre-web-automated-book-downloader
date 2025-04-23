@@ -28,13 +28,13 @@ if [ "$TZ" ]; then
     ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 fi
 
-# Set UID if not set
-if [ -z "$UID" ]; then
+# Set PUID if not set
+if [ -z "$PUID" ]; then
     UID=1000
 fi
 
-# Set GID if not set
-if [ -z "$GID" ]; then
+# Set PGID if not set
+if [ -z "$PGID" ]; then
     GID=100
 fi
 
