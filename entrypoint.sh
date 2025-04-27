@@ -6,11 +6,10 @@ LOG_FILE=${LOG_DIR}/cwa-bd_entrypoint.log
 # Cleanup any existing files or folders in the log directory
 rm -rf $LOG_DIR/*
 
-
 (
-if [ "$USING_TOR" = "true" ]; then
-    ./tor.sh
-fi
+    if [ "$USING_TOR" = "true" ]; then
+        ./tor.sh
+    fi
 )
 
 exec 3>&1 4>&2
@@ -56,17 +55,55 @@ fi
 # Get username for the UID (whether we just created it or it existed)
 USERNAME=$(getent passwd "$UID" | cut -d: -f1)
 echo "Username for UID $UID is $USERNAME"
+
+test_write() {
+    folder=$1
+    mkdir -p $folder
+    set +e
+    (
+        sudo -E -u "$USERNAME" HOME=/app echo 0123456789_TEST > $folder/calibre-web-automated-book-downloader_TEST_WRITE
+    )
+    set -e
+    FILE_CONTENT=$(cat $folder/calibre-web-automated-book-downloader_TEST_WRITE)
+    rm -f $folder/calibre-web-automated-book-downloader_TEST_WRITE
+    [ "$FILE_CONTENT" = "0123456789_TEST" ]
+    result=$?
+    if [ $result -eq 0 ]; then
+        result_text="true"
+    else
+        result_text="false"
+    fi
+    echo "Test write to $folder by $USERNAME: $result_text"
+    return $result
+}
+
 # Ensure proper ownership of application directories
 change_ownership() {
-  folder=$1
-  echo "Changing ownership of $folder to $USERNAME:$GID"
-  chown -R "${UID}:${GID}" "${folder}" || echo "Failed to change ownership for ${folder}, continuing..."
+    folder=$1
+    set +e
+    mkdir -p $folder
+    if test_write $folder; then
+        echo "Successfully wrote to $folder as $USERNAME, no need to change ownership"
+    else    
+        echo "Failed to write to $folder as $USERNAME"
+        echo "Changing ownership of $folder to $USERNAME:$GID"
+        chown -R "${UID}:${GID}" "${folder}" || echo "Failed to change ownership for ${folder}, continuing..."
+        echo "Changing mode of $folder to group r/w"
+        chmod g+r,g+w "${folder}" || echo "Failed to change mode for ${folder}, continuing..."
+    fi
+    set -e
 }
 
 change_ownership /app
 change_ownership /var/log/cwa-book-downloader
 change_ownership /cwa-book-ingest
 change_ownership /tmp/cwa-book-downloader
+
+# Test write to all folders
+test_write /app
+test_write /var/log/cwa-book-downloader
+test_write /cwa-book-ingest
+test_write /tmp/cwa-book-downloader
 
 # Set the command to run based on the environment
 is_prod=$(echo "$APP_ENV" | tr '[:upper:]' '[:lower:]')
