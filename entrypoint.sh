@@ -6,11 +6,10 @@ LOG_FILE=${LOG_DIR}/cwa-bd_entrypoint.log
 # Cleanup any existing files or folders in the log directory
 rm -rf $LOG_DIR/*
 
-
 (
-if [ "$USING_TOR" = "true" ]; then
-    ./tor.sh
-fi
+    if [ "$USING_TOR" = "true" ]; then
+        ./tor.sh
+    fi
 )
 
 exec 3>&1 4>&2
@@ -56,17 +55,57 @@ fi
 # Get username for the UID (whether we just created it or it existed)
 USERNAME=$(getent passwd "$UID" | cut -d: -f1)
 echo "Username for UID $UID is $USERNAME"
+
+test_write() {
+    folder=$1
+    test_file=$folder/calibre-web-automated-book-downloader_TEST_WRITE
+    mkdir -p $folder
+    (
+        echo 0123456789_TEST | sudo -E -u "$USERNAME" HOME=/app tee $test_file > /dev/null
+    )
+    FILE_CONTENT=$(cat $test_file || echo "")
+    rm -f $test_file
+    [ "$FILE_CONTENT" = "0123456789_TEST" ]
+    result=$?
+    if [ $result -eq 0 ]; then
+        result_text="true"
+    else
+        result_text="false"
+    fi
+    echo "Test write to $folder by $USERNAME: $result_text"
+    return $result
+}
+
+make_writable() {
+    folder=$1
+    set +e
+    is_writable=$(test_write $folder)
+    set -e
+    if [ "$is_writable" = "true" ]; then
+        echo "Folder $folder is writable, no need to change ownership"
+    else
+        echo "Folder $folder is not writable, changing ownership"
+        change_ownership $folder
+        chmod g+r,g+w $folder
+    fi
+    test_write $folder
+}
+
 # Ensure proper ownership of application directories
 change_ownership() {
   folder=$1
+  mkdir -p $folder
   echo "Changing ownership of $folder to $USERNAME:$GID"
-  chown -R "${UID}:${GID}" "${folder}" || echo "Failed to change ownership for ${folder}, continuing..."
+  chown -R "${UID}" "${folder}" || echo "Failed to change user ownership for ${folder}, continuing..."
+  chown -R ":${GID}" "${folder}" || echo "Failed to change group ownership for ${folder}, continuing..."
 }
 
 change_ownership /app
 change_ownership /var/log/cwa-book-downloader
-change_ownership /cwa-book-ingest
 change_ownership /tmp/cwa-book-downloader
+
+# Test write to all folders
+make_writable /cwa-book-ingest
 
 # Set the command to run based on the environment
 is_prod=$(echo "$APP_ENV" | tr '[:upper:]' '[:lower:]')
