@@ -66,7 +66,6 @@ WORKDIR /app
 # Install Python dependencies using pip
 # Upgrade pip first, then copy requirements and install
 # Copying requirements.txt separately leverages build cache
-# No --chown needed as it's copied as root
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
     # Clean root's pip cache
@@ -84,7 +83,6 @@ RUN echo "#!/bin/sh" > /usr/local/bin/pyrequests && \
       chmod +x /usr/local/bin/pyrequests
 
 # Copy application code *after* dependencies are installed
-# No --chown needed as it's copied as root, entrypoint will handle permissions
 COPY . .
 
 # Final setup: permissions and directories in one layer
@@ -92,8 +90,6 @@ COPY . .
 # Ownership will be handled by the entrypoint script.
 RUN mkdir -p /var/log/cwa-book-downloader /cwa-book-ingest && \
     chmod +x /app/entrypoint.sh /app/tor.sh /app/genDebug.sh
-    # chown is removed
-
 
 # Expose the application port
 EXPOSE ${FLASK_PORT}
