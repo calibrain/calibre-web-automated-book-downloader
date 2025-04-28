@@ -95,6 +95,22 @@ echo "=== Installed Python Packages ===" > "$LOG_DIR/packages.txt"
 pip list 2>/dev/null >> "$LOG_DIR/packages.txt" || echo "pip not found" >> "$LOG_DIR/packages.txt"
 echo "" >> "$LOG_DIR/packages.txt"
 
+# Check Permissions
+echo "=== Permissions ===" > "$LOG_DIR/permissions.txt"
+echo "ls -all /app" >> "$LOG_DIR/permissions.txt"
+ls -all /app >> "$LOG_DIR/permissions.txt"
+echo "" >> "$LOG_DIR/permissions.txt"
+echo "ls -all /cwa-book-ingest" >> "$LOG_DIR/permissions.txt"
+ls -all /cwa-book-ingest >> "$LOG_DIR/permissions.txt"
+echo "" >> "$LOG_DIR/permissions.txt"
+echo "ls -all /var/log/cwa-book-downloader" >> "$LOG_DIR/permissions.txt"
+ls -all /var/log/cwa-book-downloader >> "$LOG_DIR/permissions.txt"
+echo "" >> "$LOG_DIR/permissions.txt"
+echo "ls -all /tmp/cwa-book-downloader" >> "$LOG_DIR/permissions.txt"
+ls -all /tmp/cwa-book-downloader >> "$LOG_DIR/permissions.txt"
+echo "" >> "$LOG_DIR/permissions.txt"
+
+
 # Check if running in Docker
 echo "=== Container Info ===" > "$LOG_DIR/container_info.txt"
 if [ -f /.dockerenv ]; then
