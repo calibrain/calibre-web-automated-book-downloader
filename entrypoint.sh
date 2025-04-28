@@ -75,9 +75,10 @@ test_write() {
 make_writable() {
     folder=$1
     set +e
-    is_writable=$(test_write $folder)
+    test_write $folder
+    is_writable=$?
     set -e
-    if [ "$is_writable" = "true" ]; then
+    if [ $is_writable -eq 0 ]; then
         echo "Folder $folder is writable, no need to change ownership"
     else
         echo "Folder $folder is not writable, changing ownership"
