@@ -215,7 +215,7 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 
 Logs are available in:
 
-- Container: `/var/logs/calibre-web-automated-bookdownloader.log`
+- Container: `/var/logs/cwa-book-downloader.log`
 - Docker logs: Access via `docker logs`
 
 ## 🤝 Contributing

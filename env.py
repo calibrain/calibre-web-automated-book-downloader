@@ -37,7 +37,7 @@ USE_DOH = string_to_bool(os.getenv("USE_DOH", "false"))
 BYPASS_RELEASE_INACTIVE_MIN = int(os.getenv("BYPASS_RELEASE_INACTIVE_MIN", "5"))
 APP_ENV = os.getenv("APP_ENV", "prod").lower()
 # Logging settings
-LOG_FILE = LOG_DIR / "cwa-bookd-downloader.log"
+LOG_FILE = LOG_DIR / "cwa-book-downloader.log"
 
 USING_TOR = string_to_bool(os.getenv("USING_TOR", "false"))
 # If using Tor, we don't need to set custom DNS, use DOH, or proxy
