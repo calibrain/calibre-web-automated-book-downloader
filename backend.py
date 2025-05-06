@@ -84,7 +84,7 @@ def queue_status() -> Dict[str, Dict[str, Any]]:
         for status_type, books in status.items()
     }
 
-def get_book_data(book_id: str) -> Tuple[Optional[bytes], str] :
+def get_book_data(book_id: str) -> Tuple[Optional[bytes], BookInfo]:
     """Get book data for a specific book, including its title.
     
     Args:
@@ -97,7 +97,7 @@ def get_book_data(book_id: str) -> Tuple[Optional[bytes], str] :
         book_info = book_queue._book_data[book_id]
         path = book_info.download_path
         with open(path, "rb") as f:
-            return f.read(), book_info.title
+            return f.read(), book_info
     except Exception as e:
         logger.error_trace(f"Error getting book data: {e}")
         book_info.download_path = None
