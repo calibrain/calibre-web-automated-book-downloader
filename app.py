@@ -239,19 +239,19 @@ def api_local_download() -> Union[Response, Tuple[Response, int]]:
         return jsonify({"error": "No book ID provided"}), 400
 
     try:
-        file_data, file_name = backend.get_book_data(book_id)
+        file_data, book_info = backend.get_book_data(book_id)
         if file_data is None:
             # Book data not found or not available
             return jsonify({"error": "File not found"}), 404
         # Santize the file name
-        file_name = re.sub(r'[\\/:*?"<>|]', '_', file_name.strip())[:255]
+        file_name = book_info.title
+        file_name = re.sub(r'[\\/:*?"<>|]', '_', file_name.strip())[:245]
+        file_extension = book_info.format
         # Prepare the file for sending to the client
-        epub_file = io.BytesIO(file_data)
-        # Typically EPUB mime-type: 'application/epub+zip'
+        data = io.BytesIO(file_data)
         return send_file(
-            epub_file,
-            mimetype='application/epub+zip',
-            download_name=f"{file_name}.epub",
+            data,
+            download_name=f"{file_name}.{file_extension}",
             as_attachment=True
         )
 
