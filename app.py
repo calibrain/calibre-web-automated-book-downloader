@@ -2,15 +2,17 @@
 
 import logging
 import io, re, os
-from flask import Flask, request, jsonify, render_template, send_file, send_from_directory
+import sqlite3
+from flask import Flask, request, jsonify, redirect, render_template, send_file, send_from_directory, session
 from werkzeug.middleware.proxy_fix import ProxyFix
-from werkzeug.wrappers import Response 
+from werkzeug.security import check_password_hash
+from werkzeug.wrappers import Request, Response
 from flask import url_for as flask_url_for
 import typing
 
 from logger import setup_logger
 from config import _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE
-from env import FLASK_HOST, FLASK_PORT, APP_ENV, DEBUG
+from env import FLASK_HOST, FLASK_PORT, APP_ENV, CONFIG_ROOT, DB_PATH, DEBUG
 import backend
 
 from models import SearchFilters
@@ -28,6 +30,13 @@ app.logger.setLevel(logger.level)
 werkzeug_logger = logging.getLogger('werkzeug')
 werkzeug_logger.handlers = logger.handlers
 werkzeug_logger.setLevel(logger.level)
+
+# Set up authentication defaults
+# The secret key will reset every time we restart, which will
+# require users to login again
+app.config.update(
+    SECRET_KEY = os.urandom(64)
+)
 
 def register_dual_routes(app : Flask) -> None:
     """
@@ -73,6 +82,10 @@ def index() -> str:
     """
     Render main page with search and status table.
     """
+    if os.path.isdir(CONFIG_ROOT) or os.path.isfile(DB_PATH):
+      if not is_authenticated():
+        return redirect("/auth")
+
     return render_template('index.html', book_languages=_SUPPORTED_BOOK_LANGUAGE, default_language=BOOK_LANGUAGE, debug=DEBUG)
 
 @app.route('/favico<path:_>')
@@ -287,6 +300,58 @@ def internal_error(error: Exception) -> Union[Response, Tuple[Response, int]]:
     logger.error_trace(f"500 error: {error}")
     return jsonify({"error": "Internal server error"}), 500
 
+@app.route('/auth', methods=['GET', 'POST'])
+def authenticate():
+    """
+    Authentication middleware that:
+    1. Validates Basic Auth credentials against SQLite database
+    2. Forwards authenticated requests to backend service
+    3. Adds X-Authenticated-User header for backend to identify the user
+
+    Database requirements:
+    - Table 'user' with columns: 'name' (username), 'password'
+    - Passwords must be hashed with Werkzeug's generate_password_hash()
+    """
+    if not os.path.isdir(CONFIG_ROOT) or not os.path.isfile(DB_PATH):
+      return
+
+    if is_authenticated():
+        return redirect("/")
+
+    if request.method == 'GET':
+        return render_template('auth.html', debug=DEBUG)
+
+    username = request.form.get("username")
+    password = request.form.get("password")
+
+    # Validate credentials against database
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT password FROM user WHERE name = ?", (username,))
+        row = cur.fetchone()
+        conn.close()
+
+        # Check if user exists and password is correct
+        if not row or not row[0] or not check_password_hash(row[0], password):
+            logger.error("User not found or password check failed")
+            return Response(
+                "Unauthorized",
+                401,
+            )
+
+        session["username"] = username
+        print(f"Authentication successful for user {username}")
+    except Exception as e:
+        logger.error_trace(f"CWA DB or authentication send_from_directory: {e}")
+        return Response("Internal Server Error", 500)
+
+    return redirect("/")
+
+def is_authenticated() -> bool:
+    if "username" in session and session["username"] is not None:
+        return True
+    return False
 
 # Register all routes with /request prefix
 register_dual_routes(app)
