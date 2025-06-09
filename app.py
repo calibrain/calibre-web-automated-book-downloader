@@ -3,16 +3,17 @@
 import logging
 import io, re, os
 import sqlite3
-from flask import Flask, request, jsonify, redirect, render_template, send_file, send_from_directory, session
+from functools import wraps
+from flask import Flask, request, jsonify, render_template, send_file, send_from_directory
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
-from werkzeug.wrappers import Request, Response
+from werkzeug.wrappers import Response
 from flask import url_for as flask_url_for
 import typing
 
 from logger import setup_logger
 from config import _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE
-from env import FLASK_HOST, FLASK_PORT, APP_ENV, CONFIG_ROOT, DB_PATH, DEBUG
+from env import FLASK_HOST, FLASK_PORT, APP_ENV, CWA_DB_PATH, DEBUG
 import backend
 
 from models import SearchFilters
@@ -33,10 +34,29 @@ werkzeug_logger.setLevel(logger.level)
 
 # Set up authentication defaults
 # The secret key will reset every time we restart, which will
-# require users to login again
+# require users to authenticate again
 app.config.update(
     SECRET_KEY = os.urandom(64)
 )
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # If the CWA_DB_PATH variable exists, but isn't a valid
+        # path, return a server error
+        if CWA_DB_PATH is not None and not os.path.isfile(CWA_DB_PATH):
+            logger.error(f"CWA_DB_PATH is set to {CWA_DB_PATH} but this is not a valid path")
+            return Response("Internal Server Error", 500)
+        if not authenticate():
+            return Response(
+                response="Unauthorized",
+                status=401,
+                headers={
+                    "WWW-Authenticate": 'Basic realm="Calibre-Web-Automated-Book-Downloader"',
+                },
+            )
+        return f(*args, **kwargs)
+    return decorated_function
 
 def register_dual_routes(app : Flask) -> None:
     """
@@ -78,14 +98,11 @@ def url_for_with_request(endpoint : str, **values : typing.Any) -> str:
     return flask_url_for(endpoint, **values)
 
 @app.route('/')
+@login_required
 def index() -> str:
     """
     Render main page with search and status table.
     """
-    if os.path.isdir(CONFIG_ROOT) or os.path.isfile(DB_PATH):
-      if not is_authenticated():
-        return redirect("/auth")
-
     return render_template('index.html', book_languages=_SUPPORTED_BOOK_LANGUAGE, default_language=BOOK_LANGUAGE, debug=DEBUG)
 
 @app.route('/favico<path:_>')
@@ -102,6 +119,7 @@ if DEBUG:
     import time
     from cloudflare_bypasser import _reset_driver as STOP_GUI
     @app.route('/debug', methods=['GET'])
+    @login_required
     def debug() -> Union[Response, Tuple[Response, int]]:
         """
         This will run the /app/debug.sh script, which will generate a debug zip with all the logs
@@ -136,6 +154,7 @@ if DEBUG:
             return jsonify({"error": str(e)}), 500
 
 @app.route('/api/search', methods=['GET'])
+@login_required
 def api_search() -> Union[Response, Tuple[Response, int]]:
     """
     Search for books matching the provided query.
@@ -174,6 +193,7 @@ def api_search() -> Union[Response, Tuple[Response, int]]:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/info', methods=['GET'])
+@login_required
 def api_info() -> Union[Response, Tuple[Response, int]]:
     """
     Get detailed book information.
@@ -198,6 +218,7 @@ def api_info() -> Union[Response, Tuple[Response, int]]:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/download', methods=['GET'])
+@login_required
 def api_download() -> Union[Response, Tuple[Response, int]]:
     """
     Queue a book for download.
@@ -222,6 +243,7 @@ def api_download() -> Union[Response, Tuple[Response, int]]:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/status', methods=['GET'])
+@login_required
 def api_status() -> Union[Response, Tuple[Response, int]]:
     """
     Get current download queue status.
@@ -237,6 +259,7 @@ def api_status() -> Union[Response, Tuple[Response, int]]:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/localdownload', methods=['GET'])
+@login_required
 def api_local_download() -> Union[Response, Tuple[Response, int]]:
     """
     Download an EPUB file from local storage if available.
@@ -300,33 +323,30 @@ def internal_error(error: Exception) -> Union[Response, Tuple[Response, int]]:
     logger.error_trace(f"500 error: {error}")
     return jsonify({"error": "Internal server error"}), 500
 
-@app.route('/auth', methods=['GET', 'POST'])
-def authenticate():
+def authenticate() -> bool:
     """
-    Authentication middleware that:
-    1. Validates Basic Auth credentials against SQLite database
-    2. Forwards authenticated requests to backend service
-    3. Adds X-Authenticated-User header for backend to identify the user
+    Helper function that validates Basic credentials
+    against a Calibre-Web app.db SQLite database
 
-    Database requirements:
+    Database structure:
     - Table 'user' with columns: 'name' (username), 'password'
-    - Passwords must be hashed with Werkzeug's generate_password_hash()
     """
-    if not os.path.isdir(CONFIG_ROOT) or not os.path.isfile(DB_PATH):
-      return
 
-    if is_authenticated():
-        return redirect("/")
+    # If the database doesn't exist, the user is always authenticated
+    if not CWA_DB_PATH:
+        return True
 
-    if request.method == 'GET':
-        return render_template('auth.html', debug=DEBUG)
+    # If no authorization object exists, return false to prompt
+    # a request to the user
+    if not request.authorization:
+        return False
 
-    username = request.form.get("username")
-    password = request.form.get("password")
+    username = request.authorization.get("username")
+    password = request.authorization.get("password")
 
     # Validate credentials against database
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(CWA_DB_PATH)
         cur = conn.cursor()
         cur.execute("SELECT password FROM user WHERE name = ?", (username,))
         row = cur.fetchone()
@@ -335,23 +355,14 @@ def authenticate():
         # Check if user exists and password is correct
         if not row or not row[0] or not check_password_hash(row[0], password):
             logger.error("User not found or password check failed")
-            return Response(
-                "Unauthorized",
-                401,
-            )
+            return False
 
-        session["username"] = username
-        print(f"Authentication successful for user {username}")
     except Exception as e:
         logger.error_trace(f"CWA DB or authentication send_from_directory: {e}")
-        return Response("Internal Server Error", 500)
+        return False
 
-    return redirect("/")
-
-def is_authenticated() -> bool:
-    if "username" in session and session["username"] is not None:
-        return True
-    return False
+    logger.info(f"Authentication successful for user {username}")
+    return True
 
 # Register all routes with /request prefix
 register_dual_routes(app)

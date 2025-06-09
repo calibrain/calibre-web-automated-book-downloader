@@ -60,11 +60,11 @@ An intuitive web interface for searching and requesting book downloads, designed
 | `TZ`              | Container timezone      | `UTC`              |
 | `UID`             | Runtime user ID         | `1000`             |
 | `GID`             | Runtime group ID        | `100`              |
-| `CONFIG_ROOT`     | Calibre-Web's /config   | None               |
+| `CWA_DB_PATH`     | Calibre-Web's database  | None               |
 | `ENABLE_LOGGING`  | Enable log file         | `true`             |
 | `LOG_LEVEL`       | Log level to use        | `info`             |
 
-If you wish to enable authentication, you must set CONFIG_ROOT to point to the directory containing Calibre-Web's app.db, in order to match the username and password.
+If you wish to enable authentication, you must set `CWA_DB_PATH` to point to Calibre-Web's `app.db`, in order to match the username and password.
 
 If logging is enabld, log folder default location is `/var/log/cwa-book-downloader`
 Available log levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Higher levels show fewer messages.
@@ -168,7 +168,7 @@ volumes:
 ```yaml
 volumes:
   - /your/local/path:/cwa-book-ingest
-  - /cwa/config/path:/config
+  - /cwa/config/path/app.db:/auth/app.db:ro
 ```
 
 Mount should align with your Calibre-Web-Automated ingest folder.
