@@ -4,6 +4,8 @@ from pathlib import Path
 def string_to_bool(s: str) -> bool:
     return s.lower() in ["true", "yes", "1", "y"]
 
+CWA_DB = os.getenv("CWA_DB_PATH")
+CWA_DB_PATH = Path(CWA_DB) if CWA_DB else None
 LOG_ROOT = Path(os.getenv("LOG_ROOT", "/var/log/"))
 LOG_DIR = LOG_ROOT / "cwa-book-downloader"
 TMP_DIR = Path(os.getenv("TMP_DIR", "/tmp/cwa-book-downloader"))
