@@ -10,10 +10,14 @@ services:
       APP_ENV: prod
       PUID: 1000
       PGID: 100
+      CWA_DB_PATH: /auth/app.db
     ports:
       - 8084:8084
     restart: unless-stopped
     volumes:
-    # This is where the books will be downloaded to, usually it would be 
-    # the same as whatever you gave in "calibre-web-automated"
+      # This is where the books will be downloaded to, usually it would be
+      # the same as whatever you gave in "calibre-web-automated"
       - /tmp/data/calibre-web/ingest:/cwa-book-ingest
+      # This is the location of CWA's app.db, which contains authentication
+      # details
+      - /cwa/config/path/app.db:/auth/app.db:ro
