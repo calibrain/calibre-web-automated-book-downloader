@@ -91,9 +91,3 @@ if CUSTOM_SCRIPT:
     elif not os.access(CUSTOM_SCRIPT, os.X_OK):
         logger.warn(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} is not executable")
         CUSTOM_SCRIPT = ""
-
-# Debugging settings
-VIRTUAL_SCREEN_SIZE = (1024, 768)
-RECORDING_DIR = env.LOG_DIR / "recording"
-if env.DEBUG:
-    RECORDING_DIR.mkdir(parents=True, exist_ok=True)
