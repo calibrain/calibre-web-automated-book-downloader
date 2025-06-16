@@ -11,11 +11,35 @@ from tqdm import tqdm
 
 from logger import setup_logger
 from config import PROXIES
-from env import MAX_RETRY, DEFAULT_SLEEP, USE_CF_BYPASS
-if USE_CF_BYPASS:
-    import cloudflare_bypasser
+from env import MAX_RETRY, DEFAULT_SLEEP, USE_CF_BYPASS, FLARESOLVERR_URL, FLARESOLVERR_PATH, FLARESOLVERR_TIMEOUT
 
 logger = setup_logger(__name__)
+
+
+def flaresolverr_get_page(url: str) -> Optional[str]:
+    """Fetch HTML content from a URL using Flaresolverr.
+    
+    Args:
+        url: Target URL
+        retry: Number of retry attempts
+        
+    Returns:
+        str: HTML content if successful, None otherwise
+    """
+    if not FLARESOLVERR_URL or not FLARESOLVERR_PATH:
+        logger.error("Wrong FlareSolverr configured. Please check your environment configuration.")
+        return None
+    fr_url = f"{FLARESOLVERR_URL}{FLARESOLVERR_PATH}"
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "cmd": "request.get",
+        "url": url,
+        "maxTimeout": FLARESOLVERR_TIMEOUT
+    }
+    response = requests.post(fr_url, headers=headers, json=data)
+    response.raise_for_status()
+    logger.debug(f"FlareSolverr response for '{url}': {response.json()['status']} - {response.json()['message']}")
+    return response.json()['solution']['response']
 
 
 def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) -> str:
@@ -34,12 +58,7 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) 
         logger.debug(f"html_get_page: {url}, retry: {retry}, use_bypasser: {use_bypasser}")
         if use_bypasser and USE_CF_BYPASS:
             logger.info(f"GET Using Cloudflare Bypasser for: {url}")
-            response_html = cloudflare_bypasser.get(url)
-            logger.debug(f"Cloudflare Bypasser response length: {len(response_html)}")
-            if response_html.strip() != "":
-                return response_html
-            else:
-                raise requests.exceptions.RequestException("Failed to bypass Cloudflare")
+            return flaresolverr_get_page(url)
         else:
             logger.info(f"GET: {url}")
             response = requests.get(url, proxies=PROXIES)

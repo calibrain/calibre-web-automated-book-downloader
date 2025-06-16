@@ -14,7 +14,12 @@ STATUS_TIMEOUT = int(os.getenv("STATUS_TIMEOUT", "3600"))
 USE_BOOK_TITLE = string_to_bool(os.getenv("USE_BOOK_TITLE", "false"))
 MAX_RETRY = int(os.getenv("MAX_RETRY", "10"))
 DEFAULT_SLEEP = int(os.getenv("DEFAULT_SLEEP", "5"))
+# Cloudflare Bypass settings
 USE_CF_BYPASS = string_to_bool(os.getenv("USE_CF_BYPASS", "true"))
+FLARESOLVERR_URL = os.getenv("FLARESOLVERR_URL").strip()
+FLARESOLVERR_PATH = os.getenv("FLARESOLVERR_PATH", "/v1").strip()
+FLARESOLVERR_TIMEOUT = int(os.getenv("FLARESOLVERR_TIMEOUT", "60000"))
+
 HTTP_PROXY = os.getenv("HTTP_PROXY", "").strip()
 HTTPS_PROXY = os.getenv("HTTPS_PROXY", "").strip()
 AA_DONATOR_KEY = os.getenv("AA_DONATOR_KEY", "").strip()
