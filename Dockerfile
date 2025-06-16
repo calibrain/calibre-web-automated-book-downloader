@@ -38,18 +38,10 @@ RUN apt-get update && \
     curl \
     # For entrypoint
     dumb-init \
-    # For dumb display
-    xvfb \
-    # For screen recording
-    ffmpeg \
     # For debug
     zip iputils-ping \
     # For user switching
-    sudo \
-    # --- Chromium Browser ---
-    chromium-driver \
-    # For tkinter (pyautogui)
-    python3-tk && \
+    sudo &&\
     # Cleanup APT cache *after* all installs in this layer
     apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false && \
     apt-get clean && \
@@ -72,11 +64,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
     # Clean root's pip cache
     rm -rf /root/.cache
-
-# Add this line to grant read/execute permissions to others
-RUN chmod -R o+rx /usr/bin/chromium && \
-    chmod -R o+rx /usr/bin/chromedriver && \
-    chmod -R o+w /usr/local/lib/python3.10/site-packages/seleniumbase/drivers/
 
 # Copy application code *after* dependencies are installed
 COPY . .
