@@ -290,11 +290,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             FILTERS.forEach(filterType => {
                 if (filterType === 'format') {
-                    // Handle format checkboxes
-                    const checkboxes = document.querySelectorAll(`[id^="${filterType}-"]:checked`);
-                    checkboxes.forEach(checkbox => {
-                        queryParams.push(`${filterType}=${encodeURIComponent(checkbox.value)}`);
-                    });
+                    // Handle format multi-select dropdown
+                    const select = document.getElementById('format-input');
+                    if (select) {
+                        const selectedOptions = Array.from(select.selectedOptions);
+                        selectedOptions.forEach(option => {
+                            queryParams.push(`${filterType}=${encodeURIComponent(option.value)}`);
+                        });
+                    }
                 } else {
                     const inputs = document.querySelectorAll(`[id^="${filterType}-input"]`);
                 
