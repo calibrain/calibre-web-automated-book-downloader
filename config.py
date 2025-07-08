@@ -8,9 +8,15 @@ from logger import setup_logger
 
 logger = setup_logger(__name__)
 
+SENSITIVE_KEYS = (
+    "AA_DONATOR_KEY",
+    "ZLIBRARY_USERNAME",
+    "ZLIBRARY_PASSWORD",
+)
+
 for key, value in env.__dict__.items():
     if not key.startswith('_'):
-        if key == "AA_DONATOR_KEY" and value.strip() != "":
+        if key in SENSITIVE_KEYS and value.strip() != "":
             value = "REDACTED"
         logger.info(f"{key}: {value}")
 

@@ -48,4 +48,7 @@ if USING_TOR:
     USE_DOH = False
     HTTP_PROXY = ""
     HTTPS_PROXY = ""
-    
+
+# Z-Library support
+ZLIBRARY_USERNAME = os.getenv("ZLIBRARY_USERNAME", None)
+ZLIBRARY_PASSWORD = os.getenv("ZLIBRARY_PASSWORD", None)
