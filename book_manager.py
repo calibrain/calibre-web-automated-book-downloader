@@ -92,14 +92,18 @@ def get_zlibrary_session_data(page_url: str, username: str, password: str) -> Op
 def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
     query_html = quote(query)
     if filters.isbn:
+        #ISBNs are included in query string
         isbns = " || ".join([f"('isbn13:{isbn}' || 'isbn10:{isbn}')" for isbn in filters.isbn])
         query_html = quote(f"({isbns}) {query}")
     filters_query = ""
+
     for value in filters.lang or BOOK_LANGUAGE:
         if value != "all":
             filters_query += f"&lang={quote(value)}"
+
     if filters.sort:
         filters_query += f"&sort={quote(filters.sort)}"
+
     if filters.content:
         for value in filters.content:
             filters_query += f"&content={quote(value)}"
@@ -109,6 +113,7 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
             for value in filter_values:
                 filters_query += f"&termtype_{index}={filter_type}&termval_{index}={quote(value)}"
                 index += 1
+
     url = (
         f"{AA_BASE_URL}"
         f"/search?index=&page=1&display=table"
@@ -116,14 +121,18 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
         f"&ext={'&ext='.join(SUPPORTED_FORMATS)}&q={query_html}"
         f"{filters_query}"
     )
+
     html = downloader.html_get_page(url)
     if not html:
         raise Exception("Failed to fetch search results")
+
     if "No files found." in html:
         logger.info(f"No books found for query: {query}")
         raise Exception("No books found. Please try another query.")
+
     soup = BeautifulSoup(html, 'html.parser')
     tbody: Tag | NavigableString | None = soup.find('table')
+
     if not tbody:
         logger.warning(f"No results table found for query: {query}")
         raise Exception("No books found. Please try another query.")
@@ -136,6 +145,7 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
                     books.append(book)
             except Exception as e:
                 logger.error_trace(f"Failed to parse search result row: {e}")
+
     books.sort(
         key=lambda x: (
             SUPPORTED_FORMATS.index(x.format)
@@ -143,13 +153,16 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
             else len(SUPPORTED_FORMATS)
         )
     )
+
     return books
 
 def _parse_search_result_row(row: Tag) -> Optional[BookInfo]:
+    """Parse a single search result row into a BookInfo object."""
     try:
         cells = row.find_all('td')
         preview_img = cells[0].find('img')
         preview = preview_img['src'] if preview_img else None
+
         return BookInfo(
             id=row.find_all('a')[0]['href'].split('/')[-1],
             preview=preview,
@@ -166,18 +179,33 @@ def _parse_search_result_row(row: Tag) -> Optional[BookInfo]:
         return None
 
 def get_book_info(book_id: str) -> BookInfo:
+    """Get detailed information for a specific book.
+    
+    Args:
+        book_id: Book identifier (MD5 hash)
+        
+    Returns:
+        BookInfo: Detailed book information
+    """
     url = f"{AA_BASE_URL}/md5/{book_id}"
     html = downloader.html_get_page(url)
+
     if not html:
         raise Exception(f"Failed to fetch book info for ID: {book_id}")
+    
     soup = BeautifulSoup(html, 'html.parser')
+
     return _parse_book_info_page(soup, book_id)
 
 def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
+    """Parse the book info page HTML into a BookInfo object."""
     data = soup.select_one('body > main > div:nth-of-type(1)')
+
     if not data:
         raise Exception(f"Failed to parse book info for ID: {book_id}")
+    
     preview: str = ""
+    
     node = data.select_one('div:nth-of-type(1) > img')
     if node:
         preview_value = node.get('src', "")
@@ -185,6 +213,8 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
             preview = preview_value[0]
         else:
             preview = preview_value
+
+    # Find the start of book information
     divs = data.find_all('div')
     start_div_id = next((i for i, div in enumerate(divs) if "🔍" in div.text), 3)
     format_div = divs[start_div_id - 1].text
@@ -193,12 +223,18 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         format = format_parts[1].split(",")[0].strip().lower()
     else:
         format = None
-    size = next((token.strip() for token in format_div.split(",") if token.strip() and token.strip()[0].isnumeric()), None)
+
+    size = next(
+        (token.strip() for token in format_div.split(",")
+         if token.strip() and token.strip()[0].isnumeric()),
+         None
+    )
     every_url = soup.find_all('a')
     slow_urls_no_waitlist = set()
     slow_urls_with_waitlist = set()
     external_urls_libgen = set()
     external_urls_z_lib = set()
+
     for url in every_url:
         try:
             if url.parent.text.strip().lower().startswith("option #"):
@@ -216,12 +252,15 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                         external_urls_z_lib.add(url['href'])
         except:
             pass
+
     if USE_CF_BYPASS:
         urls = list(slow_urls_no_waitlist) + list(external_urls_libgen) + list(slow_urls_with_waitlist) + list(external_urls_z_lib)
     else:
         urls = list(external_urls_libgen) + list(external_urls_z_lib) + list(slow_urls_no_waitlist) + list(slow_urls_with_waitlist)
     for i in range(len(urls)):
         urls[i] = downloader.get_absolute_url(AA_BASE_URL, urls[i])
+
+    # Extract basic information
     book_info = BookInfo(
         id=book_id,
         preview=preview,
@@ -234,13 +273,19 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     )
     info = _extract_book_metadata(divs[start_div_id + 3:])
     book_info.info = info
+
+    # Set language and year from metadata if available
     if info.get("Language"):
         book_info.language = info["Language"][0]
     if info.get("Year"):
         book_info.year = info["Year"][0]
+
     return book_info
 
 def _extract_book_metadata(metadata_divs: Union[ResultSet[Tag], List[Tag]]) -> Dict[str, List[str]]:
+    """Extract metadata from book info divs."""
+
+    # Process the first set of metadata
     info: Dict[str, List[str]] = {}
     sub_data = metadata_divs[0].find_all('div')
     for i in range(0, len(sub_data) - 1, 2):
@@ -249,6 +294,9 @@ def _extract_book_metadata(metadata_divs: Union[ResultSet[Tag], List[Tag]]) -> D
         if key not in info:
             info[key] = []
         info[key].append(value)
+    
+    # Process the second set of metadata (spans)
+    # Find elements where aria-label="code tabs"
     meta_spans: List[Tag] = []
     for div in metadata_divs:
         if div.find_all('div', {'aria-label': 'code tabs'}):
@@ -260,6 +308,8 @@ def _extract_book_metadata(metadata_divs: Union[ResultSet[Tag], List[Tag]]) -> D
         if key not in info:
             info[key] = []
         info[key].append(value)
+
+    # Filter relevant metadata
     relevant_prefixes = ["ISBN-", "ALTERNATIVE", "ASIN", "Goodreads", "Language", "Year"]
     return {
         k.strip(): v for k, v in info.items()
@@ -268,14 +318,19 @@ def _extract_book_metadata(metadata_divs: Union[ResultSet[Tag], List[Tag]]) -> D
     }
 
 def _get_download_url(link: str, title: str) -> str:
+    """Extract actual download URL from various source pages."""
+
     url = ""
+
     if link.startswith(f"{AA_BASE_URL}/dyn/api/fast_download.json"):
         page = downloader.html_get_page(link)
         url = json.loads(page).get("download_url")
     else:
         html = downloader.html_get_page(link)
+
         if not html:
             return ""
+        
         soup = BeautifulSoup(html, 'html.parser')
         
         if link.startswith(f"{AA_BASE_URL}/slow_download/"):
