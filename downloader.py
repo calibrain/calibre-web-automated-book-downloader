@@ -21,6 +21,17 @@ logger = setup_logger(__name__)
 
 
 def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) -> str:
+    """Fetch HTML content from a URL with retry mechanism.
+     
+     Args:
+         url: Target URL
+         retry: Number of retry attempts
+         skip_404: Whether to skip 404 errors
+         
+     Returns:
+         str: HTML content if successful, None otherwise
+    """
+    
     response = None
     try:
         logger.debug(f"html_get_page: {url}, retry: {retry}, use_bypasser: {use_bypasser}")
@@ -39,6 +50,7 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) 
             logger.debug(f"Success getting: {url}")
             time.sleep(1)
         return str(response.text)
+    
     except Exception as e:
         if retry == 0:
             logger.error_trace(f"Failed to fetch page: {url}, error: {e}")
