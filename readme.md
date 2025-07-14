@@ -170,6 +170,7 @@ volumes:
   - /your/local/path:/cwa-book-ingest
   - /cwa/config/path/app.db:/auth/app.db:ro
 ```
+**Note** - If your library volume is on a cifs share, you will get a "database locked" error until you add **nobrl** to your mount line in your fstab file. e.g. //192.168.1.1/Books /media/books cifs credentials=.smbcredentials,uid=1000,gid=1000,iocharset=utf8,**nobrl** - See https://github.com/crocodilestick/Calibre-Web-Automated/issues/64#issuecomment-2712769777
 
 Mount should align with your Calibre-Web-Automated ingest folder.
 
