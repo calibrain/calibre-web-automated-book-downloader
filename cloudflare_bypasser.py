@@ -110,6 +110,13 @@ def _bypass(sb, max_retries: int = MAX_RETRY) -> None:
 def _get_chromium_args():
     
     arguments = [
+        # Ignore certificate and SSL errors (similar to curl's --insecure)
+        "--ignore-certificate-errors",
+        "--ignore-ssl-errors",
+        "--allow-running-insecure-content",
+        "--disable-web-security",
+        "--ignore-certificate-errors-spki-list",
+        "--ignore-certificate-errors-skip-list"
     ]
     
     # Conditionally add verbose logging arguments

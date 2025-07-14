@@ -136,8 +136,7 @@ def _download_book(book_id: str) -> Optional[str]:
         if CUSTOM_SCRIPT:
             logger.info(f"Running custom script: {CUSTOM_SCRIPT}")
             subprocess.run([CUSTOM_SCRIPT, book_path])
-
-        intermediate_path = INGEST_DIR /  book_id # Without extension
+        intermediate_path = INGEST_DIR / f"{book_id}.crdownload"
         final_path = INGEST_DIR /  book_name
         
         if os.path.exists(book_path):
