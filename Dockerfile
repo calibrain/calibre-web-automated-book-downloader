@@ -34,6 +34,8 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     # For locale
     locales tzdata \
+    # For healthcheck
+    curl \
     # For entrypoint
     dumb-init \
     # For dumb display
@@ -76,12 +78,6 @@ RUN chmod -R o+rx /usr/bin/chromium && \
     chmod -R o+rx /usr/bin/chromedriver && \
     chmod -R o+w /usr/local/lib/python3.10/site-packages/seleniumbase/drivers/
 
-# Our custom wanabe curl
-RUN echo "#!/bin/sh" > /usr/local/bin/pyrequests && \
-    echo 'python -c "import sys, requests; url=sys.argv[1]; r=requests.get(url, timeout=60); print(r.text); sys.exit(0) if r.ok else sys.exit(1)" "$@"' \
-      >> /usr/local/bin/pyrequests && \
-      chmod +x /usr/local/bin/pyrequests
-
 # Copy application code *after* dependencies are installed
 COPY . .
 
@@ -97,7 +93,7 @@ EXPOSE ${FLASK_PORT}
 # Add healthcheck for container status
 # This will run as root initially, but check localhost which should work if the app binds correctly.
 HEALTHCHECK --interval=60s --timeout=60s --start-period=60s --retries=3 \
-    CMD pyrequests http://localhost:${FLASK_PORT}/request/api/status || exit 1
+    CMD curl -s http://localhost:${FLASK_PORT}/request/api/status > /dev/null || exit 1
 
 # Use dumb-init as the entrypoint to handle signals properly
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
