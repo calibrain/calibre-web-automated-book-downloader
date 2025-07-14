@@ -51,7 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
         download: '/request/api/download',
         status: '/request/api/status'
     };
-    const FILTERS = ['isbn', 'author', 'title', 'lang' , 'sort', "content"];
+    const FILTERS = ['isbn', 'author', 'title', 'lang' , 'sort', "content", "format"];
 
     // Utility Functions
     const utils = {
@@ -289,14 +289,22 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             FILTERS.forEach(filterType => {
-                const inputs = document.querySelectorAll(`[id^="${filterType}-input"]`);
-            
-                inputs.forEach(input => {
-                    const value = input.value.trim();
-                    if (value) {  
-                        queryParams.push(`${filterType}=${encodeURIComponent(value.trim())}`);
-                    }
-                });
+                if (filterType === 'format') {
+                    // Handle format checkboxes
+                    const checkboxes = document.querySelectorAll(`[id^="${filterType}-"]:checked`);
+                    checkboxes.forEach(checkbox => {
+                        queryParams.push(`${filterType}=${encodeURIComponent(checkbox.value)}`);
+                    });
+                } else {
+                    const inputs = document.querySelectorAll(`[id^="${filterType}-input"]`);
+                
+                    inputs.forEach(input => {
+                        const value = input.value.trim();
+                        if (value) {  
+                            queryParams.push(`${filterType}=${encodeURIComponent(value.trim())}`);
+                        }
+                    });
+                }
             });
 
             return queryParams.join('&');

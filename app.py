@@ -167,6 +167,7 @@ def api_search() -> Union[Response, Tuple[Response, int]]:
         lang (str): Book Language
         sort (str): Order to sort results
         content (str): Content type of book
+        format (str): File format filter (pdf, epub, mobi, azw3, fb2, djvu, cbz, cbr)
 
     Returns:
         flask.Response: JSON array of matching books or error response.
@@ -180,6 +181,7 @@ def api_search() -> Union[Response, Tuple[Response, int]]:
         lang = request.args.getlist('lang'),
         sort = request.args.get('sort'),
         content = request.args.getlist('content'),
+        format = request.args.getlist('format'),
     )
 
     if not query and not any(vars(filters).values()):

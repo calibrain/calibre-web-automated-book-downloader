@@ -128,3 +128,4 @@ class SearchFilters:
     lang: Optional[List[str]] = None
     sort: Optional[str] = None
     content: Optional[List[str]] = None
+    format: Optional[List[str]] = None
