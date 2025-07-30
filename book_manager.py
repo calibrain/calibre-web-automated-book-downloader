@@ -1,6 +1,6 @@
 """Book download manager handling search and retrieval operations."""
 
-import time, json
+import time, json, re
 from pathlib import Path
 from urllib.parse import quote
 from typing import List, Optional, Dict, Union
@@ -211,7 +211,10 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                     and url.next.next is not None
                     and "click “GET” at the top" in url.next.next.text.strip()
                 ):
-                    external_urls_libgen.add(url["href"])
+                    libgen_url = url["href"]
+                    # TODO : Temporary fix ? Maybe get URLs from https://open-slum.org/ ?
+                    libgen_url = libgen_url = re.sub(r'libgen\.(\w+)', 'libgen.bz', url["href"])
+                    external_urls_libgen.add(libgen_url)
                 elif url.text.strip().lower().startswith("z-lib"):
                     if ".onion/" not in url["href"]:
                         external_urls_z_lib.add(url["href"])
