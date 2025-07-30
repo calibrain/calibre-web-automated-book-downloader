@@ -114,7 +114,6 @@ def _get_chromium_args():
         "--ignore-certificate-errors",
         "--ignore-ssl-errors",
         "--allow-running-insecure-content",
-        "--disable-web-security",
         "--ignore-certificate-errors-spki-list",
         "--ignore-certificate-errors-skip-list"
     ]
