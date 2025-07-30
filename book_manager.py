@@ -221,19 +221,12 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         except:
             pass
 
-    if USE_CF_BYPASS:
-        urls = (list(external_urls_libgen)
-            + list(slow_urls_with_waitlist)
-            + list(external_urls_z_lib)
-        )
-    else:
-        urls = (
-            list(external_urls_libgen)
-            + list(external_urls_z_lib)
-        )
 
-    if AA_DONATOR_KEY != "":
-        urls = list(slow_urls_no_waitlist) + urls
+    urls = []
+    urls += list(slow_urls_no_waitlist) if USE_CF_BYPASS else []
+    urls += list(external_urls_libgen)
+    urls += list(slow_urls_with_waitlist)  if USE_CF_BYPASS else []
+    urls += list(external_urls_z_lib)
 
     for i in range(len(urls)):
         urls[i] = downloader.get_absolute_url(AA_BASE_URL, urls[i])
