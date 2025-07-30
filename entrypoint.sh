@@ -111,7 +111,7 @@ make_writable /cwa-book-ingest
 # Set the command to run based on the environment
 is_prod=$(echo "$APP_ENV" | tr '[:upper:]' '[:lower:]')
 if [ "$is_prod" = "prod" ]; then 
-    command="gunicorn -t 300 -b 0.0.0.0:${FLASK_PORT:-8084} app:app"
+    command="gunicorn -t 300 -b ${FLASK_HOST:-0.0.0.0}:${FLASK_PORT:-8084} app:app"
 else
     command="python3 app.py"
 fi
