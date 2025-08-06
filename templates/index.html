@@ -22,6 +22,11 @@
             <h1 class="uk-heading-medium" style="color: white;">Book Search & Download</h1>
             <div class="uk-margin-right">
                 {% if debug %}
+                <form action="/api/restart" method="get" style="display: inline;" id="restart-form">
+                    <button class="uk-button uk-button-danger uk-margin-small-right" id="restart-button" type="submit">
+                        RESTART <span uk-spinner="ratio: 0.8" class="uk-hidden" id="restart-spinner"></span>
+                    </button>
+                </form>
                 <form action="/debug" method="get" style="display: inline;" id="debug-form">
                     <button class="uk-button uk-button-danger uk-margin-small-right" id="debug-button" type="submit">
                         DEBUG <span uk-spinner="ratio: 0.8" class="uk-hidden" id="debug-spinner"></span>

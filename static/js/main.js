@@ -32,6 +32,11 @@ document.addEventListener('DOMContentLoaded', () => {
             form: document.getElementById('debug-form'),
             button: document.getElementById('debug-button'),
             spinner: document.getElementById('debug-spinner')
+        },
+        restart: {
+            form: document.getElementById('restart-form'),
+            button: document.getElementById('restart-button'),
+            spinner: document.getElementById('restart-spinner')
         }
     };
 
@@ -753,6 +758,49 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // Restart Functions
+    const restart = {
+        init() {
+            if (!elements.restart.form) return;
+            
+            elements.restart.form.addEventListener('submit', (e) => {
+                e.preventDefault(); // Prevent default form submission
+                
+                if (elements.restart.button.disabled) {
+                    return; // Prevent multiple submissions
+                }
+                
+                // Show confirmation dialog
+                UIkit.modal.confirm('Are you sure you want to restart the application? This will interrupt any ongoing downloads.').then(() => {
+                    // User confirmed, proceed with restart
+                    elements.restart.spinner.classList.remove('uk-hidden');
+                    elements.restart.button.disabled = true;
+                    
+                    // Show restarting message
+                    UIkit.notification({
+                        message: 'Application restarting...',
+                        status: 'warning',
+                        pos: 'top-center',
+                        timeout: 5000
+                    });
+                    
+                    // Make the restart request - this will kill the server
+                    fetch(elements.restart.form.action)
+                        .catch(() => {
+                            // Expected to fail when server shuts down
+                        });
+                    
+                    // Wait a bit then refresh the page to reconnect to the restarted server
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 3000);
+                }, () => {
+                    // User cancelled, do nothing
+                });
+            });
+        }
+    };
+
     // Event Listeners
     function setupEventListeners() {
         // Search events
@@ -830,6 +878,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setupEventListeners();
         theme.init();  // Initialize theme management
         debug.init();  // Initialize debug functionality
+        restart.init(); // Initialize restart functionality
         status.fetch();
         setInterval(() => status.fetch(), REFRESH_INTERVAL);
     }
