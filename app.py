@@ -153,6 +153,15 @@ if DEBUG:
             logger.error_trace(f"Debug endpoint error: {e}")
             return jsonify({"error": str(e)}), 500
 
+if DEBUG:
+    @app.route('/api/restart', methods=['GET'])
+    @login_required
+    def restart() -> Union[Response, Tuple[Response, int]]:
+        """
+        Restart the application
+        """
+        os._exit(0)
+
 @app.route('/api/search', methods=['GET'])
 @login_required
 def api_search() -> Union[Response, Tuple[Response, int]]:
