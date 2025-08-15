@@ -166,6 +166,9 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         else:
             preview = preview_value
 
+    data = data.select_one("div:nth-of-type(1)")
+    while "🔍" not in data.text:
+        data = data.parent
     # Find the start of book information
     divs = data.find_all("div")
     start_div_id = next((i for i, div in enumerate(divs) if "🔍" in div.text), 3)
