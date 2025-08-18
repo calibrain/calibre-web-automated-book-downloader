@@ -120,6 +120,8 @@ def get_absolute_url(base_url: str, url: str) -> str:
     """
     if url.strip() == "":
         return ""
+    if url.strip("#") == "":
+        return ""
     if url.startswith("http"):
         return url
     parsed_url = urlparse(url)

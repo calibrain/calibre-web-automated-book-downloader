@@ -166,28 +166,10 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         else:
             preview = preview_value
 
-    data = data.select_one("div:nth-of-type(1)")
-    while "🔍" not in data.text:
-        data = data.parent
-    # Find the start of book information
-    divs = data.find_all("div")
-    start_div_id = next((i for i, div in enumerate(divs) if "🔍" in div.text), 3)
-
-    format_div = divs[start_div_id - 1].text
-    format_parts = format_div.split(".")
-    if len(format_parts) > 1:
-        format = format_parts[1].split(",")[0].strip().lower()
-    else:
-        format = None
-
-    size = next(
-        (
-            token.strip()
-            for token in format_div.split(",")
-            if token.strip() and token.strip()[0].isnumeric()
-        ),
-        None,
-    )
+    data = soup.find_all("div", {"class": "main-inner"})[0].find_next("div")
+    divs = list(data.children)
+    format = divs[13].text.split(" · ")[1].strip().lower()
+    size = divs[13].text.split(" · ")[2].strip().lower()
 
     every_url = soup.find_all("a")
     slow_urls_no_waitlist = set()
@@ -197,30 +179,29 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     for url in every_url:
         try:
-            if url.parent.text.strip().lower().startswith("option #"):
-                if url.text.strip().lower().startswith("slow partner server"):
-                    if (
-                        url.next is not None
-                        and url.next.next is not None
-                        and "waitlist" in url.next.next.strip().lower()
-                    ):
-                        internal_text = url.next.next.strip().lower()
-                        if "no waitlist" in internal_text:
-                            slow_urls_no_waitlist.add(url["href"])
-                        else:
-                            slow_urls_with_waitlist.add(url["href"])
-                elif (
+            if url.text.strip().lower().startswith("slow partner server"):
+                if (
                     url.next is not None
                     and url.next.next is not None
-                    and "click “GET” at the top" in url.next.next.text.strip()
+                    and "waitlist" in url.next.next.strip().lower()
                 ):
-                    libgen_url = url["href"]
-                    # TODO : Temporary fix ? Maybe get URLs from https://open-slum.org/ ?
-                    libgen_url = libgen_url = re.sub(r'libgen\.(\w+)', 'libgen.bz', url["href"])
-                    external_urls_libgen.add(libgen_url)
-                elif url.text.strip().lower().startswith("z-lib"):
-                    if ".onion/" not in url["href"]:
-                        external_urls_z_lib.add(url["href"])
+                    internal_text = url.next.next.strip().lower()
+                    if "no waitlist" in internal_text:
+                        slow_urls_no_waitlist.add(url["href"])
+                    else:
+                        slow_urls_with_waitlist.add(url["href"])
+            elif (
+                url.next is not None
+                and url.next.next is not None
+                and "click “GET” at the top" in url.next.next.text.strip()
+            ):
+                libgen_url = url["href"]
+                # TODO : Temporary fix ? Maybe get URLs from https://open-slum.org/ ?
+                libgen_url = libgen_url = re.sub(r'libgen\.(\w+)', 'libgen.bz', url["href"])
+                external_urls_libgen.add(libgen_url)
+            elif url.text.strip().lower().startswith("z-lib"):
+                if ".onion/" not in url["href"]:
+                    external_urls_z_lib.add(url["href"])
         except:
             pass
 
@@ -234,20 +215,23 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     for i in range(len(urls)):
         urls[i] = downloader.get_absolute_url(AA_BASE_URL, urls[i])
 
+    # Remove empty urls
+    urls = [url for url in urls if url != ""]
+
     # Extract basic information
     book_info = BookInfo(
         id=book_id,
         preview=preview,
-        title=divs[start_div_id].next,
-        publisher=divs[start_div_id + 1].next,
-        author=divs[start_div_id + 2].next,
+        title=divs[7].next.strip(),
+        publisher=divs[11].text.strip(),
+        author=divs[9].text.strip(),
         format=format,
         size=size,
         download_urls=urls,
     )
 
     # Extract additional metadata
-    info = _extract_book_metadata(divs[start_div_id + 3 :])
+    info = _extract_book_metadata(divs[-6])
     book_info.info = info
 
     # Set language and year from metadata if available
@@ -260,33 +244,27 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
 
 def _extract_book_metadata(
-    metadata_divs: Union[ResultSet[Tag], List[Tag]],
+    metadata_divs
 ) -> Dict[str, List[str]]:
     """Extract metadata from book info divs."""
     info: Dict[str, List[str]] = {}
 
     # Process the first set of metadata
-    sub_data = metadata_divs[0].find_all("div")
-    for i in range(0, len(sub_data) - 1, 2):
-        key = sub_data[i].next
-        value = sub_data[i + 1].next
+    sub_datas = metadata_divs.find_all("div")[0]
+    sub_datas = list(sub_datas.children)
+    for sub_data in sub_datas:
+        if sub_data.text.strip() == "":
+            continue
+        sub_data = list(sub_data.children)
+        key = sub_data[0].text.strip()
+        value = sub_data[1].text.strip()
         if key not in info:
-            info[key] = []
-        info[key].append(value)
-
-    # Process the second set of metadata (spans)
-    # Find elements where aria-label="code tabs"
-    meta_spans: List[Tag] = []
-    for div in metadata_divs:
-        if div.find_all("div", {"aria-label": "code tabs"}):
-            meta_spans = div.find_all("span")
-            break
-    for i in range(0, len(meta_spans) - 1, 2):
-        key = meta_spans[i].next
-        value = meta_spans[i + 1].next
-        if key not in info:
-            info[key] = []
-        info[key].append(value)
+            info[key] = set()
+        info[key].add(value)
+    
+    # make set into list
+    for key, value in info.items():
+        info[key] = list(value)
 
     # Filter relevant metadata
     relevant_prefixes = [
