@@ -2,7 +2,13 @@ name: Create and publish Docker images
 
 on:
   push:
-    branches: ['main']
+    branches:
+      - 'main'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - 'main'  
   workflow_dispatch:
 
 env:
@@ -38,7 +44,8 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value={{commit_date 'YYYYMMDD'}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
             type=sha
             type=ref,event=branch
             type=ref,event=tag
@@ -74,7 +81,8 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-tor
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value={{commit_date 'YYYYMMDD'}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
             type=sha
             type=ref,event=branch
             type=ref,event=tag
