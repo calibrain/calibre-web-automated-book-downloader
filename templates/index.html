@@ -193,7 +193,7 @@
             <!-- Status Section -->
             <ul uk-accordion="animation: false" id="status-section">
                 <li id="search-accordion">
-                <a class="uk-accordion-title" href><h1 class="uk-heading-xsmall">Download Status</h1></a>
+                <a class="uk-accordion-title" href><h1 class="uk-heading-xsmall">Download Queue & Status</h1></a>
                 <div class="uk-accordion-content">
                     <div id="status-loading" class="uk-flex uk-flex-center" role="status" hidden>
                         <div uk-spinner="ratio: 2"></div>
@@ -201,13 +201,33 @@
                     </div>
                     <div class="status-content">
                         <div class="uk-overflow-auto">
-                            <table id="status-table" class="uk-table uk-table-hover uk-table-divider" role="grid">
+                            <!-- Queue Management Controls -->
+                            <div class="uk-margin-small-bottom">
+                                <div class="uk-flex uk-flex-between uk-flex-wrap uk-flex-middle">
+                                    <div class="uk-flex uk-flex-wrap uk-flex-middle">
+                                        <button class="uk-button uk-button-default uk-button-small uk-margin-small-right" id="refresh-status-button">
+                                            <span uk-icon="icon: refresh"></span> Refresh
+                                        </button>
+                                        <button class="uk-button uk-button-secondary uk-button-small uk-margin-small-right" id="clear-completed-button">
+                                            <span uk-icon="icon: trash"></span> Clear Completed
+                                        </button>
+                                        <span class="uk-text-small uk-text-muted uk-margin-small-right" id="active-downloads-count">Active: 0</span>
+                                    </div>
+                                    <div class="uk-flex uk-flex-middle">
+                                        <label class="uk-text-small uk-margin-small-right">Max Concurrent:</label>
+                                        <span class="uk-text-small uk-text-bold" id="max-concurrent-display">3</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <table id="status-table" class="uk-table uk-table-hover uk-table-divider uk-table-small" role="grid">
                                 <thead>
                                     <tr>
                                         <th scope="col">Status</th>
-                                        <th scope="col">Book ID</th>
+                                        <th scope="col">Priority</th>
                                         <th scope="col">Title</th>
-                                        <th scope="col">Preview</th>
+                                        <th scope="col">Progress</th>
+                                        <th scope="col">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>

@@ -245,9 +245,10 @@ def api_download() -> Union[Response, Tuple[Response, int]]:
         return jsonify({"error": "No book ID provided"}), 400
 
     try:
-        success = backend.queue_book(book_id)
+        priority = int(request.args.get('priority', 0))
+        success = backend.queue_book(book_id, priority)
         if success:
-            return jsonify({"status": "queued"})
+            return jsonify({"status": "queued", "priority": priority})
         return jsonify({"error": "Failed to queue book"}), 500
     except Exception as e:
         logger.error_trace(f"Download error: {e}")
@@ -304,6 +305,142 @@ def api_local_download() -> Union[Response, Tuple[Response, int]]:
 
     except Exception as e:
         logger.error_trace(f"Local download error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/download/<book_id>/cancel', methods=['DELETE'])
+@login_required
+def api_cancel_download(book_id: str) -> Union[Response, Tuple[Response, int]]:
+    """
+    Cancel a download.
+
+    Path Parameters:
+        book_id (str): Book identifier to cancel
+
+    Returns:
+        flask.Response: JSON status indicating success or failure.
+    """
+    try:
+        success = backend.cancel_download(book_id)
+        if success:
+            return jsonify({"status": "cancelled", "book_id": book_id})
+        return jsonify({"error": "Failed to cancel download or book not found"}), 404
+    except Exception as e:
+        logger.error_trace(f"Cancel download error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/queue/<book_id>/priority', methods=['PUT'])
+@login_required
+def api_set_priority(book_id: str) -> Union[Response, Tuple[Response, int]]:
+    """
+    Set priority for a queued book.
+
+    Path Parameters:
+        book_id (str): Book identifier
+
+    Request Body:
+        priority (int): New priority level (lower number = higher priority)
+
+    Returns:
+        flask.Response: JSON status indicating success or failure.
+    """
+    try:
+        data = request.get_json()
+        if not data or 'priority' not in data:
+            return jsonify({"error": "Priority not provided"}), 400
+            
+        priority = int(data['priority'])
+        success = backend.set_book_priority(book_id, priority)
+        
+        if success:
+            return jsonify({"status": "updated", "book_id": book_id, "priority": priority})
+        return jsonify({"error": "Failed to update priority or book not found"}), 404
+    except ValueError:
+        return jsonify({"error": "Invalid priority value"}), 400
+    except Exception as e:
+        logger.error_trace(f"Set priority error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/queue/reorder', methods=['POST'])
+@login_required
+def api_reorder_queue() -> Union[Response, Tuple[Response, int]]:
+    """
+    Bulk reorder queue by setting new priorities.
+
+    Request Body:
+        book_priorities (dict): Mapping of book_id to new priority
+
+    Returns:
+        flask.Response: JSON status indicating success or failure.
+    """
+    try:
+        data = request.get_json()
+        if not data or 'book_priorities' not in data:
+            return jsonify({"error": "book_priorities not provided"}), 400
+            
+        book_priorities = data['book_priorities']
+        if not isinstance(book_priorities, dict):
+            return jsonify({"error": "book_priorities must be a dictionary"}), 400
+            
+        # Validate all priorities are integers
+        for book_id, priority in book_priorities.items():
+            if not isinstance(priority, int):
+                return jsonify({"error": f"Invalid priority for book {book_id}"}), 400
+                
+        success = backend.reorder_queue(book_priorities)
+        
+        if success:
+            return jsonify({"status": "reordered", "updated_count": len(book_priorities)})
+        return jsonify({"error": "Failed to reorder queue"}), 500
+    except Exception as e:
+        logger.error_trace(f"Reorder queue error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/queue/order', methods=['GET'])
+@login_required
+def api_queue_order() -> Union[Response, Tuple[Response, int]]:
+    """
+    Get current queue order for display.
+
+    Returns:
+        flask.Response: JSON array of queued books with their order and priorities.
+    """
+    try:
+        queue_order = backend.get_queue_order()
+        return jsonify({"queue": queue_order})
+    except Exception as e:
+        logger.error_trace(f"Queue order error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/downloads/active', methods=['GET'])
+@login_required
+def api_active_downloads() -> Union[Response, Tuple[Response, int]]:
+    """
+    Get list of currently active downloads.
+
+    Returns:
+        flask.Response: JSON array of active download book IDs.
+    """
+    try:
+        active_downloads = backend.get_active_downloads()
+        return jsonify({"active_downloads": active_downloads})
+    except Exception as e:
+        logger.error_trace(f"Active downloads error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/queue/clear', methods=['DELETE'])
+@login_required
+def api_clear_completed() -> Union[Response, Tuple[Response, int]]:
+    """
+    Clear all completed, errored, or cancelled books from tracking.
+
+    Returns:
+        flask.Response: JSON with count of removed books.
+    """
+    try:
+        removed_count = backend.clear_completed()
+        return jsonify({"status": "cleared", "removed_count": removed_count})
+    except Exception as e:
+        logger.error_trace(f"Clear completed error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.errorhandler(404)

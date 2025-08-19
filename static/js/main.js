@@ -54,7 +54,13 @@ document.addEventListener('DOMContentLoaded', () => {
         search: '/request/api/search',
         info: '/request/api/info',
         download: '/request/api/download',
-        status: '/request/api/status'
+        status: '/request/api/status',
+        cancelDownload: '/request/api/download',
+        setPriority: '/request/api/queue',
+        reorderQueue: '/request/api/queue/reorder',
+        queueOrder: '/request/api/queue/order',
+        activeDownloads: '/request/api/downloads/active',
+        clearCompleted: '/request/api/queue/clear'
     };
     const FILTERS = ['isbn', 'author', 'title', 'lang' , 'sort', "content", "format"];
 
@@ -231,10 +237,27 @@ document.addEventListener('DOMContentLoaded', () => {
             modal.open();
         },
 
-        async confirmDownload(bookIds) {
-            bookIds.map((bookId) =>
-                utils.fetchJson(`${API_ENDPOINTS.download}?id=${encodeURIComponent(bookId)}`)
-            );
+        async confirmDownload(bookIds, priority = 0) {
+            try {
+                await Promise.all(bookIds.map((bookId) =>
+                    utils.fetchJson(`${API_ENDPOINTS.download}?id=${encodeURIComponent(bookId)}&priority=${priority}`)
+                ));
+                
+                UIkit.notification({
+                    message: `Successfully queued ${bookIds.length} book${bookIds.length > 1 ? 's' : ''} for download!`,
+                    status: 'success',
+                    timeout: 3000
+                });
+                
+                status.fetch();
+            } catch (error) {
+                console.error('Download error:', error);
+                UIkit.notification({
+                    message: 'Failed to queue some books for download.',
+                    status: 'danger',
+                    timeout: 3000
+                });
+            }
 
             this.clearAllCheckboxes();
             modal.close();
@@ -251,6 +274,106 @@ document.addEventListener('DOMContentLoaded', () => {
 
             selectedBooks.clear();
             utils.updateDownloadSelectedButton();
+        }
+    };
+
+    // Queue Management Functions
+    const queue = {
+        async cancelDownload(bookId) {
+            try {
+                const response = await fetch(`${API_ENDPOINTS.cancelDownload}/${bookId}/cancel`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    UIkit.notification({
+                        message: 'Download cancelled successfully',
+                        status: 'success',
+                        timeout: 2000
+                    });
+                    status.fetch();
+                    this.updateActiveDownloads();
+                } else {
+                    throw new Error('Failed to cancel download');
+                }
+            } catch (error) {
+                console.error('Cancel download error:', error);
+                UIkit.notification({
+                    message: 'Failed to cancel download',
+                    status: 'danger',
+                    timeout: 3000
+                });
+            }
+        },
+
+        async setPriority(bookId, priority) {
+            try {
+                const response = await fetch(`${API_ENDPOINTS.setPriority}/${bookId}/priority`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ priority })
+                });
+                
+                if (response.ok) {
+                    UIkit.notification({
+                        message: `Priority updated to ${priority}`,
+                        status: 'success',
+                        timeout: 2000
+                    });
+                    status.fetch();
+                } else {
+                    throw new Error('Failed to update priority');
+                }
+            } catch (error) {
+                console.error('Set priority error:', error);
+                UIkit.notification({
+                    message: 'Failed to update priority',
+                    status: 'danger',
+                    timeout: 3000
+                });
+            }
+        },
+
+        async clearCompleted() {
+            try {
+                const response = await fetch(API_ENDPOINTS.clearCompleted, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    UIkit.notification({
+                        message: `Cleared ${data.removed_count} completed items`,
+                        status: 'success',
+                        timeout: 2000
+                    });
+                    status.fetch();
+                } else {
+                    throw new Error('Failed to clear completed items');
+                }
+            } catch (error) {
+                console.error('Clear completed error:', error);
+                UIkit.notification({
+                    message: 'Failed to clear completed items',
+                    status: 'danger',
+                    timeout: 3000
+                });
+            }
+        },
+
+        async updateActiveDownloads() {
+            try {
+                const data = await utils.fetchJson(API_ENDPOINTS.activeDownloads);
+                const count = data.active_downloads ? data.active_downloads.length : 0;
+                const element = document.getElementById('active-downloads-count');
+                if (element) {
+                    element.textContent = `Active: ${count}`;
+                }
+            } catch (error) {
+                console.error('Update active downloads error:', error);
+            }
         }
     };
 
@@ -522,6 +645,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 utils.showLoading(elements.statusLoading);
                 const data = await utils.fetchJson(API_ENDPOINTS.status);
                 this.display(data);
+                queue.updateActiveDownloads();
             } catch (error) {
                 this.handleError(error);
             } finally {
@@ -552,23 +676,70 @@ document.addEventListener('DOMContentLoaded', () => {
                 textContent: status
             });
 
+            // Priority cell with editable input for queued items
+            const priorityCell = utils.createElement('td');
+            if (status === 'queued') {
+                const priorityInput = utils.createElement('input', {
+                    type: 'number',
+                    className: 'uk-input uk-form-small uk-form-width-xsmall',
+                    value: book.priority || 0,
+                    min: 0,
+                    onchange: () => queue.setPriority(book.id, parseInt(priorityInput.value))
+                });
+                priorityCell.appendChild(priorityInput);
+            } else {
+                priorityCell.textContent = book.priority || '-';
+            }
+
+            // Title with download link if available
             let titleElement;
             if (book.download_path != null) {
                 titleElement = utils.createElement('a', {
                     href: `/request/api/localdownload?id=${book.id}`,
                     target: '_blank',
-                    textContent: book.title || 'N/A'
+                    textContent: book.title || 'N/A',
+                    className: 'uk-link'
                 });
+            } else {
+                titleElement = document.createTextNode(book.title || 'N/A');
             }
-            else {
-                titleElement = utils.createElement('td', { textContent: book.title || 'N/A' })
+            const titleCell = utils.createElement('td');
+            titleCell.appendChild(titleElement);
+
+            // Progress cell
+            const progressCell = utils.createElement('td');
+            if (status === 'downloading' && book.progress !== undefined) {
+                const progressBar = utils.createElement('progress', {
+                    className: 'uk-progress',
+                    value: book.progress,
+                    max: 100
+                });
+                progressCell.appendChild(progressBar);
+                progressCell.appendChild(document.createTextNode(` ${Math.round(book.progress)}%`));
+            } else {
+                progressCell.textContent = '-';
             }
 
-            const row = utils.createElement('tr', {}, [
+            // Actions cell
+            const actionsCell = utils.createElement('td');
+            if (status === 'queued' || status === 'downloading') {
+                const cancelBtn = utils.createElement('button', {
+                    className: 'uk-button uk-button-danger uk-button-small',
+                    textContent: 'Cancel',
+                    onclick: () => queue.cancelDownload(book.id)
+                });
+                actionsCell.appendChild(cancelBtn);
+            }
+
+            const row = utils.createElement('tr', {
+                'data-book-id': book.id,
+                'data-status': status
+            }, [
                 statusCell,
-                utils.createElement('td', { textContent: book.id }),
-                titleElement,
-                this.createPreviewCell(book.preview)
+                priorityCell,
+                titleCell,
+                progressCell,
+                actionsCell
             ]);
 
             elements.statusTableBody.appendChild(row);
@@ -838,6 +1009,26 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         // Download selected books
         elements.downloadSelectedButton.addEventListener('click', utils.handleDownloadSelected);
+        
+        // Queue management buttons
+        const refreshButton = document.getElementById('refresh-status-button');
+        if (refreshButton) {
+            refreshButton.addEventListener('click', () => {
+                status.fetch();
+                queue.updateActiveDownloads();
+            });
+        }
+        
+        const clearCompletedButton = document.getElementById('clear-completed-button');
+        if (clearCompletedButton) {
+            clearCompletedButton.addEventListener('click', () => {
+                UIkit.modal.confirm('Are you sure you want to clear all completed downloads?').then(() => {
+                    queue.clearCompleted();
+                }, () => {
+                    // User cancelled
+                });
+            });
+        }
 
         // Check/uncheck all book checkboxes
         elements.selectAllCheckbox.addEventListener('change', (event) => {
@@ -880,6 +1071,7 @@ document.addEventListener('DOMContentLoaded', () => {
         debug.init();  // Initialize debug functionality
         restart.init(); // Initialize restart functionality
         status.fetch();
+        queue.updateActiveDownloads();
         setInterval(() => status.fetch(), REFRESH_INTERVAL);
     }
 

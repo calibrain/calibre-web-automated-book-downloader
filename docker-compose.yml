@@ -1,6 +1,9 @@
 services:
   calibre-web-automated-book-downloader:
     image: ghcr.io/calibrain/calibre-web-automated-book-downloader:latest
+    # Uncomment to build the image from the Dockerfile for local testing changes.
+    # Remember to comment out the image line above.
+    #build: .
     container_name: calibre-web-automated-book-downloader
     environment:
       FLASK_PORT: 8084
@@ -11,7 +14,10 @@ services:
       APP_ENV: prod
       UID: 1000
       GID: 100
-      CWA_DB_PATH: /auth/app.db
+      # CWA_DB_PATH: /auth/app.db  # Comment out to disable authentication
+      # Queue management settings
+      MAX_CONCURRENT_DOWNLOADS: 3
+      DOWNLOAD_PROGRESS_UPDATE_INTERVAL: 5
     ports:
       - 8084:8084
     restart: unless-stopped
@@ -20,5 +26,5 @@ services:
       # the same as whatever you gave in "calibre-web-automated"
       - /tmp/data/calibre-web/ingest:/cwa-book-ingest
       # This is the location of CWA's app.db, which contains authentication
-      # details
+      # details. Comment out to disable authentication
       #- /cwa/config/path/app.db:/auth/app.db:ro

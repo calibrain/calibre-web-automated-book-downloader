@@ -33,6 +33,8 @@ else:
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 ENABLE_LOGGING = string_to_bool(os.getenv("ENABLE_LOGGING", "true"))
 MAIN_LOOP_SLEEP_TIME = int(os.getenv("MAIN_LOOP_SLEEP_TIME", "5"))
+MAX_CONCURRENT_DOWNLOADS = int(os.getenv("MAX_CONCURRENT_DOWNLOADS", "3"))
+DOWNLOAD_PROGRESS_UPDATE_INTERVAL = int(os.getenv("DOWNLOAD_PROGRESS_UPDATE_INTERVAL", "5"))
 DOCKERMODE = string_to_bool(os.getenv("DOCKERMODE", "false"))
 _CUSTOM_DNS = os.getenv("CUSTOM_DNS", "").strip()
 USE_DOH = string_to_bool(os.getenv("USE_DOH", "false"))
