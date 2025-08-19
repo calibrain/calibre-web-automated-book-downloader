@@ -176,6 +176,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     slow_urls_with_waitlist = set()
     external_urls_libgen = set()
     external_urls_z_lib = set()
+    external_urls_welib = set()
 
     for url in every_url:
         try:
@@ -209,6 +210,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     urls = []
     urls += list(slow_urls_no_waitlist) if USE_CF_BYPASS else []
     urls += list(external_urls_libgen)
+    urls += list( _get_download_urls_from_welib(book_id))  if USE_CF_BYPASS else []
     urls += list(slow_urls_with_waitlist)  if USE_CF_BYPASS else []
     urls += list(external_urls_z_lib)
 
@@ -242,6 +244,18 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     return book_info
 
+def _get_download_urls_from_welib(book_id: str) -> List[str]:
+    """Get download urls from welib.org."""
+    url = f"https://welib.org/md5/{book_id}"
+    html = downloader.html_get_page(url, use_bypasser=True)
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    download_links = soup.find_all("a", href=True)
+    download_links = [link["href"] for link in download_links]
+    download_links = [link for link in download_links if "/slow_download/" in link]
+    download_links = [downloader.get_absolute_url(url, link) for link in download_links]
+    return set(download_links)
 
 def _extract_book_metadata(
     metadata_divs
@@ -347,7 +361,7 @@ def _get_download_url(link: str, title: str) -> str:
             download_link = soup.find_all("a", href=True, class_="addDownloadedBook")
             if download_link:
                 url = download_link[0]["href"]
-        elif link.startswith(f"{AA_BASE_URL}/slow_download/"):
+        elif "/slow_download/" in link:
             download_links = soup.find_all("a", href=True, string="📚 Download now")
             if not download_links:
                 countdown = soup.find_all("span", class_="js-partner-countdown")
