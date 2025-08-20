@@ -6,9 +6,6 @@ on:
       - 'main'
     tags:
       - 'v*'
-  pull_request:
-    branches:
-      - 'main'  
   workflow_dispatch:
 
 env:
@@ -26,7 +23,7 @@ jobs:
     steps:
       - name: Get current date
         id: date
-        run: echo "::set-output name=date::$(date +'%Y-%m-%d')"
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
       - name: Checkout repository
         uses: actions/checkout@v4
       - name: Log in to the Container registry
@@ -43,11 +40,11 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=dev,enable={{is_default_branch}}
+            type=raw,value=latest,enable={{is_tag}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
-            type=ref,event=branch
             type=ref,event=tag
       
       - name: Set up Docker Buildx
@@ -60,13 +57,14 @@ jobs:
           platforms: linux/amd64,linux/arm64
           context: .
           target: cwa-bd
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           build-args: |
             BUILD_VERSION=${{ steps.date.outputs.date }}-${{ github.sha }}
           tags: ${{ steps.meta-main.outputs.tags }}
           labels: ${{ steps.meta-main.outputs.labels }}
 
       - name: Generate artifact attestation for main image
+        if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -80,11 +78,11 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-tor
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=dev,enable={{is_default_branch}}
+            type=raw,value=latest,enable={{is_tag}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
-            type=ref,event=branch
             type=ref,event=tag
 
       - name: Build and push tor Docker image
@@ -94,13 +92,14 @@ jobs:
           platforms: linux/amd64,linux/arm64
           context: .
           target: cwa-bd-tor
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           build-args: |
             BUILD_VERSION=${{ steps.date.outputs.date }}-${{ github.sha }}
           tags: ${{ steps.meta-tor.outputs.tags }}
           labels: ${{ steps.meta-tor.outputs.labels }}
 
       - name: Generate artifact attestation for tor image
+        if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-tor
