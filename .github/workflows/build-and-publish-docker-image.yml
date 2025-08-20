@@ -105,4 +105,3 @@ jobs:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-tor
           subject-digest: ${{ steps.push-tor.outputs.digest }}
           push-to-registry: true
-
