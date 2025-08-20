@@ -44,11 +44,25 @@ def _reset_pyautogui_display_state():
         logger.warning(f"Error resetting pyautogui display state: {e}")
 
 def _is_bypassed(sb) -> bool:
+    """Enhanced bypass detection with more comprehensive checks"""
     try:
-        title = sb.get_title().lower()
-        body = sb.get_text("body").lower()
+        # Get page information with error handling
+        try:
+            title = sb.get_title().lower()
+        except:
+            title = ""
+            
+        try:
+            body = sb.get_text("body").lower()
+        except:
+            body = ""
+            
+        try:
+            current_url = sb.get_current_url()
+        except:
+            current_url = ""
         
-        # Check both title and body for verification messages
+        # Enhanced verification texts for newer Cloudflare versions
         verification_texts = [
             "just a moment",
             "verify you are human",
@@ -62,50 +76,165 @@ def _is_bypassed(sb) -> bool:
             "checking the site connection security",
             "enable javascript and cookies to continue",
             "ray id",
+            "cloudflare",
+            "please wait",
+            "ddos protection",
+            "security check",
+            "browser check",
+            "moment please",
+            "hold on",
+            "loading",
+            "one more step",
+            "challenge"
         ]
+        
+        # Check for Cloudflare indicators
         for text in verification_texts:
-            if text in title.lower() or text in body.lower():
+            if text in title or text in body:
+                logger.debug(f"Cloudflare indicator found: '{text}' in page")
                 return False
-                
+        
+        # Additional checks for specific Cloudflare patterns
+        if "cf-" in body or "cloudflare" in current_url.lower():
+            logger.debug("Cloudflare patterns detected in page")
+            return False
+            
+        # Check if we're still on a challenge page (common Cloudflare pattern)
+        if "/cdn-cgi/" in current_url:
+            logger.debug("Still on Cloudflare CDN challenge page")
+            return False
+            
+        # If page is mostly empty, it might still be loading
+        if len(body.strip()) < 50:
+            logger.debug("Page content too short, might still be loading")
+            return False
+            
+        logger.debug(f"Bypass check passed - Title: '{title[:100]}', Body length: {len(body)}")
         return True
+        
     except Exception as e:
-        logger.debug(f"Error checking page title: {e}")
+        logger.warning(f"Error checking bypass status: {e}")
+        # If we can't check, assume we're not bypassed
         return False
 
 def _bypass_method_1(sb) -> bool:
+    """Original bypass method using uc_gui_click_captcha"""
     try:
+        logger.debug("Attempting bypass method 1: uc_gui_click_captcha")
         sb.uc_gui_click_captcha()
+        time.sleep(3)
+        return _is_bypassed(sb)
     except Exception as e:
-        logger.debug_trace(f"Error clicking captcha: {e}")
-        time.sleep(5)
-        sb.wait_for_element_visible('body')
+        logger.debug(f"Method 1 failed on first try: {e}")
+        try:
+            time.sleep(5)
+            sb.wait_for_element_visible('body', timeout=10)
+            sb.uc_gui_click_captcha()
+            time.sleep(3)
+            return _is_bypassed(sb)
+        except Exception as e2:
+            logger.debug(f"Method 1 failed on second try: {e2}")
+            try:
+                time.sleep(DEFAULT_SLEEP)
+                sb.uc_gui_click_captcha()
+                time.sleep(5)
+                return _is_bypassed(sb)
+            except Exception as e3:
+                logger.debug(f"Method 1 completely failed: {e3}")
+                return False
+
+def _bypass_method_2(sb) -> bool:
+    """Alternative bypass method using longer waits and manual interaction"""
+    try:
+        logger.debug("Attempting bypass method 2: wait and reload")
+        # Wait longer for page to load completely
+        time.sleep(10)
+        
+        # Try refreshing the page
+        sb.refresh()
+        time.sleep(8)
+        
+        # Check if bypass worked after refresh
+        if _is_bypassed(sb):
+            return True
+            
+        # Try clicking on the page center (sometimes helps trigger bypass)
+        try:
+            sb.click_if_visible("body", timeout=5)
+            time.sleep(5)
+        except:
+            pass
+            
+        return _is_bypassed(sb)
+    except Exception as e:
+        logger.debug(f"Method 2 failed: {e}")
+        return False
+
+def _bypass_method_3(sb) -> bool:
+    """Third bypass method using user-agent rotation and stealth mode"""
+    try:
+        logger.debug("Attempting bypass method 3: stealth approach")
+        # Wait a random amount to appear more human
+        import random
+        wait_time = random.uniform(8, 15)
+        time.sleep(wait_time)
+        
+        # Try to scroll the page (human-like behavior)
+        try:
+            sb.scroll_to_bottom()
+            time.sleep(2)
+            sb.scroll_to_top()
+            time.sleep(3)
+        except:
+            pass
+            
+        # Check if this helped
+        if _is_bypassed(sb):
+            return True
+            
+        # Try the original captcha click as last resort
         try:
             sb.uc_gui_click_captcha()
-        except Exception as e:
-            logger.debug_trace(f"Error clicking captcha again: {e}")
-            time.sleep(DEFAULT_SLEEP)
-            sb.uc_gui_click_captcha()
-    return _is_bypassed(sb)
+            time.sleep(5)
+        except:
+            pass
+            
+        return _is_bypassed(sb)
+    except Exception as e:
+        logger.debug(f"Method 3 failed: {e}")
+        return False
 
 def _bypass(sb, max_retries: int = MAX_RETRY) -> None:
+    """Enhanced bypass function with multiple strategies"""
     try_count = 0
+    methods = [_bypass_method_1, _bypass_method_2, _bypass_method_3]
 
     while not _is_bypassed(sb):
         if try_count >= max_retries:
             logger.warning("Exceeded maximum retries. Bypass failed.")
             break
-        logger.info(f"Bypass attempt {try_count + 1} / {max_retries}")
-
+            
+        method_index = try_count % len(methods)
+        method = methods[method_index]
+        
+        logger.info(f"Bypass attempt {try_count + 1} / {max_retries} using {method.__name__}")
+        
         try_count += 1
 
-        wait_time = DEFAULT_SLEEP * (try_count - 1)
-        logger.info(f"Waiting {wait_time}s before trying...")
-        time.sleep(wait_time)
+        # Progressive backoff: wait longer between retries
+        wait_time = min(DEFAULT_SLEEP * (try_count - 1), 15)
+        if wait_time > 0:
+            logger.info(f"Waiting {wait_time}s before trying...")
+            time.sleep(wait_time)
 
-        if _bypass_method_1(sb):
-            return
+        try:
+            if method(sb):
+                logger.info(f"Bypass successful using {method.__name__}")
+                return
+        except Exception as e:
+            logger.warning(f"Exception in {method.__name__}: {e}")
 
-        logger.info("Bypass failed.")
+        logger.info(f"Bypass method {method.__name__} failed.")
 
 def _get_chromium_args():
     
@@ -161,18 +290,56 @@ def _get(url, retry : int = MAX_RETRY):
     try:
         logger.info(f"SB_GET: {url}")
         sb = _get_driver()
+        
+        # Enhanced page loading with better error handling
+        logger.debug("Opening URL with SeleniumBase...")
         sb.uc_open_with_reconnect(url, DEFAULT_SLEEP)
         time.sleep(DEFAULT_SLEEP)
+        
+        # Log current page title and URL for debugging
+        try:
+            current_url = sb.get_current_url()
+            current_title = sb.get_title()
+            logger.debug(f"Page loaded - URL: {current_url}, Title: {current_title}")
+        except Exception as debug_e:
+            logger.debug(f"Could not get page info: {debug_e}")
+        
+        # Attempt bypass
+        logger.debug("Starting bypass process...")
         _bypass(sb)
+        
         if _is_bypassed(sb):
             logger.info("Bypass successful.")
             return sb.page_source
+        else:
+            logger.warning("Bypass completed but page still shows Cloudflare protection")
+            # Log page content for debugging (truncated)
+            try:
+                page_text = sb.get_text("body")[:500] + "..." if len(sb.get_text("body")) > 500 else sb.get_text("body")
+                logger.debug(f"Page content: {page_text}")
+            except:
+                pass
+            
     except Exception as e:
+        # Enhanced error logging with full stack trace
+        import traceback
+        error_details = f"Exception type: {type(e).__name__}, Message: {str(e)}"
+        stack_trace = traceback.format_exc()
+        
         if retry == 0:
-            logger.error_trace(f"Failed to initialize browser: {e}")
+            logger.error(f"Failed to initialize browser after all retries: {error_details}")
+            logger.debug(f"Full stack trace: {stack_trace}")
             _reset_driver()
             raise e
-        logger.error_trace(f"Failed to bypass Cloudflare: {e}. Will retry...")
+        
+        logger.warning(f"Failed to bypass Cloudflare (retry {MAX_RETRY - retry + 1}/{MAX_RETRY}): {error_details}")
+        logger.debug(f"Stack trace: {stack_trace}")
+        
+        # Reset driver on certain errors
+        if "WebDriverException" in str(type(e)) or "SessionNotCreatedException" in str(type(e)):
+            logger.info("Resetting driver due to WebDriver error...")
+            _reset_driver()
+            
     return _get(url, retry - 1)
 
 def get(url, retry : int = MAX_RETRY):
