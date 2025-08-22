@@ -232,9 +232,18 @@ document.addEventListener('DOMContentLoaded', () => {
         },
 
         async confirmDownload(bookIds) {
-            bookIds.map((bookId) =>
+            bookIds.forEach((bookId) => {
+                // Optimistically mark row as queued and disable button
+                status.setRowStatus(bookId, 'queued');
+                const btn = document.getElementById(`download-btn-${bookId}`);
+                if (btn) btn.disabled = true;
                 utils.fetchJson(`${API_ENDPOINTS.download}?id=${encodeURIComponent(bookId)}`)
-            );
+                    .catch(() => {
+                        // Re-enable on error
+                        status.setRowStatus(bookId, 'error');
+                        if (btn) btn.disabled = false;
+                    });
+            });
 
             this.clearAllCheckboxes();
             modal.close();
@@ -351,9 +360,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
             ]);
 
-            return utils.createElement('tr', {}, [
+            // Create a status cell with a stable id so we can update it later
+            const statusCell = utils.createElement('td', {
+                id: `status-${book.id}`,
+                className: 'status-cell'
+            });
+
+            return utils.createElement('tr', { id: `row-${book.id}` }, [
                 checkboxCell,
-                utils.createElement('td', { textContent: index + 1 }),
                 this.createPreviewCell(book.preview),
                 utils.createElement('td', { textContent: book.title || 'N/A' }),
                 utils.createElement('td', { textContent: book.author || 'N/A' }),
@@ -362,7 +376,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 utils.createElement('td', { textContent: book.language || 'N/A' }),
                 utils.createElement('td', { textContent: book.format || 'N/A' }),
                 utils.createElement('td', { textContent: book.size || 'N/A' }),
-                this.createActionCell(book)
+                this.createActionCell(book),
+                statusCell
             ]);
         },
 
@@ -388,7 +403,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const downloadButton = utils.createElement('button', {
                 className: 'uk-button uk-button-primary uk-align-center uk-margin-small uk-width-1-1',
-                onclick: () => bookDetails.downloadBook(book)
+                id: `download-btn-${book.id}`,
+                onclick: async () => {
+                    // Disable immediately and set queued status
+                    downloadButton.disabled = true;
+                    status.setRowStatus(book.id, 'queued');
+                    try {
+                        await utils.fetchJson(`${API_ENDPOINTS.download}?id=${encodeURIComponent(book.id)}`);
+                        // Trigger a quick status refresh
+                        status.fetch();
+                    } catch (e) {
+                        // Re-enable on error and show error status
+                        downloadButton.disabled = false;
+                        status.setRowStatus(book.id, 'error');
+                    }
+                }
             }, [utils.createElement('span', { textContent: 'Download' })]);
 
             return utils.createElement('td', {}, [buttonDetails, downloadButton]);
@@ -411,7 +440,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const bookDetails = {
         async show(bookId) {
             if (STATE.isLoadingDetails) return;
-
+            
             try {
                 STATE.isLoadingDetails = true;
                 modal.open();
@@ -517,11 +546,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Status Functions
     const status = {
+        // Map backend status names to UI label and classes
+        mapStatus(s) {
+            const map = {
+                queued: { label: 'Queued', cls: 'uk-label uk-label-warning' },
+                downloading: { label: 'Downloading', cls: 'uk-label uk-label-primary' },
+                completed: { label: 'Completed', cls: 'uk-label uk-label-success' },
+                failed: { label: 'Failed', cls: 'uk-label uk-label-danger' }
+            };
+            return map[s] || { label: s || '—', cls: 'uk-label' };
+        },
+        setRowStatus(bookId, s) {
+            const cell = document.getElementById(`status-${bookId}`);
+            if (!cell) return;
+            const { label, cls } = this.mapStatus(s);
+            cell.innerHTML = '';
+            cell.appendChild(utils.createElement('span', { className: cls, textContent: label }));
+            const btn = document.getElementById(`download-btn-${bookId}`);
+            if (btn) {
+                btn.disabled = ['queued', 'downloading'].includes(s);
+                if (['failed'].includes(s)) btn.disabled = false;
+            }
+        },
+        updateRows(data) {
+            if (!data) return;
+            // The backend status endpoint returns an object keyed by status -> { bookId: bookInfo }
+            Object.entries(data).forEach(([statusName, books]) => {
+                Object.entries(books || {}).forEach(([bookId, info]) => {
+                    this.setRowStatus(bookId, statusName);
+                });
+            });
+        },
         async fetch() {
             try {
                 utils.showLoading(elements.statusLoading);
                 const data = await utils.fetchJson(API_ENDPOINTS.status);
                 this.display(data);
+                this.updateRows(data);
             } catch (error) {
                 this.handleError(error);
             } finally {
