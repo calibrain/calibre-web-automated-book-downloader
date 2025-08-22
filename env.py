@@ -25,7 +25,9 @@ _BOOK_LANGUAGE = os.getenv("BOOK_LANGUAGE", "en").lower()
 _CUSTOM_SCRIPT = os.getenv("CUSTOM_SCRIPT", "").strip()
 FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = int(os.getenv("FLASK_PORT", "8084"))
-DEBUG = string_to_bool(os.getenv("DEBUG", "False"))
+DEBUG = string_to_bool(os.getenv("DEBUG", "false"))
+PRIORITIZE_WELIB = string_to_bool(os.getenv("PRIORITIZE_WELIB", "false"))
+
 # If debug is true, we want to log everything
 if DEBUG:
     LOG_LEVEL = "DEBUG"

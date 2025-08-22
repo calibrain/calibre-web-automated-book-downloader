@@ -357,7 +357,10 @@ def authenticate() -> bool:
 
     # Validate credentials against database
     try:
-        conn = sqlite3.connect(CWA_DB_PATH)
+        # Open database in true read-only mode to avoid journal/WAL writes on RO mounts
+        db_path = os.fspath(CWA_DB_PATH)
+        db_uri = f"file:{db_path}?mode=ro&immutable=1"
+        conn = sqlite3.connect(db_uri, uri=True)
         cur = conn.cursor()
         cur.execute("SELECT password FROM user WHERE name = ?", (username,))
         row = cur.fetchone()
