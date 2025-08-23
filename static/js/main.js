@@ -368,6 +368,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             return utils.createElement('tr', { id: `row-${book.id}` }, [
                 checkboxCell,
+                utils.createElement('td', { textContent: index + 1 }),
                 this.createPreviewCell(book.preview),
                 utils.createElement('td', { textContent: book.title || 'N/A' }),
                 utils.createElement('td', { textContent: book.author || 'N/A' }),
