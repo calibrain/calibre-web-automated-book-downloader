@@ -13,6 +13,7 @@ services:
       TZ: Europe/Rome
       USE_DOH: true
       CUSTOM_DNS: cloudflare
+      CWA_DB_PATH: null
       # FlareSolverr environment variables
       USE_CF_BYPASS: true  # Enable Cloudflare bypass, requires FlareSolverr (default: true)
       FLARESOLVERR_URL: "http://flaresolverr:8191"  # URL of the FlareSolverr service
