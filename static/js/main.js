@@ -12,15 +12,10 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         selectAllCheckbox: document.getElementById('select-all-checkbox'),
         downloadSelectedButton: document.getElementById('download-selected-button'),
-        resultsSectionAccordion: document.getElementById('results-section-accordion'),
-        searchAccordion: document.getElementById('search-accordion'),
         resultsHeading: document.getElementById('results-heading'),
         resultsTable: document.getElementById('results-table'),
         resultsTableBody: document.querySelector('#results-table tbody'),
         searchLoading: document.getElementById('search-loading'),
-        statusLoading: document.getElementById('status-loading'),
-        statusTable: document.getElementById('status-table'),
-        statusTableBody: document.querySelector('#status-table tbody'),
         modalOverlay: document.getElementById('modal-overlay'),
         detailsContainer: document.getElementById('details-container'),
         theme: {
@@ -232,9 +227,18 @@ document.addEventListener('DOMContentLoaded', () => {
         },
 
         async confirmDownload(bookIds) {
-            bookIds.map((bookId) =>
+            bookIds.forEach((bookId) => {
+                // Optimistically mark row as queued and disable button
+                status.setRowStatus(bookId, 'queued');
+                const btn = document.getElementById(`download-btn-${bookId}`);
+                if (btn) btn.disabled = true;
                 utils.fetchJson(`${API_ENDPOINTS.download}?id=${encodeURIComponent(bookId)}`)
-            );
+                    .catch(() => {
+                        // Re-enable on error
+                        status.setRowStatus(bookId, 'error');
+                        if (btn) btn.disabled = false;
+                    });
+            });
 
             this.clearAllCheckboxes();
             modal.close();
@@ -263,10 +267,6 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 STATE.isSearching = true;
                 utils.showLoading(elements.searchLoading);
-
-                if (!elements.searchAccordion.classList.contains('uk-open')) {
-                    utils.showAccordion(elements.resultsSectionAccordion);
-                };
                 
                 const data = await utils.fetchJson(
                     `${API_ENDPOINTS.search}?${query}`
@@ -332,7 +332,7 @@ document.addEventListener('DOMContentLoaded', () => {
         displayNoResults() {
             const row = utils.createElement('tr', {}, [
                 utils.createElement('td', {
-                    colSpan: '10',
+                    colSpan: '12',
                     textContent: 'No results found.'
                 })
             ]);
@@ -351,7 +351,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
             ]);
 
-            return utils.createElement('tr', {}, [
+            // Create a status cell with a stable id so we can update it later
+            const statusCell = utils.createElement('td', {
+                id: `status-${book.id}`,
+                className: 'status-cell'
+            });
+
+            return utils.createElement('tr', { id: `row-${book.id}` }, [
                 checkboxCell,
                 utils.createElement('td', { textContent: index + 1 }),
                 this.createPreviewCell(book.preview),
@@ -362,7 +368,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 utils.createElement('td', { textContent: book.language || 'N/A' }),
                 utils.createElement('td', { textContent: book.format || 'N/A' }),
                 utils.createElement('td', { textContent: book.size || 'N/A' }),
-                this.createActionCell(book)
+                this.createActionCell(book),
+                statusCell
             ]);
         },
 
@@ -388,7 +395,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const downloadButton = utils.createElement('button', {
                 className: 'uk-button uk-button-primary uk-align-center uk-margin-small uk-width-1-1',
-                onclick: () => bookDetails.downloadBook(book)
+                id: `download-btn-${book.id}`,
+                onclick: async () => {
+                    // Disable immediately and set queued status
+                    downloadButton.disabled = true;
+                    status.setRowStatus(book.id, 'queued');
+                    try {
+                        await utils.fetchJson(`${API_ENDPOINTS.download}?id=${encodeURIComponent(book.id)}`);
+                        // Trigger a quick status refresh
+                        status.fetch();
+                    } catch (e) {
+                        // Re-enable on error and show error status
+                        downloadButton.disabled = false;
+                        status.setRowStatus(book.id, 'error');
+                    }
+                }
             }, [utils.createElement('span', { textContent: 'Download' })]);
 
             return utils.createElement('td', {}, [buttonDetails, downloadButton]);
@@ -399,7 +420,7 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.resultsTableBody.innerHTML = '';
             const errorRow = utils.createElement('tr', {}, [
                 utils.createElement('td', {
-                    colSpan: '10',
+                    colSpan: '12',
                     textContent: 'An error occurred while searching. Please try again.'
                 })
             ]);
@@ -411,7 +432,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const bookDetails = {
         async show(bookId) {
             if (STATE.isLoadingDetails) return;
-
+            
             try {
                 STATE.isLoadingDetails = true;
                 modal.open();
@@ -517,61 +538,46 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Status Functions
     const status = {
+        // Map backend status names to UI label and classes
+        mapStatus(s) {
+            const map = {
+                queued: { label: 'Queued', cls: 'uk-label uk-label-warning' },
+                downloading: { label: 'Downloading', cls: 'uk-label uk-label-primary' },
+                completed: { label: 'Completed', cls: 'uk-label uk-label-success' },
+                error: { label: 'Error', cls: 'uk-label uk-label-danger' }
+            };
+            return map[s] || { label: s || '—', cls: 'uk-label' };
+        },
+        setRowStatus(bookId, s) {
+            const cell = document.getElementById(`status-${bookId}`);
+            if (!cell) return;
+            const { label, cls } = this.mapStatus(s);
+            cell.innerHTML = '';
+            cell.appendChild(utils.createElement('span', { className: cls, textContent: label }));
+            const btn = document.getElementById(`download-btn-${bookId}`);
+            if (btn) {
+                btn.disabled = ['queued', 'downloading', 'completed'].includes(s);
+                if (['error'].includes(s)) btn.disabled = false;
+            }
+        },
+        updateRows(data) {
+            if (!data) return;
+            // The backend status endpoint returns an object keyed by status -> { bookId: bookInfo }
+            Object.entries(data).forEach(([statusName, books]) => {
+                Object.entries(books || {}).forEach(([bookId, info]) => {
+                    this.setRowStatus(bookId, statusName);
+                });
+            });
+        },
         async fetch() {
             try {
-                utils.showLoading(elements.statusLoading);
                 const data = await utils.fetchJson(API_ENDPOINTS.status);
-                this.display(data);
+                this.updateRows(data);
             } catch (error) {
                 this.handleError(error);
             } finally {
                 utils.hideLoading(elements.statusLoading);
             }
-        },
-
-        display(data) {
-            elements.statusTableBody.innerHTML = '';
-
-            // Handle each status type
-            Object.entries(data).forEach(([status, booksInStatus]) => {
-                // If the status section has books
-                if (Object.keys(booksInStatus).length > 0) {
-                    // For each book in this status
-                    Object.entries(booksInStatus).forEach(([bookId, bookData]) => {
-                        this.addStatusRow(status, bookData);
-                    });
-                }
-            });
-        },
-
-        addStatusRow(status, book) {
-            if (!book.id || !book.title) return;
-
-            const statusCell = utils.createElement('td', {
-                className: `status-${status.toLowerCase()}`,
-                textContent: status
-            });
-
-            let titleElement;
-            if (book.download_path != null) {
-                titleElement = utils.createElement('a', {
-                    href: `/request/api/localdownload?id=${book.id}`,
-                    target: '_blank',
-                    textContent: book.title || 'N/A'
-                });
-            }
-            else {
-                titleElement = utils.createElement('td', { textContent: book.title || 'N/A' })
-            }
-
-            const row = utils.createElement('tr', {}, [
-                statusCell,
-                utils.createElement('td', { textContent: book.id }),
-                titleElement,
-                this.createPreviewCell(book.preview)
-            ]);
-
-            elements.statusTableBody.appendChild(row);
         },
 
         createPreviewCell(previewUrl) {
@@ -593,17 +599,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         handleError(error) {
             console.error('Status error:', error);
-            elements.statusTableBody.innerHTML = '';
-
-            const errorRow = utils.createElement('tr', {}, [
-                utils.createElement('td', {
-                    colSpan: '4',
-                    className: 'error-message',
-                    textContent: 'Error loading status. Will retry automatically.'
-                })
-            ]);
-
-            elements.statusTableBody.appendChild(errorRow);
         }
     };
 
