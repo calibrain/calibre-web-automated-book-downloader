@@ -92,9 +92,13 @@ If you change `BOOK_LANGUAGE`, you can add multiple comma separated languages, s
 | ---------------------- | --------------------------------------------------------- | --------------------------------- |
 | `AA_BASE_URL`          | Base URL of Annas-Archive (could be changed for a proxy)  | `https://annas-archive.org`       |
 | `USE_CF_BYPASS`        | Disable CF bypass and use alternative links instead       | `true`                            |
+| `FLARESOLVERR_URL`     | Host and port for FlareSolverr active service             | ``                                |
+| `FLARESOLVERR_PATH`    | Path of FlareSolverr APIs                                 | `/v1`                             |
+| `FLARESOLVERR_TIMEOUT` | Timeout to send to FlareSolverr service (in milliseconds) | `60000`                           |
 
 If you are a donator on AA, you can use your Key in `AA_DONATOR_KEY` to speed up downloads and bypass the wait times.
 If disabling the cloudflare bypass, you will be using alternative download hosts, such as libgen or z-lib, but they usually have a delay before getting the more recent books and their collection is not as big as aa's. But this setting should work for the majority of books.
+The cloudflare bypass has done using a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) service
 
 #### Network Settings
 

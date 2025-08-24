@@ -2,10 +2,7 @@ flask
 requests[socks]
 beautifulsoup4
 tqdm
-pyvirtualdisplay
 dnspython
-pyautogui
-seleniumbase>=4.41.1
 gunicorn
 python-xlib
 psutil
