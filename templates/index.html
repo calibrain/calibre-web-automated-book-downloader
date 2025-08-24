@@ -144,44 +144,40 @@
             </section>
 
             <!-- Results Section -->
-            <ul uk-accordion="animation: false" id="results-section-accordion">
-                <li id="search-accordion">
-                <a class="uk-accordion-title" href><h1 class="uk-heading-xsmall">Search Results</h1></a>
-                <div class="uk-accordion-content">
-                    <div id="search-loading" class="uk-flex uk-flex-center" role="status" hidden>
-                        <div uk-spinner="ratio: 2"></div>
-                        <span>Loading...</span>
-                    </div>
-                    <div class="results-content">
-                    <button class="uk-button uk-button-primary uk-margin-small" id="download-selected-button" disabled>Download Selected</button>
-                        <div class="uk-overflow-auto">
-                            <table id="results-table" class="uk-table uk-table-hover uk-table-divider" role="grid">
-                                <thead>
-                                    <tr>
-                                        <th>
-                                            <input type="checkbox" id="select-all-checkbox" class="uk-checkbox" />
-                                        </th>
-                                        <th scope="col" data-sort="index"># <span class="sort-icon" uk-icon></span></th>
-                                        <th scope="col">Preview</th>
-                                        <th scope="col" data-sort="title">Title <span class="sort-icon" uk-icon></span></th>
-                                        <th scope="col" data-sort="author">Author <span class="sort-icon" uk-icon></span></th>
-                                        <th scope="col" data-sort="publisher">Publisher <span class="sort-icon" uk-icon></span></th>
-                                        <th scope="col" data-sort="year">Year <span class="sort-icon" uk-icon></span></th>
-                                        <th scope="col" data-sort="language">Language <span class="sort-icon" uk-icon></span></th>
-                                        <th scope="col" data-sort="format">Format <span class="sort-icon" uk-icon></span></th>
-                                        <th scope="col" data-sort="size">Size <span class="sort-icon" uk-icon></span></th>
-                                        <th scope="col">Actions</th>
-                                        <th scope="col">Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <!-- Search results will be injected here -->
-                                </tbody>
-                            </table>
-                        </div>
+            <ul id="results-section">
+                <h1 class="uk-heading-xsmall">Search Results</h1>
+                <div id="search-loading" class="uk-flex uk-flex-center" role="status" hidden>
+                    <div uk-spinner="ratio: 2"></div>
+                    <span>Loading...</span>
+                </div>
+                <div class="results-content">
+                <button class="uk-button uk-button-primary uk-margin-small" id="download-selected-button" disabled>Download Selected</button>
+                    <div class="uk-overflow-auto">
+                        <table id="results-table" class="uk-table uk-table-hover uk-table-divider" role="grid">
+                            <thead>
+                                <tr>
+                                    <th>
+                                        <input type="checkbox" id="select-all-checkbox" class="uk-checkbox" />
+                                    </th>
+                                    <th scope="col" data-sort="index"># <span class="sort-icon" uk-icon></span></th>
+                                    <th scope="col">Preview</th>
+                                    <th scope="col" data-sort="title">Title <span class="sort-icon" uk-icon></span></th>
+                                    <th scope="col" data-sort="author">Author <span class="sort-icon" uk-icon></span></th>
+                                    <th scope="col" data-sort="publisher">Publisher <span class="sort-icon" uk-icon></span></th>
+                                    <th scope="col" data-sort="year">Year <span class="sort-icon" uk-icon></span></th>
+                                    <th scope="col" data-sort="language">Language <span class="sort-icon" uk-icon></span></th>
+                                    <th scope="col" data-sort="format">Format <span class="sort-icon" uk-icon></span></th>
+                                    <th scope="col" data-sort="size">Size <span class="sort-icon" uk-icon></span></th>
+                                    <th scope="col">Actions</th>
+                                    <th scope="col">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Search results will be injected here -->
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-                </li>
             </ul>
 
             <!-- Modal -->
@@ -191,35 +187,7 @@
                 </div>
             </div>
 
-            <!-- Status Section -->
-            <ul uk-accordion="animation: false" id="status-section">
-                <li id="search-accordion">
-                <a class="uk-accordion-title" href><h1 class="uk-heading-xsmall">Download Status</h1></a>
-                <div class="uk-accordion-content">
-                    <div id="status-loading" class="uk-flex uk-flex-center" role="status" hidden>
-                        <div uk-spinner="ratio: 2"></div>
-                        <span>Loading...</span>
-                    </div>
-                    <div class="status-content">
-                        <div class="uk-overflow-auto">
-                            <table id="status-table" class="uk-table uk-table-hover uk-table-divider" role="grid">
-                                <thead>
-                                    <tr>
-                                        <th scope="col">Status</th>
-                                        <th scope="col">Book ID</th>
-                                        <th scope="col">Title</th>
-                                        <th scope="col">Preview</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <!-- Search results will be injected here -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-                </li>
-            </ul>
+            
         </div>
     </main>
 
