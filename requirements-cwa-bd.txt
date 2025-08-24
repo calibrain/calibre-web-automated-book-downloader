@@ -1,0 +1,3 @@
+pyvirtualdisplay
+pyautogui
+seleniumbase>=4.41.1
