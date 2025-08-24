@@ -533,12 +533,7 @@ h1, h2, h3, h4, h5, h6,
     color: var(--heading-color) !important;
 }
 
-/* Ensure accordion titles are visible */
-.uk-title {
-    color: var(--heading-color) !important;
-}
-
 /* Ensure search results heading is visible */
-#results-section .uk-accordion-title h1 {
+#results-section h1 {
     color: var(--heading-color) !important;
 }
