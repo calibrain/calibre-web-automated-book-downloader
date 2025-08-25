@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup, Tag, NavigableString, ResultSet
 import downloader
 from logger import setup_logger
 from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_BASE_URL
-from env import AA_DONATOR_KEY, USE_CF_BYPASS
+from env import AA_DONATOR_KEY, USE_CF_BYPASS, PRIORITIZE_WELIB
 from models import BookInfo, SearchFilters
 
 logger = setup_logger(__name__)
@@ -198,7 +198,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
             ):
                 libgen_url = url["href"]
                 # TODO : Temporary fix ? Maybe get URLs from https://open-slum.org/ ?
-                libgen_url = libgen_url = re.sub(r'libgen\.(\w+)', 'libgen.bz', url["href"])
+                libgen_url = libgen_url = re.sub(r'libgen\.(\w+)', 'libgen.gs', url["href"])
                 external_urls_libgen.add(libgen_url)
             elif url.text.strip().lower().startswith("z-lib"):
                 if ".onion/" not in url["href"]:
@@ -206,11 +206,13 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         except:
             pass
 
+    external_urls_welib = _get_download_urls_from_welib(book_id) if USE_CF_BYPASS else set()
 
     urls = []
+    urls += list(external_urls_welib) if PRIORITIZE_WELIB else []
     urls += list(slow_urls_no_waitlist) if USE_CF_BYPASS else []
     urls += list(external_urls_libgen)
-    urls += list( _get_download_urls_from_welib(book_id))  if USE_CF_BYPASS else []
+    urls += list(external_urls_welib) if not PRIORITIZE_WELIB else []
     urls += list(slow_urls_with_waitlist)  if USE_CF_BYPASS else []
     urls += list(external_urls_z_lib)
 
@@ -244,9 +246,10 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     return book_info
 
-def _get_download_urls_from_welib(book_id: str) -> List[str]:
+def _get_download_urls_from_welib(book_id: str) -> set[str]:
     """Get download urls from welib.org."""
     url = f"https://welib.org/md5/{book_id}"
+    logger.info(f"Getting download urls from welib.org for {book_id}. While this uses the bypasser, it will not start downloading them yet.")
     html = downloader.html_get_page(url, use_bypasser=True)
     if not html:
         return []
