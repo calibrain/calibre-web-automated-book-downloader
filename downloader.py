@@ -5,7 +5,7 @@ network.init()
 import requests
 import time
 from io import BytesIO
-from typing import Optional
+from typing import Optional, Callable
 from urllib.parse import urlparse
 from tqdm import tqdm
 
@@ -71,11 +71,12 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) 
         time.sleep(sleep_time)
         return html_get_page(url, retry - 1, use_bypasser)
 
-def download_url(link: str, size: str = "") -> Optional[BytesIO]:
+def download_url(link: str, size: str = "", progress_cb: Optional[Callable[[int], None]] = None) -> Optional[BytesIO]:
     """Download content from URL into a BytesIO buffer.
     
     Args:
         link: URL to download from
+        progress_cb: Optional callback receiving integer percentage (0-100)
         
     Returns:
         BytesIO: Buffer containing downloaded content if successful
@@ -85,7 +86,7 @@ def download_url(link: str, size: str = "") -> Optional[BytesIO]:
         response = requests.get(link, stream=True, proxies=PROXIES)
         response.raise_for_status()
 
-        total_size : float = 0.0
+        total_size: float = 0.0
         try:
             # we assume size is in MB
             total_size = float(size.strip().replace(" ", "").replace(",", ".").upper()[:-2].strip()) * 1024 * 1024
@@ -96,16 +97,23 @@ def download_url(link: str, size: str = "") -> Optional[BytesIO]:
 
         # Initialize the progress bar with your guess
         pbar = tqdm(total=total_size, unit='B', unit_scale=True, desc='Downloading')
+        downloaded = 0
         for chunk in response.iter_content(chunk_size=1000):
             buffer.write(chunk)
+            downloaded += len(chunk)
             pbar.update(len(chunk))
-            
+            if progress_cb:
+                pct = int(downloaded * 100 / total_size)
+                progress_cb(pct)
+        
         pbar.close()
         if buffer.tell() * 0.1 < total_size * 0.9:
             # Check the content of the buffer if its HTML or binary
             if response.headers.get('content-type', '').startswith('text/html'):
-                logger.warn(f"Failed to download content for {link}. Found HTML content instead.")
+                logger.warning(f"Failed to download content for {link}. Found HTML content instead.")
                 return None
+        if progress_cb:
+            progress_cb(100)
         return buffer
     except requests.exceptions.RequestException as e:
         logger.error_trace(f"Failed to download from {link}: {e}")

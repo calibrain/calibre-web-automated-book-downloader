@@ -31,6 +31,7 @@ class BookInfo:
     info: Optional[Dict[str, List[str]]] = None
     download_urls: List[str] = field(default_factory=list)
     download_path: Optional[str] = None
+    download_progress: Optional[int] = 0
 
 class BookQueue:
     """Thread-safe book queue manager."""
@@ -68,6 +69,14 @@ class BookQueue:
         """Update the download path of a book in the queue."""
         with self._lock:
             self._book_data[book_id].download_path = download_path
+    
+    def update_progress(self, book_id: str, progress: int) -> None:
+        """Update download progress (0-100) for a book."""
+        with self._lock:
+            if book_id in self._book_data:
+                # Clamp between 0 and 100
+                progress = max(0, min(100, int(progress)))
+                self._book_data[book_id].download_progress = progress
             
     def get_status(self) -> Dict[QueueStatus, Dict[str, BookInfo]]:
         """Get current queue status."""

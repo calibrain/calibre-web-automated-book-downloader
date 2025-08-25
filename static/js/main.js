@@ -564,11 +564,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 titleElement = utils.createElement('td', { textContent: book.title || 'N/A' })
             }
 
+            const progressCell = document.createElement("td");
+            const pct =
+                typeof book.progress === "number"
+                ? book.progress
+                : status.toLowerCase() === "downloading"
+                ? 0
+                : null;
+            if (pct === null) {
+                progressCell.textContent = "-";
+            } else {
+                const bar = document.createElement("progress");
+                bar.max = 100;
+                bar.value = Math.max(0, Math.min(100, pct));
+                bar.className = "uk-progress";
+                const label = document.createElement("span");
+                label.style.marginLeft = "8px";
+                label.textContent = `${bar.value}%`;
+                progressCell.appendChild(bar);
+                progressCell.appendChild(label);
+            }
+
             const row = utils.createElement('tr', {}, [
                 statusCell,
                 utils.createElement('td', { textContent: book.id }),
                 titleElement,
-                this.createPreviewCell(book.preview)
+                this.createPreviewCell(book.preview),
+                progressCell
             ]);
 
             elements.statusTableBody.appendChild(row);

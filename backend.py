@@ -129,9 +129,16 @@ def _download_book(book_id: str) -> Optional[str]:
         book_name += f".{book_info.format}"
         book_path = TMP_DIR / book_name
 
-        success = book_manager.download_book(book_info, book_path)
+        book_queue.update_progress(book_id, 0)
+
+        def progress_cb(pct: int) -> None:
+            book_queue.update_progress(book_id, pct)
+
+        success = book_manager.download_book(book_info, book_path, progress_cb)
         if not success:
             raise Exception("Unkown error downloading book")
+
+        book_queue.update_progress(book_id, 100)
 
         if CUSTOM_SCRIPT:
             logger.info(f"Running custom script: {CUSTOM_SCRIPT}")

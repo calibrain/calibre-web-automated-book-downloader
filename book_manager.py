@@ -3,7 +3,7 @@
 import time, json, re
 from pathlib import Path
 from urllib.parse import quote
-from typing import List, Optional, Dict, Union
+from typing import List, Optional, Dict, Union, Callable
 from bs4 import BeautifulSoup, Tag, NavigableString, ResultSet
 
 import downloader
@@ -300,7 +300,7 @@ def _extract_book_metadata(
     }
 
 
-def download_book(book_info: BookInfo, book_path: Path) -> bool:
+def download_book(book_info: BookInfo, book_path: Path, progress_cb: Optional[Callable[[int], None]] = None) -> bool:
     """Download a book from available sources.
 
     Args:
@@ -327,7 +327,7 @@ def download_book(book_info: BookInfo, book_path: Path) -> bool:
             download_url = _get_download_url(link, book_info.title)
             if download_url != "":
                 logger.info(f"Downloading `{book_info.title}` from `{download_url}`")
-                data = downloader.download_url(download_url, book_info.size or "")
+                data = downloader.download_url(download_url, book_info.size or "", progress_cb)
                 if not data:
                     raise Exception("No data received")
 
