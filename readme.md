@@ -200,7 +200,7 @@ To use the Tor variant:
 
 ### External Cloudflare resolver variant
 
-This variant allows the application to use an external service to bypass Cloudflare protection, instead of relying on the built-in bypasser. This is useful if you already have a dedicated Cloudflare resolver (such as [FalreSolverr](https://github.com/FlareSolverr/FlareSolverr) or compatible services like [ByParr](https://github.com/ThePhaseless/Byparr)) running elsewhere.
+This variant allows the application to use an external service to bypass Cloudflare protection, instead of relying on the built-in bypasser. This is useful if you already have a dedicated Cloudflare resolver (such as [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) or compatible services like [ByParr](https://github.com/ThePhaseless/Byparr)) running elsewhere.
 
 #### How it works:
 
@@ -218,7 +218,7 @@ This variant allows the application to use an external service to bypass Cloudfl
 
 #### Important
 
-This feature follows the same configuration of the build-in Cloudflare bypasser, so should turn on `USE_CF_BYPASS` configuration to enable it
+This feature follows the same configuration of the built-in Cloudflare bypasser, so you should turn on the `USE_CF_BYPASS` configuration to enable it.
 
 #### To use the External Cloudflare resolver variant:
 
