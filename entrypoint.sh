@@ -112,8 +112,8 @@ else
     command="python3 app.py"
 fi
 
-# IF DEBUG
-if [ "$DEBUG" = "true" ]; then
+# If DEBUG and not using an external bypass
+if [ "$DEBUG" = "true" ] && [ "$USING_EXTERNAL_BYPASSER" != "true" ]; then
     set +e
     set -x
     echo "vvvvvvvvvvvv DEBUG MODE vvvvvvvvvvvv"
