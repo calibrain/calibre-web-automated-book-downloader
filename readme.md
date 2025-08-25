@@ -175,7 +175,9 @@ volumes:
 
 Mount should align with your Calibre-Web-Automated ingest folder.
 
-## 🧅 Tor Variant
+## Variants:
+
+### 🧅 Tor Variant
 
 This application also offers a variant that routes all its traffic through the Tor network. This can be useful for enhanced privacy or bypassing network restrictions.
 
@@ -195,6 +197,48 @@ To use the Tor variant:
 *   **Capabilities:** This variant requires the `NET_ADMIN` and `NET_RAW` Docker capabilities to configure `iptables` for transparent Tor proxying.
 *   **Timezone:** When running in Tor mode, the container will attempt to determine the timezone based on the Tor exit node's IP address and set it automatically. This will override the `TZ` environment variable if it is set.
 *   **Network Settings:** Custom DNS, DoH, and HTTP(S) proxy settings (`CUSTOM_DNS`, `USE_DOH`, `HTTP_PROXY`, `HTTPS_PROXY`) are ignored when using the Tor variant, as all traffic goes through Tor.
+
+### External Cloudflare resolver variant
+
+This variant allows the application to use an external service to bypass Cloudflare protection, instead of relying on the built-in bypasser. This is useful if you already have a dedicated Cloudflare resolver (such as [FalreSolverr](https://github.com/FlareSolverr/FlareSolverr) or compatible services like [ByParr](https://github.com/ThePhaseless/Byparr)) running elsewhere.
+
+#### How it works:
+
+- When enabled, all requests that require Cloudflare bypass are sent to your external resolver service.
+- The application communicates with the resolver using its API.
+- This approach can improve reliability and performance, especially if your external resolver is optimized or shared across multiple applications.
+
+#### Configuration
+
+| Variable               | Description                                                 | Default Value           |
+| ---------------------- | ----------------------------------------------------------- | ----------------------- |
+| `EXT_BYPASSER_URL`     | The full URL of your external resolver (required)           |                         |
+| `EXT_BYPASSER_PATH`    | API path for the resolver (usually `/v1`)                   | `/v1`                   |
+| `EXT_BYPASSER_TIMEOUT` | Timeout for page loading (in milliseconds)                  | `60000`                 |
+
+#### Important
+
+This feature follows the same configuration of the build-in Cloudflare bypasser, so should turn on `USE_CF_BYPASS` configuration to enable it
+
+#### To use the External Cloudflare resolver variant:
+
+1.  Get the extbp-specific docker-compose file:
+    ```bash
+    curl -O https://raw.githubusercontent.com/calibrain/calibre-web-automated-book-downloader/refs/heads/main/docker-compose.extbp.yml
+    ```
+2.  Start the service using this file:
+    ```bash
+    docker compose -f docker-compose.extbp.yml up -d
+    ```
+
+#### Compatibility:
+This feature is designed to work with any resolver that implements the `FlareSolverr` API schema, including `ByParr` and similar projects.
+
+#### Benefits:
+
+- Centralizes Cloudflare bypass logic for easier maintenance.
+- Can leverage more powerful or distributed resolver infrastructure.
+- Reduces load on the main application container.
 
 ## 🏗️ Architecture
 

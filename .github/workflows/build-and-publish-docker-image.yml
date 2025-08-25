@@ -26,6 +26,9 @@ jobs:
           - suffix: "-tor"
             target: cwa-bd-tor
             image_name_suffix: "-tor"
+          - suffix: "-extbp"
+            target: cwa-bd-extbp
+            image_name_suffix: "-extbp"
     steps:
       - name: Get current date
         id: date

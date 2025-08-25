@@ -1,0 +1,35 @@
+services:
+  calibre-web-automated-book-downloader-extbp-dev:
+    container_name: cwa-bd-extbp-dev
+    extends:
+      file: ./docker-compose.extbp.yml
+      service: calibre-web-automated-book-downloader-extbp
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: cwa-bd-extbp
+    environment:
+      DEBUG: true
+      APP_ENV: dev
+      USE_DOH: true
+      CUSTOM_DNS: cloudflare
+      USE_CF_BYPASS: true  # Enable Cloudflare bypass (default: true)
+      # External Cloudflare Bypass environment variables
+      EXT_BYPASSER_URL: "http://flaresolverr:8191"  # URL of the external Cloudflare resolver service (used FlareSolverr)
+      EXT_BYPASSER_PATH: "/v1"  # Path for external Cloudflare resolver API (default: /v1)
+      EXT_BYPASSER_TIMEOUT: 60000  # Timeout for external Cloudflare resolver requests (default: 60000)
+    volumes:
+      #- /tmp/cwa-book-downloader:/tmp/cwa-book-downloader
+      #- /tmp/cwa-book-downloader-log:/var/log/cwa-book-downloader
+      - ./deploy/ingest:/cwa-book-ingest
+      - ./deploy/log:/var/log/cwa-book-downloader
+      - ./deploy/tmp:/tmp/cwa-book-downloader
+
+  flaresolverr:  # External Cloudflare resolver service
+    image: ghcr.io/flaresolverr/flaresolverr:v3.3.22
+    container_name: flaresolverr
+    environment:
+      LOG_LEVEL: info
+      LOG_HTML: false
+      CAPTCHA_SOLVER: none
+      TZ: Europe/Rome

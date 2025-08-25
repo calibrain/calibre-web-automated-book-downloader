@@ -135,3 +135,9 @@ RUN apt-get update && \
 
 # Override the default command to run Tor
 CMD ["/app/entrypoint.sh"]
+
+FROM base AS cwa-bd-extbp
+
+ENV USING_EXTERNAL_BYPASSER=true
+
+CMD ["/app/entrypoint.sh"]
