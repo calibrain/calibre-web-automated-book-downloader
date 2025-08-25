@@ -198,7 +198,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
             ):
                 libgen_url = url["href"]
                 # TODO : Temporary fix ? Maybe get URLs from https://open-slum.org/ ?
-                libgen_url = libgen_url = re.sub(r'libgen\.(\w+)', 'libgen.gs', url["href"])
+                libgen_url = libgen_url = re.sub(r'libgen\.lc', 'libgen.gs', url["href"])
                 external_urls_libgen.add(libgen_url)
             elif url.text.strip().lower().startswith("z-lib"):
                 if ".onion/" not in url["href"]:

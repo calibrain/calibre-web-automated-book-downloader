@@ -43,7 +43,7 @@ def _reset_pyautogui_display_state():
     except Exception as e:
         logger.warning(f"Error resetting pyautogui display state: {e}")
 
-def _is_bypassed(sb) -> bool:
+def _is_bypassed(sb, escape_emojis : bool = True) -> bool:
     """Enhanced bypass detection with more comprehensive checks"""
     try:
         # Get page information with error handling
@@ -62,30 +62,25 @@ def _is_bypassed(sb) -> bool:
         except:
             current_url = ""
         
+        # Check if page is too long, if so we are probably bypassed
+        if len(body.strip()) > 100000:
+            logger.debug(f"Page content too long, we are probably bypassed len: {len(body.strip())}")
+            return True
+        
+        # Detect if there is an emoji in the page, any utf8 emoji, if so we are probably bypassed
+        if escape_emojis:
+            import emoji
+            emoji_list = emoji.emoji_list(text)
+            if len(emoji_list) >= 3:
+                logger.debug(f"Detected emoji in page, we are probably bypassed len: {len(emoji_list)}")
+                return True
+
         # Enhanced verification texts for newer Cloudflare versions
         verification_texts = [
             "just a moment",
             "verify you are human",
             "verifying you are human",
-            "needs to review the security of your connection before proceeding",
-            "checking your browser",
-            "checking connection",
-            "attention required",
-            "access denied",
-            "needs to review the security of your connection",
-            "checking the site connection security",
-            "enable javascript and cookies to continue",
-            "ray id",
-            "cloudflare",
-            "please wait",
-            "ddos protection",
-            "security check",
-            "browser check",
-            "moment please",
-            "hold on",
-            "loading",
-            "one more step",
-            "challenge"
+            "cloudflare.com/products/turnstile/?utm_source=turnstile"
         ]
         
         # Check for Cloudflare indicators
