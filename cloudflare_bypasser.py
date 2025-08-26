@@ -80,7 +80,6 @@ def _is_bypassed(sb) -> bool:
             "please wait",
             "ddos protection",
             "security check",
-            "browser check",
             "moment please",
             "hold on",
             "loading",
