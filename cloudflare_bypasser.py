@@ -8,6 +8,8 @@ from env import LOG_DIR, DEBUG
 import signal
 from datetime import datetime
 import subprocess
+import requests
+from typing import Optional
 
 # --- SeleniumBase Import ---
 from seleniumbase import Driver
@@ -471,3 +473,20 @@ def wait_for_result(func, timeout : int = 10, condition : any = True):
         time.sleep(0.5)
     return None
 _init_cleanup_thread()
+
+
+def get_bypassed_page(url: str) -> Optional[str]:
+    """Fetch HTML content from a URL using the internal Cloudflare Bypasser.
+
+    Args:
+        url: Target URL
+    Returns:
+        str: HTML content if successful, None otherwise
+    """
+
+    response_html = get(url)
+    logger.debug(f"Cloudflare Bypasser response length: {len(response_html)}")
+    if response_html.strip() != "":
+        return response_html
+    else:
+        raise requests.exceptions.RequestException("Failed to bypass Cloudflare")

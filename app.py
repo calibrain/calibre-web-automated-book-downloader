@@ -13,7 +13,7 @@ import typing
 
 from logger import setup_logger
 from config import _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE
-from env import FLASK_HOST, FLASK_PORT, APP_ENV, CWA_DB_PATH, DEBUG
+from env import FLASK_HOST, FLASK_PORT, APP_ENV, CWA_DB_PATH, DEBUG, USING_EXTERNAL_BYPASSER
 import backend
 
 from models import SearchFilters
@@ -117,7 +117,10 @@ from typing import Union, Tuple
 if DEBUG:
     import subprocess
     import time
-    from cloudflare_bypasser import _reset_driver as STOP_GUI
+    if USING_EXTERNAL_BYPASSER:
+        STOP_GUI = lambda: None  # No-op for external bypasser
+    else:
+        from cloudflare_bypasser import _reset_driver as STOP_GUI
     @app.route('/debug', methods=['GET'])
     @login_required
     def debug() -> Union[Response, Tuple[Response, int]]:

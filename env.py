@@ -45,6 +45,12 @@ APP_ENV = os.getenv("APP_ENV", "prod").lower()
 # Logging settings
 LOG_FILE = LOG_DIR / "cwa-book-downloader.log"
 
+USING_EXTERNAL_BYPASSER = string_to_bool(os.getenv("USING_EXTERNAL_BYPASSER", "false"))
+if USING_EXTERNAL_BYPASSER:
+    EXT_BYPASSER_URL = os.getenv("EXT_BYPASSER_URL").strip()
+    EXT_BYPASSER_PATH = os.getenv("EXT_BYPASSER_PATH", "/v1").strip()
+    EXT_BYPASSER_TIMEOUT = int(os.getenv("EXT_BYPASSER_TIMEOUT", "60000"))
+
 USING_TOR = string_to_bool(os.getenv("USING_TOR", "false"))
 # If using Tor, we don't need to set custom DNS, use DOH, or proxy
 if USING_TOR:

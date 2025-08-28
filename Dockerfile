@@ -38,18 +38,10 @@ RUN apt-get update && \
     curl \
     # For entrypoint
     dumb-init \
-    # For dumb display
-    xvfb \
-    # For screen recording
-    ffmpeg \
     # For debug
     zip iputils-ping \
     # For user switching
-    sudo \
-    # --- Chromium Browser ---
-    chromium-driver \
-    # For tkinter (pyautogui)
-    python3-tk && \
+    sudo && \
     # Cleanup APT cache *after* all installs in this layer
     apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false && \
     apt-get clean && \
@@ -67,16 +59,11 @@ WORKDIR /app
 
 # Install Python dependencies using pip
 # Upgrade pip first, then copy requirements and install
-# Copying requirements.txt separately leverages build cache
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && \
+# Copying requirements-base.txt separately leverages build cache
+COPY requirements-base.txt .
+RUN pip install --no-cache-dir -r requirements-base.txt && \
     # Clean root's pip cache
     rm -rf /root/.cache
-
-# Add this line to grant read/execute permissions to others
-RUN chmod -R o+rx /usr/bin/chromium && \
-    chmod -R o+rx /usr/bin/chromedriver && \
-    chmod -R o+w /usr/local/lib/python3.10/site-packages/seleniumbase/drivers/
 
 # Copy application code *after* dependencies are installed
 COPY . .
@@ -101,10 +88,34 @@ ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 
 FROM base AS cwa-bd
 
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    # For dumb display
+    xvfb \
+    # For screen recording
+    ffmpeg \
+    # --- Chromium ---
+    chromium \
+    # --- ChromeDriver ---
+    chromium-driver \
+    # For tkinter (pyautogui)
+    python3-tk
+
+# install additional dependencies
+COPY requirements-cwa-bd.txt .
+RUN pip install --no-cache-dir -r requirements-cwa-bd.txt && \
+    # Clean root's pip cache
+    rm -rf /root/.cache
+
+# Add this line to grant read/execute permissions to others
+RUN chmod -R o+rx /usr/bin/chromium && \
+    chmod -R o+rx /usr/bin/chromedriver && \
+    chmod -R o+w /usr/local/lib/python3.10/site-packages/seleniumbase/drivers/
+
 # Default command to run the application entrypoint script
 CMD ["/app/entrypoint.sh"]
 
-FROM base AS cwa-bd-tor
+FROM cwa-bd AS cwa-bd-tor
 
 ENV USING_TOR=true
 
@@ -123,4 +134,10 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Override the default command to run Tor
+CMD ["/app/entrypoint.sh"]
+
+FROM base AS cwa-bd-extbp
+
+ENV USING_EXTERNAL_BYPASSER=true
+
 CMD ["/app/entrypoint.sh"]

@@ -12,9 +12,12 @@ from typing import Callable
 from threading import Event
 from logger import setup_logger
 from config import PROXIES
-from env import MAX_RETRY, DEFAULT_SLEEP, USE_CF_BYPASS
+from env import MAX_RETRY, DEFAULT_SLEEP, USE_CF_BYPASS, USING_EXTERNAL_BYPASSER
 if USE_CF_BYPASS:
-    import cloudflare_bypasser
+    if USING_EXTERNAL_BYPASSER:
+        from cloudflare_bypasser_external import get_bypassed_page
+    else:
+        from cloudflare_bypasser import get_bypassed_page
 
 logger = setup_logger(__name__)
 
@@ -35,12 +38,7 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) 
         logger.debug(f"html_get_page: {url}, retry: {retry}, use_bypasser: {use_bypasser}")
         if use_bypasser and USE_CF_BYPASS:
             logger.info(f"GET Using Cloudflare Bypasser for: {url}")
-            response_html = cloudflare_bypasser.get(url)
-            logger.debug(f"Cloudflare Bypasser response length: {len(response_html)}")
-            if response_html.strip() != "":
-                return response_html
-            else:
-                raise requests.exceptions.RequestException("Failed to bypass Cloudflare")
+            return get_bypassed_page(url)
         else:
             logger.info(f"GET: {url}")
             response = requests.get(url, proxies=PROXIES)
