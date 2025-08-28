@@ -8,7 +8,8 @@ from io import BytesIO
 from typing import Optional
 from urllib.parse import urlparse
 from tqdm import tqdm
-
+from typing import Callable
+from threading import Event
 from logger import setup_logger
 from config import PROXIES
 from env import MAX_RETRY, DEFAULT_SLEEP, USE_CF_BYPASS
@@ -71,7 +72,7 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) 
         time.sleep(sleep_time)
         return html_get_page(url, retry - 1, use_bypasser)
 
-def download_url(link: str, size: str = "") -> Optional[BytesIO]:
+def download_url(link: str, size: str = "", progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None) -> Optional[BytesIO]:
     """Download content from URL into a BytesIO buffer.
     
     Args:
@@ -99,6 +100,11 @@ def download_url(link: str, size: str = "") -> Optional[BytesIO]:
         for chunk in response.iter_content(chunk_size=1000):
             buffer.write(chunk)
             pbar.update(len(chunk))
+            if progress_callback is not None:
+                progress_callback(pbar.n * 100.0 / total_size)
+            if cancel_flag is not None and cancel_flag.is_set():
+                logger.info(f"Download cancelled: {link}")
+                return None
             
         pbar.close()
         if buffer.tell() * 0.1 < total_size * 0.9:

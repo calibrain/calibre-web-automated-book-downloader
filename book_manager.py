@@ -3,7 +3,8 @@
 import time, json, re
 from pathlib import Path
 from urllib.parse import quote
-from typing import List, Optional, Dict, Union
+from typing import List, Optional, Dict, Union, Callable
+from threading import Event
 from bs4 import BeautifulSoup, Tag, NavigableString, ResultSet
 
 import downloader
@@ -11,8 +12,8 @@ from logger import setup_logger
 from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_BASE_URL
 from env import AA_DONATOR_KEY, USE_CF_BYPASS, PRIORITIZE_WELIB
 from models import BookInfo, SearchFilters
-
 logger = setup_logger(__name__)
+
 
 
 def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
@@ -198,7 +199,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
             ):
                 libgen_url = url["href"]
                 # TODO : Temporary fix ? Maybe get URLs from https://open-slum.org/ ?
-                libgen_url = libgen_url = re.sub(r'libgen\.lc', 'libgen.gs', url["href"])
+                libgen_url = re.sub(r'libgen\.(lc|is|bz|st)', 'libgen.gl', url["href"])
                 external_urls_libgen.add(libgen_url)
             elif url.text.strip().lower().startswith("z-lib"):
                 if ".onion/" not in url["href"]:
@@ -300,7 +301,7 @@ def _extract_book_metadata(
     }
 
 
-def download_book(book_info: BookInfo, book_path: Path) -> bool:
+def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None) -> bool:
     """Download a book from available sources.
 
     Args:
@@ -324,10 +325,11 @@ def download_book(book_info: BookInfo, book_path: Path) -> bool:
 
     for link in download_links:
         try:
-            download_url = _get_download_url(link, book_info.title)
+            download_url = _get_download_url(link, book_info.title, cancel_flag)
             if download_url != "":
                 logger.info(f"Downloading `{book_info.title}` from `{download_url}`")
-                data = downloader.download_url(download_url, book_info.size or "")
+
+                data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag)
                 if not data:
                     raise Exception("No data received")
 
@@ -344,7 +346,7 @@ def download_book(book_info: BookInfo, book_path: Path) -> bool:
     return False
 
 
-def _get_download_url(link: str, title: str) -> str:
+def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None) -> str:
     """Extract actual download URL from various source pages."""
 
     url = ""
@@ -371,8 +373,10 @@ def _get_download_url(link: str, title: str) -> str:
                 if countdown:
                     sleep_time = int(countdown[0].text)
                     logger.info(f"Waiting {sleep_time}s for {title}")
-                    time.sleep(sleep_time)
-                    url = _get_download_url(link, title)
+                    if cancel_flag is not None and cancel_flag.wait(timeout=sleep_time):
+                        logger.info(f"Cancelled wait for {title}")
+                        return ""
+                    url = _get_download_url(link, title, cancel_flag)
             else:
                 url = download_links[0]["href"]
         else:

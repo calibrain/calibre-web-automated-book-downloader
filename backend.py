@@ -144,16 +144,9 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
         if cancel_flag.is_set():
             logger.info(f"Download cancelled before book manager call: {book_id}")
             return None
-
-        # Update progress periodically during download
-        progress_thread = threading.Thread(
-            target=_update_download_progress,
-            args=(book_id, cancel_flag),
-            daemon=True
-        )
-        progress_thread.start()
-
-        success = book_manager.download_book(book_info, book_path)
+        
+        progress_callback = lambda progress: update_download_progress(book_id, progress)
+        success = book_manager.download_book(book_info, book_path, progress_callback, cancel_flag)
         
         # Stop progress updates
         cancel_flag.wait(0.1)  # Brief pause for progress thread cleanup
@@ -209,14 +202,9 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
             logger.error_trace(f"Error downloading book: {e}")
         return None
 
-def _update_download_progress(book_id: str, cancel_flag: Event) -> None:
-    """Update download progress periodically."""
-    progress = 0.0
-    while not cancel_flag.is_set() and progress < 100.0:
-        # Simulate progress (in real implementation, this would get actual progress)
-        progress = min(100.0, progress + 10.0)
-        book_queue.update_progress(book_id, progress)
-        time.sleep(DOWNLOAD_PROGRESS_UPDATE_INTERVAL)
+def update_download_progress(book_id: str, progress: float) -> None:
+    """Update download progress."""
+    book_queue.update_progress(book_id, progress)
 
 def cancel_download(book_id: str) -> bool:
     """Cancel a download.
