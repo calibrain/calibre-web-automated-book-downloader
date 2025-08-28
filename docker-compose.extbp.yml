@@ -10,6 +10,7 @@ services:
       APP_ENV: prod
       UID: 1000
       GID: 100
+      EXT_BYPASSER_URL: http://flaresolverr:8191
     ports:
       - 8084:8084
     restart: unless-stopped
@@ -20,3 +21,5 @@ services:
       # This is the location of CWA's app.db, which contains authentication
       # details
       #- /cwa/config/path/app.db:/auth/app.db:ro
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest

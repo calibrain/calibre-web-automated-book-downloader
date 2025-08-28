@@ -47,7 +47,7 @@ LOG_FILE = LOG_DIR / "cwa-book-downloader.log"
 
 USING_EXTERNAL_BYPASSER = string_to_bool(os.getenv("USING_EXTERNAL_BYPASSER", "false"))
 if USING_EXTERNAL_BYPASSER:
-    EXT_BYPASSER_URL = os.getenv("EXT_BYPASSER_URL").strip()
+    EXT_BYPASSER_URL = os.getenv("EXT_BYPASSER_URL", "http://flaresolverr:8191").strip()
     EXT_BYPASSER_PATH = os.getenv("EXT_BYPASSER_PATH", "/v1").strip()
     EXT_BYPASSER_TIMEOUT = int(os.getenv("EXT_BYPASSER_TIMEOUT", "60000"))
 
