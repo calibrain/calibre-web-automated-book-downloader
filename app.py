@@ -103,7 +103,7 @@ def index() -> str:
     """
     Render main page with search and status table.
     """
-    return render_template('index.html', book_languages=_SUPPORTED_BOOK_LANGUAGE, default_language=BOOK_LANGUAGE, debug=DEBUG)
+    return render_template('new_index.html', book_languages=_SUPPORTED_BOOK_LANGUAGE, default_language=BOOK_LANGUAGE, debug=DEBUG)
 
 @app.route('/new')
 @login_required
