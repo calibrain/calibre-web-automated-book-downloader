@@ -103,16 +103,9 @@ def index() -> str:
     """
     Render main page with search and status table.
     """
-    return render_template('new_index.html', book_languages=_SUPPORTED_BOOK_LANGUAGE, default_language=BOOK_LANGUAGE, debug=DEBUG)
+    return render_template('index.html', book_languages=_SUPPORTED_BOOK_LANGUAGE, default_language=BOOK_LANGUAGE, debug=DEBUG)
 
-@app.route('/new')
-@login_required
-def index_new() -> str:
-    """
-    Render modern UI page with card-based results and streamlined layout.
-    Uses the same context variables as the classic index for compatibility.
-    """
-    return render_template('new_index.html', book_languages=_SUPPORTED_BOOK_LANGUAGE, default_language=BOOK_LANGUAGE, debug=DEBUG)
+ 
 
 @app.route('/favico<path:_>')
 @app.route('/request/favico<path:_>')

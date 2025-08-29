@@ -1,1079 +1,383 @@
-// Main application JavaScript
-document.addEventListener('DOMContentLoaded', () => {
-    // DOM Elements
-    const elements = {
-        search: {
-            searchInput: document.getElementById('search-input'),
-            searchButton: document.getElementById('search-button'),
-            advanced: {
-                advSearchButton: document.getElementById('adv-search-button'),
-                searchFiltersForm: document.getElementById('search-filters')
-            }
-        },
-        selectAllCheckbox: document.getElementById('select-all-checkbox'),
-        downloadSelectedButton: document.getElementById('download-selected-button'),
-        resultsSectionAccordion: document.getElementById('results-section-accordion'),
-        searchAccordion: document.getElementById('search-accordion'),
-        resultsHeading: document.getElementById('results-heading'),
-        resultsTable: document.getElementById('results-table'),
-        resultsTableBody: document.querySelector('#results-table tbody'),
-        searchLoading: document.getElementById('search-loading'),
-        statusLoading: document.getElementById('status-loading'),
-        statusTable: document.getElementById('status-table'),
-        statusTableBody: document.querySelector('#status-table tbody'),
-        modalOverlay: document.getElementById('modal-overlay'),
-        detailsContainer: document.getElementById('details-container'),
-        theme: {
-            toggle: document.getElementById('theme-toggle'),
-            text: document.getElementById('theme-text'),
-            dropdown: document.querySelector('[uk-dropdown]'),
-        },
-        debug: {
-            form: document.getElementById('debug-form'),
-            button: document.getElementById('debug-button'),
-            spinner: document.getElementById('debug-spinner')
-        },
-        restart: {
-            form: document.getElementById('restart-form'),
-            button: document.getElementById('restart-button'),
-            spinner: document.getElementById('restart-spinner')
+// Modern UI script: search, cards, details, downloads, status, theme
+// Reuses existing API endpoints. Keeps logic minimal and accessible.
+
+(function () {
+  // ---- DOM ----
+  const el = {
+    searchInput: document.getElementById('search-input'),
+    searchBtn: document.getElementById('search-button'),
+    advToggle: document.getElementById('toggle-advanced'),
+    filtersForm: document.getElementById('search-filters'),
+    isbn: document.getElementById('isbn-input'),
+    author: document.getElementById('author-input'),
+    title: document.getElementById('title-input'),
+    lang: document.getElementById('lang-input'),
+    sort: document.getElementById('sort-input'),
+    content: document.getElementById('content-input'),
+    resultsGrid: document.getElementById('results-grid'),
+    noResults: document.getElementById('no-results'),
+    searchLoading: document.getElementById('search-loading'),
+    modalOverlay: document.getElementById('modal-overlay'),
+    detailsContainer: document.getElementById('details-container'),
+    refreshStatusBtn: document.getElementById('refresh-status-button'),
+    clearCompletedBtn: document.getElementById('clear-completed-button'),
+    statusLoading: document.getElementById('status-loading'),
+    statusList: document.getElementById('status-list'),
+    activeDownloadsCount: document.getElementById('active-downloads-count'),
+    // Active downloads (top section under search)
+    activeTopSec: document.getElementById('active-downloads-top'),
+    activeTopList: document.getElementById('active-downloads-list'),
+    activeTopRefreshBtn: document.getElementById('active-refresh-button'),
+    themeToggle: document.getElementById('theme-toggle'),
+    themeText: document.getElementById('theme-text'),
+    themeMenu: document.getElementById('theme-menu')
+  };
+
+  // ---- Constants ----
+  const API = {
+    search: '/request/api/search',
+    info: '/request/api/info',
+    download: '/request/api/download',
+    status: '/request/api/status',
+    cancelDownload: '/request/api/download',
+    setPriority: '/request/api/queue',
+    clearCompleted: '/request/api/queue/clear',
+    activeDownloads: '/request/api/downloads/active'
+  };
+  const FILTERS = ['isbn', 'author', 'title', 'lang', 'sort', 'content', 'format'];
+
+  // ---- Utils ----
+  const utils = {
+    show(node) { node && node.classList.remove('hidden'); },
+    hide(node) { node && node.classList.add('hidden'); },
+    async j(url, opts = {}) {
+      const res = await fetch(url, opts);
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return res.json();
+    },
+    // Build query string from basic + advanced filters
+    buildQuery() {
+      const q = [];
+      const basic = el.searchInput?.value?.trim();
+      if (basic) q.push(`query=${encodeURIComponent(basic)}`);
+
+      if (!el.filtersForm || el.filtersForm.classList.contains('hidden')) {
+        return q.join('&');
+      }
+
+      FILTERS.forEach((name) => {
+        if (name === 'format') {
+          const checked = Array.from(document.querySelectorAll('[id^="format-"]:checked'));
+          checked.forEach((cb) => q.push(`format=${encodeURIComponent(cb.value)}`));
+        } else {
+          const input = document.querySelectorAll(`[id^="${name}-input"]`);
+          input.forEach((node) => {
+            const val = node.value?.trim();
+            if (val) q.push(`${name}=${encodeURIComponent(val)}`);
+          });
         }
-    };
-
-    // State
-    let modalDetails = null;
-    const selectedBooks = new Set();
-    const STATE = {
-        isSearching: false,
-        isLoadingDetails: false,
-    };
-
-    // Constants
-    const REFRESH_INTERVAL = 60000; // 60 seconds
-    const API_ENDPOINTS = {
-        search: '/request/api/search',
-        info: '/request/api/info',
-        download: '/request/api/download',
-        status: '/request/api/status',
-        cancelDownload: '/request/api/download',
-        setPriority: '/request/api/queue',
-        reorderQueue: '/request/api/queue/reorder',
-        queueOrder: '/request/api/queue/order',
-        activeDownloads: '/request/api/downloads/active',
-        clearCompleted: '/request/api/queue/clear'
-    };
-    const FILTERS = ['isbn', 'author', 'title', 'lang' , 'sort', "content", "format"];
-
-    // Utility Functions
-    const utils = {
-        debounce(func, wait) {
-            let timeout;
-            return function executedFunction(...args) {
-                const later = () => {
-                    clearTimeout(timeout);
-                    func(...args);
-                };
-                clearTimeout(timeout);
-                timeout = setTimeout(later, wait);
-            };
-        },
-
-        showLoading(element) {
-            element.removeAttribute('hidden');
-        },
-
-        hideLoading(element) {
-            element.setAttribute('hidden', '');
-        },
-
-        showAccordion(element) {
-            UIkit.accordion(element).toggle(1, true);
-        },
-
-        async fetchJson(url, options = {}) {
-            try {
-                const response = await fetch(url, options);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                return await response.json();
-            } catch (error) {
-                console.error('Fetch error:', error);
-                throw error;
-            }
-        },
-
-        createElement(tag, attributes = {}, children = []) {
-            const element = document.createElement(tag);
-            Object.entries(attributes).forEach(([key, value]) => {
-                element[key] = value;
-            });
-            children.forEach(child => {
-                if (typeof child === 'string') {
-                    element.appendChild(document.createTextNode(child));
-                } else {
-                    element.appendChild(child);
-                }
-            });
-            return element;
-        },
-
-        sortResultsTable(column, order = 'asc') {
-            const rows = Array.from(elements.resultsTableBody.querySelectorAll('tr'));
-            const headers = document.querySelectorAll('#results-table thead th');
-
-            const parseFileSize = (size) => {
-                const match = size.match(/([\d.]+)([KMGT]B)/i);
-                if (!match) return 0;
-                const [_, value, unit] = match;
-                const multiplier = { KB: 1, MB: 1024, GB: 1024 * 1024, TB: 1024 * 1024 * 1024 };
-                return parseFloat(value) * (multiplier[unit.toUpperCase()] || 1);
-            };
-
-            const parseTitle = (title) => {
-                return title.replace(/^(The)\s+/i, '').trim();
-            }
-
-            const columnName = headers[column].textContent.trim().toLowerCase();
-
-            const getCellValue = (row, column) => {
-                const cell = row.querySelector(`td:nth-child(${column + 1})`);
-                const text = cell ? cell.textContent.trim() : '';
-                if (columnName === 'size') return parseFileSize(text);
-                if (columnName === 'title') return parseTitle(text);
-                return text;
-            };
-
-            rows.sort((a, b) => {
-                const valA = getCellValue(a, column);
-                const valB = getCellValue(b, column);
-
-                if (!isNaN(valA) && !isNaN(valB)) {
-                    return order === 'asc' ? valA - valB : valB - valA;
-                }
-                return order === 'asc'
-                    ? valA.localeCompare(valB)
-                    : valB.localeCompare(valA);
-            });
-
-            elements.resultsTableBody.innerHTML = '';
-            rows.forEach(row => elements.resultsTableBody.appendChild(row));
-
-            headers.forEach(header => {
-                const icon = header.querySelector('.sort-icon');
-                if (icon) {
-                    icon.removeAttribute('uk-icon');
-                }
-            });
-
-            const currentHeader = headers[column];
-            const icon = currentHeader.querySelector('.sort-icon');
-            if (icon) {
-                icon.setAttribute('uk-icon', `icon: ${order === 'asc' ? 'triangle-up' : 'triangle-down'}`);
-            }
-        },
-
-        updateDownloadSelectedButton() {
-            elements.downloadSelectedButton.disabled = selectedBooks.size === 0;
-        },
-
-        handleCheckboxChange(event) {
-            const checkbox = event.target;
-            if (checkbox.checked) {
-                selectedBooks.add(checkbox.value);
-            } else {
-                selectedBooks.delete(checkbox.value);
-            }
-            utils.updateDownloadSelectedButton();
-        },
-
-        async handleDownloadSelected() {
-            if (selectedBooks.size === 0) return;
-
-            const bookIds = Array.from(selectedBooks);
-            const books = bookIds.map((bookId) => {
-                const row = document.querySelector(`#book-${bookId}`).closest('tr');
-                return {
-                    title: row.querySelector('td:nth-child(4)').textContent,
-                    author: row.querySelector('td:nth-child(5)').textContent
-                };
-            });
-
-            // Confirmation modal
-            const confirmationContent = `
-                <h2>Confirm Download</h2>
-                <p>Are you sure you want to download ${books.length} book${books.length > 1 ? 's' : ''}?</p>
-                <div class="uk-overflow-auto">
-                    <table class="uk-table uk-table-divider uk-table-small">
-                        <thead>
-                            <tr>
-                                <th>Title</th>
-                                <th>Author</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${books.map((book) => `
-                                <tr>
-                                    <td>${book.title}</td>
-                                    <td>${book.author}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
-                <div class="uk-flex uk-flex-between uk-margin-top">
-                    <button id="cancel-download" class="uk-button uk-button-default">Cancel</button>
-                    <button id="confirm-download" class="uk-button uk-button-primary">Download</button>
-                </div>
-            `;
-
-            elements.detailsContainer.innerHTML = confirmationContent;
-
-            document.getElementById('cancel-download').addEventListener('click', modal.close);
-            document.getElementById('confirm-download').addEventListener('click', async () => {
-                await utils.confirmDownload(bookIds);
-            });
-
-            modal.open();
-        },
-
-        async confirmDownload(bookIds, priority = 0) {
-            try {
-                await Promise.all(bookIds.map((bookId) =>
-                    utils.fetchJson(`${API_ENDPOINTS.download}?id=${encodeURIComponent(bookId)}&priority=${priority}`)
-                ));
-                
-                UIkit.notification({
-                    message: `Successfully queued ${bookIds.length} book${bookIds.length > 1 ? 's' : ''} for download!`,
-                    status: 'success',
-                    timeout: 3000
-                });
-                
-                status.fetch();
-            } catch (error) {
-                console.error('Download error:', error);
-                UIkit.notification({
-                    message: 'Failed to queue some books for download.',
-                    status: 'danger',
-                    timeout: 3000
-                });
-            }
-
-            this.clearAllCheckboxes();
-            modal.close();
-        },
-
-        clearAllCheckboxes() {
-            selectedBooks.forEach((bookId) => {
-                const checkbox = document.getElementById(`book-${bookId}`);
-                if (checkbox) checkbox.checked = false;
-            });
-
-            const selectAllCheckbox = document.getElementById('select-all-checkbox');
-            if (selectAllCheckbox) selectAllCheckbox.checked = false;
-
-            selectedBooks.clear();
-            utils.updateDownloadSelectedButton();
-        }
-    };
-
-    // Queue Management Functions
-    const queue = {
-        async cancelDownload(bookId) {
-            try {
-                const response = await fetch(`${API_ENDPOINTS.cancelDownload}/${bookId}/cancel`, {
-                    method: 'DELETE'
-                });
-                
-                if (response.ok) {
-                    UIkit.notification({
-                        message: 'Download cancelled successfully',
-                        status: 'success',
-                        timeout: 2000
-                    });
-                    status.fetch();
-                    this.updateActiveDownloads();
-                } else {
-                    throw new Error('Failed to cancel download');
-                }
-            } catch (error) {
-                console.error('Cancel download error:', error);
-                UIkit.notification({
-                    message: 'Failed to cancel download',
-                    status: 'danger',
-                    timeout: 3000
-                });
-            }
-        },
-
-        async setPriority(bookId, priority) {
-            try {
-                const response = await fetch(`${API_ENDPOINTS.setPriority}/${bookId}/priority`, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ priority })
-                });
-                
-                if (response.ok) {
-                    UIkit.notification({
-                        message: `Priority updated to ${priority}`,
-                        status: 'success',
-                        timeout: 2000
-                    });
-                    status.fetch();
-                } else {
-                    throw new Error('Failed to update priority');
-                }
-            } catch (error) {
-                console.error('Set priority error:', error);
-                UIkit.notification({
-                    message: 'Failed to update priority',
-                    status: 'danger',
-                    timeout: 3000
-                });
-            }
-        },
-
-        async clearCompleted() {
-            try {
-                const response = await fetch(API_ENDPOINTS.clearCompleted, {
-                    method: 'DELETE'
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    UIkit.notification({
-                        message: `Cleared ${data.removed_count} completed items`,
-                        status: 'success',
-                        timeout: 2000
-                    });
-                    status.fetch();
-                } else {
-                    throw new Error('Failed to clear completed items');
-                }
-            } catch (error) {
-                console.error('Clear completed error:', error);
-                UIkit.notification({
-                    message: 'Failed to clear completed items',
-                    status: 'danger',
-                    timeout: 3000
-                });
-            }
-        },
-
-        async updateActiveDownloads() {
-            try {
-                const data = await utils.fetchJson(API_ENDPOINTS.activeDownloads);
-                const count = data.active_downloads ? data.active_downloads.length : 0;
-                const element = document.getElementById('active-downloads-count');
-                if (element) {
-                    element.textContent = `Active: ${count}`;
-                }
-            } catch (error) {
-                console.error('Update active downloads error:', error);
-            }
-        }
-    };
-
-    // Search Functions
-    const search = {
-        async performSearch(query) {
-            utils.clearAllCheckboxes();
-            if (STATE.isSearching) return;
-
-            try {
-                STATE.isSearching = true;
-                utils.showLoading(elements.searchLoading);
-
-                if (!elements.searchAccordion.classList.contains('uk-open')) {
-                    utils.showAccordion(elements.resultsSectionAccordion);
-                };
-                
-                const data = await utils.fetchJson(
-                    `${API_ENDPOINTS.search}?${query}`
-                );
-
-                this.displayResults(data);
-            } catch (error) {
-                this.handleSearchError(error);
-            } finally {
-                STATE.isSearching = false;
-                utils.hideLoading(elements.searchLoading);
-            }
-        },
-
-        buildQuery() {
-            let queryParams = [];
-
-            if(elements.search.searchInput.value.trim()) {
-                queryParams.push(`query=${encodeURIComponent(elements.search.searchInput.value.trim())}`);
-            }
-
-            if(elements.search.advanced.searchFiltersForm.hasAttribute('hidden')) {
-                //Not advanced search
-                return queryParams.join('&');
-            }
-
-            FILTERS.forEach(filterType => {
-                if (filterType === 'format') {
-                    // Handle format checkboxes
-                    const checkboxes = document.querySelectorAll(`[id^="${filterType}-"]:checked`);
-                    checkboxes.forEach(checkbox => {
-                        queryParams.push(`${filterType}=${encodeURIComponent(checkbox.value)}`);
-                    });
-                } else {
-                    const inputs = document.querySelectorAll(`[id^="${filterType}-input"]`);
-                
-                    inputs.forEach(input => {
-                        const value = input.value.trim();
-                        if (value) {  
-                            queryParams.push(`${filterType}=${encodeURIComponent(value.trim())}`);
-                        }
-                    });
-                }
-            });
-
-            return queryParams.join('&');
-        },
-
-        displayResults(books) {
-            elements.resultsTableBody.innerHTML = '';
-
-            if (!books.length) {
-                this.displayNoResults();
-                return;
-            }
-
-            books.forEach((book, index) => {
-                const row = this.createBookRow(book, index);
-                elements.resultsTableBody.appendChild(row);
-            });
-        },
-
-        displayNoResults() {
-            const row = utils.createElement('tr', {}, [
-                utils.createElement('td', {
-                    colSpan: '10',
-                    textContent: 'No results found.'
-                })
-            ]);
-            elements.resultsTableBody.appendChild(row);
-        },
-
-        createBookRow(book, index) {
-            const checkboxCell = utils.createElement('td', {}, [
-                utils.createElement('input', {
-                    type: 'checkbox',
-                    className: 'uk-checkbox',
-                    id: 'book-' + book.id,
-                    name: 'book-' + book.id,
-                    value: book.id,
-                    onchange: utils.handleCheckboxChange
-                })
-            ]);
-
-            return utils.createElement('tr', {}, [
-                checkboxCell,
-                utils.createElement('td', { textContent: index + 1 }),
-                this.createPreviewCell(book.preview),
-                utils.createElement('td', { textContent: book.title || 'N/A' }),
-                utils.createElement('td', { textContent: book.author || 'N/A' }),
-                utils.createElement('td', { textContent: book.publisher || 'N/A' }),
-                utils.createElement('td', { textContent: book.year || 'N/A' }),
-                utils.createElement('td', { textContent: book.language || 'N/A' }),
-                utils.createElement('td', { textContent: book.format || 'N/A' }),
-                utils.createElement('td', { textContent: book.size || 'N/A' }),
-                this.createActionCell(book)
-            ]);
-        },
-
-        createPreviewCell(previewUrl) {
-            if (!previewUrl) {
-                return utils.createElement('td', { textContent: 'N/A' });
-            }
-
-            const img = utils.createElement('img', {
-                src: previewUrl,
-                alt: 'Book Preview',
-                style: 'max-width: 60px;'
-            });
-
-            return utils.createElement('td', {}, [img]);
-        },
-
-        createActionCell(book) {
-            const buttonDetails = utils.createElement('button', {
-                className: 'uk-button uk-button-default uk-align-center uk-margin-small uk-width-1-1',
-                onclick: () => bookDetails.show(book.id)
-            }, [utils.createElement('span', { textContent: 'Details' })]);
-
-            const downloadButton = utils.createElement('button', {
-                className: 'uk-button uk-button-primary uk-align-center uk-margin-small uk-width-1-1',
-                onclick: () => bookDetails.downloadBook(book)
-            }, [utils.createElement('span', { textContent: 'Download' })]);
-
-            return utils.createElement('td', {}, [buttonDetails, downloadButton]);
-        },
-
-        handleSearchError(error) {
-            console.error('Search error:', error);
-            elements.resultsTableBody.innerHTML = '';
-            const errorRow = utils.createElement('tr', {}, [
-                utils.createElement('td', {
-                    colSpan: '10',
-                    textContent: 'An error occurred while searching. Please try again.'
-                })
-            ]);
-            elements.resultsTableBody.appendChild(errorRow);
-        }
-    };
-
-    // Book Details Functions
-    const bookDetails = {
-        async show(bookId) {
-            if (STATE.isLoadingDetails) return;
-
-            try {
-                STATE.isLoadingDetails = true;
-                modal.open();
-                elements.detailsContainer.innerHTML = '<p>Loading details...</p>';
-
-                const book = await utils.fetchJson(
-                    `${API_ENDPOINTS.info}?id=${encodeURIComponent(bookId)}`
-                );
-
-                modalDetails = book;
-                this.displayDetails(book);
-            } catch (error) {
-                this.handleDetailsError(error);
-            } finally {
-                STATE.isLoadingDetails = false;
-            }
-        },
-
-        displayDetails(book) {
-            elements.detailsContainer.innerHTML = this.generateDetailsHTML(book);
-
-            // Add event listeners
-            document.getElementById('download-button')
-                .addEventListener('click', () => this.downloadBook(book));
-            document.getElementById('close-details')
-                .addEventListener('click', modal.close);
-        },
-
-        generateDetailsHTML(book) {
-            return `
-
-                <div class="uk-card uk-card-default uk-child-width-1-2" uk-grid>
-                    <div class="uk-card-media-left uk-cover-container uk-padding">
-                        <img class="uk-height-medium" src="${book.preview || ''}" alt="Book Preview" uk-cover>
-                        <canvas width="299" height="461"></canvas>
-                    </div>
-                    <div class="uk-card-body">
-                        <h3>${book.title || 'No title available'}</h3>
-                        <p><strong>Author:</strong> ${book.author || 'N/A'}</p>
-                        <p><strong>Publisher:</strong> ${book.publisher || 'N/A'}</p>
-                        <p><strong>Year:</strong> ${book.year || 'N/A'}</p>
-                        <p><strong>Language:</strong> ${book.language || 'N/A'}</p>
-                        <p><strong>Format:</strong> ${book.format || 'N/A'}</p>
-                        <p><strong>Size:</strong> ${book.size || 'N/A'}</p>
-                    </div>
-                    
-                    <button id="download-button" class="uk-button uk-button-primary" type="button">Download</button>
-                    <button id="close-details" class="uk-button uk-button-default uk-modal-close" type="button">Close</button>
-                </div>
-                <ul uk-accordion>
-                    <li>
-                        <a class="uk-accordion-title" href>Further Information</a>
-                        <div class="uk-accordion-content">
-                            ${this.generateInfoList(book.info)}
-                        </div>
-                    </li>
-                </ul>
-            `;
-        },
-
-        generateInfoList(info) {
-            if (!info) return '';
-
-            const listItems = Object.entries(info)
-                .map(([key, values]) => `
-                    <li><strong>${key}:</strong> ${values.join(', ')}</li>
-                `)
-                .join('');
-
-            return `<ul class="uk-list uk-list-bullet">${listItems}</ul>`;
-        },
-
-        async downloadBook(book) {
-            if (!book) return;
-
-            try {
-                utils.showLoading(elements.searchLoading);
-                await utils.fetchJson(
-                    `${API_ENDPOINTS.download}?id=${encodeURIComponent(book.id)}`
-                );
-
-                modal.close();
-                status.fetch();
-            } catch (error) {
-                console.error('Download error:', error);
-            } finally {
-                utils.hideLoading(elements.searchLoading);
-            }
-        },
-
-        handleDetailsError(error) {
-            console.error('Details error:', error);
-            elements.detailsContainer.innerHTML = `
-                <p>Error loading details. Please try again.</p>
-                <div class="details-actions">
-                    <button id="close-details" onclick="modal.close()">Close</button>
-                </div>
-            `;
-            document.getElementById('close-details')
-                .addEventListener('click', modal.close);
-        }
-    };
-
-    // Status Functions
-    const status = {
-        async fetch() {
-            try {
-                utils.showLoading(elements.statusLoading);
-                const data = await utils.fetchJson(API_ENDPOINTS.status);
-                this.display(data);
-                queue.updateActiveDownloads();
-            } catch (error) {
-                this.handleError(error);
-            } finally {
-                utils.hideLoading(elements.statusLoading);
-            }
-        },
-
-        display(data) {
-            elements.statusTableBody.innerHTML = '';
-
-            // Handle each status type
-            Object.entries(data).forEach(([status, booksInStatus]) => {
-                // If the status section has books
-                if (Object.keys(booksInStatus).length > 0) {
-                    // For each book in this status
-                    Object.entries(booksInStatus).forEach(([bookId, bookData]) => {
-                        this.addStatusRow(status, bookData);
-                    });
-                }
-            });
-        },
-
-        addStatusRow(status, book) {
-            if (!book.id || !book.title) return;
-
-            const statusCell = utils.createElement('td', {
-                className: `status-${status.toLowerCase()}`,
-                textContent: status
-            });
-
-            // Priority cell with editable input for queued items
-            const priorityCell = utils.createElement('td');
-            if (status === 'queued') {
-                const priorityInput = utils.createElement('input', {
-                    type: 'number',
-                    className: 'uk-input uk-form-small uk-form-width-xsmall',
-                    value: book.priority || 0,
-                    min: 0,
-                    onchange: () => queue.setPriority(book.id, parseInt(priorityInput.value))
-                });
-                priorityCell.appendChild(priorityInput);
-            } else {
-                priorityCell.textContent = book.priority || '-';
-            }
-
-            // Title with download link if available
-            let titleElement;
-            if (book.download_path != null) {
-                titleElement = utils.createElement('a', {
-                    href: `/request/api/localdownload?id=${book.id}`,
-                    target: '_blank',
-                    textContent: book.title || 'N/A',
-                    className: 'uk-link'
-                });
-            } else {
-                titleElement = document.createTextNode(book.title || 'N/A');
-            }
-            const titleCell = utils.createElement('td');
-            titleCell.appendChild(titleElement);
-
-            // Progress cell
-            const progressCell = utils.createElement('td');
-            if (status === 'downloading' && book.progress !== undefined) {
-                const progressBar = utils.createElement('progress', {
-                    className: 'uk-progress',
-                    value: book.progress,
-                    max: 100
-                });
-                progressCell.appendChild(progressBar);
-                progressCell.appendChild(document.createTextNode(` ${Math.round(book.progress)}%`));
-            } else {
-                progressCell.textContent = '-';
-            }
-
-            // Actions cell
-            const actionsCell = utils.createElement('td');
-            if (status === 'queued' || status === 'downloading') {
-                const cancelBtn = utils.createElement('button', {
-                    className: 'uk-button uk-button-danger uk-button-small',
-                    textContent: 'Cancel',
-                    onclick: () => queue.cancelDownload(book.id)
-                });
-                actionsCell.appendChild(cancelBtn);
-            }
-
-            const row = utils.createElement('tr', {
-                'data-book-id': book.id,
-                'data-status': status
-            }, [
-                statusCell,
-                priorityCell,
-                titleCell,
-                progressCell,
-                actionsCell
-            ]);
-
-            elements.statusTableBody.appendChild(row);
-        },
-
-        createPreviewCell(previewUrl) {
-            const cell = utils.createElement('td');
-
-            if (previewUrl) {
-                const img = utils.createElement('img', {
-                    src: previewUrl,
-                    alt: 'Book Preview',
-                    style: 'max-width: 60px; height: auto;'
-                });
-                cell.appendChild(img);
-            } else {
-                cell.textContent = 'N/A';
-            }
-
-            return cell;
-        },
-
-        handleError(error) {
-            console.error('Status error:', error);
-            elements.statusTableBody.innerHTML = '';
-
-            const errorRow = utils.createElement('tr', {}, [
-                utils.createElement('td', {
-                    colSpan: '4',
-                    className: 'error-message',
-                    textContent: 'Error loading status. Will retry automatically.'
-                })
-            ]);
-
-            elements.statusTableBody.appendChild(errorRow);
-        }
-    };
-
-    // Modal Functions
-    const modal = {
-        open() {
-            elements.modalOverlay.classList.add('active');
-        },
-
-        close() {
-            elements.modalOverlay.classList.remove('active');
-            modalDetails = null;
-        }
-    };
-
-    // Theme Management
-    const theme = {
-        STORAGE_KEY: 'preferred-theme',
-        
-        init() {
-            this.loadTheme();
-            this.setupListeners();
-        },
-
-        loadTheme() {
-            const savedTheme = localStorage.getItem(this.STORAGE_KEY) || 'auto';
-            this.applyThemePreference(savedTheme);
-            this.updateButtonText(savedTheme);
-        },
-
-        applyThemePreference(preference) {
-            if (preference === 'auto') {
-                const isDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                document.documentElement.setAttribute('data-theme', isDarkMode ? 'dark' : 'light');
-            } else {
-                document.documentElement.setAttribute('data-theme', preference);
-            }
-        },
-
-        setupListeners() {
-            // Listen for system theme changes
-            const darkModeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-            darkModeMediaQuery.addEventListener('change', (e) => {
-                if (localStorage.getItem(this.STORAGE_KEY) === 'auto') {
-                    document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
-                }
-            });
-            
-            // Theme selection listeners
-            const themeLinks = document.querySelectorAll('.uk-dropdown-nav a[data-theme]');
-            themeLinks.forEach(link => {
-                link.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const selectedTheme = e.target.getAttribute('data-theme');
-                    localStorage.setItem(this.STORAGE_KEY, selectedTheme);
-                    this.applyThemePreference(selectedTheme);
-                    this.updateButtonText(selectedTheme);
-                });
-            });
-        },
-
-        updateButtonText(currentTheme) {
-            const themeText = currentTheme.charAt(0).toUpperCase() + currentTheme.slice(1);
-            const themeTextElement = document.getElementById('theme-text');
-            if (themeTextElement) {
-                themeTextElement.textContent = themeText;
-            }
-        }
-    };
-
-    // Debug Functions
-    const debug = {
-        init() {
-            if (!elements.debug.form) return;
-            
-            elements.debug.form.addEventListener('submit', (e) => {
-                e.preventDefault(); // Prevent default form submission
-                
-                if (elements.debug.button.disabled) {
-                    return; // Prevent multiple submissions
-                }
-                
-                // Disable button and show spinner
-                elements.debug.spinner.classList.remove('uk-hidden');
-                elements.debug.button.disabled = true;
-                
-                // Use fetch to make the request
-                fetch(elements.debug.form.action)
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error('Debug request failed');
-                        }
-                        // Store content disposition before returning blob
-                        const contentDisposition = response.headers.get('Content-Disposition');
-                        return response.blob().then(blob => {
-                            return { blob, contentDisposition, url: response.url };
-                        });
-                    })
-                    .then(data => {
-                        // Create and click a download link
-                        const url = URL.createObjectURL(data.blob);
-                        const a = document.createElement('a');
-                        a.style.display = 'none';
-                        a.href = url;
-                        
-                        // Extract filename from Content-Disposition header, URL, or use default
-                        let filename;
-                        if (data.contentDisposition) {
-                            const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-                            const matches = filenameRegex.exec(data.contentDisposition);
-                            if (matches && matches[1]) {
-                                filename = matches[1].replace(/['"]/g, '');
-                            }
-                        }
-                        
-                        if (!filename) {
-                            // Extract from URL if header is not available
-                            const urlParts = data.url.split('/');
-                            filename = urlParts[urlParts.length - 1];
-                        }
-                        
-                        a.download = filename || "cwa-book-downloader-debug.zip";
-                        document.body.appendChild(a);
-                        a.click();
-                        
-                        // Clean up
-                        setTimeout(() => {
-                            URL.revokeObjectURL(url);
-                            document.body.removeChild(a);
-                            
-                            // Only reset UI after download starts
-                            elements.debug.spinner.classList.add('uk-hidden');
-                            elements.debug.button.disabled = false;
-                        }, 100);
-                    })
-                    .catch(error => {
-                        console.error('Debug download error:', error);
-                        
-                        // Reset UI on error
-                        elements.debug.spinner.classList.add('uk-hidden');
-                        elements.debug.button.disabled = false;
-                        
-                        // Show error notification
-                        UIkit.notification({
-                            message: 'Error generating debug file. Please try again.',
-                            status: 'danger',
-                            pos: 'top-center',
-                            timeout: 5000
-                        });
-                    });
-            });
-        }
-    };
-
-    // Restart Functions
-    const restart = {
-        init() {
-            if (!elements.restart.form) return;
-            
-            elements.restart.form.addEventListener('submit', (e) => {
-                e.preventDefault(); // Prevent default form submission
-                
-                if (elements.restart.button.disabled) {
-                    return; // Prevent multiple submissions
-                }
-                
-                // Show confirmation dialog
-                UIkit.modal.confirm('Are you sure you want to restart the application? This will interrupt any ongoing downloads.').then(() => {
-                    // User confirmed, proceed with restart
-                    elements.restart.spinner.classList.remove('uk-hidden');
-                    elements.restart.button.disabled = true;
-                    
-                    // Show restarting message
-                    UIkit.notification({
-                        message: 'Application restarting...',
-                        status: 'warning',
-                        pos: 'top-center',
-                        timeout: 5000
-                    });
-                    
-                    // Make the restart request - this will kill the server
-                    fetch(elements.restart.form.action)
-                        .catch(() => {
-                            // Expected to fail when server shuts down
-                        });
-                    
-                    // Wait a bit then refresh the page to reconnect to the restarted server
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 3000);
-                }, () => {
-                    // User cancelled, do nothing
-                });
-            });
-        }
-    };
-
-    // Event Listeners
-    function setupEventListeners() {
-        // Search events
-        elements.search.searchButton.addEventListener('click', () => {
-            const query = search.buildQuery();
-            if(query) search.performSearch(query);
-        });
-
-        elements.search.advanced.advSearchButton.addEventListener('click', () => {
-            const query = search.buildQuery();
-            if(query) search.performSearch(query);
-        });
-        
-        elements.search.searchInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-
-                const query = search.buildQuery();
-                if(query) search.performSearch(query);
-            }
-        });
-
-        // Modal close on overlay click
-        elements.modalOverlay.addEventListener('click', (e) => {
-            if (e.target === elements.modalOverlay) {
-                modal.close();
-            }
-        });
-
-        // Keyboard accessibility
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && elements.modalOverlay.classList.contains('active')) {
-                modal.close();
-            }
-        });
-        // Download selected books
-        elements.downloadSelectedButton.addEventListener('click', utils.handleDownloadSelected);
-        
-        // Queue management buttons
-        const refreshButton = document.getElementById('refresh-status-button');
-        if (refreshButton) {
-            refreshButton.addEventListener('click', () => {
-                status.fetch();
-                queue.updateActiveDownloads();
-            });
-        }
-        
-        const clearCompletedButton = document.getElementById('clear-completed-button');
-        if (clearCompletedButton) {
-            clearCompletedButton.addEventListener('click', () => {
-                UIkit.modal.confirm('Are you sure you want to clear all completed downloads?').then(() => {
-                    queue.clearCompleted();
-                }, () => {
-                    // User cancelled
-                });
-            });
-        }
-
-        // Check/uncheck all book checkboxes
-        elements.selectAllCheckbox.addEventListener('change', (event) => {
-            const isChecked = event.target.checked;
-
-            document.querySelectorAll('.uk-checkbox').forEach((checkbox) => {
-                if (checkbox !== elements.selectAllCheckbox) {
-                    checkbox.checked = isChecked;
-                    if (isChecked) {
-                        selectedBooks.add(checkbox.value);
-                    } else {
-                        selectedBooks.delete(checkbox.value);
-                    }
-                }
-            });
-            utils.updateDownloadSelectedButton();
-        });
-
-        function setupSorting() {
-            const headers = document.querySelectorAll('#results-table thead th[data-sort]');
-            headers.forEach((header) => {
-                let sortOrder = 'asc';
-                header.addEventListener('click', () => {
-                    const allHeaders = Array.from(document.querySelectorAll('#results-table thead th'));
-                    const columnIndex = allHeaders.indexOf(header);
-                    utils.sortResultsTable(columnIndex, sortOrder);
-                    sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
-                });
-            });
-        }
-
-        setupSorting();
-
+      });
+
+      return q.join('&');
+    },
+    // Simple notification via alert fallback
+    toast(msg) { try { console.info(msg); } catch (_) {} },
+    // Escapes text for safe HTML injection
+    e(text) { return (text ?? '').toString(); }
+  };
+
+  // ---- Modal ----
+  const modal = {
+    open() { el.modalOverlay?.classList.add('active'); },
+    close() { el.modalOverlay?.classList.remove('active'); el.detailsContainer.innerHTML = ''; }
+  };
+
+  // ---- Cards ----
+  function renderCard(book) {
+    const cover = book.preview ? `<img src="${utils.e(book.preview)}" alt="Cover" class="w-full h-44 object-cover rounded">` :
+      `<div class="w-full h-44 rounded flex items-center justify-center opacity-70" style="background: var(--bg-soft)">No Cover</div>`;
+
+    const html = `
+      <article class="rounded border p-3 flex flex-col gap-3" style="border-color: var(--border-muted); background: var(--bg-soft)">
+        ${cover}
+        <div class="flex-1 space-y-1">
+          <h3 class="font-semibold leading-tight">${utils.e(book.title) || 'Untitled'}</h3>
+          <p class="text-sm opacity-80">${utils.e(book.author) || 'Unknown author'}</p>
+          <div class="text-xs opacity-70 flex flex-wrap gap-2">
+            <span>${utils.e(book.year) || '-'}</span>
+            <span>•</span>
+            <span>${utils.e(book.language) || '-'}</span>
+            <span>•</span>
+            <span>${utils.e(book.format) || '-'}</span>
+            ${book.size ? `<span>•</span><span>${utils.e(book.size)}</span>` : ''}
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button class="px-3 py-2 rounded border text-sm flex-1" data-action="details" data-id="${utils.e(book.id)}" style="border-color: var(--border-muted);">Details</button>
+          <button class="px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm flex-1" data-action="download" data-id="${utils.e(book.id)}">Download</button>
+        </div>
+      </article>`;
+
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+    // Bind actions
+    const detailsBtn = wrapper.querySelector('[data-action="details"]');
+    const downloadBtn = wrapper.querySelector('[data-action="download"]');
+    detailsBtn?.addEventListener('click', () => bookDetails.show(book.id));
+    downloadBtn?.addEventListener('click', () => bookDetails.download(book));
+    return wrapper.firstElementChild;
+  }
+
+  function renderCards(books) {
+    el.resultsGrid.innerHTML = '';
+    if (!books || books.length === 0) {
+      utils.show(el.noResults);
+      return;
     }
+    utils.hide(el.noResults);
+    const frag = document.createDocumentFragment();
+    books.forEach((b) => frag.appendChild(renderCard(b)));
+    el.resultsGrid.appendChild(frag);
+  }
 
-    // Initialize
-    function init() {
-        setupEventListeners();
-        theme.init();  // Initialize theme management
-        debug.init();  // Initialize debug functionality
-        restart.init(); // Initialize restart functionality
+  // ---- Search ----
+  const search = {
+    async run() {
+      const qs = utils.buildQuery();
+      if (!qs) { renderCards([]); return; }
+      utils.show(el.searchLoading);
+      try {
+        const data = await utils.j(`${API.search}?${qs}`);
+        renderCards(data);
+      } catch (e) {
+        renderCards([]);
+      } finally {
+        utils.hide(el.searchLoading);
+      }
+    }
+  };
+
+  // ---- Details ----
+  const bookDetails = {
+    async show(id) {
+      try {
+        modal.open();
+        el.detailsContainer.innerHTML = '<div class="p-4">Loading…</div>';
+        const book = await utils.j(`${API.info}?id=${encodeURIComponent(id)}`);
+        el.detailsContainer.innerHTML = this.tpl(book);
+        document.getElementById('close-details')?.addEventListener('click', modal.close);
+        document.getElementById('download-button')?.addEventListener('click', () => this.download(book));
+      } catch (e) {
+        el.detailsContainer.innerHTML = '<div class="p-4">Failed to load details.</div>';
+      }
+    },
+    tpl(book) {
+      const cover = book.preview ? `<img src="${utils.e(book.preview)}" alt="Cover" class="w-full h-56 object-cover rounded">` : '';
+      const infoList = book.info ? Object.entries(book.info).map(([k, v]) => `<li><strong>${utils.e(k)}:</strong> ${utils.e((v||[]).join 
+        ? v.join(', ') : v)}</li>`).join('') : '';
+      return `
+        <div class="p-4 space-y-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>${cover}</div>
+            <div>
+              <h3 class="text-lg font-semibold mb-1">${utils.e(book.title) || 'Untitled'}</h3>
+              <p class="text-sm opacity-80">${utils.e(book.author) || 'Unknown author'}</p>
+              <div class="text-sm mt-2 space-y-1">
+                <p><strong>Publisher:</strong> ${utils.e(book.publisher) || '-'}</p>
+                <p><strong>Year:</strong> ${utils.e(book.year) || '-'}</p>
+                <p><strong>Language:</strong> ${utils.e(book.language) || '-'}</p>
+                <p><strong>Format:</strong> ${utils.e(book.format) || '-'}</p>
+                <p><strong>Size:</strong> ${utils.e(book.size) || '-'}</p>
+              </div>
+            </div>
+          </div>
+          ${infoList ? `<div><h4 class="font-semibold mb-2">Further Information</h4><ul class="list-disc pl-6 space-y-1 text-sm">${infoList}</ul></div>` : ''}
+          <div class="flex gap-2">
+            <button id="download-button" class="px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm">Download</button>
+            <button id="close-details" class="px-3 py-2 rounded border text-sm" style="border-color: var(--border-muted);">Close</button>
+          </div>
+        </div>`;
+    },
+    async download(book) {
+      if (!book) return;
+      try {
+        await utils.j(`${API.download}?id=${encodeURIComponent(book.id)}`);
+        utils.toast('Queued for download');
+        modal.close();
         status.fetch();
-        queue.updateActiveDownloads();
-        setInterval(() => status.fetch(), REFRESH_INTERVAL);
+      } catch (_){}
+    }
+  };
+
+  // ---- Status ----
+  const status = {
+    async fetch() {
+      try {
+        utils.show(el.statusLoading);
+        const data = await utils.j(API.status);
+        this.render(data);
+        // Also reflect active downloads in the top section
+        this.renderTop(data);
+        this.updateActive();
+      } catch (e) {
+        el.statusList.innerHTML = '<div class="text-sm opacity-80">Error loading status.</div>';
+      } finally { utils.hide(el.statusLoading); }
+    },
+    render(data) {
+      // data shape: {queued: {...}, downloading: {...}, completed: {...}, error: {...}}
+      const sections = [];
+      for (const [name, items] of Object.entries(data || {})) {
+        if (!items || Object.keys(items).length === 0) continue;
+        const rows = Object.values(items).map((b) => {
+          const actions = (name === 'queued' || name === 'downloading')
+            ? `<button class="px-2 py-1 rounded border text-xs" data-cancel="${utils.e(b.id)}" style="border-color: var(--border-muted);">Cancel</button>`
+            : '';
+          const progress = (name === 'downloading' && typeof b.progress === 'number')
+            ? `<div class="h-2 bg-black/10 rounded overflow-hidden"><div class="h-2 bg-blue-600" style="width:${Math.round(b.progress)}%"></div></div>`
+            : '';
+          return `<li class="p-3 rounded border flex flex-col gap-2" style="border-color: var(--border-muted); background: var(--bg-soft)">
+            <div class="text-sm"><span class="opacity-70">${utils.e(name)}</span> • <strong>${utils.e(b.title || '-') }</strong></div>
+            ${progress}
+            <div class="flex items-center gap-2">${actions}</div>
+          </li>`;
+        }).join('');
+        sections.push(`
+          <div>
+            <h4 class="font-semibold mb-2">${name.charAt(0).toUpperCase() + name.slice(1)}</h4>
+            <ul class="space-y-2">${rows}</ul>
+          </div>`);
+      }
+      el.statusList.innerHTML = sections.join('') || '<div class="text-sm opacity-80">No items.</div>';
+      // Bind cancel buttons
+      el.statusList.querySelectorAll('[data-cancel]')?.forEach((btn) => {
+        btn.addEventListener('click', () => queue.cancel(btn.getAttribute('data-cancel')));
+      });
+    },
+    // Render compact active downloads list near the search bar
+    renderTop(data) {
+      try {
+        const downloading = (data && data.downloading) ? Object.values(data.downloading) : [];
+        if (!el.activeTopSec || !el.activeTopList) return;
+        if (!downloading.length) {
+          el.activeTopList.innerHTML = '';
+          el.activeTopSec.classList.add('hidden');
+          return;
+        }
+        // Build compact rows with title and progress bar + cancel
+        const rows = downloading.map((b) => {
+          const prog = (typeof b.progress === 'number')
+            ? `<div class="h-1.5 bg-black/10 rounded overflow-hidden"><div class="h-1.5 bg-blue-600" style="width:${Math.round(b.progress)}%"></div></div>`
+            : '';
+          const cancel = `<button class="px-2 py-0.5 rounded border text-xs" data-cancel="${utils.e(b.id)}" style="border-color: var(--border-muted);">Cancel</button>`;
+          return `<div class="p-3 rounded border" style="border-color: var(--border-muted); background: var(--bg-soft)">
+            <div class="flex items-center justify-between gap-3">
+              <div class="text-sm truncate"><strong>${utils.e(b.title || '-') }</strong></div>
+              <div class="shrink-0">${cancel}</div>
+            </div>
+            ${prog}
+          </div>`;
+        }).join('');
+        el.activeTopList.innerHTML = rows;
+        el.activeTopSec.classList.remove('hidden');
+        // Bind cancel handlers for the top section
+        el.activeTopList.querySelectorAll('[data-cancel]')?.forEach((btn) => {
+          btn.addEventListener('click', () => queue.cancel(btn.getAttribute('data-cancel')));
+        });
+      } catch (_) {}
+    },
+    async updateActive() {
+      try {
+        const d = await utils.j(API.activeDownloads);
+        const n = Array.isArray(d.active_downloads) ? d.active_downloads.length : 0;
+        if (el.activeDownloadsCount) el.activeDownloadsCount.textContent = `Active: ${n}`;
+      } catch (_) {}
+    }
+  };
+
+  // ---- Queue ----
+  const queue = {
+    async cancel(id) {
+      try {
+        await fetch(`${API.cancelDownload}/${encodeURIComponent(id)}/cancel`, { method: 'DELETE' });
+        status.fetch();
+      } catch (_){}
+    }
+  };
+
+  // ---- Theme ----
+  const theme = {
+    KEY: 'preferred-theme',
+    init() {
+      const saved = localStorage.getItem(this.KEY) || 'auto';
+      this.apply(saved);
+      this.updateLabel(saved);
+      // toggle dropdown
+      el.themeToggle?.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (!el.themeMenu) return;
+        el.themeMenu.classList.toggle('hidden');
+      });
+      // outside click to close
+      document.addEventListener('click', (ev) => {
+        if (!el.themeMenu || !el.themeToggle) return;
+        if (el.themeMenu.contains(ev.target) || el.themeToggle.contains(ev.target)) return;
+        el.themeMenu.classList.add('hidden');
+      });
+      // selection
+      el.themeMenu?.querySelectorAll('a[data-theme]')?.forEach((a) => {
+        a.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          const pref = a.getAttribute('data-theme');
+          localStorage.setItem(theme.KEY, pref);
+          theme.apply(pref);
+          theme.updateLabel(pref);
+          el.themeMenu.classList.add('hidden');
+        });
+      });
+      // react to system change if auto
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      mq.addEventListener('change', (e) => {
+        if ((localStorage.getItem(theme.KEY) || 'auto') === 'auto') {
+          document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+        }
+      });
+    },
+    apply(pref) {
+      if (pref === 'auto') {
+        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+      } else {
+        document.documentElement.setAttribute('data-theme', pref);
+      }
+    },
+    updateLabel(pref) { if (el.themeText) el.themeText.textContent = `Theme (${pref})`; }
+  };
+
+  // ---- Wire up ----
+  function initEvents() {
+    el.searchBtn?.addEventListener('click', () => search.run());
+    el.searchInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') search.run(); });
+    document.getElementById('adv-search-button')?.addEventListener('click', () => search.run());
+
+    if (el.advToggle && el.filtersForm) {
+      el.advToggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        el.filtersForm.classList.toggle('hidden');
+      });
     }
 
-    init();
-});
+    el.refreshStatusBtn?.addEventListener('click', () => status.fetch());
+    el.activeTopRefreshBtn?.addEventListener('click', () => status.fetch());
+    el.clearCompletedBtn?.addEventListener('click', async () => {
+      try { await fetch(API.clearCompleted, { method: 'DELETE' }); status.fetch(); } catch (_) {}
+    });
+
+    // Close modal on overlay click
+    el.modalOverlay?.addEventListener('click', (e) => { if (e.target === el.modalOverlay) modal.close(); });
+  }
+
+  // ---- Init ----
+  theme.init();
+  initEvents();
+  status.fetch();
+})();
