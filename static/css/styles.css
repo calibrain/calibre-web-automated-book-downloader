@@ -15,6 +15,13 @@
     --table-border-color: #e5e5e5;
     --input-background: #fff;
     --heading-color: #333;
+
+    /* Modern UI alias tokens */
+    --bg: var(--background-color);
+    --text: var(--text-color);
+    --border-muted: var(--border-color);
+    --bg-soft: var(--card-background);
+    --footer-bg: var(--header-bg);
 }
 
 [data-theme="dark"] {
