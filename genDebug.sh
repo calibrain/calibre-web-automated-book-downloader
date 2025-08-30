@@ -3,7 +3,7 @@
 # Set up log paths
 LOG_ROOT=${LOG_ROOT:-"/var/log"}
 LOG_DIR="$LOG_ROOT/cwa-book-downloader"
-OUTPUT_FILE_NAME="cwa-book-downloader-debug_BUILD-${BUILD_VERSION:-local}_$(date +%Y%m%d-%H%M%S)"
+OUTPUT_FILE_NAME="cwa-book-downloader-debug_BUILD-${BUILD_VERSION:-local}_RELEASE-${RELEASE_VERSION:-NA}_$(date +%Y%m%d-%H%M%S)"
 OUTPUT_FILE="/tmp/$OUTPUT_FILE_NAME.zip"
 
 # Create LOG_DIR if it doesn't exist

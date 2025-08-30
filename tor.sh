@@ -14,6 +14,7 @@ set -e
 echo "[*] Running tor script..."
 
 echo "Build version: $BUILD_VERSION"
+echo "Release version: $RELEASE_VERSION"
 
 echo "[*] Installing Tor and dependencies..."
 echo "[*] Writing Tor transparent proxy config..."

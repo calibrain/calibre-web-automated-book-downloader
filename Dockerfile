@@ -4,6 +4,8 @@ FROM python:3.10-slim AS base
 # Add build argument for version
 ARG BUILD_VERSION
 ENV BUILD_VERSION=${BUILD_VERSION}
+ARG RELEASE_VERSION
+ENV RELEASE_VERSION=${RELEASE_VERSION}
 
 # Set shell to bash with pipefail option
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]

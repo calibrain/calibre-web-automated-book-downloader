@@ -13,7 +13,7 @@ import typing
 
 from logger import setup_logger
 from config import _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE
-from env import FLASK_HOST, FLASK_PORT, APP_ENV, CWA_DB_PATH, DEBUG, USING_EXTERNAL_BYPASSER
+from env import FLASK_HOST, FLASK_PORT, APP_ENV, CWA_DB_PATH, DEBUG, USING_EXTERNAL_BYPASSER, BUILD_VERSION, RELEASE_VERSION
 import backend
 
 from models import SearchFilters
@@ -103,7 +103,14 @@ def index() -> str:
     """
     Render main page with search and status table.
     """
-    return render_template('index.html', book_languages=_SUPPORTED_BOOK_LANGUAGE, default_language=BOOK_LANGUAGE, debug=DEBUG)
+    return render_template('index.html', 
+                           book_languages=_SUPPORTED_BOOK_LANGUAGE, 
+                           default_language=BOOK_LANGUAGE, 
+                           debug=DEBUG,
+                           build_version=BUILD_VERSION,
+                           release_version=RELEASE_VERSION,
+                           app_env=APP_ENV
+                           )
 
  
 

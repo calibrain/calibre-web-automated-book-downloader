@@ -26,7 +26,12 @@ _CUSTOM_SCRIPT = os.getenv("CUSTOM_SCRIPT", "").strip()
 FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = int(os.getenv("FLASK_PORT", "8084"))
 DEBUG = string_to_bool(os.getenv("DEBUG", "false"))
+APP_ENV = os.getenv("APP_ENV", "N/A").lower()
 PRIORITIZE_WELIB = string_to_bool(os.getenv("PRIORITIZE_WELIB", "false"))
+
+# Version information from Docker build
+BUILD_VERSION = os.getenv("BUILD_VERSION", "N/A")
+RELEASE_VERSION = os.getenv("RELEASE_VERSION", "N/A")
 
 # If debug is true, we want to log everything
 if DEBUG:
@@ -41,7 +46,7 @@ DOCKERMODE = string_to_bool(os.getenv("DOCKERMODE", "false"))
 _CUSTOM_DNS = os.getenv("CUSTOM_DNS", "").strip()
 USE_DOH = string_to_bool(os.getenv("USE_DOH", "false"))
 BYPASS_RELEASE_INACTIVE_MIN = int(os.getenv("BYPASS_RELEASE_INACTIVE_MIN", "5"))
-APP_ENV = os.getenv("APP_ENV", "prod").lower()
+
 # Logging settings
 LOG_FILE = LOG_DIR / "cwa-book-downloader.log"
 

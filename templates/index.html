@@ -193,7 +193,12 @@
 
     <footer class="mt-10 border-t pt-6 pb-10" style="border-color: var(--border-muted); background: var(--footer-bg);">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
-            <p class="text-sm opacity-80">Calibre Web Book Downloader</p>
+            <div>
+                <p class="text-sm opacity-80">Calibre Web Book Downloader</p>
+                <p class="text-xs opacity-60 mt-1">
+                    Build: {{ build_version }}  • Release: {{ release_version }}  • App Env: {{ app_env }}
+                </p>
+            </div>
             <a href="https://github.com/calibrain/calibre-web-automated-book-downloader" class="opacity-80 hover:opacity-100" aria-label="GitHub">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-6 h-6">
                     <path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 005.47 7.59c.4.07.55-.17.55-.38

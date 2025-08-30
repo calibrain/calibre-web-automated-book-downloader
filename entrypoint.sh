@@ -20,6 +20,7 @@ set -e
 
 # Print build version
 echo "Build version: $BUILD_VERSION"
+echo "Release version: $RELEASE_VERSION"
 
 # Configure timezone
 if [ "$TZ" ]; then
