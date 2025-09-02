@@ -94,8 +94,8 @@
 
   // ---- Cards ----
   function renderCard(book) {
-    const cover = book.preview ? `<img src="${utils.e(book.preview)}" alt="Cover" class="w-full h-44 object-cover rounded">` :
-      `<div class="w-full h-44 rounded flex items-center justify-center opacity-70" style="background: var(--bg-soft)">No Cover</div>`;
+    const cover = book.preview ? `<img src="${utils.e(book.preview)}" alt="Cover" class="w-full h-full object-cover rounded">` :
+      `<div class="w-full h-full rounded flex items-center justify-center opacity-70" style="background: var(--bg-soft)">No Cover</div>`;
 
     const html = `
       <article class="rounded border p-3 flex flex-col gap-3" style="border-color: var(--border-muted); background: var(--bg-soft)">
@@ -172,7 +172,7 @@
       }
     },
     tpl(book) {
-      const cover = book.preview ? `<img src="${utils.e(book.preview)}" alt="Cover" class="w-full h-56 object-cover rounded">` : '';
+      const cover = book.preview ? `<img src="${utils.e(book.preview)}" alt="Cover" class="w-full h-full object-cover rounded">` : '';
       const infoList = book.info ? Object.entries(book.info).map(([k, v]) => `<li><strong>${utils.e(k)}:</strong> ${utils.e((v||[]).join 
         ? v.join(', ') : v)}</li>`).join('') : '';
       return `
