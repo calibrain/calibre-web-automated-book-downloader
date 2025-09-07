@@ -169,8 +169,21 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     data = soup.find_all("div", {"class": "main-inner"})[0].find_next("div")
     divs = list(data.children)
-    format = divs[13].text.split(" · ")[-6].strip().lower()
-    size = divs[13].text.split(" · ")[-5].strip().lower()
+    _details = divs[13].text.strip().lower().split(" · ")
+    format = ""
+    size = ""
+    for f in _details:
+        if format == "" and f.strip().lower() in SUPPORTED_FORMATS:
+            format = f.strip().lower()
+        if size == "" and any(u in f.strip().lower() for u in ["mb", "kb", "gb"]):
+            size = f.strip().lower()
+
+    if format == "" or size == "":
+        for f in _details:
+            if f == "" and not " " in f.strip().lower():
+                format = f.strip().lower()
+            if size == "" and "." in f.strip().lower():
+                size = f.strip().lower()
 
     every_url = soup.find_all("a")
     slow_urls_no_waitlist = set()
