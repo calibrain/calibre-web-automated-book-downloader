@@ -132,14 +132,38 @@
                     <div class="md:col-span-2 lg:col-span-3">
                         <label class="block text-sm mb-1 opacity-80">Formats</label>
                         <div class="flex flex-wrap gap-3 text-sm">
-                            <label class="inline-flex items-center gap-2"><input type="checkbox" id="format-pdf" value="pdf"> PDF</label>
-                            <label class="inline-flex items-center gap-2"><input type="checkbox" id="format-epub" value="epub" checked> EPUB</label>
-                            <label class="inline-flex items-center gap-2"><input type="checkbox" id="format-mobi" value="mobi" checked> MOBI</label>
-                            <label class="inline-flex items-center gap-2"><input type="checkbox" id="format-azw3" value="azw3" checked> AZW3</label>
-                            <label class="inline-flex items-center gap-2"><input type="checkbox" id="format-fb2" value="fb2" checked> FB2</label>
-                            <label class="inline-flex items-center gap-2"><input type="checkbox" id="format-djvu" value="djvu" checked> DJVU</label>
-                            <label class="inline-flex items-center gap-2"><input type="checkbox" id="format-cbz" value="cbz" checked> CBZ</label>
-                            <label class="inline-flex items-center gap-2"><input type="checkbox" id="format-cbr" value="cbr" checked> CBR</label>
+                            <label class="inline-flex items-center gap-2 {{ 'opacity-50 cursor-not-allowed' if 'pdf' not in supported_formats else '' }}">
+                                <input type="checkbox" id="format-pdf" value="pdf" {% if 'pdf' not in supported_formats %}disabled{% endif %}>
+                                PDF
+                            </label>
+                            <label class="inline-flex items-center gap-2 {{ 'opacity-50 cursor-not-allowed' if 'epub' not in supported_formats else '' }}">
+                                <input type="checkbox" id="format-epub" value="epub" {% if 'epub' in supported_formats %}checked{% endif %} {% if 'epub' not in supported_formats %}disabled{% endif %}>
+                                EPUB
+                            </label>
+                            <label class="inline-flex items-center gap-2 {{ 'opacity-50 cursor-not-allowed' if 'mobi' not in supported_formats else '' }}">
+                                <input type="checkbox" id="format-mobi" value="mobi" {% if 'mobi' in supported_formats %}checked{% endif %} {% if 'mobi' not in supported_formats %}disabled{% endif %}>
+                                MOBI
+                            </label>
+                            <label class="inline-flex items-center gap-2 {{ 'opacity-50 cursor-not-allowed' if 'azw3' not in supported_formats else '' }}">
+                                <input type="checkbox" id="format-azw3" value="azw3" {% if 'azw3' in supported_formats %}checked{% endif %} {% if 'azw3' not in supported_formats %}disabled{% endif %}>
+                                AZW3
+                            </label>
+                            <label class="inline-flex items-center gap-2 {{ 'opacity-50 cursor-not-allowed' if 'fb2' not in supported_formats else '' }}">
+                                <input type="checkbox" id="format-fb2" value="fb2" {% if 'fb2' in supported_formats %}checked{% endif %} {% if 'fb2' not in supported_formats %}disabled{% endif %}>
+                                FB2
+                            </label>
+                            <label class="inline-flex items-center gap-2 {{ 'opacity-50 cursor-not-allowed' if 'djvu' not in supported_formats else '' }}">
+                                <input type="checkbox" id="format-djvu" value="djvu" {% if 'djvu' in supported_formats %}checked{% endif %} {% if 'djvu' not in supported_formats %}disabled{% endif %}>
+                                DJVU
+                            </label>
+                            <label class="inline-flex items-center gap-2 {{ 'opacity-50 cursor-not-allowed' if 'cbz' not in supported_formats else '' }}">
+                                <input type="checkbox" id="format-cbz" value="cbz" {% if 'cbz' in supported_formats %}checked{% endif %} {% if 'cbz' not in supported_formats %}disabled{% endif %}>
+                                CBZ
+                            </label>
+                            <label class="inline-flex items-center gap-2 {{ 'opacity-50 cursor-not-allowed' if 'cbr' not in supported_formats else '' }}">
+                                <input type="checkbox" id="format-cbr" value="cbr" {% if 'cbr' in supported_formats %}checked{% endif %} {% if 'cbr' not in supported_formats %}disabled{% endif %}>
+                                CBR
+                            </label>
                         </div>
                     </div>
                     <div class="md:col-span-2 lg:col-span-3 flex justify-end">

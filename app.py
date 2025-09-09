@@ -12,7 +12,7 @@ from flask import url_for as flask_url_for
 import typing
 
 from logger import setup_logger
-from config import _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE
+from config import _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE, SUPPORTED_FORMATS
 from env import FLASK_HOST, FLASK_PORT, APP_ENV, CWA_DB_PATH, DEBUG, USING_EXTERNAL_BYPASSER, BUILD_VERSION, RELEASE_VERSION
 import backend
 
@@ -106,6 +106,7 @@ def index() -> str:
     return render_template('index.html', 
                            book_languages=_SUPPORTED_BOOK_LANGUAGE, 
                            default_language=BOOK_LANGUAGE, 
+                           supported_formats=SUPPORTED_FORMATS,
                            debug=DEBUG,
                            build_version=BUILD_VERSION,
                            release_version=RELEASE_VERSION,
