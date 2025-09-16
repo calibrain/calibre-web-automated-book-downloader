@@ -229,6 +229,10 @@
       for (const [name, items] of Object.entries(data || {})) {
         if (!items || Object.keys(items).length === 0) continue;
         const rows = Object.values(items).map((b) => {
+          const titleText = utils.e(b.title) || '-';
+          const maybeLinkedTitle = b.download_path
+            ? `<a href="/request/api/localdownload?id=${encodeURIComponent(b.id)}" class="text-blue-600 hover:underline">${titleText}</a>`
+            : titleText;
           const actions = (name === 'queued' || name === 'downloading')
             ? `<button class="px-2 py-1 rounded border text-xs" data-cancel="${utils.e(b.id)}" style="border-color: var(--border-muted);">Cancel</button>`
             : '';
@@ -236,7 +240,7 @@
             ? `<div class="h-2 bg-black/10 rounded overflow-hidden"><div class="h-2 bg-blue-600" style="width:${Math.round(b.progress)}%"></div></div>`
             : '';
           return `<li class="p-3 rounded border flex flex-col gap-2" style="border-color: var(--border-muted); background: var(--bg-soft)">
-            <div class="text-sm"><span class="opacity-70">${utils.e(name)}</span> • <strong>${utils.e(b.title || '-') }</strong></div>
+            <div class="text-sm"><span class="opacity-70">${utils.e(name)}</span> • <strong>${maybeLinkedTitle}</strong></div>
             ${progress}
             <div class="flex items-center gap-2">${actions}</div>
           </li>`;

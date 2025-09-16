@@ -81,6 +81,12 @@ def queue_status() -> Dict[str, Dict[str, Any]]:
         Dict: Queue status organized by status type
     """
     status = book_queue.get_status()
+    for _, books in status.items():
+        for _, book_info in books.items():
+            if book_info.download_path:
+                if not os.path.exists(book_info.download_path):
+                    book_info.download_path = None
+
     # Convert Enum keys to strings and properly format the response
     return {
         status_type.value: books
