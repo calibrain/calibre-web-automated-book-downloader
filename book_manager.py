@@ -241,7 +241,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     book_info = BookInfo(
         id=book_id,
         preview=preview,
-        title=divs[7].next.strip(),
+        title=divs[7].text.strip(),
         publisher=divs[11].text.strip(),
         author=divs[9].text.strip(),
         format=format,
