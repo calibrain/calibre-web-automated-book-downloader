@@ -28,6 +28,7 @@ FLASK_PORT = int(os.getenv("FLASK_PORT", "8084"))
 DEBUG = string_to_bool(os.getenv("DEBUG", "false"))
 APP_ENV = os.getenv("APP_ENV", "N/A").lower()
 PRIORITIZE_WELIB = string_to_bool(os.getenv("PRIORITIZE_WELIB", "false"))
+ALLOW_USE_WELIB = string_to_bool(os.getenv("ALLOW_USE_WELIB", "true"))
 
 # Version information from Docker build
 BUILD_VERSION = os.getenv("BUILD_VERSION", "N/A")

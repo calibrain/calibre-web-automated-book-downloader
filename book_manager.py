@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup, Tag, NavigableString, ResultSet
 import downloader
 from logger import setup_logger
 from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_BASE_URL
-from env import AA_DONATOR_KEY, USE_CF_BYPASS, PRIORITIZE_WELIB
+from env import AA_DONATOR_KEY, USE_CF_BYPASS, PRIORITIZE_WELIB, ALLOW_USE_WELIB
 from models import BookInfo, SearchFilters
 logger = setup_logger(__name__)
 
@@ -169,21 +169,6 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     data = soup.find_all("div", {"class": "main-inner"})[0].find_next("div")
     divs = list(data.children)
-    _details = divs[13].text.strip().lower().split(" · ")
-    format = ""
-    size = ""
-    for f in _details:
-        if format == "" and f.strip().lower() in SUPPORTED_FORMATS:
-            format = f.strip().lower()
-        if size == "" and any(u in f.strip().lower() for u in ["mb", "kb", "gb"]):
-            size = f.strip().lower()
-
-    if format == "" or size == "":
-        for f in _details:
-            if f == "" and not " " in f.strip().lower():
-                format = f.strip().lower()
-            if size == "" and "." in f.strip().lower():
-                size = f.strip().lower()
 
     every_url = soup.find_all("a")
     slow_urls_no_waitlist = set()
@@ -237,20 +222,49 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     # Remove empty urls
     urls = [url for url in urls if url != ""]
 
+    # Filter out divs that are not text
+    original_divs = divs
+    divs = [div.text.strip() for div in divs if div.text.strip() != ""]
+
+    separator_index = 6
+    for i, div in enumerate(divs):
+        if "·" in div.strip():
+            separator_index = i
+            break
+            
+    _details = divs[separator_index].lower().split(" · ")
+    format = ""
+    size = ""
+    for f in _details:
+        if format == "" and f.strip().lower() in SUPPORTED_FORMATS:
+            format = f.strip().lower()
+        if size == "" and any(u in f.strip().lower() for u in ["mb", "kb", "gb"]):
+            size = f.strip().lower()
+
+    if format == "" or size == "":
+        for f in _details:
+            if f == "" and not " " in f.strip().lower():
+                format = f.strip().lower()
+            if size == "" and "." in f.strip().lower():
+                size = f.strip().lower()
+
+    
+    book_title = divs[separator_index-3].strip("🔍")
+
     # Extract basic information
     book_info = BookInfo(
         id=book_id,
         preview=preview,
-        title=divs[7].text.strip(),
-        publisher=divs[11].text.strip(),
-        author=divs[9].text.strip(),
+        title=book_title,
+        publisher=divs[separator_index-1],
+        author=divs[separator_index-2],
         format=format,
         size=size,
         download_urls=urls,
     )
 
     # Extract additional metadata
-    info = _extract_book_metadata(divs[-6])
+    info = _extract_book_metadata(original_divs[-6])
     book_info.info = info
 
     # Set language and year from metadata if available
@@ -262,6 +276,8 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     return book_info
 
 def _get_download_urls_from_welib(book_id: str) -> set[str]:
+    if ALLOW_USE_WELIB == False:
+        return set()
     """Get download urls from welib.org."""
     url = f"https://welib.org/md5/{book_id}"
     logger.info(f"Getting download urls from welib.org for {book_id}. While this uses the bypasser, it will not start downloading them yet.")
