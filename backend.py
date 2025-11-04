@@ -182,6 +182,38 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
         final_path = INGEST_DIR / book_name
         
         if os.path.exists(book_path):
+            # Check if this is a zip/rar file that needs to be extracted
+            if book_info.format.lower() in ['zip', 'rar']:
+                logger.info(f"Extracting archive: {book_path}")
+                try:
+                    # Create temporary extraction directory
+                    extract_dir = TMP_DIR / f"{book_id}_extract"
+                    extract_dir.mkdir(parents=True, exist_ok=True)
+
+                    # Extract the archive based on its type
+                    if book_info.format.lower() == 'zip':
+                        import zipfile
+                        with zipfile.ZipFile(book_path, 'r') as zip_ref:
+                            zip_ref.extractall(extract_dir)
+                    else:  # rar
+                        import rarfile
+                        with rarfile.RarFile(book_path, 'r') as rar_ref:
+                            rar_ref.extractall(extract_dir)
+
+                    # Delete the original archive
+                    book_path.unlink()
+
+                    # Update book_path to point to the extraction directory
+                    book_path = extract_dir
+
+                    # Log success
+                    logger.info(f"Archive extracted successfully to: {extract_dir}")
+                except Exception as e:
+                    logger.error_trace(f"Error extracting archive: {e}")
+                    if extract_dir.exists():
+                        shutil.rmtree(extract_dir)
+                    raise
+
             logger.info(f"Moving book to ingest directory: {book_path} -> {final_path}")
             try:
                 shutil.move(book_path, intermediate_path)
