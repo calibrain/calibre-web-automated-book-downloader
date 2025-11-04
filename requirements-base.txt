@@ -6,3 +6,4 @@ dnspython
 gunicorn
 psutil
 emoji
+rarfile

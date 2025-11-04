@@ -43,7 +43,9 @@ RUN apt-get update && \
     # For debug
     zip iputils-ping \
     # For user switching
-    sudo && \
+    sudo \
+    # For rar support
+    unrar && \
     # Cleanup APT cache *after* all installs in this layer
     apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false && \
     apt-get clean && \
