@@ -19,6 +19,20 @@ class QueueStatus(str, Enum):
     DONE = "done"
     CANCELLED = "cancelled"
 
+
+class ContentType(str, Enum):
+    """Enum for possible content types."""
+    BOOK_FICTION = "Book (fiction)"
+    BOOK_NON_FICTION = "Book (non-fiction)"
+    BOOK_UNKNOWN = "Book (unknown)"
+    MAGAZINE = "Magazine"
+    COMIC_BOOK = "Comic book"
+    AUDIOBOOK = "Audiobook"
+    STANDARDS_DOCUMENT = "Standards document"
+    MUSICAL_SCORE = "Musical score"
+    OTHER = "Other"
+
+
 @dataclass
 class QueueItem:
     """Queue item with priority and metadata."""
@@ -42,6 +56,7 @@ class BookInfo:
     publisher: Optional[str] = None
     year: Optional[str] = None
     language: Optional[str] = None
+    content: Optional[str] = None
     format: Optional[str] = None
     size: Optional[str] = None
     info: Optional[Dict[str, List[str]]] = None

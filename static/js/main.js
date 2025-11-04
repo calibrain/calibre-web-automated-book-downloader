@@ -103,6 +103,7 @@
         <div class="flex-1 space-y-1">
           <h3 class="font-semibold leading-tight">${utils.e(book.title) || 'Untitled'}</h3>
           <p class="text-sm opacity-80">${utils.e(book.author) || 'Unknown author'}</p>
+          <p class="text-sm opacity-80">${utils.e(book.content) || 'Unknown type'}</p>
           <div class="text-xs opacity-70 flex flex-wrap gap-2">
             <span>${utils.e(book.year) || '-'}</span>
             <span>•</span>

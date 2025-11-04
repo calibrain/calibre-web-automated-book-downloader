@@ -1,6 +1,6 @@
 """Book download manager handling search and retrieval operations."""
 
-import time, json, re
+import time, json, os, re
 from pathlib import Path
 from urllib.parse import quote
 from typing import List, Optional, Dict, Union, Callable
@@ -11,7 +11,7 @@ import downloader
 from logger import setup_logger
 from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_BASE_URL
 from env import AA_DONATOR_KEY, USE_CF_BYPASS, PRIORITIZE_WELIB, ALLOW_USE_WELIB
-from models import BookInfo, SearchFilters
+from models import BookInfo, ContentType, SearchFilters
 logger = setup_logger(__name__)
 
 
@@ -122,6 +122,7 @@ def _parse_search_result_row(row: Tag) -> Optional[BookInfo]:
             publisher=cells[3].find("span").next,
             year=cells[4].find("span").next,
             language=cells[7].find("span").next,
+            content=cells[8].find("span").next,
             format=cells[9].find("span").next.lower(),
             size=cells[10].find("span").next,
         )
@@ -235,11 +236,15 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     _details = divs[separator_index].lower().split(" · ")
     format = ""
     size = ""
+    content = ""
+    content_types = [c.value for c in ContentType]
     for f in _details:
         if format == "" and f.strip().lower() in SUPPORTED_FORMATS:
             format = f.strip().lower()
         if size == "" and any(u in f.strip().lower() for u in ["mb", "kb", "gb"]):
             size = f.strip().lower()
+        if content == "" and any(ct.lower() in f.strip().lower() for ct in content_types):
+            content = [ct for ct in content_types if ct.lower() in f.strip().lower()][0]
 
     if format == "" or size == "":
         for f in _details:
@@ -247,6 +252,8 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                 format = f.strip().lower()
             if size == "" and "." in f.strip().lower():
                 size = f.strip().lower()
+    if content == "":
+        content = ContentType.OTHER
 
     
     book_title = divs[separator_index-3].strip("🔍")
@@ -256,6 +263,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         id=book_id,
         preview=preview,
         title=book_title,
+        content=content,
         publisher=divs[separator_index-1],
         author=divs[separator_index-2],
         format=format,
