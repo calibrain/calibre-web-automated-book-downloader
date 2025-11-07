@@ -13,7 +13,7 @@ import typing
 
 from logger import setup_logger
 from config import _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE, SUPPORTED_FORMATS
-from env import FLASK_HOST, FLASK_PORT, APP_ENV, CWA_DB_PATH, DEBUG, USING_EXTERNAL_BYPASSER, BUILD_VERSION, RELEASE_VERSION
+from env import FLASK_HOST, FLASK_PORT, APP_ENV, CWA_DB_PATH, DEBUG, USING_EXTERNAL_BYPASSER, BUILD_VERSION, RELEASE_VERSION, CALIBRE_WEB_URL
 import backend
 
 from models import SearchFilters
@@ -110,7 +110,8 @@ def index() -> str:
                            debug=DEBUG,
                            build_version=BUILD_VERSION,
                            release_version=RELEASE_VERSION,
-                           app_env=APP_ENV
+                           app_env=APP_ENV,
+                           calibre_web_url=CALIBRE_WEB_URL
                            )
 
  

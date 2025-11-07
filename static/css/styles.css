@@ -549,3 +549,28 @@ h1, h2, h3, h4, h5, h6,
 #results-section-accordion .uk-accordion-title h1 {
     color: var(--heading-color) !important;
 }
+
+/* Toast Notification Styles */
+#toast-container {
+    max-width: 400px;
+    pointer-events: none;
+}
+
+.toast-notification {
+    opacity: 0;
+    transform: translateX(100%);
+    max-width: 100%;
+    word-wrap: break-word;
+    pointer-events: auto;
+}
+
+.toast-notification.toast-visible {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+/* Disabled button styles for queued/downloading states */
+button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}

@@ -36,6 +36,13 @@
                 </form>
                 {% endif %}
 
+                {% if calibre_web_url %}
+                <!-- Calibre-Web Navigation Button -->
+                <a href="{{ calibre_web_url }}" target="_blank" rel="noopener noreferrer" class="px-3 py-1 rounded border text-sm hover:opacity-80" style="border-color: var(--border-muted);">
+                    Calibre-Web
+                </a>
+                {% endif %}
+
                 <!-- Theme Dropdown -->
                 <div class="relative">
                     <button id="theme-toggle" class="px-3 py-1 rounded border text-sm" style="border-color: var(--border-muted);">

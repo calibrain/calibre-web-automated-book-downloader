@@ -45,6 +45,10 @@
     activeDownloads: '/request/api/downloads/active'
   };
   const FILTERS = ['isbn', 'author', 'title', 'lang', 'sort', 'content', 'format'];
+  
+  // Track current status for button state management
+  let currentStatus = {};
+  let previousStatus = {};
 
   // ---- Utils ----
   const utils = {
@@ -83,7 +87,18 @@
     // Simple notification via alert fallback
     toast(msg) { try { console.info(msg); } catch (_) {} },
     // Escapes text for safe HTML injection
-    e(text) { return (text ?? '').toString(); }
+    e(text) { return (text ?? '').toString(); },
+    // Get button state for a book ID
+    getButtonState(bookId) {
+      if (!currentStatus) return null;
+      if (currentStatus.downloading && currentStatus.downloading[bookId]) {
+        return { text: 'Downloading', state: 'downloading' };
+      }
+      if (currentStatus.queued && currentStatus.queued[bookId]) {
+        return { text: 'Queued', state: 'queued' };
+      }
+      return { text: 'Download', state: 'download' };
+    }
   };
 
   // ---- Modal ----
@@ -96,6 +111,14 @@
   function renderCard(book) {
     const cover = book.preview ? `<img src="${utils.e(book.preview)}" alt="Cover" class="w-full h-88 object-cover rounded">` :
       `<div class="w-full h-88 rounded flex items-center justify-center opacity-70" style="background: var(--bg-soft)">No Cover</div>`;
+
+    // Get button state
+    const buttonState = utils.getButtonState(book.id);
+    const buttonText = buttonState ? buttonState.text : 'Download';
+    const buttonStateClass = buttonState && buttonState.state !== 'download' 
+      ? 'bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed' 
+      : 'bg-blue-600 hover:bg-blue-700';
+    const isDisabled = buttonState && buttonState.state !== 'download';
 
     const html = `
       <article class="rounded border p-3 flex flex-col gap-3" style="border-color: var(--border-muted); background: var(--bg-soft)">
@@ -114,7 +137,7 @@
         </div>
         <div class="flex gap-2">
           <button class="px-3 py-2 rounded border text-sm flex-1" data-action="details" data-id="${utils.e(book.id)}" style="border-color: var(--border-muted);">Details</button>
-          <button class="px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm flex-1" data-action="download" data-id="${utils.e(book.id)}">Download</button>
+          <button class="px-3 py-2 rounded ${buttonStateClass} text-white text-sm flex-1" data-action="download" data-id="${utils.e(book.id)}" ${isDisabled ? 'disabled' : ''}>${buttonText}</button>
         </div>
       </article>`;
 
@@ -124,7 +147,9 @@
     const detailsBtn = wrapper.querySelector('[data-action="details"]');
     const downloadBtn = wrapper.querySelector('[data-action="download"]');
     detailsBtn?.addEventListener('click', () => bookDetails.show(book.id));
-    downloadBtn?.addEventListener('click', () => bookDetails.download(book));
+    if (!isDisabled) {
+      downloadBtn?.addEventListener('click', () => bookDetails.download(book));
+    }
     return wrapper.firstElementChild;
   }
 
@@ -138,6 +163,39 @@
     const frag = document.createDocumentFragment();
     books.forEach((b) => frag.appendChild(renderCard(b)));
     el.resultsGrid.appendChild(frag);
+  }
+  
+  // Update button states for all cards based on current status
+  function updateCardButtons() {
+    const downloadButtons = el.resultsGrid.querySelectorAll('[data-action="download"]');
+    downloadButtons.forEach((btn) => {
+      const bookId = btn.getAttribute('data-id');
+      const buttonState = utils.getButtonState(bookId);
+      if (buttonState) {
+        const isDisabled = buttonState.state !== 'download';
+        btn.disabled = isDisabled;
+        btn.textContent = buttonState.text;
+        
+        // Remove existing color classes (preserve other classes)
+        const classes = btn.className.split(' ');
+        const filteredClasses = classes.filter(cls => 
+          !cls.match(/^bg-(blue|green)-\d+$/) && !cls.match(/^hover:bg-(blue|green)-\d+$/)
+        );
+        btn.className = filteredClasses.join(' ');
+        
+        if (buttonState.state !== 'download') {
+          // Queued or Downloading state - green
+          btn.classList.add('bg-green-600', 'hover:bg-green-700');
+          if (isDisabled) {
+            btn.classList.add('disabled:opacity-60', 'disabled:cursor-not-allowed');
+          }
+        } else {
+          // Download state - blue
+          btn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+          btn.classList.remove('disabled:opacity-60', 'disabled:cursor-not-allowed');
+        }
+      }
+    });
   }
 
   // ---- Search ----
@@ -175,6 +233,15 @@
       const cover = book.preview ? `<img src="${utils.e(book.preview)}" alt="Cover" class="w-full h-88 object-cover rounded">` : '';
       const infoList = book.info ? Object.entries(book.info).map(([k, v]) => `<li><strong>${utils.e(k)}:</strong> ${utils.e((v||[]).join 
         ? v.join(', ') : v)}</li>`).join('') : '';
+      
+      // Get button state for modal
+      const buttonState = utils.getButtonState(book.id);
+      const buttonText = buttonState ? buttonState.text : 'Download';
+      const buttonStateClass = buttonState && buttonState.state !== 'download' 
+        ? 'bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed' 
+        : 'bg-blue-600 hover:bg-blue-700';
+      const isDisabled = buttonState && buttonState.state !== 'download';
+      
       return `
         <div class="p-4 space-y-4">
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -193,7 +260,7 @@
           </div>
           ${infoList ? `<div><h4 class="font-semibold mb-2">Further Information</h4><ul class="list-disc pl-6 space-y-1 text-sm">${infoList}</ul></div>` : ''}
           <div class="flex gap-2">
-            <button id="download-button" class="px-3 py-2 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm">Download</button>
+            <button id="download-button" class="px-3 py-2 rounded ${buttonStateClass} text-white text-sm" ${isDisabled ? 'disabled' : ''}>${buttonText}</button>
             <button id="close-details" class="px-3 py-2 rounded border text-sm" style="border-color: var(--border-muted);">Close</button>
           </div>
         </div>`;
@@ -215,13 +282,63 @@
       try {
         utils.show(el.statusLoading);
         const data = await utils.j(API.status);
+        // Store previous status before updating
+        previousStatus = JSON.parse(JSON.stringify(currentStatus));
+        currentStatus = data;
         this.render(data);
         // Also reflect active downloads in the top section
         this.renderTop(data);
         this.updateActive();
+        // Update card button states
+        updateCardButtons();
+        // Detect changes and show toasts
+        this.detectChanges(previousStatus, currentStatus);
       } catch (e) {
         el.statusList.innerHTML = '<div class="text-sm opacity-80">Error loading status.</div>';
       } finally { utils.hide(el.statusLoading); }
+    },
+    detectChanges(prev, curr) {
+      if (!prev || Object.keys(prev).length === 0) return;
+      
+      // Check for new items in queue
+      const prevQueued = prev.queued || {};
+      const currQueued = curr.queued || {};
+      Object.keys(currQueued).forEach((bookId) => {
+        if (!prevQueued[bookId]) {
+          const book = currQueued[bookId];
+          toastNotifications.show(`${book.title || 'Book'} added to queue`, 'info');
+        }
+      });
+      
+      // Check for items that started downloading
+      const prevDownloading = prev.downloading || {};
+      const currDownloading = curr.downloading || {};
+      Object.keys(currDownloading).forEach((bookId) => {
+        if (!prevDownloading[bookId]) {
+          const book = currDownloading[bookId];
+          toastNotifications.show(`${book.title || 'Book'} started downloading`, 'info');
+        }
+      });
+      
+      // Check for completed items (moved from downloading/queued to available/done)
+      const prevDownloadingIds = new Set(Object.keys(prevDownloading));
+      const prevQueuedIds = new Set(Object.keys(prevQueued));
+      const currAvailable = curr.available || {};
+      const currDone = curr.done || {};
+      
+      Object.keys(currAvailable).forEach((bookId) => {
+        if (prevDownloadingIds.has(bookId) || prevQueuedIds.has(bookId)) {
+          const book = currAvailable[bookId];
+          toastNotifications.show(`${book.title || 'Book'} completed`, 'success');
+        }
+      });
+      
+      Object.keys(currDone).forEach((bookId) => {
+        if (prevDownloadingIds.has(bookId) || prevQueuedIds.has(bookId)) {
+          const book = currDone[bookId];
+          toastNotifications.show(`${book.title || 'Book'} completed`, 'success');
+        }
+      });
     },
     render(data) {
       // data shape: {queued: {...}, downloading: {...}, completed: {...}, error: {...}}
@@ -307,6 +424,46 @@
       } catch (_){}
     }
   };
+  
+  // ---- Toast Notifications ----
+  const toastNotifications = {
+    container: null,
+    init() {
+      // Create toast container if it doesn't exist
+      if (!this.container) {
+        this.container = document.createElement('div');
+        this.container.id = 'toast-container';
+        this.container.className = 'fixed top-4 right-4 z-50 space-y-2';
+        document.body.appendChild(this.container);
+      }
+    },
+    show(message, type = 'info') {
+      this.init();
+      const toast = document.createElement('div');
+      toast.className = `toast-notification px-4 py-3 rounded-md shadow-lg text-sm font-medium transition-all duration-300 ${
+        type === 'success' ? 'bg-green-600 text-white' : 'bg-blue-600 text-white'
+      }`;
+      toast.textContent = message;
+      
+      // Add to container
+      this.container.appendChild(toast);
+      
+      // Trigger animation
+      setTimeout(() => {
+        toast.classList.add('toast-visible');
+      }, 10);
+      
+      // Auto-dismiss after 4 seconds
+      setTimeout(() => {
+        toast.classList.remove('toast-visible');
+        setTimeout(() => {
+          if (toast.parentNode) {
+            toast.parentNode.removeChild(toast);
+          }
+        }, 300);
+      }, 4000);
+    }
+  };
 
   // ---- Theme ----
   const theme = {
@@ -383,5 +540,11 @@
   // ---- Init ----
   theme.init();
   initEvents();
+  toastNotifications.init();
   status.fetch();
+  
+  // Auto-update status every 10 seconds
+  setInterval(() => {
+    status.fetch();
+  }, 10000);
 })();

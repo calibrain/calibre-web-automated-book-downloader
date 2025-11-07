@@ -64,4 +64,7 @@ if USING_TOR:
     USE_DOH = False
     HTTP_PROXY = ""
     HTTPS_PROXY = ""
+
+# Calibre-Web URL for navigation button
+CALIBRE_WEB_URL = os.getenv("CALIBRE_WEB_URL", "").strip()
     
