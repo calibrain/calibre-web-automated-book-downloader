@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='media/favicon.ico') }}">
 
-    <!-- Tailwind (no-build) for rapid iteration) -->
+    <!-- Tailwind (no-build for rapid iteration) -->
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="min-h-screen" style="background: var(--bg); color: var(--text);">
@@ -127,7 +127,7 @@
                         </select>
                     </div>
                     <div>
-                        <label for="content-input" class="block text sm mb-1 opacity-80">Content</label>
+                        <label for="content-input" class="block text-sm mb-1 opacity-80">Content</label>
                         <select id="content-input" class="w-full px-3 py-2 rounded-md border"
                                 style="background: var(--bg-soft); color: var(--text); border-color: var(--border-muted);">
                             <option value="">All</option>

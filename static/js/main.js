@@ -467,8 +467,7 @@
     },
     tpl(book) {
       const cover = book.preview ? `<img src="${utils.e(book.preview)}" alt="Cover" class="w-full h-88 object-cover rounded">` : '';
-      const infoList = book.info ? Object.entries(book.info).map(([k, v]) => `<li><strong>${utils.e(k)}:</strong> ${utils.e((v||[]).join 
-        ? v.join(', ') : v)}</li>`).join('') : '';
+      const infoList = book.info ? Object.entries(book.info).map(([k, v]) => `<li><strong>${utils.e(k)}:</strong> ${utils.e((v||[]).join ? v.join(', ') : v)}</li>`).join('') : '';
       
       // Get button state for modal
       const buttonState = utils.getButtonState(book.id);
@@ -804,8 +803,8 @@
   updateSearchSectionPosition();
   status.fetch();
   
-  // Auto-update status every 10 seconds
+  // Auto-update status every 5 seconds
   setInterval(() => {
     status.fetch();
-  }, 10000);
+  }, 5000);
 })();
