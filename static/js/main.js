@@ -114,6 +114,10 @@
       const textSpan = button.querySelector('.download-button-text');
       if (textSpan) {
         textSpan.textContent = 'Queuing...';
+        // Force layout recalculation on mobile to prevent text clipping
+        if (window.innerWidth <= 639) {
+          void textSpan.offsetWidth; // Force reflow
+        }
       } else {
         button.textContent = 'Queuing...';
       }
@@ -257,6 +261,10 @@
         // Update button text
         if (textSpan) {
           textSpan.textContent = buttonState.text;
+          // Force layout recalculation on mobile to prevent text clipping
+          if (window.innerWidth <= 639) {
+            void textSpan.offsetWidth; // Force reflow
+          }
         } else {
           btn.textContent = buttonState.text;
         }
@@ -324,6 +332,10 @@
       // Update button text
       if (textSpan) {
         textSpan.textContent = buttonState.text;
+        // Force layout recalculation on mobile to prevent text clipping
+        if (window.innerWidth <= 639) {
+          void textSpan.offsetWidth; // Force reflow
+        }
       } else {
         downloadBtn.textContent = buttonState.text;
       }

@@ -267,7 +267,7 @@ th[data-sort="index"] {
 
 .details-container {
     background: white;
-    padding: 0.25rem 0.25rem 2rem 3rem;
+    padding: 1.5rem;
     border-radius: 4px;
     max-width: 800px;
     width: 90%;
@@ -351,6 +351,11 @@ th[data-sort="index"] {
     th, td {
         padding: 0.5rem;
         font-size: 0.875rem;
+    }
+    
+    /* Minimal equal padding for details container on mobile */
+    .details-container {
+        padding: 1rem;
     }
 }
 
@@ -677,5 +682,97 @@ button:disabled {
     .book-card-buttons {
         width: 100%;
         margin-top: 0.5rem;
+    }
+}
+
+/* Desktop: align details and buttons to bottom, artwork stays at top */
+@media (min-width: 640px) {
+    .book-card {
+        /* Ensure card can grow to accommodate content */
+        display: flex;
+        flex-direction: column;
+        height: 100%; /* Ensure card fills grid cell height */
+    }
+    
+    .book-card-content {
+        /* Grow to fill available space, pushing buttons to bottom */
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0; /* Allow flex shrinking */
+    }
+    
+    .book-card-cover {
+        /* Artwork stays at top, doesn't grow */
+        flex-shrink: 0;
+    }
+    
+    .book-card-text {
+        /* Push text to bottom of content area, right above buttons */
+        margin-top: auto;
+        flex: 0 0 auto !important; /* Override flex-1 from HTML, don't grow or shrink */
+    }
+}
+
+/* Fix download button text clipping on mobile */
+.download-button-text {
+    white-space: nowrap;
+    overflow: visible;
+    flex-shrink: 0;
+    display: inline-block;
+}
+
+/* Ensure download buttons can accommodate their text content */
+[data-action="download"],
+#download-button {
+    min-width: 0;
+    overflow: visible;
+    width: 100%;
+}
+
+/* On mobile, ensure button text is fully visible */
+@media (max-width: 639px) {
+    /* Ensure button container allows overflow */
+    .book-card-buttons {
+        overflow: visible;
+    }
+    
+    /* Make sure download buttons can expand to fit their content */
+    [data-action="download"],
+    #download-button {
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow: visible;
+        box-sizing: border-box;
+    }
+    
+    /* Make text span flexible to use available space */
+    .download-button-text {
+        white-space: nowrap;
+        overflow: visible;
+        /* Take up all available space in the button, allow shrinking if needed */
+        flex: 1 1 0%;
+        min-width: 0;
+        display: block;
+        /* Center text within its available space */
+        text-align: center;
+        box-sizing: border-box;
+        /* Force layout recalculation by ensuring the element is treated as a flex item */
+        position: relative;
+    }
+    
+    /* Ensure button's flex container properly distributes space on mobile */
+    [data-action="download"].flex,
+    #download-button.flex {
+        /* Ensure gap doesn't cause issues */
+        gap: 0.5rem;
+    }
+    
+    /* Ensure spinner doesn't interfere with text layout */
+    .download-spinner {
+        flex-shrink: 0;
+        flex-grow: 0;
+        width: 1rem;
+        height: 1rem;
     }
 }
