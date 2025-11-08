@@ -142,8 +142,8 @@
 
   // ---- Cards ----
   function renderCard(book) {
-    const cover = book.preview ? `<img src="${utils.e(book.preview)}" alt="Cover" class="w-full h-88 object-cover rounded">` :
-      `<div class="w-full h-88 rounded flex items-center justify-center opacity-70" style="background: var(--bg-soft)">No Cover</div>`;
+    const cover = book.preview ? `<img src="${utils.e(book.preview)}" alt="Cover" class="book-card-cover w-full h-88 object-cover rounded">` :
+      `<div class="book-card-cover w-full h-88 rounded flex items-center justify-center opacity-70" style="background: var(--bg-soft)">No Cover</div>`;
 
     // Get button state
     const buttonState = utils.getButtonState(book.id);
@@ -154,21 +154,23 @@
     const isDisabled = buttonState && buttonState.state !== 'download';
 
     const html = `
-      <article class="rounded border p-3 flex flex-col gap-3" style="border-color: var(--border-muted); background: var(--bg-soft)">
-        ${cover}
-        <div class="flex-1 space-y-1">
-          <h3 class="font-semibold leading-tight">${utils.e(book.title) || 'Untitled'}</h3>
-          <p class="text-sm opacity-80">${utils.e(book.author) || 'Unknown author'}</p>
-          <div class="text-xs opacity-70 flex flex-wrap gap-2">
-            <span>${utils.e(book.year) || '-'}</span>
-            <span>•</span>
-            <span>${utils.e(book.language) || '-'}</span>
-            <span>•</span>
-            <span>${utils.e(book.format) || '-'}</span>
-            ${book.size ? `<span>•</span><span>${utils.e(book.size)}</span>` : ''}
+      <article class="book-card rounded border p-3 flex flex-col gap-3" style="border-color: var(--border-muted); background: var(--bg-soft)">
+        <div class="book-card-content flex flex-col gap-3">
+          ${cover}
+          <div class="book-card-text flex-1 space-y-1">
+            <h3 class="font-semibold leading-tight">${utils.e(book.title) || 'Untitled'}</h3>
+            <p class="text-sm opacity-80">${utils.e(book.author) || 'Unknown author'}</p>
+            <div class="text-xs opacity-70 flex flex-wrap gap-2">
+              <span>${utils.e(book.year) || '-'}</span>
+              <span>•</span>
+              <span>${utils.e(book.language) || '-'}</span>
+              <span>•</span>
+              <span>${utils.e(book.format) || '-'}</span>
+              ${book.size ? `<span>•</span><span>${utils.e(book.size)}</span>` : ''}
+            </div>
           </div>
         </div>
-        <div class="flex gap-2">
+        <div class="book-card-buttons flex gap-2">
           <button class="px-3 py-2 rounded border text-sm flex-1 flex items-center justify-center gap-2" data-action="details" data-id="${utils.e(book.id)}" style="border-color: var(--border-muted);">
             <span class="details-button-text">Details</span>
             <div class="details-spinner hidden w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>

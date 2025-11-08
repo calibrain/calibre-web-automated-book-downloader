@@ -650,3 +650,32 @@ button:disabled {
         margin-top: 4rem;
     }
 }
+
+/* Mobile-friendly book card layout */
+/* On mobile (below 640px), use horizontal layout: image left, text right, buttons below */
+/* Desktop remains unchanged - full width, full height artwork via Tailwind classes */
+@media (max-width: 639px) {
+    .book-card-content {
+        flex-direction: row !important;
+        gap: 0.75rem !important;
+        align-items: flex-start;
+    }
+    
+    .book-card-cover {
+        width: 50% !important;
+        height: auto !important;
+        flex-shrink: 0;
+        aspect-ratio: 2/3; /* Maintain book cover proportions */
+    }
+    
+    .book-card-text {
+        width: 50% !important;
+        flex-shrink: 0;
+        padding-left: 0.5rem;
+    }
+    
+    .book-card-buttons {
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+}
