@@ -83,35 +83,8 @@ footer {
     margin-top: auto;
 }
 
-/* Search Section */
-.search-section {
-    margin-bottom: 2rem;
-}
-
-.search-container {
-    max-width: 600px;
-    margin: 0 auto;
-    display: flex;
-    gap: 0.5rem;
-}
-
-.search-container input {
-    flex: 1;
-    padding: 0.75rem;
-    border: 2px solid var(--border-color);
-    border-radius: 4px;
-    font-size: 1rem;
-    transition: border-color 0.3s ease;
-}
-
-.search-container input:focus {
-    border-color: var(--primary-color);
-    outline: none;
-}
-
-.search-filter {
-    max-width: 210px;
-}
+/* Search Section - Legacy styles (no longer in use, kept for reference) */
+/* The search UI now uses Tailwind classes and .search-wrapper instead */
 
 /* Table Styles */
 .table-responsive {
@@ -331,10 +304,6 @@ th[data-sort="index"] {
 
 /* Responsive Design */
 @media (max-width: 768px) {
-    .search-container {
-        flex-direction: column;
-    }
-
     .details-header {
         grid-template-columns: 1fr;
         text-align: center;
@@ -610,50 +579,69 @@ button:disabled {
     cursor: not-allowed;
 }
 
-/* Search wrapper - unifies width of search input and advanced search */
+/* Search wrapper and input - base styles */
 .search-wrapper {
     width: 100%;
 }
 
-/* Search input - allow it to fill available space, no fixed min-width */
 .search-input {
-    min-width: 0; /* Allow shrinking on mobile */
+    min-width: 0; /* Allow input to shrink on mobile flex containers */
 }
 
-/* On desktop, set min-width on wrapper to match advanced search width */
-/* Advanced search uses 3-column grid on lg screens (1024px+) */
-/* With gap-4 (16px) between columns, approximate width needed is ~800px */
-/* This ensures search box maintains consistent width whether advanced search is open or closed */
-@media (min-width: 1024px) {
-    .search-wrapper {
-        min-width: 800px;
+/* ============================================
+   MOBILE: Full viewport width, no fixed widths
+   ============================================ */
+@media (max-width: 639px) {
+    /* Break search section out to full viewport width, escaping the centered main container */
+    #search-section {
+        position: relative;
+        left: 50%;
+        right: 50%;
+        margin-left: -50vw;
+        margin-right: -50vw;
+        width: 100vw;
+        padding-left: 1rem;
+        padding-right: 1rem;
+        box-sizing: border-box;
     }
-}
-
-/* On medium screens (md: 768px+), advanced search uses 2 columns */
-@media (min-width: 768px) and (max-width: 1023px) {
+    
+    /* Remove any width constraints on search wrapper */
     .search-wrapper {
-        min-width: 600px;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: none !important;
     }
-}
-
-/* On small screens, allow full width */
-@media (max-width: 767px) {
-    .search-wrapper {
+    
+    /* Ensure flex containers are full width */
+    .search-wrapper > .flex,
+    #search-filters {
+        width: 100%;
+        max-width: 100%;
         min-width: 0;
     }
 }
 
-/* Position search section lower on screen when in initial state (no results, no queue) */
-.search-initial-state {
-    margin-top: 8rem; /* Push search box down from top, reminiscent of AI/search services */
+/* ============================================
+   DESKTOP: Fixed px widths for consistency
+   ============================================ */
+/* Medium screens (small tablets/large phones): 640px - 1023px */
+@media (min-width: 640px) and (max-width: 1023px) {
+    .search-wrapper {
+        min-width: 600px; /* Fixed width for medium screens */
+    }
 }
 
-/* On smaller screens, use less margin */
-@media (max-width: 768px) {
-    .search-initial-state {
-        margin-top: 4rem;
+/* Large screens (desktop): 1024px+ */
+@media (min-width: 1024px) {
+    .search-wrapper {
+        min-width: 800px; /* Fixed width for large screens */
     }
+}
+
+/* Position search section lower on screen when in initial state (no results, no queue) */
+/* Same vertical position across all screen sizes for consistency */
+.search-initial-state {
+    margin-top: 8rem; /* Push search box down from top, reminiscent of AI/search services */
 }
 
 /* Mobile-friendly book card layout */
