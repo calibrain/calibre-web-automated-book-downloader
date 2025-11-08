@@ -590,25 +590,31 @@ button:disabled {
 /* Medium screens (small tablets/large phones): 640px - 1023px */
 @media (min-width: 640px) and (max-width: 1023px) {
     .search-wrapper {
-        min-width: 600px; /* Fixed width for medium screens */
+        width: 600px; /* Fixed width for medium screens */
+        max-width: 600px; /* Prevent expansion */
     }
 }
 
 /* Large screens (desktop): 1024px+ */
 @media (min-width: 1024px) {
     .search-wrapper {
-        min-width: 800px; /* Fixed width for large screens */
+        width: 800px; /* Fixed width for large screens */
+        max-width: 800px; /* Prevent expansion */
     }
+}
+
+/* Search section base styles - always center horizontally on desktop */
+#search-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Keep search box centered horizontally */
 }
 
 /* Center search section vertically when in initial state (no results, no queue) */
 /* Responsive to different window sizes */
 .search-initial-state {
     flex: 1;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
+    justify-content: center; /* Only add vertical centering in initial state */
 }
 
 /* Mobile-friendly book card layout */
