@@ -1,4 +1,5 @@
 flask
+flask-cors
 requests[socks]
 beautifulsoup4
 tqdm

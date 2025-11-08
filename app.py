@@ -4,7 +4,8 @@ import logging
 import io, re, os
 import sqlite3
 from functools import wraps
-from flask import Flask, request, jsonify, render_template, send_file, send_from_directory
+from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 from werkzeug.wrappers import Response
@@ -23,6 +24,17 @@ app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app)  # type: ignore
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching
 app.config['APPLICATION_ROOT'] = '/'
+
+# Enable CORS in development mode for local frontend development
+if DEBUG:
+    CORS(app, resources={
+        r"/*": {
+            "origins": ["http://localhost:5173", "http://127.0.0.1:5173"],
+            "supports_credentials": True,
+            "allow_headers": ["Content-Type", "Authorization"],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+        }
+    })
 
 # Flask logger
 app.logger.handlers = logger.handlers
@@ -91,36 +103,45 @@ def register_dual_routes(app : Flask) -> None:
 
 def url_for_with_request(endpoint : str, **values : typing.Any) -> str:
     """Generate URLs with /request prefix by default."""
-    if endpoint == 'static':
+    if endpoint == 'static' or endpoint == 'serve_frontend_assets':
         # For static files, add /request prefix
         url = flask_url_for(endpoint, **values)
         return f"/request{url}"
     return flask_url_for(endpoint, **values)
 
+# Serve frontend static files
+@app.route('/assets/<path:filename>')
+def serve_frontend_assets(filename: str) -> Response:
+    """
+    Serve static assets from the built frontend.
+    """
+    return send_from_directory(os.path.join(app.root_path, 'frontend-dist', 'assets'), filename)
+
 @app.route('/')
 @login_required
-def index() -> str:
+def index() -> Response:
     """
-    Render main page with search and status table.
+    Serve the React frontend application.
     """
-    return render_template('index.html', 
-                           book_languages=_SUPPORTED_BOOK_LANGUAGE, 
-                           default_language=BOOK_LANGUAGE, 
-                           supported_formats=SUPPORTED_FORMATS,
-                           debug=DEBUG,
-                           build_version=BUILD_VERSION,
-                           release_version=RELEASE_VERSION,
-                           app_env=APP_ENV,
-                           calibre_web_url=CALIBRE_WEB_URL
-                           )
+    return send_from_directory(os.path.join(app.root_path, 'frontend-dist'), 'index.html')
 
- 
+@app.route('/logo.png')
+def logo() -> Response:
+    """
+    Serve logo from built frontend assets.
+    """
+    return send_from_directory(os.path.join(app.root_path, 'frontend-dist'),
+        'logo.png', mimetype='image/png')
 
+@app.route('/favicon.ico')
 @app.route('/favico<path:_>')
 @app.route('/request/favico<path:_>')
 @app.route('/request/static/favico<path:_>')
-def favicon(_ : typing.Any) -> Response:
-    return send_from_directory(os.path.join(app.root_path, 'static', 'media'),
+def favicon(_ : typing.Any = None) -> Response:
+    """
+    Serve favicon from built frontend assets.
+    """
+    return send_from_directory(os.path.join(app.root_path, 'frontend-dist'),
         'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
 from typing import Union, Tuple
@@ -266,6 +287,28 @@ def api_download() -> Union[Response, Tuple[Response, int]]:
         return jsonify({"error": "Failed to queue book"}), 500
     except Exception as e:
         logger.error_trace(f"Download error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config', methods=['GET'])
+@login_required
+def api_config() -> Union[Response, Tuple[Response, int]]:
+    """
+    Get application configuration for frontend.
+    """
+    try:
+        config = {
+            "calibre_web_url": CALIBRE_WEB_URL,
+            "debug": DEBUG,
+            "app_env": APP_ENV,
+            "build_version": BUILD_VERSION,
+            "release_version": RELEASE_VERSION,
+            "book_languages": _SUPPORTED_BOOK_LANGUAGE,
+            "default_language": BOOK_LANGUAGE,
+            "supported_formats": SUPPORTED_FORMATS
+        }
+        return jsonify(config)
+    except Exception as e:
+        logger.error_trace(f"Config error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/status', methods=['GET'])
@@ -528,6 +571,21 @@ def authenticate() -> bool:
 
     logger.info(f"Authentication successful for user {username}")
     return True
+
+# Catch-all route for React Router (must be last)
+# This handles client-side routing by serving index.html for any unmatched routes
+@app.route('/<path:path>')
+@login_required
+def catch_all(path: str) -> Response:
+    """
+    Serve the React app for any route not matched by API endpoints.
+    This allows React Router to handle client-side routing.
+    """
+    # If the request is for an API endpoint or static file, let it 404
+    if path.startswith('api/') or path.startswith('assets/'):
+        return jsonify({"error": "Resource not found"}), 404
+    # Otherwise serve the React app
+    return send_from_directory(os.path.join(app.root_path, 'frontend-dist'), 'index.html')
 
 # Register all routes with /request prefix
 register_dual_routes(app)
