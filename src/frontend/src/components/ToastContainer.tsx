@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Toast } from '../hooks/useToast';
+import { Toast } from '../types';
 
 interface ToastContainerProps {
   toasts: Toast[];

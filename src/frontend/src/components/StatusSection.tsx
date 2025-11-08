@@ -1,5 +1,58 @@
 import { StatusData } from '../types';
 
+interface StatusBadgeProps {
+  status: string;
+}
+
+const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
+  queued: {
+    bg: 'bg-amber-500/10',
+    text: 'text-amber-600',
+    label: 'Queued',
+  },
+  downloading: {
+    bg: 'bg-blue-500/10',
+    text: 'text-blue-600',
+    label: 'Downloading',
+  },
+  completed: {
+    bg: 'bg-green-500/10',
+    text: 'text-green-600',
+    label: 'Completed',
+  },
+  available: {
+    bg: 'bg-green-500/10',
+    text: 'text-green-600',
+    label: 'Available',
+  },
+  done: {
+    bg: 'bg-green-500/10',
+    text: 'text-green-600',
+    label: 'Done',
+  },
+  error: {
+    bg: 'bg-red-500/10',
+    text: 'text-red-600',
+    label: 'Error',
+  },
+};
+
+const StatusBadge = ({ status }: StatusBadgeProps) => {
+  const style = STATUS_STYLES[status.toLowerCase()] || {
+    bg: 'bg-gray-500/10',
+    text: 'text-gray-600',
+    label: status.charAt(0).toUpperCase() + status.slice(1),
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${style.bg} ${style.text}`}
+    >
+      {style.label}
+    </span>
+  );
+};
+
 interface StatusSectionProps {
   status: StatusData;
   visible: boolean;
@@ -67,8 +120,8 @@ export const StatusSection = ({
                 className="p-3 rounded border flex flex-col gap-2"
                 style={{ borderColor: 'var(--border-muted)', background: 'var(--bg-soft)' }}
               >
-                <div className="text-sm">
-                  <span className="opacity-70">{name}</span> • <strong>{maybeLinkedTitle}</strong>
+                <div className="text-sm flex items-center gap-2">
+                  <StatusBadge status={name} /> <strong>{maybeLinkedTitle}</strong>
                 </div>
                 {progress}
                 {actions && <div className="flex items-center gap-2">{actions}</div>}
@@ -88,7 +141,7 @@ export const StatusSection = ({
   return (
     <section id="status-section">
       <div className="flex items-center flex-wrap mb-3">
-        <h2 className="text-xl font-semibold mr-4 sm:mr-6">Download Queue & Status</h2>
+        <h2 className="text-xl font-semibold mr-4 sm:mr-6">Downloads</h2>
         <div className="flex items-center gap-3 ml-4 sm:ml-auto">
           <button
             onClick={onRefresh}

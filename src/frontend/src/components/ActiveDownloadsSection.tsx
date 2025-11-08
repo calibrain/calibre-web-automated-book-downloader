@@ -1,5 +1,17 @@
 import { Book } from '../types';
 
+interface StatusBadgeProps {
+  status: string;
+}
+
+const StatusBadge = ({ status }: StatusBadgeProps) => {
+  return (
+    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-600">
+      {status}
+    </span>
+  );
+};
+
 interface ActiveDownloadsSectionProps {
   downloads: Book[];
   visible: boolean;
@@ -35,7 +47,8 @@ export const ActiveDownloadsSection = ({
             style={{ borderColor: 'var(--border-muted)', background: 'var(--bg-soft)' }}
           >
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm truncate">
+              <div className="text-sm truncate flex items-center gap-2">
+                <StatusBadge status="Downloading" />
                 <strong>{book.title || '-'}</strong>
               </div>
               <div className="shrink-0">
