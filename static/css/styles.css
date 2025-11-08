@@ -605,13 +605,48 @@ button:disabled {
     cursor: not-allowed;
 }
 
-/* Search input min-width for desktop (preserves width when queue is hidden) */
+/* Search wrapper - unifies width of search input and advanced search */
+.search-wrapper {
+    width: 100%;
+}
+
+/* Search input - allow it to fill available space, no fixed min-width */
 .search-input {
     min-width: 0; /* Allow shrinking on mobile */
 }
 
-@media (min-width: 640px) {
-    .search-input {
-        min-width: 600px; /* Set minimum width on desktop to preserve layout */
+/* On desktop, set min-width on wrapper to match advanced search width */
+/* Advanced search uses 3-column grid on lg screens (1024px+) */
+/* With gap-4 (16px) between columns, approximate width needed is ~800px */
+/* This ensures search box maintains consistent width whether advanced search is open or closed */
+@media (min-width: 1024px) {
+    .search-wrapper {
+        min-width: 800px;
+    }
+}
+
+/* On medium screens (md: 768px+), advanced search uses 2 columns */
+@media (min-width: 768px) and (max-width: 1023px) {
+    .search-wrapper {
+        min-width: 600px;
+    }
+}
+
+/* On small screens, allow full width */
+@media (max-width: 767px) {
+    .search-wrapper {
+        min-width: 0;
+    }
+}
+
+/* Position search section lower on screen when in initial state (no results, no queue) */
+.search-initial-state {
+    margin-top: 8rem; /* Push search box down from top, reminiscent of AI/search services */
+}
+
+/* On smaller screens, use less margin */
+@media (max-width: 768px) {
+    .search-initial-state {
+        margin-top: 4rem;
     }
 }

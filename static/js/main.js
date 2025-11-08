@@ -8,6 +8,7 @@
     searchBtn: document.getElementById('search-button'),
     searchIcon: document.getElementById('search-icon'),
     searchSpinner: document.getElementById('search-spinner'),
+    searchSection: document.getElementById('search-section'),
     advToggle: document.getElementById('toggle-advanced'),
     filtersForm: document.getElementById('search-filters'),
     isbn: document.getElementById('isbn-input'),
@@ -201,6 +202,7 @@
     if (!books || books.length === 0) {
       utils.hide(el.resultsSection);
       utils.hide(el.noResults);
+      updateSearchSectionPosition();
       return;
     }
     utils.show(el.resultsSection);
@@ -208,6 +210,22 @@
     const frag = document.createDocumentFragment();
     books.forEach((b) => frag.appendChild(renderCard(b)));
     el.resultsGrid.appendChild(frag);
+    updateSearchSectionPosition();
+  }
+
+  // Update search section position based on whether we're in initial state
+  function updateSearchSectionPosition() {
+    if (!el.searchSection) return;
+    const hasResults = el.resultsSection && !el.resultsSection.classList.contains('hidden');
+    const hasStatus = el.statusSection && !el.statusSection.classList.contains('hidden');
+    const hasActiveDownloads = el.activeTopSec && !el.activeTopSec.classList.contains('hidden');
+    
+    // In initial state when nothing is visible
+    if (!hasResults && !hasStatus && !hasActiveDownloads) {
+      el.searchSection.classList.add('search-initial-state');
+    } else {
+      el.searchSection.classList.remove('search-initial-state');
+    }
   }
   
   // Update button states for all cards based on current status
@@ -592,6 +610,8 @@
       } else {
         utils.hide(el.statusSection);
       }
+      // Update search section position
+      updateSearchSectionPosition();
       // Bind cancel buttons
       el.statusList.querySelectorAll('[data-cancel]')?.forEach((btn) => {
         btn.addEventListener('click', () => queue.cancel(btn.getAttribute('data-cancel')));
@@ -605,6 +625,7 @@
         if (!downloading.length) {
           el.activeTopList.innerHTML = '';
           el.activeTopSec.classList.add('hidden');
+          updateSearchSectionPosition();
           return;
         }
         // Build compact rows with title and progress bar + cancel
@@ -623,6 +644,8 @@
         }).join('');
         el.activeTopList.innerHTML = rows;
         el.activeTopSec.classList.remove('hidden');
+        // Update search section position
+        updateSearchSectionPosition();
         // Bind cancel handlers for the top section
         el.activeTopList.querySelectorAll('[data-cancel]')?.forEach((btn) => {
           btn.addEventListener('click', () => queue.cancel(btn.getAttribute('data-cancel')));
@@ -763,6 +786,8 @@
   theme.init();
   initEvents();
   toastNotifications.init();
+  // Set initial position before first status fetch
+  updateSearchSectionPosition();
   status.fetch();
   
   // Auto-update status every 10 seconds
