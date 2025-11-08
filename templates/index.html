@@ -66,7 +66,7 @@
             <div class="flex flex-col gap-3">
                 <div class="flex gap-2">
                     <input id="search-input" type="search" placeholder="Search by ISBN, title, author..." aria-label="Search books"
-                           class="flex-1 px-4 py-3 rounded-md border outline-none"
+                           class="flex-1 px-4 py-3 rounded-md border outline-none search-input"
                            style="background: var(--bg-soft); color: var(--text); border-color: var(--border-muted);">
                     <button id="toggle-advanced" class="px-4 py-3 rounded-md border flex items-center justify-center" style="border-color: var(--border-muted);" aria-label="Advanced Search">
                         <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
@@ -208,7 +208,7 @@
         </div>
 
         <!-- Status -->
-        <section>
+        <section id="status-section" class="hidden">
             <div class="flex items-center flex-wrap mb-3">
                 <h2 class="text-xl font-semibold mr-4 sm:mr-6">Download Queue & Status</h2>
                 <div class="flex items-center gap-3 ml-4 sm:ml-auto">

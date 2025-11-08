@@ -604,3 +604,14 @@ button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
 }
+
+/* Search input min-width for desktop (preserves width when queue is hidden) */
+.search-input {
+    min-width: 0; /* Allow shrinking on mobile */
+}
+
+@media (min-width: 640px) {
+    .search-input {
+        min-width: 600px; /* Set minimum width on desktop to preserve layout */
+    }
+}

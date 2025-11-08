@@ -25,6 +25,7 @@
     clearCompletedBtn: document.getElementById('clear-completed-button'),
     statusLoading: document.getElementById('status-loading'),
     statusList: document.getElementById('status-list'),
+    statusSection: document.getElementById('status-section'),
     activeDownloadsCount: document.getElementById('active-downloads-count'),
     // Active downloads (top section under search)
     activeTopSec: document.getElementById('active-downloads-top'),
@@ -557,8 +558,10 @@
     render(data) {
       // data shape: {queued: {...}, downloading: {...}, completed: {...}, error: {...}}
       const sections = [];
+      let hasItems = false;
       for (const [name, items] of Object.entries(data || {})) {
         if (!items || Object.keys(items).length === 0) continue;
+        hasItems = true;
         const rows = Object.values(items).map((b) => {
           const titleText = utils.e(b.title) || '-';
           const maybeLinkedTitle = b.download_path
@@ -583,6 +586,12 @@
           </div>`);
       }
       el.statusList.innerHTML = sections.join('') || '<div class="text-sm opacity-80">No items.</div>';
+      // Show/hide status section based on whether there are items
+      if (hasItems) {
+        utils.show(el.statusSection);
+      } else {
+        utils.hide(el.statusSection);
+      }
       // Bind cancel buttons
       el.statusList.querySelectorAll('[data-cancel]')?.forEach((btn) => {
         btn.addEventListener('click', () => queue.cancel(btn.getAttribute('data-cancel')));
