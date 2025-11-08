@@ -20,6 +20,8 @@ function App() {
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [config, setConfig] = useState<AppConfig | null>(null);
+  const [isNearBottom, setIsNearBottom] = useState(false);
+  const [isPageScrollable, setIsPageScrollable] = useState(false);
   const { toasts, showToast } = useToast();
 
   // Compute visibility states
@@ -192,6 +194,46 @@ function App() {
     ? Object.values(currentStatus.downloading)
     : [];
 
+  // Track scroll position and page scrollability
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollPosition = window.scrollY + window.innerHeight;
+      const documentHeight = document.documentElement.scrollHeight;
+      const windowHeight = window.innerHeight;
+      
+      // Check if page is scrollable (content height > viewport height)
+      setIsPageScrollable(documentHeight > windowHeight);
+      
+      // Consider "near bottom" if within 300px of the bottom
+      setIsNearBottom(scrollPosition >= documentHeight - 300);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    window.addEventListener('resize', handleScroll); // Also check on resize
+    handleScroll(); // Check initial position
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, []);
+
+  // Scroll to downloads or back to top
+  const handleFABClick = () => {
+    if (isNearBottom) {
+      // Scroll to top (search section)
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      // Scroll to downloads section
+      const statusSection = document.getElementById('status-section');
+      if (statusSection) {
+        statusSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  };
+
+  // Show FAB when there are downloads to show AND the page is scrollable
+  const showDownloadsFAB = (hasActiveDownloads || hasStatusItems) && isPageScrollable;
+
   return (
     <>
       <Header 
@@ -250,6 +292,54 @@ function App() {
         appEnv={config?.app_env || 'development'} 
       />
       <ToastContainer toasts={toasts} />
+      
+      {/* Floating action button to scroll to downloads or back to top */}
+      {showDownloadsFAB && (
+        <button
+          onClick={handleFABClick}
+          className="fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white rounded-full p-4 shadow-lg transition-all duration-200 hover:scale-110 z-40"
+          aria-label={isNearBottom ? 'Back to top' : 'View downloads'}
+        >
+          {isNearBottom ? (
+            // Up arrow
+            <svg
+              className="w-6 h-6"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth="2.5"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M4.5 15.75l7.5-7.5 7.5 7.5"
+              />
+            </svg>
+          ) : (
+            // Down arrow
+            <svg
+              className="w-6 h-6"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth="2.5"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19.5 8.25l-7.5 7.5-7.5-7.5"
+              />
+            </svg>
+          )}
+          {!isNearBottom && activeCount > 0 && (
+            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
+              {activeCount}
+            </span>
+          )}
+        </button>
+      )}
     </>
   );
 }
