@@ -17,6 +17,7 @@
     sort: document.getElementById('sort-input'),
     content: document.getElementById('content-input'),
     resultsGrid: document.getElementById('results-grid'),
+    resultsSection: document.getElementById('results-section'),
     noResults: document.getElementById('no-results'),
     modalOverlay: document.getElementById('modal-overlay'),
     detailsContainer: document.getElementById('details-container'),
@@ -197,9 +198,11 @@
   function renderCards(books) {
     el.resultsGrid.innerHTML = '';
     if (!books || books.length === 0) {
-      utils.show(el.noResults);
+      utils.hide(el.resultsSection);
+      utils.hide(el.noResults);
       return;
     }
+    utils.show(el.resultsSection);
     utils.hide(el.noResults);
     const frag = document.createDocumentFragment();
     books.forEach((b) => frag.appendChild(renderCard(b)));
