@@ -283,7 +283,7 @@ class BookQueue:
         with self._lock:
             to_remove = []
             for book_id, status in self._status.items():
-                if status in [QueueStatus.DONE, QueueStatus.ERROR, QueueStatus.CANCELLED]:
+                if status in [QueueStatus.DONE, QueueStatus.AVAILABLE, QueueStatus.ERROR, QueueStatus.CANCELLED]:
                     to_remove.append(book_id)
             
             removed_count = len(to_remove)
