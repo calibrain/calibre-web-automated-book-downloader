@@ -217,6 +217,36 @@ th[data-sort="index"] {
     to { transform: rotate(360deg); }
 }
 
+/* Button spinner styles */
+#search-spinner {
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    transition: opacity 0.2s ease;
+}
+
+#search-icon {
+    transition: opacity 0.2s ease;
+}
+
+#search-button:disabled {
+    cursor: not-allowed;
+}
+
+/* Download button spinner styles */
+.download-spinner {
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    transition: opacity 0.2s ease;
+    flex-shrink: 0;
+}
+
+.details-spinner {
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    transition: opacity 0.2s ease;
+    flex-shrink: 0;
+}
+
 /* Modal Styles */
 .modal-overlay {
     display: none;

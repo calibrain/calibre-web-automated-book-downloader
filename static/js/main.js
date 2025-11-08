@@ -6,6 +6,8 @@
   const el = {
     searchInput: document.getElementById('search-input'),
     searchBtn: document.getElementById('search-button'),
+    searchIcon: document.getElementById('search-icon'),
+    searchSpinner: document.getElementById('search-spinner'),
     advToggle: document.getElementById('toggle-advanced'),
     filtersForm: document.getElementById('search-filters'),
     isbn: document.getElementById('isbn-input'),
@@ -16,7 +18,6 @@
     content: document.getElementById('content-input'),
     resultsGrid: document.getElementById('results-grid'),
     noResults: document.getElementById('no-results'),
-    searchLoading: document.getElementById('search-loading'),
     modalOverlay: document.getElementById('modal-overlay'),
     detailsContainer: document.getElementById('details-container'),
     refreshStatusBtn: document.getElementById('refresh-status-button'),
@@ -98,6 +99,35 @@
         return { text: 'Queued', state: 'queued' };
       }
       return { text: 'Download', state: 'download' };
+    },
+    // Set download button to queuing state (immediate feedback)
+    setDownloadButtonQueuing(button) {
+      if (!button) return;
+      
+      // Disable button
+      button.disabled = true;
+      
+      // Update button text
+      const textSpan = button.querySelector('.download-button-text');
+      if (textSpan) {
+        textSpan.textContent = 'Queuing...';
+      } else {
+        button.textContent = 'Queuing...';
+      }
+      
+      // Show spinner
+      const spinner = button.querySelector('.download-spinner');
+      if (spinner) {
+        spinner.classList.remove('hidden');
+      }
+      
+      // Update button color to indicate processing (use blue color)
+      const classes = button.className.split(' ');
+      const filteredClasses = classes.filter(cls => 
+        !cls.match(/^bg-(blue|green|yellow|orange)-\d+$/) && !cls.match(/^hover:bg-(blue|green|yellow|orange)-\d+$/)
+      );
+      button.className = filteredClasses.join(' ');
+      button.classList.add('bg-blue-600', 'hover:bg-blue-700');
     }
   };
 
@@ -136,8 +166,14 @@
           </div>
         </div>
         <div class="flex gap-2">
-          <button class="px-3 py-2 rounded border text-sm flex-1" data-action="details" data-id="${utils.e(book.id)}" style="border-color: var(--border-muted);">Details</button>
-          <button class="px-3 py-2 rounded ${buttonStateClass} text-white text-sm flex-1" data-action="download" data-id="${utils.e(book.id)}" ${isDisabled ? 'disabled' : ''}>${buttonText}</button>
+          <button class="px-3 py-2 rounded border text-sm flex-1 flex items-center justify-center gap-2" data-action="details" data-id="${utils.e(book.id)}" style="border-color: var(--border-muted);">
+            <span class="details-button-text">Details</span>
+            <div class="details-spinner hidden w-4 h-4 border-2 border-current border-t-transparent rounded-full"></div>
+          </button>
+          <button class="px-3 py-2 rounded ${buttonStateClass} text-white text-sm flex-1 flex items-center justify-center gap-2" data-action="download" data-id="${utils.e(book.id)}" ${isDisabled ? 'disabled' : ''}>
+            <span class="download-button-text">${buttonText}</span>
+            <div class="download-spinner hidden w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+          </button>
         </div>
       </article>`;
 
@@ -148,7 +184,12 @@
     const downloadBtn = wrapper.querySelector('[data-action="download"]');
     detailsBtn?.addEventListener('click', () => bookDetails.show(book.id));
     if (!isDisabled) {
-      downloadBtn?.addEventListener('click', () => bookDetails.download(book));
+      downloadBtn?.addEventListener('click', () => {
+        // Show immediate feedback
+        utils.setDownloadButtonQueuing(downloadBtn);
+        // Then make the API call
+        bookDetails.download(book);
+      });
     }
     return wrapper.firstElementChild;
   }
@@ -171,10 +212,40 @@
     downloadButtons.forEach((btn) => {
       const bookId = btn.getAttribute('data-id');
       const buttonState = utils.getButtonState(bookId);
+      
+      // Check if button is in "Queuing..." state
+      const textSpan = btn.querySelector('.download-button-text');
+      const currentText = textSpan ? textSpan.textContent : btn.textContent;
+      const isQueuing = currentText === 'Queuing...';
+      
+      // If button is queuing, only update if we have queued/downloading status
+      // Otherwise preserve the queuing state
+      if (isQueuing) {
+        if (!buttonState || buttonState.state === 'download') {
+          return; // Don't update, keep queuing state
+        }
+      }
+      
       if (buttonState) {
         const isDisabled = buttonState.state !== 'download';
         btn.disabled = isDisabled;
-        btn.textContent = buttonState.text;
+        
+        // Update button text
+        if (textSpan) {
+          textSpan.textContent = buttonState.text;
+        } else {
+          btn.textContent = buttonState.text;
+        }
+        
+        // Show/hide spinner based on state
+        const spinner = btn.querySelector('.download-spinner');
+        if (spinner) {
+          if (buttonState.state !== 'download') {
+            spinner.classList.remove('hidden');
+          } else {
+            spinner.classList.add('hidden');
+          }
+        }
         
         // Remove existing color classes (preserve other classes)
         const classes = btn.className.split(' ');
@@ -198,19 +269,98 @@
     });
   }
 
+  // Update button state for details pane download button
+  function updateDetailsPaneButton() {
+    const downloadBtn = document.getElementById('download-button');
+    if (!downloadBtn) return;
+    
+    // Get book ID from the details container - we need to store it when modal opens
+    const bookId = downloadBtn.getAttribute('data-id');
+    if (!bookId) return;
+    
+    const buttonState = utils.getButtonState(bookId);
+    
+    // Check if button is in "Queuing..." state
+    const textSpan = downloadBtn.querySelector('.download-button-text');
+    const currentText = textSpan ? textSpan.textContent : downloadBtn.textContent;
+    const isQueuing = currentText === 'Queuing...';
+    
+    // If button is queuing, only update if we have queued/downloading status
+    // Otherwise preserve the queuing state
+    if (isQueuing) {
+      if (!buttonState || buttonState.state === 'download') {
+        return; // Don't update, keep queuing state
+      }
+    }
+    
+    if (buttonState) {
+      const isDisabled = buttonState.state !== 'download';
+      downloadBtn.disabled = isDisabled;
+      
+      // Update button text
+      if (textSpan) {
+        textSpan.textContent = buttonState.text;
+      } else {
+        downloadBtn.textContent = buttonState.text;
+      }
+      
+      // Show/hide spinner based on state
+      const spinner = downloadBtn.querySelector('.download-spinner');
+      if (spinner) {
+        if (buttonState.state !== 'download') {
+          spinner.classList.remove('hidden');
+        } else {
+          spinner.classList.add('hidden');
+        }
+      }
+      
+      // Remove existing color classes (preserve other classes)
+      const classes = downloadBtn.className.split(' ');
+      const filteredClasses = classes.filter(cls => 
+        !cls.match(/^bg-(blue|green)-\d+$/) && !cls.match(/^hover:bg-(blue|green)-\d+$/) &&
+        !cls.match(/^disabled:opacity-\d+$/) && !cls.match(/^disabled:cursor-not-allowed$/)
+      );
+      downloadBtn.className = filteredClasses.join(' ');
+      
+      if (buttonState.state !== 'download') {
+        // Queued or Downloading state - green
+        downloadBtn.classList.add('bg-green-600', 'hover:bg-green-700');
+        if (isDisabled) {
+          downloadBtn.classList.add('disabled:opacity-60', 'disabled:cursor-not-allowed');
+        }
+      } else {
+        // Download state - blue
+        downloadBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+        downloadBtn.classList.remove('disabled:opacity-60', 'disabled:cursor-not-allowed');
+      }
+    }
+  }
+
   // ---- Search ----
   const search = {
+    setLoading(isLoading) {
+      if (!el.searchBtn || !el.searchIcon || !el.searchSpinner) return;
+      if (isLoading) {
+        el.searchBtn.disabled = true;
+        el.searchIcon.classList.add('hidden');
+        el.searchSpinner.classList.remove('hidden');
+      } else {
+        el.searchBtn.disabled = false;
+        el.searchIcon.classList.remove('hidden');
+        el.searchSpinner.classList.add('hidden');
+      }
+    },
     async run() {
       const qs = utils.buildQuery();
       if (!qs) { renderCards([]); return; }
-      utils.show(el.searchLoading);
+      this.setLoading(true);
       try {
         const data = await utils.j(`${API.search}?${qs}`);
         renderCards(data);
       } catch (e) {
         renderCards([]);
       } finally {
-        utils.hide(el.searchLoading);
+        this.setLoading(false);
       }
     }
   };
@@ -218,15 +368,65 @@
   // ---- Details ----
   const bookDetails = {
     async show(id) {
+      // Find the Details button for this book ID
+      const detailsBtn = el.resultsGrid.querySelector(`[data-action="details"][data-id="${id}"]`);
+      let originalButtonState = null;
+      
+      if (detailsBtn) {
+        // Store original button state
+        const textSpan = detailsBtn.querySelector('.details-button-text');
+        const spinner = detailsBtn.querySelector('.details-spinner');
+        originalButtonState = {
+          text: textSpan ? textSpan.textContent : detailsBtn.textContent,
+          disabled: detailsBtn.disabled,
+          spinnerHidden: spinner ? spinner.classList.contains('hidden') : true
+        };
+        
+        // Update button to show loading state
+        detailsBtn.disabled = true;
+        if (textSpan) {
+          textSpan.textContent = 'Loading';
+        } else {
+          detailsBtn.textContent = 'Loading';
+        }
+        if (spinner) {
+          spinner.classList.remove('hidden');
+        }
+      }
+      
       try {
-        modal.open();
-        el.detailsContainer.innerHTML = '<div class="p-4">Loading…</div>';
+        // Don't open modal yet - wait for data to load
         const book = await utils.j(`${API.info}?id=${encodeURIComponent(id)}`);
+        
+        // Now open the modal with the loaded data
+        modal.open();
         el.detailsContainer.innerHTML = this.tpl(book);
         document.getElementById('close-details')?.addEventListener('click', modal.close);
-        document.getElementById('download-button')?.addEventListener('click', () => this.download(book));
+        const detailsDownloadBtn = document.getElementById('download-button');
+        detailsDownloadBtn?.addEventListener('click', () => this.download(book, detailsDownloadBtn));
       } catch (e) {
+        // Open modal even on error to show error message
+        modal.open();
         el.detailsContainer.innerHTML = '<div class="p-4">Failed to load details.</div>';
+      } finally {
+        // Restore button state
+        if (detailsBtn && originalButtonState) {
+          detailsBtn.disabled = originalButtonState.disabled;
+          const textSpan = detailsBtn.querySelector('.details-button-text');
+          const spinner = detailsBtn.querySelector('.details-spinner');
+          if (textSpan) {
+            textSpan.textContent = originalButtonState.text;
+          } else {
+            detailsBtn.textContent = originalButtonState.text;
+          }
+          if (spinner) {
+            if (originalButtonState.spinnerHidden) {
+              spinner.classList.add('hidden');
+            } else {
+              spinner.classList.remove('hidden');
+            }
+          }
+        }
       }
     },
     tpl(book) {
@@ -260,13 +460,22 @@
           </div>
           ${infoList ? `<div><h4 class="font-semibold mb-2">Further Information</h4><ul class="list-disc pl-6 space-y-1 text-sm">${infoList}</ul></div>` : ''}
           <div class="flex gap-2">
-            <button id="download-button" class="px-3 py-2 rounded ${buttonStateClass} text-white text-sm" ${isDisabled ? 'disabled' : ''}>${buttonText}</button>
+            <button id="download-button" data-id="${utils.e(book.id)}" class="px-3 py-2 rounded ${buttonStateClass} text-white text-sm flex items-center justify-center gap-2" ${isDisabled ? 'disabled' : ''}>
+              <span class="download-button-text">${buttonText}</span>
+              <div class="download-spinner ${buttonState && buttonState.state !== 'download' ? '' : 'hidden'} w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div>
+            </button>
             <button id="close-details" class="px-3 py-2 rounded border text-sm" style="border-color: var(--border-muted);">Close</button>
           </div>
         </div>`;
     },
-    async download(book) {
+    async download(book, button = null) {
       if (!book) return;
+      
+      // Show immediate feedback if button is provided
+      if (button) {
+        utils.setDownloadButtonQueuing(button);
+      }
+      
       try {
         await utils.j(`${API.download}?id=${encodeURIComponent(book.id)}`);
         utils.toast('Queued for download');
@@ -291,6 +500,8 @@
         this.updateActive();
         // Update card button states
         updateCardButtons();
+        // Update details pane button state
+        updateDetailsPaneButton();
         // Detect changes and show toasts
         this.detectChanges(previousStatus, currentStatus);
       } catch (e) {
@@ -518,7 +729,6 @@
   function initEvents() {
     el.searchBtn?.addEventListener('click', () => search.run());
     el.searchInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') search.run(); });
-    document.getElementById('adv-search-button')?.addEventListener('click', () => search.run());
 
     if (el.advToggle && el.filtersForm) {
       el.advToggle.addEventListener('click', (e) => {

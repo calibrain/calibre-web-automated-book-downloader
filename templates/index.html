@@ -68,12 +68,18 @@
                     <input id="search-input" type="search" placeholder="Search by ISBN, title, author..." aria-label="Search books"
                            class="flex-1 px-4 py-3 rounded-md border outline-none"
                            style="background: var(--bg-soft); color: var(--text); border-color: var(--border-muted);">
-                    <button id="search-button" class="px-4 py-3 rounded-md text-white bg-blue-600 hover:bg-blue-700">
-                        Search
+                    <button id="toggle-advanced" class="px-4 py-3 rounded-md border flex items-center justify-center" style="border-color: var(--border-muted);" aria-label="Advanced Search">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                        </svg>
                     </button>
-                </div>
-                <div>
-                    <button id="toggle-advanced" class="text-sm underline opacity-80 hover:opacity-100">Advanced Search</button>
+                    <button id="search-button" class="px-4 py-3 rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center" aria-label="Search books">
+                        <svg id="search-icon" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" fill="white"></path>
+                        </svg>
+                        <div id="search-spinner" class="spinner hidden w-5 h-5 border-2 border-white border-t-transparent"></div>
+                    </button>
                 </div>
                 <!-- Advanced Filters -->
                 <form id="search-filters" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 hidden">
@@ -173,10 +179,6 @@
                             </label>
                         </div>
                     </div>
-                    <div class="md:col-span-2 lg:col-span-3 flex justify-end">
-                        <button id="adv-search-button" type="button" class="px-4 py-2 rounded-md border"
-                                style="border-color: var(--border-muted);">Search</button>
-                    </div>
                 </form>
             </div>
         </section>
@@ -194,7 +196,6 @@
         <section class="mb-8">
             <div class="flex items-center justify-between mb-3">
                 <h2 class="text-xl font-semibold">Search Results</h2>
-                <div id="search-loading" class="text-sm opacity-80 hidden">Loading…</div>
             </div>
             <div id="results-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 <!-- Cards will be injected here -->
