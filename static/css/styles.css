@@ -6,8 +6,6 @@
     --text-color: #333;
     --background-color: #f8f8f8;
     --border-color: #e5e5e5;
-    --header-bg: #333;
-    --header-text: #fff;
     --loading-overlay: rgba(0, 0, 0, 0.5);
     --card-background: #fff;
     --table-background: #fff;
@@ -21,7 +19,6 @@
     --text: var(--text-color);
     --border-muted: var(--border-color);
     --bg-soft: var(--card-background);
-    --footer-bg: var(--header-bg);
 }
 
 [data-theme="dark"] {
@@ -64,22 +61,14 @@ main {
     flex: 1;
     min-height: 100%;
     background: var(--background-color);
+    display: flex;
+    flex-direction: column;
 }
 
 /* Layout */
-header {
-    background: var(--header-bg);
-    color: var(--header-text);
-    padding: 1rem;
-    text-align: center;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
 footer {
     text-align: center;
     padding: 1rem;
-    background: var(--header-bg);
-    color: var(--header-text);
     margin-top: auto;
 }
 
@@ -507,32 +496,6 @@ th[data-sort="index"] {
     color: #f44336 !important;
 }
 
-/* Header specific button styles */
-header .uk-button-default {
-    color: var(--header-text) !important;
-    background-color: transparent;
-    border-color: var(--header-text);
-}
-
-header .uk-button-default:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-    border-color: var(--header-text);
-    color: var(--header-text) !important;
-}
-
-/* Ensure dropdown text is visible when opened */
-header .uk-dropdown {
-    background-color: var(--card-background);
-}
-
-header .uk-dropdown-nav > li > a {
-    color: var(--text-color);
-}
-
-header .uk-dropdown-nav > li > a:hover {
-    color: var(--text-color);
-    background-color: var(--table-hover-background);
-}
 
 /* Update headings to use heading color */
 h1, h2, h3, h4, h5, h6,
@@ -638,10 +601,14 @@ button:disabled {
     }
 }
 
-/* Position search section lower on screen when in initial state (no results, no queue) */
-/* Same vertical position across all screen sizes for consistency */
+/* Center search section vertically when in initial state (no results, no queue) */
+/* Responsive to different window sizes */
 .search-initial-state {
-    margin-top: 8rem; /* Push search box down from top, reminiscent of AI/search services */
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
 }
 
 /* Mobile-friendly book card layout */

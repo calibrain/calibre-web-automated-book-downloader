@@ -15,40 +15,16 @@
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="min-h-screen" style="background: var(--bg); color: var(--text);">
-    <!-- Header -->
-    <header class="w-full border-b border-[color:var(--border-muted)]" style="background: var(--header-bg);">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <div class="flex items-center gap-3">
-                <img src="{{ url_for('static', filename='media/logo.png') }}" alt="Logo" class="h-8 w-8">
-                <h1 class="text-lg font-semibold">Book Search & Download</h1>
-            </div>
+    <!-- Invisible header for top-right buttons -->
+    <header class="w-full">
+        <div class="max-w-full mx-auto px-4 sm:px-6 lg:px-8 h-12 flex items-center justify-end">
             <div class="flex items-center gap-2">
-                {% if debug %}
-                <form action="/request/api/restart" method="get" id="restart-form">
-                    <button class="px-3 py-1 rounded bg-red-600 text-white text-sm" id="restart-button" type="submit">
-                        RESTART
-                    </button>
-                </form>
-                <form action="/request/debug" method="get" id="debug-form">
-                    <button class="px-3 py-1 rounded bg-red-600/80 text-white text-sm" id="debug-button" type="submit">
-                        DEBUG
-                    </button>
-                </form>
-                {% endif %}
-
-                {% if calibre_web_url %}
-                <!-- Calibre-Web Navigation Button -->
-                <a href="{{ calibre_web_url }}" target="_blank" rel="noopener noreferrer" class="px-3 py-1 rounded border text-sm hover:opacity-80" style="border-color: var(--border-muted);">
-                    Calibre-Web
-                </a>
-                {% endif %}
-
                 <!-- Theme Dropdown -->
                 <div class="relative">
-                    <button id="theme-toggle" class="px-3 py-1 rounded border text-sm" style="border-color: var(--border-muted);">
+                    <button id="theme-toggle" class="px-3 py-1 rounded border text-sm hover:opacity-80" style="border-color: var(--border-muted);">
                         <span id="theme-text">Theme</span>
                     </button>
-                    <div id="theme-menu" class="absolute right-0 mt-2 w-36 rounded-md shadow-lg ring-1 ring-black/5 hidden" style="background: var(--bg-soft);">
+                    <div id="theme-menu" class="absolute right-0 mt-2 w-36 rounded-md shadow-lg ring-1 ring-black/5 hidden z-50" style="background: var(--bg-soft);">
                         <ul class="py-1 text-sm">
                             <li><a href="#" data-theme="light" class="block px-3 py-1 hover:bg-black/10" style="color: var(--text);">Light</a></li>
                             <li><a href="#" data-theme="dark" class="block px-3 py-1 hover:bg-black/10" style="color: var(--text);">Dark</a></li>
@@ -56,13 +32,38 @@
                         </ul>
                     </div>
                 </div>
+                
+                {% if calibre_web_url %}
+                <!-- Calibre-Web Navigation Button -->
+                <a href="{{ calibre_web_url }}" target="_blank" rel="noopener noreferrer" class="px-3 py-1 rounded border text-sm hover:opacity-80" style="border-color: var(--border-muted);">
+                    Calibre-Web
+                </a>
+                {% endif %}
+
+                {% if debug %}
+                <form action="/request/debug" method="get" id="debug-form">
+                    <button class="px-3 py-1 rounded bg-red-600/80 text-white text-sm hover:bg-red-600" id="debug-button" type="submit">
+                        DEBUG
+                    </button>
+                </form>
+                <form action="/request/api/restart" method="get" id="restart-form">
+                    <button class="px-3 py-1 rounded bg-red-600 text-white text-sm hover:bg-red-700" id="restart-button" type="submit">
+                        RESTART
+                    </button>
+                </form>
+                {% endif %}
             </div>
         </div>
     </header>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
         <!-- Hero / Search -->
         <section id="search-section" class="mb-6 search-initial-state">
+            <div class="flex items-center justify-center gap-3 mb-8">
+                <img src="{{ url_for('static', filename='media/logo.png') }}" alt="Logo" class="h-8 w-8">
+                <h1 id="search-title" class="text-2xl font-semibold">Book Search & Download</h1>
+            </div>
             <div class="flex flex-col gap-3 search-wrapper">
                 <div class="flex gap-2">
                     <input id="search-input" type="search" placeholder="Search by ISBN, title, author..." aria-label="Search books"
@@ -222,10 +223,10 @@
         </section>
     </main>
 
-    <footer class="mt-10 border-t pt-6 pb-10" style="border-color: var(--border-muted); background: var(--footer-bg);">
+    <footer class="mt-10 border-t pt-6 pb-10" style="border-color: var(--border-muted);">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
             <div>
-                <p class="text-sm opacity-80">Calibre Web Book Downloader TEST</p>
+                <p class="text-sm opacity-80">Calibre Web Book Downloader</p>
                 <p class="text-xs opacity-60 mt-1">
                     Build: {{ build_version }}  • Release: {{ release_version }}  • Env: {{ app_env }}
                 </p>
