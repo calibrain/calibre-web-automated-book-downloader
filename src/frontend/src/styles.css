@@ -1,4 +1,8 @@
 /* Base styles and CSS reset */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
     /* Light theme variables */
     --primary-color: #0073e6;
@@ -49,6 +53,13 @@ body {
     transition: background-color 0.3s ease, color 0.3s ease;
     display: flex;
     flex-direction: column;
+}
+
+#root {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 100vh;
 }
 
 main {
