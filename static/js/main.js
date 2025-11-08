@@ -777,7 +777,7 @@
   // ---- Wire up ----
   function initEvents() {
     el.searchBtn?.addEventListener('click', () => search.run());
-    el.searchInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') search.run(); });
+    el.searchInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { search.run(); el.searchInput.blur(); } });
 
     if (el.advToggle && el.filtersForm) {
       el.advToggle.addEventListener('click', (e) => {
