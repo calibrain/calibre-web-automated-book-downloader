@@ -27,13 +27,23 @@ app.wsgi_app = ProxyFix(app.wsgi_app)  # type: ignore
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching
 app.config['APPLICATION_ROOT'] = '/'
 
-# Initialize Flask-SocketIO
+# Initialize Flask-SocketIO with reverse proxy support
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
     async_mode='threading',
     logger=False,
-    engineio_logger=False
+    engineio_logger=False,
+    # Reverse proxy / Traefik compatibility settings
+    path='/socket.io',
+    ping_timeout=60,  # Time to wait for pong response
+    ping_interval=25,  # Send ping every 25 seconds
+    # Allow both websocket and polling for better compatibility
+    transports=['websocket', 'polling'],
+    # Enable CORS for all origins (you can restrict this in production)
+    allow_upgrades=True,
+    # Important for proxies that buffer
+    http_compression=True
 )
 
 # Initialize WebSocket manager

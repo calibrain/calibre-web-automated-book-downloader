@@ -105,11 +105,26 @@ export const useRealtimeStatus = ({
 
     try {
       const socket = io(wsUrl, {
+        // Try websocket first, fall back to polling if needed
         transports: ['websocket', 'polling'],
-        timeout: 5000,
+        // Explicitly set the path to match backend
+        path: '/socket.io',
+        // Connection timeout
+        timeout: 10000,
+        // Reconnection settings
         reconnection: true,
-        reconnectionAttempts: 3,
+        reconnectionAttempts: 5,
         reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        // Upgrade settings for reverse proxies
+        upgrade: true,
+        rememberUpgrade: true,
+        // Force new connection instead of reusing
+        forceNew: false,
+        // Enable multiplexing
+        multiplex: true,
+        // Auto-connect
+        autoConnect: true,
       });
 
       socketRef.current = socket;
@@ -127,7 +142,7 @@ export const useRealtimeStatus = ({
       });
 
       socket.on('disconnect', (reason: string) => {
-        console.log('WebSocket disconnected:', reason);
+        console.log('WebSocket disconnected. Reason:', reason);
         setConnected(false);
         setIsUsingWebSocket(false);
         isConnectingRef.current = false;
@@ -135,8 +150,12 @@ export const useRealtimeStatus = ({
         // Start polling as fallback
         startPolling();
         
-        // Attempt to reconnect WebSocket
-        if (reason === 'io server disconnect' || reason === 'transport close') {
+        // Attempt to reconnect WebSocket for most disconnect reasons
+        // 'io server disconnect' = server initiated disconnect
+        // 'transport close' = network error or server unreachable
+        // 'transport error' = transport failed (like websocket failed to connect)
+        if (reason !== 'io client disconnect') {
+          console.log('Attempting to reconnect WebSocket after disconnect:', reason);
           attemptReconnect();
         }
       });

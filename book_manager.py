@@ -331,15 +331,18 @@ def _extract_book_metadata(
     }
 
 
-def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None) -> bool:
+def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None) -> bool:
     """Download a book from available sources.
 
     Args:
         book_id: Book identifier (MD5 hash)
         title: Book title for logging
+        progress_callback: Optional callback for download progress updates
+        cancel_flag: Optional cancellation flag
+        status_callback: Optional callback for status updates
 
     Returns:
-        Optional[BytesIO]: Book content buffer if successful
+        bool: True if successful, False otherwise
     """
 
     if len(book_info.download_urls) == 0:
@@ -355,8 +358,16 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
 
     for link in download_links:
         try:
-            download_url = _get_download_url(link, book_info.title, cancel_flag)
+            # Update status to resolving before attempting download URL fetch
+            if status_callback:
+                status_callback("resolving")
+            
+            download_url = _get_download_url(link, book_info.title, cancel_flag, status_callback)
             if download_url != "":
+                # Update status to downloading before starting actual download
+                if status_callback:
+                    status_callback("downloading")
+                    
                 logger.info(f"Downloading `{book_info.title}` from `{download_url}`")
 
                 data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag)
@@ -376,16 +387,16 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
     return False
 
 
-def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None) -> str:
+def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None) -> str:
     """Extract actual download URL from various source pages."""
 
     url = ""
 
     if link.startswith(f"{AA_BASE_URL}/dyn/api/fast_download.json"):
-        page = downloader.html_get_page(link)
+        page = downloader.html_get_page(link, status_callback=status_callback)
         url = json.loads(page).get("download_url")
     else:
-        html = downloader.html_get_page(link)
+        html = downloader.html_get_page(link, status_callback=status_callback)
 
         if html == "":
             return ""
@@ -406,7 +417,7 @@ def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None
                     if cancel_flag is not None and cancel_flag.wait(timeout=sleep_time):
                         logger.info(f"Cancelled wait for {title}")
                         return ""
-                    url = _get_download_url(link, title, cancel_flag)
+                    url = _get_download_url(link, title, cancel_flag, status_callback)
             else:
                 url = download_links[0]["href"]
         else:

@@ -17,11 +17,17 @@ export interface Book {
 // Status response types
 export interface StatusData {
   queued?: Record<string, Book>;
+  resolving?: Record<string, Book>;
+  bypassing?: Record<string, Book>;
   downloading?: Record<string, Book>;
+  verifying?: Record<string, Book>;
+  ingesting?: Record<string, Book>;
+  complete?: Record<string, Book>;
   available?: Record<string, Book>;
   done?: Record<string, Book>;
   completed?: Record<string, Book>;
   error?: Record<string, Book>;
+  cancelled?: Record<string, Book>;
 }
 
 export interface ActiveDownloadsResponse {

@@ -22,13 +22,14 @@ if USE_CF_BYPASS:
 logger = setup_logger(__name__)
 
 
-def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) -> str:
+def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False, status_callback: Optional[Callable[[str], None]] = None) -> str:
     """Fetch HTML content from a URL with retry mechanism.
     
     Args:
         url: Target URL
         retry: Number of retry attempts
-        skip_404: Whether to skip 404 errors
+        use_bypasser: Whether to use Cloudflare bypasser
+        status_callback: Optional callback for status updates
         
     Returns:
         str: HTML content if successful, None otherwise
@@ -37,6 +38,8 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) 
     try:
         logger.debug(f"html_get_page: {url}, retry: {retry}, use_bypasser: {use_bypasser}")
         if use_bypasser and USE_CF_BYPASS:
+            if status_callback:
+                status_callback("bypassing")
             logger.info(f"GET Using Cloudflare Bypasser for: {url}")
             return get_bypassed_page(url)
         else:
@@ -61,14 +64,14 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False) 
             return ""
         elif response is not None and response.status_code == 403:
             logger.warning(f"403 detected for URL: {url}. Should retry using cloudflare bypass.")
-            return html_get_page(url, retry - 1, True)
+            return html_get_page(url, retry - 1, True, status_callback)
             
         sleep_time = DEFAULT_SLEEP * (MAX_RETRY - retry + 1)
         logger.warning(
             f"Retrying GET {url} in {sleep_time} seconds due to error: {e}"
         )
         time.sleep(sleep_time)
-        return html_get_page(url, retry - 1, use_bypasser)
+        return html_get_page(url, retry - 1, use_bypasser, status_callback)
 
 def download_url(link: str, size: str = "", progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None) -> Optional[BytesIO]:
     """Download content from URL into a BytesIO buffer.

@@ -23,13 +23,19 @@ function App() {
   const [isPageScrollable, setIsPageScrollable] = useState(false);
   const { toasts, showToast } = useToast();
   
+  // Determine WebSocket URL based on current location
+  // In production, use the same origin as the page; in dev, use localhost
+  const wsUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:8084'
+    : window.location.origin;
+  
   // Use realtime status with WebSocket and polling fallback
   const { 
     status: currentStatus, 
     isUsingWebSocket,
     forceRefresh: fetchStatus 
   } = useRealtimeStatus({
-    wsUrl: 'http://localhost:8084',
+    wsUrl,
     pollInterval: 5000,
     reconnectAttempts: 3,
   });
