@@ -27,11 +27,19 @@ app.wsgi_app = ProxyFix(app.wsgi_app)  # type: ignore
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching
 app.config['APPLICATION_ROOT'] = '/'
 
+# Determine async mode based on environment
+# In production with Gunicorn + gevent worker, use 'gevent'
+# In development with Flask dev server, use 'threading'
+if APP_ENV == 'prod':
+    async_mode = 'gevent'
+else:
+    async_mode = 'threading'
+
 # Initialize Flask-SocketIO with reverse proxy support
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    async_mode='threading',
+    async_mode=async_mode,
     logger=False,
     engineio_logger=False,
     # Reverse proxy / Traefik compatibility settings
@@ -48,6 +56,7 @@ socketio = SocketIO(
 
 # Initialize WebSocket manager
 ws_manager.init_app(app, socketio)
+logger.info(f"Flask-SocketIO initialized with async_mode='{async_mode}'")
 
 # Enable CORS in development mode for local frontend development
 if DEBUG:

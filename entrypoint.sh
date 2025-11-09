@@ -108,7 +108,11 @@ make_writable /cwa-book-ingest
 # Set the command to run based on the environment
 is_prod=$(echo "$APP_ENV" | tr '[:upper:]' '[:lower:]')
 if [ "$is_prod" = "prod" ]; then 
-    command="gunicorn -t 300 -b ${FLASK_HOST:-0.0.0.0}:${FLASK_PORT:-8084} app:app"
+    # Use gevent worker for SocketIO compatibility
+    # --worker-class gevent: Required for WebSocket support
+    # --workers 1: SocketIO requires sticky sessions, use 1 worker or configure sticky sessions
+    # -t 300: 300 second timeout for long-running requests
+    command="gunicorn --worker-class gevent --workers 1 -t 300 -b ${FLASK_HOST:-0.0.0.0}:${FLASK_PORT:-8084} app:app"
 else
     command="python3 app.py"
 fi

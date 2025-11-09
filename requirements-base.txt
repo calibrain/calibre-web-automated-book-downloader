@@ -7,5 +7,7 @@ beautifulsoup4
 tqdm
 dnspython
 gunicorn
+gevent
+gevent-websocket
 psutil
 emoji
