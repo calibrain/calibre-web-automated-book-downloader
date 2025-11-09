@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Book, StatusData, ButtonStateInfo, AppConfig } from './types';
-import { searchBooks, getBookInfo, downloadBook, getStatus, cancelDownload, clearCompleted, getConfig } from './services/api';
+import { searchBooks, getBookInfo, downloadBook, cancelDownload, clearCompleted, getConfig } from './services/api';
 import { useToast } from './hooks/useToast';
+import { useRealtimeStatus } from './hooks/useRealtimeStatus';
 import { Header } from './components/Header';
 import { SearchSection } from './components/SearchSection';
 import { ActiveDownloadsSection } from './components/ActiveDownloadsSection';
@@ -15,14 +16,28 @@ import './styles.css';
 
 function App() {
   const [books, setBooks] = useState<Book[]>([]);
-  const [currentStatus, setCurrentStatus] = useState<StatusData>({});
-  const [activeCount, setActiveCount] = useState(0);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(false);
   const [isPageScrollable, setIsPageScrollable] = useState(false);
   const { toasts, showToast } = useToast();
+  
+  // Use realtime status with WebSocket and polling fallback
+  const { 
+    status: currentStatus, 
+    isUsingWebSocket,
+    forceRefresh: fetchStatus 
+  } = useRealtimeStatus({
+    wsUrl: 'http://localhost:8084',
+    pollInterval: 5000,
+    reconnectAttempts: 3,
+  });
+  
+  // Calculate active count from status
+  const activeCount = currentStatus.downloading
+    ? Object.keys(currentStatus.downloading).length
+    : 0;
 
   // Compute visibility states
   const hasResults = books.length > 0;
@@ -78,23 +93,16 @@ function App() {
     });
   }, [showToast]);
 
-  // Fetch status
-  const fetchStatus = useCallback(async () => {
-    try {
-      const data = await getStatus();
-      setCurrentStatus(prevStatus => {
-        // Detect changes and show toasts using previous state
-        detectChanges(prevStatus, data);
-        return data;
-      });
-      
-      // Update active count
-      const downloading = data.downloading || {};
-      setActiveCount(Object.keys(downloading).length);
-    } catch (error) {
-      console.error('Failed to fetch status:', error);
+  // Track previous status for change detection
+  const prevStatusRef = useRef<StatusData>({});
+  
+  // Detect status changes when currentStatus updates
+  useEffect(() => {
+    if (prevStatusRef.current && Object.keys(prevStatusRef.current).length > 0) {
+      detectChanges(prevStatusRef.current, currentStatus);
     }
-  }, [detectChanges]);
+    prevStatusRef.current = currentStatus;
+  }, [currentStatus, detectChanges]);
 
   // Fetch config on mount
   useEffect(() => {
@@ -110,12 +118,14 @@ function App() {
     loadConfig();
   }, []);
 
-  // Auto-refresh status every 5 seconds
+  // Log WebSocket connection status changes
   useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 5000);
-    return () => clearInterval(interval);
-  }, [fetchStatus]);
+    if (isUsingWebSocket) {
+      console.log('✅ Using WebSocket for real-time updates');
+    } else {
+      console.log('⏳ Using polling fallback (5s interval)');
+    }
+  }, [isUsingWebSocket]);
 
   // Search handler
   const handleSearch = async (query: string) => {
@@ -162,7 +172,7 @@ function App() {
   const handleCancel = async (id: string) => {
     try {
       await cancelDownload(id);
-      fetchStatus();
+      await fetchStatus();
     } catch (error) {
       console.error('Cancel failed:', error);
     }
@@ -172,7 +182,7 @@ function App() {
   const handleClearCompleted = async () => {
     try {
       await clearCompleted();
-      fetchStatus();
+      await fetchStatus();
     } catch (error) {
       console.error('Clear completed failed:', error);
     }
