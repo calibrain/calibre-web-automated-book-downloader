@@ -66,11 +66,11 @@ export const AdvancedFilters = ({
   if (!visible) return null;
 
   return (
-    <div className="w-full border-b pb-4 mb-4" style={{ borderColor: 'var(--border-muted)' }}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="w-full border-b pt-6 pb-4 mb-4" style={{ borderColor: 'var(--border-muted)' }}>
+      <div className="w-full px-4 sm:px-6 lg:px-8">
         <form
           id="search-filters"
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 px-2 lg:ml-[calc(3rem+1rem)] lg:w-[50vw]"
         >
           <div>
             <label htmlFor="isbn-input" className="block text-sm mb-1 opacity-80">

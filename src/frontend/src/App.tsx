@@ -81,10 +81,7 @@ function App() {
   const hasResults = books.length > 0;
   const hasActiveDownloads =
     currentStatus.downloading && Object.keys(currentStatus.downloading).length > 0;
-  const hasStatusItems = Object.values(currentStatus).some(
-    section => section && Object.keys(section).length > 0
-  );
-  const isInitialState = !hasResults && !hasActiveDownloads && !hasStatusItems;
+  const isInitialState = !hasResults;
 
   // Detect status changes and show notifications
   const detectChanges = useCallback((prev: StatusData, curr: StatusData) => {
@@ -164,6 +161,11 @@ function App() {
       console.log('⏳ Using polling fallback (5s interval)');
     }
   }, [isUsingWebSocket]);
+
+  // Fetch status immediately on startup
+  useEffect(() => {
+    fetchStatus();
+  }, [fetchStatus]);
 
   // Search handler
   const handleSearch = async (query: string) => {

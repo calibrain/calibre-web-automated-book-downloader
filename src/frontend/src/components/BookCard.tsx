@@ -52,7 +52,7 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
 
   return (
     <article
-      className="book-card overflow-hidden flex flex-col sm:flex-col max-sm:flex-row space-between w-full sm:max-w-[292px] sm:max-h-[590px] max-sm:h-[180px] transition-shadow duration-300"
+      className="book-card overflow-hidden flex flex-col sm:flex-col max-sm:flex-row space-between w-full sm:max-w-[292px] max-sm:h-[180px] h-full transition-shadow duration-300"
       style={{ 
         background: 'var(--bg-soft)',
         borderRadius: '.75rem',
@@ -106,8 +106,8 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
         <button
           className="absolute bottom-2 right-2 w-8 h-8 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm flex items-center justify-center transition-all duration-300 shadow-lg hover:scale-110 max-sm:hidden"
           style={{ 
-            opacity: isHovered ? 1 : 0,
-            pointerEvents: isHovered ? 'auto' : 'none'
+            opacity: (isHovered || isLoadingDetails) ? 1 : 0,
+            pointerEvents: (isHovered || isLoadingDetails) ? 'auto' : 'none'
           }}
           onClick={(e) => {
             e.stopPropagation();
@@ -137,10 +137,10 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
       </div>
 
       {/* Book Details Section */}
-      <div className="p-4 max-sm:p-3 max-sm:py-2 flex flex-col gap-3 max-sm:gap-2 max-sm:flex-1 max-sm:justify-between max-sm:min-w-0 sm:flex-1 sm:flex sm:flex-col">
+      <div className="p-4 max-sm:p-3 max-sm:py-2 flex flex-col gap-3 max-sm:gap-2 max-sm:flex-1 max-sm:justify-between max-sm:min-w-0 sm:flex-1 sm:flex sm:flex-col sm:justify-end">
         <div className="space-y-1 max-sm:space-y-0.5 max-sm:min-w-0">
           <h3 
-            className="font-semibold leading-tight truncate text-base max-sm:text-sm max-sm:min-w-0" 
+            className="font-semibold leading-tight line-clamp-2 text-base max-sm:line-clamp-3 max-sm:min-w-0" 
             title={book.title || 'Untitled'}
           >
             {book.title || 'Untitled'}

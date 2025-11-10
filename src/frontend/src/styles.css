@@ -81,9 +81,9 @@ footer {
     display: inline-block;
     width: 1.25rem;
     height: 1.25rem;
-    border: 3px solid rgba(0, 0, 0, 0.1);
+    border: 3px solid rgba(255, 255, 255, 0.3);
     border-radius: 50%;
-    border-top-color: var(--primary-color);
+    border-top-color: white;
     animation: spin 1s linear infinite;
 }
 

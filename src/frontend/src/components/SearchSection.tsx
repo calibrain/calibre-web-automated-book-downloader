@@ -169,7 +169,7 @@ export const SearchSection = ({
         {/* Advanced Filters */}
         <form
           id="search-filters"
-          className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 ${
+          className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 px-2 ${
             showAdvanced ? '' : 'hidden'
           }`}
         >
