@@ -5,6 +5,7 @@ import { useToast } from './hooks/useToast';
 import { useRealtimeStatus } from './hooks/useRealtimeStatus';
 import { Header } from './components/Header';
 import { SearchSection } from './components/SearchSection';
+import { AdvancedFilters } from './components/AdvancedFilters';
 import { ActiveDownloadsSection } from './components/ActiveDownloadsSection';
 import { ResultsSection } from './components/ResultsSection';
 import { DetailsModal } from './components/DetailsModal';
@@ -21,6 +22,17 @@ function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(false);
   const [isPageScrollable, setIsPageScrollable] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [advancedFilters, setAdvancedFilters] = useState({
+    isbn: '',
+    author: '',
+    title: '',
+    lang: 'all',
+    sort: '',
+    content: '',
+    formats: [] as string[],
+  });
   const { toasts, showToast } = useToast();
   
   // Determine WebSocket URL based on current location
@@ -254,7 +266,38 @@ function App() {
     <>
       <Header 
         calibreWebUrl={config?.calibre_web_url || ''} 
-        debug={config?.debug || false} 
+        debug={config?.debug || false}
+        logoUrl="/logo.png"
+        showSearch={!isInitialState}
+        searchInput={searchInput}
+        onSearchChange={setSearchInput}
+        onSearch={() => {
+          const q: string[] = [];
+          const basic = searchInput.trim();
+          if (basic) q.push(`query=${encodeURIComponent(basic)}`);
+          
+          if (showAdvanced) {
+            if (advancedFilters.isbn) q.push(`isbn=${encodeURIComponent(advancedFilters.isbn)}`);
+            if (advancedFilters.author) q.push(`author=${encodeURIComponent(advancedFilters.author)}`);
+            if (advancedFilters.title) q.push(`title=${encodeURIComponent(advancedFilters.title)}`);
+            if (advancedFilters.lang && advancedFilters.lang !== 'all') q.push(`lang=${encodeURIComponent(advancedFilters.lang)}`);
+            if (advancedFilters.sort) q.push(`sort=${encodeURIComponent(advancedFilters.sort)}`);
+            if (advancedFilters.content) q.push(`content=${encodeURIComponent(advancedFilters.content)}`);
+            advancedFilters.formats.forEach(f => q.push(`format=${encodeURIComponent(f)}`));
+          }
+          
+          handleSearch(q.join('&'));
+        }}
+        onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
+        isLoading={isSearching}
+      />
+      
+      <AdvancedFilters
+        visible={showAdvanced && !isInitialState}
+        bookLanguages={config?.book_languages || DEFAULT_LANGUAGES}
+        defaultLanguage={config?.default_language || 'en'}
+        supportedFormats={config?.supported_formats || DEFAULT_SUPPORTED_FORMATS}
+        onFiltersChange={setAdvancedFilters}
       />
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -266,6 +309,10 @@ function App() {
           defaultLanguage={config?.default_language || 'en'}
           supportedFormats={config?.supported_formats || DEFAULT_SUPPORTED_FORMATS}
           logoUrl="/logo.png"
+          searchInput={searchInput}
+          onSearchInputChange={setSearchInput}
+          showAdvanced={showAdvanced}
+          onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
         />
 
         <ActiveDownloadsSection
