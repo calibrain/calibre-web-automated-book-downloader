@@ -78,12 +78,12 @@ export const SearchSection = ({
         <h1 className="text-2xl font-semibold">Book Search & Download</h1>
       </div>
       <div className="flex flex-col gap-3 search-wrapper">
-        <div className="flex gap-2">
+        <div className="relative">
           <input
             type="search"
             placeholder="Search by ISBN, title, author..."
             aria-label="Search books"
-            className="flex-1 px-4 py-3 rounded-md border outline-none search-input"
+            className="w-full pl-4 pr-28 py-3 rounded-full border outline-none search-input"
             style={{
               background: 'var(--bg-soft)',
               color: 'var(--text)',
@@ -93,57 +93,64 @@ export const SearchSection = ({
             onChange={e => setSearchInput(e.target.value)}
             onKeyDown={handleKeyDown}
           />
-          <button
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            className="px-4 py-3 rounded-md border flex items-center justify-center"
-            style={{ borderColor: 'var(--border-muted)' }}
-            aria-label="Advanced Search"
-          >
-            <svg
-              className="w-5 h-5"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth="1.5"
-              stroke="currentColor"
+          <div className="absolute inset-y-0 right-0 flex items-center gap-1 pr-2">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center transition-colors"
+              aria-label="Advanced Search"
+              title="Advanced Search"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"
-              />
-            </svg>
-          </button>
-          <button
-            onClick={handleSearch}
-            className="px-4 py-3 rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center"
-            aria-label="Search books"
-            disabled={isLoading}
-          >
-            {!isLoading && (
               <svg
-                id="search-icon"
                 className="w-5 h-5"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"
                 strokeWidth="1.5"
                 stroke="currentColor"
+                style={{ color: 'var(--text)' }}
               >
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+                  d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"
                 />
               </svg>
-            )}
-            {isLoading && (
-              <div
-                id="search-spinner"
-                className="spinner w-4 h-4 border-2 border-white border-t-transparent"
-              />
-            )}
-          </button>
+            </button>
+            <button
+              type="button"
+              onClick={handleSearch}
+              className="p-2 rounded-full text-white bg-sky-700 hover:bg-sky-800 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
+              aria-label="Search books"
+              title="Search"
+              disabled={isLoading}
+            >
+              {!isLoading && (
+                <svg
+                  id="search-icon"
+                  className="w-5 h-5"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth="2"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+                  />
+                </svg>
+                
+              )}
+              {isLoading && (
+                <div
+                  id="search-spinner"
+                  className="spinner w-3 h-3 border-2 border-white border-t-transparent"
+                />
+              )}
+            </button>
+          </div>
         </div>
         {/* Advanced Filters */}
         <form
