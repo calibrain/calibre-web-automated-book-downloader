@@ -9,7 +9,7 @@ import { AdvancedFilters } from './components/AdvancedFilters';
 import { ActiveDownloadsSection } from './components/ActiveDownloadsSection';
 import { ResultsSection } from './components/ResultsSection';
 import { DetailsModal } from './components/DetailsModal';
-import { StatusSection } from './components/StatusSection';
+import { DownloadsSidebar } from './components/DownloadsSidebar';
 import { ToastContainer } from './components/ToastContainer';
 import { Footer } from './components/Footer';
 import { DEFAULT_LANGUAGES, DEFAULT_SUPPORTED_FORMATS } from './data/languages';
@@ -20,10 +20,9 @@ function App() {
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [config, setConfig] = useState<AppConfig | null>(null);
-  const [isNearBottom, setIsNearBottom] = useState(false);
-  const [isPageScrollable, setIsPageScrollable] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [downloadsSidebarOpen, setDownloadsSidebarOpen] = useState(false);
   const [advancedFilters, setAdvancedFilters] = useState({
     isbn: '',
     author: '',
@@ -222,45 +221,13 @@ function App() {
     ? Object.values(currentStatus.downloading)
     : [];
 
-  // Track scroll position and page scrollability
-  useEffect(() => {
-    const handleScroll = () => {
-      const scrollPosition = window.scrollY + window.innerHeight;
-      const documentHeight = document.documentElement.scrollHeight;
-      const windowHeight = window.innerHeight;
-      
-      // Check if page is scrollable (content height > viewport height)
-      setIsPageScrollable(documentHeight > windowHeight);
-      
-      // Consider "near bottom" if within 300px of the bottom
-      setIsNearBottom(scrollPosition >= documentHeight - 300);
-    };
-
-    window.addEventListener('scroll', handleScroll);
-    window.addEventListener('resize', handleScroll); // Also check on resize
-    handleScroll(); // Check initial position
-    return () => {
-      window.removeEventListener('scroll', handleScroll);
-      window.removeEventListener('resize', handleScroll);
-    };
-  }, []);
-
-  // Scroll to downloads or back to top
+  // Open downloads sidebar
   const handleFABClick = () => {
-    if (isNearBottom) {
-      // Scroll to top (search section)
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      // Scroll to downloads section
-      const statusSection = document.getElementById('status-section');
-      if (statusSection) {
-        statusSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    }
+    setDownloadsSidebarOpen(true);
   };
 
-  // Show FAB when there are downloads to show AND the page is scrollable
-  const showDownloadsFAB = (hasActiveDownloads || hasStatusItems) && isPageScrollable;
+  // Show FAB when there are downloads to show
+  const showDownloadsFAB = hasActiveDownloads || hasStatusItems;
 
   return (
     <>
@@ -271,6 +238,8 @@ function App() {
         showSearch={!isInitialState}
         searchInput={searchInput}
         onSearchChange={setSearchInput}
+        onDownloadsClick={() => setDownloadsSidebarOpen(true)}
+        activeDownloadsCount={activeCount}
         onSearch={() => {
           const q: string[] = [];
           const basic = searchInput.trim();
@@ -339,15 +308,7 @@ function App() {
           />
         )}
 
-        <StatusSection
-          status={currentStatus}
-          visible={hasStatusItems}
-          activeCount={activeCount}
-          onRefresh={fetchStatus}
-          onClearCompleted={handleClearCompleted}
-          onCancel={handleCancel}
-        />
-      </main>
+        </main>
 
       <Footer 
         buildVersion={config?.build_version || 'dev'} 
@@ -356,47 +317,40 @@ function App() {
       />
       <ToastContainer toasts={toasts} />
       
-      {/* Floating action button to scroll to downloads or back to top */}
+      {/* Downloads Sidebar */}
+      <DownloadsSidebar
+        isOpen={downloadsSidebarOpen}
+        onClose={() => setDownloadsSidebarOpen(false)}
+        status={currentStatus}
+        onRefresh={fetchStatus}
+        onClearCompleted={handleClearCompleted}
+        onCancel={handleCancel}
+        activeCount={activeCount}
+      />
+      
+      {/* Floating action button to open downloads */}
       {showDownloadsFAB && (
         <button
           onClick={handleFABClick}
           className="fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white rounded-full p-4 shadow-lg transition-all duration-200 hover:scale-110 z-40"
-          aria-label={isNearBottom ? 'Back to top' : 'View downloads'}
+          aria-label="View downloads"
         >
-          {isNearBottom ? (
-            // Up arrow
-            <svg
-              className="w-6 h-6"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth="2.5"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4.5 15.75l7.5-7.5 7.5 7.5"
-              />
-            </svg>
-          ) : (
-            // Down arrow
-            <svg
-              className="w-6 h-6"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth="2.5"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M19.5 8.25l-7.5 7.5-7.5-7.5"
-              />
-            </svg>
-          )}
-          {!isNearBottom && activeCount > 0 && (
+          {/* Download icon */}
+          <svg
+            className="w-6 h-6"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth="2.5"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
+            />
+          </svg>
+          {activeCount > 0 && (
             <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
               {activeCount}
             </span>
