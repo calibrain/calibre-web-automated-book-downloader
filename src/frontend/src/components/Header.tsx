@@ -18,6 +18,7 @@ interface HeaderProps {
   isLoading?: boolean;
   onDownloadsClick?: () => void;
   statusCounts?: StatusCounts;
+  onLogoClick?: () => void;
 }
 
 export const Header = ({ 
@@ -32,6 +33,7 @@ export const Header = ({
   isLoading = false,
   onDownloadsClick,
   statusCounts = { ongoing: 0, completed: 0, errored: 0 },
+  onLogoClick,
 }: HeaderProps) => {
   const [theme, setTheme] = useState<string>('auto');
 
@@ -154,13 +156,14 @@ export const Header = ({
           href={calibreWebUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           aria-label="Open Calibre-Web"
-          title="Calibre-Web"
+          title="Go To Library"
         >
           <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
           </svg>
+          <span className="text-sm font-medium">Go To Library</span>
         </a>
       )}
 
@@ -208,7 +211,7 @@ export const Header = ({
               {logoUrl && (
                 <img 
                   src={logoUrl} 
-                  onClick={() => window.location.href = calibreWebUrl || ''} 
+                  onClick={onLogoClick} 
                   alt="Logo" 
                   className="h-10 w-10 flex-shrink-0 cursor-pointer lg:hidden" 
                 />
@@ -223,7 +226,7 @@ export const Header = ({
               {logoUrl && (
                 <img 
                   src={logoUrl} 
-                  onClick={() => window.location.href = calibreWebUrl || ''} 
+                  onClick={onLogoClick} 
                   alt="Logo" 
                   className="hidden lg:block h-12 w-12 flex-shrink-0 cursor-pointer" 
                 />

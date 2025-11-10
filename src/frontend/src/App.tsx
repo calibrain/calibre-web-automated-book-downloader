@@ -226,6 +226,22 @@ function App() {
     }
   };
 
+  // Reset search state (clear books and search input)
+  const handleResetSearch = () => {
+    setBooks([]);
+    setSearchInput('');
+    setShowAdvanced(false);
+    setAdvancedFilters({
+      isbn: '',
+      author: '',
+      title: '',
+      lang: 'all',
+      sort: '',
+      content: '',
+      formats: [],
+    });
+  };
+
   // Get button state for a book
   const getButtonState = (bookId: string): ButtonStateInfo => {
     // Check error first
@@ -283,6 +299,7 @@ function App() {
         onSearchChange={setSearchInput}
         onDownloadsClick={() => setDownloadsSidebarOpen(true)}
         statusCounts={statusCounts}
+        onLogoClick={handleResetSearch}
         onSearch={() => {
           const q: string[] = [];
           const basic = searchInput.trim();
