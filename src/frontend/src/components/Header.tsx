@@ -179,7 +179,7 @@ export const Header = ({
   );
 
   return (
-    <header className="w-full">
+    <header className="w-full sticky top-0 z-40 backdrop-blur-sm header-with-fade" style={{ background: 'var(--bg)' }}>
       <div className={`max-w-full mx-auto px-4 sm:px-6 lg:px-8 transition-all duration-500 ${
         showSearch ? 'h-auto py-4' : 'h-24'
       }`}>

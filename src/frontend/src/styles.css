@@ -488,3 +488,19 @@ button:disabled {
         height: 1rem;
     }
 }
+
+/* Sticky Header with Gradient Fade Effect */
+.header-with-fade {
+    overflow: visible;
+}
+
+.header-with-fade::after {
+    content: '';
+    position: absolute;
+    bottom: -20px;
+    left: 0;
+    right: 0;
+    height: 20px;
+    background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 20%, transparent 100%);
+    pointer-events: none;
+}
