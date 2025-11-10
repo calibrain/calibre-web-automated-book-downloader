@@ -31,9 +31,67 @@ const formatSize = (sizeStr?: string): string => {
   return sizeStr;
 };
 
+// Add keyframe animation for wave effect
+const styleSheet = document.createElement('style');
+styleSheet.textContent = `
+  @keyframes wave {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+`;
+if (!document.head.querySelector('style[data-wave-animation]')) {
+  styleSheet.setAttribute('data-wave-animation', 'true');
+  document.head.appendChild(styleSheet);
+}
+
 // Helper to get book preview image
 const getBookPreview = (book: Book): string => {
   return book.preview || '/placeholder-book.png';
+};
+
+// Helper to get progress percentage based on status
+const getStatusProgress = (statusName: string, bookProgress?: number): number => {
+  switch (statusName) {
+    case 'queued':
+      return 5;
+    case 'resolving':
+      return 10;
+    case 'bypassing':
+      return 15;
+    case 'downloading':
+      // Map actual progress (0-100) to 20-90 range
+      if (typeof bookProgress === 'number') {
+        return 20 + (bookProgress * 0.7);
+      }
+      return 20;
+    case 'verifying':
+      return 95;
+    case 'ingesting':
+      return 99;
+    case 'completed':
+    case 'complete':
+    case 'available':
+    case 'done':
+      return 100;
+    case 'error':
+      return 100;
+    default:
+      return 0;
+  }
+};
+
+// Helper to get progress bar color based on status
+const getProgressBarColor = (statusName: string): string => {
+  const isCompleted = ['completed', 'complete', 'available', 'done'].includes(statusName);
+  if (isCompleted) return 'bg-green-600';
+  if (statusName === 'error') return 'bg-red-600';
+  if (statusName === 'queued') return 'bg-gray-600';
+  if (statusName === 'resolving') return 'bg-purple-600';
+  if (statusName === 'bypassing') return 'bg-violet-600';
+  if (statusName === 'downloading') return 'bg-sky-600';
+  if (statusName === 'verifying') return 'bg-cyan-600';
+  if (statusName === 'ingesting') return 'bg-teal-600';
+  return 'bg-sky-600';
 };
 
 export const DownloadsSidebar = ({
@@ -76,29 +134,35 @@ export const DownloadsSidebar = ({
     const hasError = statusName === 'error';
     
     // Get progress information
-    const progress = book.progress || 0;
-    const hasProgress = typeof book.progress === 'number' && statusName === 'downloading';
-
+    const progress = getStatusProgress(statusName, book.progress);
+    const progressBarColor = getProgressBarColor(statusName);
+    
     // Format progress text
     let progressText = statusStyle.label;
-    if (hasProgress && book.size) {
-      const downloadedMB = (progress / 100) * parseFloat(book.size.replace(/[^\d.]/g, ''));
-      progressText = `${downloadedMB.toFixed(1)}MB / ${book.size}`;
+    if (statusName === 'downloading' && book.progress && book.size) {
+      const downloadedMB = (book.progress / 100) * parseFloat(book.size.replace(/[^\d.]/g, ''));
+      progressText = `${downloadedMB.toFixed(1)}mb / ${book.size}`;
+    } else if (isCompleted) {
+      progressText = 'Complete';
+    } else if (hasError) {
+      progressText = 'Failed';
     }
 
     return (
       <div
         key={book.id}
-        className="p-3 rounded-lg border hover:shadow-md transition-shadow"
+        className="relative rounded-lg border hover:shadow-md transition-shadow overflow-hidden"
         style={{ borderColor: 'var(--border-muted)', background: 'var(--bg-soft)' }}
       >
-        <div className="flex gap-3">
-          {/* Book Thumbnail */}
+        {/* Main content area */}
+        <div className="flex gap-2">
+          {/* Book Thumbnail - left side */}
           <div className="flex-shrink-0">
             <img
               src={getBookPreview(book)}
               alt={book.title || 'Book cover'}
-              className="w-12 h-16 object-cover rounded shadow-sm"
+              className="w-16 h-24 object-cover rounded shadow-sm"
+              style={{ aspectRatio: '2/3' }}
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
                 target.src = '/placeholder-book.png';
@@ -106,15 +170,15 @@ export const DownloadsSidebar = ({
             />
           </div>
 
-          {/* Book Info */}
-          <div className="flex-1 min-w-0">
+          {/* Book Info - right side */}
+          <div className="flex-1 min-w-0 flex flex-col justify-between px-3 pt-2 pb-3">
             {/* Title & Author */}
             <div className="mb-1">
               <h3 className="font-semibold text-sm truncate" title={book.title}>
                 {isCompleted && book.download_path ? (
                   <a
                     href={`/request/api/localdownload?id=${encodeURIComponent(book.id)}`}
-                    className="text-blue-600 hover:underline"
+                    className="text-sky-600 hover:underline"
                   >
                     {book.title || 'Unknown Title'}
                   </a>
@@ -127,53 +191,63 @@ export const DownloadsSidebar = ({
               </p>
             </div>
 
-            {/* Status Badge */}
-            <div className="mb-2">
-              <span
-                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}
-              >
-                {statusStyle.label}
-              </span>
-            </div>
-
-            {/* Progress Bar */}
-            {hasProgress && (
-              <div className="mb-2">
-                <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-600 transition-all duration-300"
-                    style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
-                  />
-                </div>
-                <p className="text-xs opacity-70 mt-1">{progressText}</p>
+            {/* Status Badge and Details Row */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}
+                >
+                  {statusStyle.label}
+                </span>
+                
+                {/* Cancel Button for in-progress items */}
+                {isInProgress && (
+                  <button
+                    onClick={() => onCancel(book.id)}
+                    className="text-xs px-2 py-1 rounded border hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    style={{ borderColor: 'var(--border-muted)' }}
+                    title="Cancel download"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
-            )}
 
-            {/* Details & Actions Row */}
-            <div className="flex items-center justify-between gap-2">
+              {/* Format and Size */}
               <div className="text-xs opacity-70">
                 {book.format && <span className="uppercase">{book.format}</span>}
                 {book.format && book.size && <span> • </span>}
                 {book.size && <span>{formatSize(book.size)}</span>}
               </div>
 
-              {/* Cancel Button for in-progress items */}
-              {isInProgress && (
-                <button
-                  onClick={() => onCancel(book.id)}
-                  className="text-xs px-2 py-1 rounded border hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                  style={{ borderColor: 'var(--border-muted)' }}
-                  title="Cancel download"
-                >
-                  ✕
-                </button>
+              {/* Error Message */}
+              {hasError && (
+                <p className="text-xs text-red-600">Download failed</p>
               )}
             </div>
+          </div>
+        </div>
 
-            {/* Error Message */}
-            {hasError && (
-              <p className="text-xs text-red-600 mt-1">Download failed</p>
-            )}
+        {/* Progress Bar - absolute positioned at bottom - always visible */}
+        <div className="absolute bottom-0 left-0 right-0">
+          <p className="text-xs opacity-70 mt-0.5 text-right p-2">{progressText}</p>
+          <div className="h-1.5 bg-gray-200 dark:bg-gray-700 overflow-hidden relative">
+            <div
+              className={`h-full ${progressBarColor} transition-all duration-300 relative overflow-hidden`}
+              style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+            >
+              {/* Animated wave effect for in-progress states */}
+              {isInProgress && progress < 100 && (
+                <div
+                  className="absolute inset-0 opacity-30"
+                  style={{
+                    background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.5) 50%, transparent 100%)',
+                    backgroundSize: '200% 100%',
+                    animation: 'wave 2s ease-in-out infinite',
+                  }}
+                />
+              )}
+            </div>
           </div>
         </div>
       </div>
