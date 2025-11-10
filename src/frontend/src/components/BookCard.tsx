@@ -17,6 +17,7 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   // Clear queuing state once button state changes from download
   useEffect(() => {
@@ -49,15 +50,18 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
 
   return (
     <article
-      className="book-card overflow-hidden flex flex-col sm:flex-col max-sm:flex-row space-between w-full sm:max-w-[292px] sm:max-h-[590px] max-sm:h-[180px]"
+      className="book-card overflow-hidden flex flex-col sm:flex-col max-sm:flex-row space-between w-full sm:max-w-[292px] sm:max-h-[590px] max-sm:h-[180px] transition-shadow duration-300"
       style={{ 
         background: 'var(--bg-soft)',
-        borderRadius: '.75rem'
+        borderRadius: '.75rem',
+        boxShadow: isHovered ? '0 10px 30px rgba(0, 0, 0, 0.15)' : 'none'
       }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
       {/* Book Cover Image - 2:3 aspect ratio on desktop, fixed width on mobile */}
       <div 
-        className="relative w-full sm:w-full max-sm:w-[120px] max-sm:h-full max-sm:flex-shrink-0" 
+        className="relative w-full sm:w-full max-sm:w-[120px] max-sm:h-full max-sm:flex-shrink-0 group" 
         style={{ aspectRatio: '2/3' }}
       >
         {book.preview && !imageError ? (
@@ -89,18 +93,57 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
             No Cover
           </div>
         )}
+        
+        {/* Hover overlay with 2% white opacity */}
+        <div 
+          className="absolute inset-0 bg-white transition-opacity duration-300 pointer-events-none"
+          style={{ opacity: isHovered ? 0.02 : 0 }}
+        />
+        
+        {/* Info button - appears on hover, positioned bottom-right */}
+        <button
+          className="absolute bottom-2 right-2 w-8 h-8 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm flex items-center justify-center transition-all duration-300 shadow-lg hover:scale-110 max-sm:hidden"
+          style={{ 
+            opacity: isHovered ? 1 : 0,
+            pointerEvents: isHovered ? 'auto' : 'none'
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleDetails(book.id);
+          }}
+          disabled={isLoadingDetails}
+          aria-label="Book details"
+        >
+          {isLoadingDetails ? (
+            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <svg 
+              className="w-4 h-4" 
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                strokeWidth={2} 
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" 
+              />
+            </svg>
+          )}
+        </button>
       </div>
 
       {/* Book Details Section */}
-      <div className="p-4 max-sm:p-3 max-sm:py-2 flex flex-col gap-3 max-sm:gap-2 max-sm:flex-1 max-sm:justify-between">
-        <div className="space-y-1 max-sm:space-y-0.5">
+      <div className="p-4 max-sm:p-3 max-sm:py-2 flex flex-col gap-3 max-sm:gap-2 max-sm:flex-1 max-sm:justify-between max-sm:min-w-0 sm:flex-1 sm:flex sm:flex-col">
+        <div className="space-y-1 max-sm:space-y-0.5 max-sm:min-w-0">
           <h3 
-            className="font-semibold leading-tight truncate text-base max-sm:text-sm" 
+            className="font-semibold leading-tight truncate text-base max-sm:text-sm max-sm:min-w-0" 
             title={book.title || 'Untitled'}
           >
             {book.title || 'Untitled'}
           </h3>
-          <p className="text-sm max-sm:text-xs opacity-80 truncate">{book.author || 'Unknown author'}</p>
+          <p className="text-sm max-sm:text-xs opacity-80 truncate max-sm:min-w-0">{book.author || 'Unknown author'}</p>
           <div className="text-xs max-sm:text-[10px] opacity-70 flex flex-wrap gap-2 max-sm:gap-1">
             <span>{book.year || '-'}</span>
             <span>•</span>
@@ -116,44 +159,69 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
           </div>
         </div>
         
-        {/* Action Buttons */}
-        <div className="flex gap-2 max-sm:gap-1.5">
-        <button
-          className="px-3 py-2 max-sm:px-2 max-sm:py-1.5 rounded border text-sm max-sm:text-xs flex-1 flex items-center justify-center gap-2 max-sm:gap-1"
-          onClick={() => handleDetails(book.id)}
-          style={{ borderColor: 'var(--border-muted)' }}
-          disabled={isLoadingDetails}
-        >
-          <span className="details-button-text">
-            {isLoadingDetails ? 'Loading' : 'Details'}
-          </span>
-          <div
-            className={`details-spinner w-4 h-4 max-sm:w-3 max-sm:h-3 border-2 border-current border-t-transparent rounded-full ${
-              isLoadingDetails ? '' : 'hidden'
+        {/* Mobile: Details and Download buttons side by side */}
+        <div className="flex gap-1.5 sm:hidden">
+          <button
+            className="px-2 py-1.5 rounded border text-xs flex-1 flex items-center justify-center gap-1"
+            onClick={() => handleDetails(book.id)}
+            style={{ borderColor: 'var(--border-muted)' }}
+            disabled={isLoadingDetails}
+          >
+            <span className="details-button-text">
+              {isLoadingDetails ? 'Loading' : 'Details'}
+            </span>
+            <div
+              className={`details-spinner w-3 h-3 border-2 border-current border-t-transparent rounded-full ${
+                isLoadingDetails ? '' : 'hidden'
+              }`}
+            />
+          </button>
+          <button
+            className={`px-2 py-1.5 rounded text-white text-xs flex-1 flex items-center justify-center gap-1 ${
+              isQueued
+                ? 'bg-gray-500 cursor-not-allowed opacity-75'
+                : buttonState.state !== 'download'
+                ? 'bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed'
+                : 'bg-sky-700 hover:bg-sky-800'
             }`}
-          />
-        </button>
-        <button
-          className={`px-3 py-2 max-sm:px-2 max-sm:py-1.5 rounded text-white text-sm max-sm:text-xs flex-1 flex items-center justify-center gap-2 max-sm:gap-1 ${
-            isQueued
-              ? 'bg-gray-500 cursor-not-allowed opacity-75'
-              : buttonState.state !== 'download'
-              ? 'bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed'
-              : 'bg-blue-600 hover:bg-blue-700'
-          }`}
-          onClick={handleDownload}
-          disabled={isDisabled || isQueued}
-          data-action="download"
-        >
-          <span className="download-button-text">{isQueued ? 'Queued' : displayText}</span>
-          <div
-            className={`download-spinner w-4 h-4 max-sm:w-3 max-sm:h-3 border-2 border-white border-t-transparent rounded-full ${
-              buttonState.state !== 'download' || isQueuing ? '' : 'hidden'
-            }`}
-          />
-        </button>
+            onClick={handleDownload}
+            disabled={isDisabled || isQueued}
+            data-action="download"
+          >
+            <span className="download-button-text">{isQueued ? 'Queued' : displayText}</span>
+            <div
+              className={`download-spinner w-3 h-3 border-2 border-white border-t-transparent rounded-full ${
+                buttonState.state !== 'download' || isQueuing ? '' : 'hidden'
+              }`}
+            />
+          </button>
         </div>
       </div>
+      
+      {/* Desktop: Full-width Download button at bottom */}
+      <button
+        className={`hidden sm:flex w-full px-4 py-3 text-white text-sm items-center justify-center gap-2 ${
+          isQueued
+            ? 'bg-gray-500 cursor-not-allowed opacity-75'
+            : buttonState.state !== 'download'
+            ? 'bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed'
+            : 'bg-sky-700 hover:bg-sky-800'
+        }`}
+        onClick={handleDownload}
+        disabled={isDisabled || isQueued}
+        data-action="download"
+        style={{
+          borderBottomLeftRadius: '.75rem',
+          borderBottomRightRadius: '.75rem'
+        }}
+      >
+        <span className="download-button-text">{isQueued ? 'Queued' : displayText}</span>
+        <div
+          className={`download-spinner w-4 h-4 border-2 border-white border-t-transparent rounded-full ${
+            buttonState.state !== 'download' || isQueuing ? '' : 'hidden'
+          }`}
+        />
+      </button>
     </article>
   );
 };
