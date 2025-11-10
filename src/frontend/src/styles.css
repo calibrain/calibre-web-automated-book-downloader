@@ -504,3 +504,18 @@ button:disabled {
     background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 20%, transparent 100%);
     pointer-events: none;
 }
+
+/* Skeleton Loader Animation */
+@keyframes shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+.animate-pulse {
+    background-size: 200% 100%;
+    animation: shimmer 2s ease-in-out infinite;
+}

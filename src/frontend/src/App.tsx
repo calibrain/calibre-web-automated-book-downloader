@@ -221,14 +221,6 @@ function App() {
     ? Object.values(currentStatus.downloading)
     : [];
 
-  // Open downloads sidebar
-  const handleFABClick = () => {
-    setDownloadsSidebarOpen(true);
-  };
-
-  // Show FAB when there are downloads to show
-  const showDownloadsFAB = hasActiveDownloads || hasStatusItems;
-
   return (
     <>
       <Header 
@@ -328,35 +320,6 @@ function App() {
         activeCount={activeCount}
       />
       
-      {/* Floating action button to open downloads */}
-      {showDownloadsFAB && (
-        <button
-          onClick={handleFABClick}
-          className="fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white rounded-full p-4 shadow-lg transition-all duration-200 hover:scale-110 z-40"
-          aria-label="View downloads"
-        >
-          {/* Download icon */}
-          <svg
-            className="w-6 h-6"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth="2.5"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
-            />
-          </svg>
-          {activeCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
-              {activeCount}
-            </span>
-          )}
-        </button>
-      )}
     </>
   );
 }
