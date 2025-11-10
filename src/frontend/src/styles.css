@@ -1,8 +1,12 @@
 /* Base styles and CSS reset */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
     /* Light theme variables */
-    --primary-color: #0073e6;
-    --primary-dark: #005bb5;
+    --primary-color: oklch(44.3% 0.11 240.79);
+    --primary-dark: oklch(39.1% 0.09 240.876);
     --text-color: #333;
     --background-color: #f8f8f8;
     --border-color: #e5e5e5;
@@ -51,6 +55,13 @@ body {
     flex-direction: column;
 }
 
+#root {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 100vh;
+}
+
 main {
     flex: 1;
     min-height: 100%;
@@ -68,8 +79,8 @@ footer {
 
 .spinner {
     display: inline-block;
-    width: 2rem;
-    height: 2rem;
+    width: 1.25rem;
+    height: 1.25rem;
     border: 3px solid rgba(0, 0, 0, 0.1);
     border-radius: 50%;
     border-top-color: var(--primary-color);
@@ -78,6 +89,36 @@ footer {
 
 @keyframes spin {
     to { transform: rotate(360deg); }
+}
+
+@keyframes slide-up {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fade-in-up {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-slide-up {
+    animation: slide-up 0.5s ease-out;
+}
+
+.animate-fade-in-up {
+    animation: fade-in-up 0.4s ease-out;
 }
 
 /* Button spinner styles */
@@ -446,4 +487,35 @@ button:disabled {
         width: 1rem;
         height: 1rem;
     }
+}
+
+/* Sticky Header with Gradient Fade Effect */
+.header-with-fade {
+    overflow: visible;
+}
+
+.header-with-fade::after {
+    content: '';
+    position: absolute;
+    bottom: -20px;
+    left: 0;
+    right: 0;
+    height: 20px;
+    background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 20%, transparent 100%);
+    pointer-events: none;
+}
+
+/* Skeleton Loader Animation */
+@keyframes shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+.animate-pulse {
+    background-size: 200% 100%;
+    animation: shimmer 2s ease-in-out infinite;
 }

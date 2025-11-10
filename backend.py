@@ -17,6 +17,13 @@ import book_manager
 
 logger = setup_logger(__name__)
 
+# Import WebSocket manager (will be initialized by app.py)
+try:
+    from websocket_manager import ws_manager
+except ImportError:
+    logger.warning("WebSocket manager not available")
+    ws_manager = None
+
 def _sanitize_filename(filename: str) -> str:
     """Sanitize a filename by replacing spaces with underscores and removing invalid characters."""
     keepcharacters = (' ','.','_')
@@ -69,6 +76,11 @@ def queue_book(book_id: str, priority: int = 0) -> bool:
         book_info = book_manager.get_book_info(book_id)
         book_queue.add(book_id, book_info, priority)
         logger.info(f"Book queued with priority {priority}: {book_info.title}")
+        
+        # Broadcast status update via WebSocket
+        if ws_manager and ws_manager.is_enabled():
+            ws_manager.broadcast_status_update(queue_status())
+        
         return True
     except Exception as e:
         logger.error_trace(f"Error queueing book: {e}")
@@ -78,7 +90,7 @@ def queue_status() -> Dict[str, Dict[str, Any]]:
     """Get current status of the download queue.
     
     Returns:
-        Dict: Queue status organized by status type
+        Dict: Queue status organized by status type with serialized book data
     """
     status = book_queue.get_status()
     for _, books in status.items():
@@ -87,9 +99,12 @@ def queue_status() -> Dict[str, Dict[str, Any]]:
                 if not os.path.exists(book_info.download_path):
                     book_info.download_path = None
 
-    # Convert Enum keys to strings and properly format the response
+    # Convert Enum keys to strings and BookInfo objects to dicts for JSON serialization
     return {
-        status_type.value: books
+        status_type.value: {
+            book_id: _book_info_to_dict(book_info)
+            for book_id, book_info in books.items()
+        }
         for status_type, books in status.items()
     }
 
@@ -152,7 +167,8 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
             return None
         
         progress_callback = lambda progress: update_download_progress(book_id, progress)
-        success = book_manager.download_book(book_info, book_path, progress_callback, cancel_flag)
+        status_callback = lambda status: update_download_status(book_id, status)
+        success = book_manager.download_book(book_info, book_path, progress_callback, cancel_flag, status_callback)
         
         # Stop progress updates
         cancel_flag.wait(0.1)  # Brief pause for progress thread cleanup
@@ -174,10 +190,21 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
                 book_path.unlink()
             return None
 
+        # Update status to verifying
+        book_queue.update_status(book_id, QueueStatus.VERIFYING)
+        if ws_manager and ws_manager.is_enabled():
+            ws_manager.broadcast_status_update(queue_status())
+        logger.info(f"Verifying download: {book_info.title}")
+
         if CUSTOM_SCRIPT:
             logger.info(f"Running custom script: {CUSTOM_SCRIPT}")
             subprocess.run([CUSTOM_SCRIPT, book_path])
             
+        # Update status to ingesting
+        book_queue.update_status(book_id, QueueStatus.INGESTING)
+        if ws_manager and ws_manager.is_enabled():
+            ws_manager.broadcast_status_update(queue_status())
+        
         intermediate_path = INGEST_DIR / f"{book_id}.crdownload"
         final_path = INGEST_DIR / book_name
         
@@ -215,6 +242,35 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
 def update_download_progress(book_id: str, progress: float) -> None:
     """Update download progress."""
     book_queue.update_progress(book_id, progress)
+    
+    # Broadcast progress via WebSocket
+    if ws_manager and ws_manager.is_enabled():
+        ws_manager.broadcast_download_progress(book_id, progress, 'downloading')
+
+def update_download_status(book_id: str, status: str) -> None:
+    """Update download status."""
+    # Map string status to QueueStatus enum
+    status_map = {
+        'queued': QueueStatus.QUEUED,
+        'resolving': QueueStatus.RESOLVING,
+        'bypassing': QueueStatus.BYPASSING,
+        'downloading': QueueStatus.DOWNLOADING,
+        'verifying': QueueStatus.VERIFYING,
+        'ingesting': QueueStatus.INGESTING,
+        'complete': QueueStatus.COMPLETE,
+        'available': QueueStatus.AVAILABLE,
+        'error': QueueStatus.ERROR,
+        'done': QueueStatus.DONE,
+        'cancelled': QueueStatus.CANCELLED,
+    }
+    
+    queue_status_enum = status_map.get(status.lower())
+    if queue_status_enum:
+        book_queue.update_status(book_id, queue_status_enum)
+        
+        # Broadcast status update via WebSocket
+        if ws_manager and ws_manager.is_enabled():
+            ws_manager.broadcast_status_update(queue_status())
 
 def cancel_download(book_id: str) -> bool:
     """Cancel a download.
@@ -225,7 +281,13 @@ def cancel_download(book_id: str) -> bool:
     Returns:
         bool: True if cancellation was successful
     """
-    return book_queue.cancel_download(book_id)
+    result = book_queue.cancel_download(book_id)
+    
+    # Broadcast status update via WebSocket
+    if result and ws_manager and ws_manager.is_enabled():
+        ws_manager.broadcast_status_update(queue_status())
+    
+    return result
 
 def set_book_priority(book_id: str, priority: int) -> bool:
     """Set priority for a queued book.
@@ -265,20 +327,28 @@ def clear_completed() -> int:
 def _process_single_download(book_id: str, cancel_flag: Event) -> None:
     """Process a single download job."""
     try:
-        book_queue.update_status(book_id, QueueStatus.DOWNLOADING)
+        # Status will be updated through callbacks during download process
+        # (resolving -> bypassing -> downloading -> verifying -> ingesting -> complete)
         download_path = _download_book_with_cancellation(book_id, cancel_flag)
         
         if cancel_flag.is_set():
             book_queue.update_status(book_id, QueueStatus.CANCELLED)
+            # Broadcast cancellation
+            if ws_manager and ws_manager.is_enabled():
+                ws_manager.broadcast_status_update(queue_status())
             return
             
         if download_path:
             book_queue.update_download_path(book_id, download_path)
-            new_status = QueueStatus.AVAILABLE
+            new_status = QueueStatus.COMPLETE
         else:
             new_status = QueueStatus.ERROR
             
         book_queue.update_status(book_id, new_status)
+        
+        # Broadcast final status (completed or error)
+        if ws_manager and ws_manager.is_enabled():
+            ws_manager.broadcast_status_update(queue_status())
         
         logger.info(
             f"Book {book_id} download {'successful' if download_path else 'failed'}"
@@ -291,6 +361,10 @@ def _process_single_download(book_id: str, cancel_flag: Event) -> None:
         else:
             logger.info(f"Download cancelled: {book_id}")
             book_queue.update_status(book_id, QueueStatus.CANCELLED)
+        
+        # Broadcast error/cancelled status
+        if ws_manager and ws_manager.is_enabled():
+            ws_manager.broadcast_status_update(queue_status())
 
 def concurrent_download_loop() -> None:
     """Main download coordinator using ThreadPoolExecutor for concurrent downloads."""
