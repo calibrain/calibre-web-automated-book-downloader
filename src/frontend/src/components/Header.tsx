@@ -1,5 +1,11 @@
 import { useState, useEffect } from 'react';
 
+interface StatusCounts {
+  ongoing: number;
+  completed: number;
+  errored: number;
+}
+
 interface HeaderProps {
   calibreWebUrl?: string;
   debug?: boolean;
@@ -11,7 +17,7 @@ interface HeaderProps {
   onAdvancedToggle?: () => void;
   isLoading?: boolean;
   onDownloadsClick?: () => void;
-  activeDownloadsCount?: number;
+  statusCounts?: StatusCounts;
 }
 
 export const Header = ({ 
@@ -25,7 +31,7 @@ export const Header = ({
   onAdvancedToggle,
   isLoading = false,
   onDownloadsClick,
-  activeDownloadsCount = 0,
+  statusCounts = { ongoing: 0, completed: 0, errored: 0 },
 }: HeaderProps) => {
   const [theme, setTheme] = useState<string>('auto');
 
@@ -100,9 +106,19 @@ export const Header = ({
               d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
             />
           </svg>
-          {activeDownloadsCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
-              {activeDownloadsCount}
+          {/* Show badge with appropriate color based on status */}
+          {(statusCounts.ongoing > 0 || statusCounts.completed > 0 || statusCounts.errored > 0) && (
+            <span 
+              className={`absolute -top-1 -right-1 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center ${
+                statusCounts.errored > 0 
+                  ? 'bg-red-500' 
+                  : statusCounts.ongoing > 0 
+                  ? 'bg-blue-500' 
+                  : 'bg-green-500'
+              }`}
+              title={`${statusCounts.ongoing} ongoing, ${statusCounts.completed} completed, ${statusCounts.errored} failed`}
+            >
+              {statusCounts.ongoing + statusCounts.completed + statusCounts.errored}
             </span>
           )}
         </button>

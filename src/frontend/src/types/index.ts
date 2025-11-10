@@ -35,7 +35,7 @@ export interface ActiveDownloadsResponse {
 }
 
 // Button states
-export type ButtonState = 'download' | 'queued' | 'downloading';
+export type ButtonState = 'download' | 'queued' | 'downloading' | 'completed' | 'error';
 
 export interface ButtonStateInfo {
   text: string;

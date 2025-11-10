@@ -51,10 +51,31 @@ function App() {
     reconnectAttempts: 3,
   });
   
-  // Calculate active count from status
-  const activeCount = currentStatus.downloading
-    ? Object.keys(currentStatus.downloading).length
-    : 0;
+  // Calculate status counts for header badges
+  const getStatusCounts = () => {
+    const ongoing = [
+      currentStatus.queued,
+      currentStatus.resolving,
+      currentStatus.bypassing,
+      currentStatus.downloading,
+      currentStatus.verifying,
+      currentStatus.ingesting,
+    ].reduce((sum, status) => sum + (status ? Object.keys(status).length : 0), 0);
+
+    const completed = [
+      currentStatus.completed,
+      currentStatus.complete,
+      currentStatus.available,
+      currentStatus.done,
+    ].reduce((sum, status) => sum + (status ? Object.keys(status).length : 0), 0);
+
+    const errored = currentStatus.error ? Object.keys(currentStatus.error).length : 0;
+
+    return { ongoing, completed, errored };
+  };
+
+  const statusCounts = getStatusCounts();
+  const activeCount = statusCounts.ongoing;
 
   // Compute visibility states
   const hasResults = books.length > 0;
@@ -207,11 +228,41 @@ function App() {
 
   // Get button state for a book
   const getButtonState = (bookId: string): ButtonStateInfo => {
+    // Check error first
+    if (currentStatus.error && currentStatus.error[bookId]) {
+      return { text: 'Failed', state: 'error' };
+    }
+    // Check completed states
+    if (currentStatus.completed && currentStatus.completed[bookId]) {
+      return { text: 'Downloaded', state: 'completed' };
+    }
+    if (currentStatus.complete && currentStatus.complete[bookId]) {
+      return { text: 'Downloaded', state: 'completed' };
+    }
+    if (currentStatus.available && currentStatus.available[bookId]) {
+      return { text: 'Downloaded', state: 'completed' };
+    }
+    if (currentStatus.done && currentStatus.done[bookId]) {
+      return { text: 'Downloaded', state: 'completed' };
+    }
+    // Check in-progress states
     if (currentStatus.downloading && currentStatus.downloading[bookId]) {
       return { text: 'Downloading', state: 'downloading' };
     }
     if (currentStatus.queued && currentStatus.queued[bookId]) {
       return { text: 'Queued', state: 'queued' };
+    }
+    if (currentStatus.resolving && currentStatus.resolving[bookId]) {
+      return { text: 'Resolving', state: 'downloading' };
+    }
+    if (currentStatus.bypassing && currentStatus.bypassing[bookId]) {
+      return { text: 'Processing', state: 'downloading' };
+    }
+    if (currentStatus.verifying && currentStatus.verifying[bookId]) {
+      return { text: 'Verifying', state: 'downloading' };
+    }
+    if (currentStatus.ingesting && currentStatus.ingesting[bookId]) {
+      return { text: 'Ingesting', state: 'downloading' };
     }
     return { text: 'Download', state: 'download' };
   };
@@ -231,7 +282,7 @@ function App() {
         searchInput={searchInput}
         onSearchChange={setSearchInput}
         onDownloadsClick={() => setDownloadsSidebarOpen(true)}
-        activeDownloadsCount={activeCount}
+        statusCounts={statusCounts}
         onSearch={() => {
           const q: string[] = [];
           const basic = searchInput.trim();

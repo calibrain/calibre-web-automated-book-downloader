@@ -26,7 +26,9 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
     }
   }, [buttonState.state, isQueuing]);
 
-  const isDisabled = buttonState.state !== 'download' || isQueuing;
+  const isCompleted = buttonState.state === 'completed';
+  const hasError = buttonState.state === 'error';
+  const isDisabled = buttonState.state !== 'download' || isQueuing || isCompleted;
   const displayText = isQueuing ? 'Queuing...' : buttonState.text;
   const isQueued = buttonState.state === 'queued' || buttonState.state === 'downloading';
 
@@ -178,7 +180,11 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
           </button>
           <button
             className={`px-2 py-1.5 rounded text-white text-xs flex-1 flex items-center justify-center gap-1 ${
-              isQueued
+              isCompleted
+                ? 'bg-green-600 cursor-not-allowed'
+                : hasError
+                ? 'bg-red-600 cursor-not-allowed opacity-75'
+                : isQueued
                 ? 'bg-gray-500 cursor-not-allowed opacity-75'
                 : buttonState.state !== 'download'
                 ? 'bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed'
@@ -189,9 +195,19 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
             data-action="download"
           >
             <span className="download-button-text">{isQueued ? 'Queued' : displayText}</span>
+            {isCompleted && (
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+            {hasError && (
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            )}
             <div
               className={`download-spinner w-3 h-3 border-2 border-white border-t-transparent rounded-full ${
-                buttonState.state !== 'download' || isQueuing ? '' : 'hidden'
+                (buttonState.state !== 'download' || isQueuing) && !isCompleted && !hasError ? '' : 'hidden'
               }`}
             />
           </button>
@@ -201,7 +217,11 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
       {/* Desktop: Full-width Download button at bottom */}
       <button
         className={`hidden sm:flex w-full px-4 py-3 text-white text-sm items-center justify-center gap-2 ${
-          isQueued
+          isCompleted
+            ? 'bg-green-600 cursor-not-allowed'
+            : hasError
+            ? 'bg-red-600 cursor-not-allowed opacity-75'
+            : isQueued
             ? 'bg-gray-500 cursor-not-allowed opacity-75'
             : buttonState.state !== 'download'
             ? 'bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed'
@@ -216,9 +236,19 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
         }}
       >
         <span className="download-button-text">{isQueued ? 'Queued' : displayText}</span>
+        {isCompleted && (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+        )}
+        {hasError && (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        )}
         <div
           className={`download-spinner w-4 h-4 border-2 border-white border-t-transparent rounded-full ${
-            buttonState.state !== 'download' || isQueuing ? '' : 'hidden'
+            (buttonState.state !== 'download' || isQueuing) && !isCompleted && !hasError ? '' : 'hidden'
           }`}
         />
       </button>
