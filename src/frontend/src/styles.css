@@ -3,6 +3,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Disable transitions on initial load to prevent flash */
+html.preload *,
+html.preload *::before,
+html.preload *::after {
+    transition: none !important;
+    animation-duration: 0s !important;
+}
+
+/* Smooth theme transitions for all elements using CSS variables */
+header, footer, section,
+input, select, textarea, button,
+.details-container, .modal-overlay {
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
 :root {
     /* Light theme variables */
     --primary-color: oklch(44.3% 0.11 240.79);
@@ -45,12 +60,17 @@ html, body {
     padding: 0;
 }
 
+html {
+    /* Transition on root element ensures smooth theme changes */
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     line-height: 1.6;
     color: var(--text-color);
     background: var(--background-color);
-    transition: background-color 0.3s ease, color 0.3s ease;
+    transition: background-color 0.2s ease, color 0.2s ease;
     display: flex;
     flex-direction: column;
 }
@@ -60,6 +80,7 @@ body {
     flex-direction: column;
     flex: 1;
     min-height: 100vh;
+    transition: background-color 0.2s ease;
 }
 
 main {
@@ -68,6 +89,7 @@ main {
     background: var(--background-color);
     display: flex;
     flex-direction: column;
+    transition: background-color 0.2s ease;
 }
 
 /* Layout */
@@ -492,6 +514,7 @@ button:disabled {
 /* Sticky Header with Gradient Fade Effect */
 .header-with-fade {
     overflow: visible;
+    position: relative;
 }
 
 .header-with-fade::after {
@@ -501,8 +524,14 @@ button:disabled {
     left: 0;
     right: 0;
     height: 20px;
-    background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 20%, transparent 100%);
+    /* Use background-color instead of gradient with CSS variables for smooth transitions */
+    background: var(--bg);
+    opacity: 1;
     pointer-events: none;
+    /* Create fade effect using mask instead of gradient */
+    mask-image: linear-gradient(to bottom, black 0%, black 20%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 0%, black 20%, transparent 100%);
+    transition: background-color 0.2s ease, opacity 0.2s ease;
 }
 
 /* Skeleton Loader Animation */

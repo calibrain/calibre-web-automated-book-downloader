@@ -7,6 +7,22 @@
     <meta name="theme-color" content="#333333" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <title>Book Downloader • Modern</title>
+    <script>
+      // Apply theme immediately before first paint to prevent flash
+      (function() {
+        const savedTheme = localStorage.getItem('preferred-theme') || 'auto';
+        let theme = savedTheme;
+        
+        if (savedTheme === 'auto') {
+          theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        
+        document.documentElement.setAttribute('data-theme', theme);
+        
+        // Add class to prevent transitions on initial load
+        document.documentElement.classList.add('preload');
+      })();
+    </script>
   </head>
   <body style="background: var(--bg); color: var(--text);">
     <div id="root"></div>

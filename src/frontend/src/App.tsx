@@ -6,7 +6,6 @@ import { useRealtimeStatus } from './hooks/useRealtimeStatus';
 import { Header } from './components/Header';
 import { SearchSection } from './components/SearchSection';
 import { AdvancedFilters } from './components/AdvancedFilters';
-import { ActiveDownloadsSection } from './components/ActiveDownloadsSection';
 import { ResultsSection } from './components/ResultsSection';
 import { DetailsModal } from './components/DetailsModal';
 import { DownloadsSidebar } from './components/DownloadsSidebar';
@@ -79,8 +78,6 @@ function App() {
 
   // Compute visibility states
   const hasResults = books.length > 0;
-  const hasActiveDownloads =
-    currentStatus.downloading && Object.keys(currentStatus.downloading).length > 0;
   const isInitialState = !hasResults;
 
   // Detect status changes and show notifications
@@ -285,11 +282,6 @@ function App() {
     return { text: 'Download', state: 'download' };
   };
 
-  // Get active downloads list
-  const activeDownloads = currentStatus.downloading
-    ? Object.values(currentStatus.downloading)
-    : [];
-
   return (
     <>
       <Header 
@@ -344,13 +336,6 @@ function App() {
           onSearchInputChange={setSearchInput}
           showAdvanced={showAdvanced}
           onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
-        />
-
-        <ActiveDownloadsSection
-          downloads={activeDownloads}
-          visible={!!hasActiveDownloads}
-          onRefresh={fetchStatus}
-          onCancel={handleCancel}
         />
 
         <ResultsSection

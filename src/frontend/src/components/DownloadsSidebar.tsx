@@ -302,14 +302,14 @@ export const DownloadsSidebar = ({
         >
           <button
             onClick={onClearCompleted}
-            className="flex-1 px-3 py-2 rounded border text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="flex-1 flex items-center justify-center px-3 py-2 rounded border text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             style={{ borderColor: 'var(--border-muted)' }}
           >
             Clear Completed
           </button>
           <button
             onClick={onRefresh}
-            className="px-3 py-2 rounded border text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="flex items-center justify-center px-3 py-2 rounded border text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             style={{ borderColor: 'var(--border-muted)' }}
             aria-label="Refresh"
             title="Refresh"

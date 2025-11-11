@@ -41,6 +41,11 @@ export const Header = ({
     const saved = localStorage.getItem('preferred-theme') || 'auto';
     setTheme(saved);
     applyTheme(saved);
+    
+    // Remove preload class after initial theme is applied to enable transitions
+    requestAnimationFrame(() => {
+      document.documentElement.classList.remove('preload');
+    });
   }, []);
 
   useEffect(() => {
