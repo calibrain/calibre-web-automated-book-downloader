@@ -97,6 +97,8 @@ export const SearchSection = ({
             type="search"
             placeholder="Search by ISBN, title, author..."
             aria-label="Search books"
+            autoComplete="off"
+            enterKeyHint="search"
             className="w-full pl-4 pr-28 py-3 rounded-full border outline-none search-input"
             style={{
               background: 'var(--bg-soft)',
@@ -179,8 +181,9 @@ export const SearchSection = ({
             </label>
             <input
               id="isbn-input"
-              type="search"
+              type="text"
               placeholder="ISBN"
+              autoComplete="off"
               className="w-full px-3 py-2 rounded-md border"
               style={{
                 background: 'var(--bg-soft)',
@@ -197,8 +200,9 @@ export const SearchSection = ({
             </label>
             <input
               id="author-input"
-              type="search"
+              type="text"
               placeholder="Author"
+              autoComplete="off"
               className="w-full px-3 py-2 rounded-md border"
               style={{
                 background: 'var(--bg-soft)',
@@ -215,8 +219,9 @@ export const SearchSection = ({
             </label>
             <input
               id="title-input"
-              type="search"
+              type="text"
               placeholder="Title"
+              autoComplete="off"
               className="w-full px-3 py-2 rounded-md border"
               style={{
                 background: 'var(--bg-soft)',

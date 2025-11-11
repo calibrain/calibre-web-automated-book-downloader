@@ -78,8 +78,9 @@ export const AdvancedFilters = ({
             </label>
             <input
               id="isbn-input"
-              type="search"
+              type="text"
               placeholder="ISBN"
+              autoComplete="off"
               className="w-full px-3 py-2 rounded-md border"
               style={{
                 background: 'var(--bg-soft)',
@@ -99,8 +100,9 @@ export const AdvancedFilters = ({
             </label>
             <input
               id="author-input"
-              type="search"
+              type="text"
               placeholder="Author"
+              autoComplete="off"
               className="w-full px-3 py-2 rounded-md border"
               style={{
                 background: 'var(--bg-soft)',
@@ -120,8 +122,9 @@ export const AdvancedFilters = ({
             </label>
             <input
               id="title-input"
-              type="search"
+              type="text"
               placeholder="Title"
+              autoComplete="off"
               className="w-full px-3 py-2 rounded-md border"
               style={{
                 background: 'var(--bg-soft)',
