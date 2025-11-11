@@ -17,11 +17,17 @@ export interface Book {
 // Status response types
 export interface StatusData {
   queued?: Record<string, Book>;
+  resolving?: Record<string, Book>;
+  bypassing?: Record<string, Book>;
   downloading?: Record<string, Book>;
+  verifying?: Record<string, Book>;
+  ingesting?: Record<string, Book>;
+  complete?: Record<string, Book>;
   available?: Record<string, Book>;
   done?: Record<string, Book>;
   completed?: Record<string, Book>;
   error?: Record<string, Book>;
+  cancelled?: Record<string, Book>;
 }
 
 export interface ActiveDownloadsResponse {
@@ -29,11 +35,12 @@ export interface ActiveDownloadsResponse {
 }
 
 // Button states
-export type ButtonState = 'download' | 'queued' | 'downloading';
+export type ButtonState = 'download' | 'queued' | 'resolving' | 'bypassing' | 'downloading' | 'verifying' | 'ingesting' | 'completed' | 'error';
 
 export interface ButtonStateInfo {
   text: string;
   state: ButtonState;
+  progress?: number; // Download progress 0-100
 }
 
 // Language option

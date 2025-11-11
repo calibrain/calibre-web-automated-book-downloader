@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Book, StatusData, ButtonStateInfo, AppConfig } from './types';
-import { searchBooks, getBookInfo, downloadBook, getStatus, cancelDownload, clearCompleted, getConfig } from './services/api';
+import { searchBooks, getBookInfo, downloadBook, cancelDownload, clearCompleted, getConfig } from './services/api';
 import { useToast } from './hooks/useToast';
+import { useRealtimeStatus } from './hooks/useRealtimeStatus';
 import { Header } from './components/Header';
 import { SearchSection } from './components/SearchSection';
-import { ActiveDownloadsSection } from './components/ActiveDownloadsSection';
+import { AdvancedFilters } from './components/AdvancedFilters';
 import { ResultsSection } from './components/ResultsSection';
 import { DetailsModal } from './components/DetailsModal';
-import { StatusSection } from './components/StatusSection';
+import { DownloadsSidebar } from './components/DownloadsSidebar';
 import { ToastContainer } from './components/ToastContainer';
 import { Footer } from './components/Footer';
 import { DEFAULT_LANGUAGES, DEFAULT_SUPPORTED_FORMATS } from './data/languages';
@@ -15,23 +16,69 @@ import './styles.css';
 
 function App() {
   const [books, setBooks] = useState<Book[]>([]);
-  const [currentStatus, setCurrentStatus] = useState<StatusData>({});
-  const [activeCount, setActiveCount] = useState(0);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [config, setConfig] = useState<AppConfig | null>(null);
-  const [isNearBottom, setIsNearBottom] = useState(false);
-  const [isPageScrollable, setIsPageScrollable] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [downloadsSidebarOpen, setDownloadsSidebarOpen] = useState(false);
+  const [advancedFilters, setAdvancedFilters] = useState({
+    isbn: '',
+    author: '',
+    title: '',
+    lang: 'all',
+    sort: '',
+    content: '',
+    formats: [] as string[],
+  });
   const { toasts, showToast } = useToast();
+  
+  // Determine WebSocket URL based on current location
+  // In production, use the same origin as the page; in dev, use localhost
+  const wsUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:8084'
+    : window.location.origin;
+  
+  // Use realtime status with WebSocket and polling fallback
+  const { 
+    status: currentStatus, 
+    isUsingWebSocket,
+    forceRefresh: fetchStatus 
+  } = useRealtimeStatus({
+    wsUrl,
+    pollInterval: 5000,
+    reconnectAttempts: 3,
+  });
+  
+  // Calculate status counts for header badges
+  const getStatusCounts = () => {
+    const ongoing = [
+      currentStatus.queued,
+      currentStatus.resolving,
+      currentStatus.bypassing,
+      currentStatus.downloading,
+      currentStatus.verifying,
+      currentStatus.ingesting,
+    ].reduce((sum, status) => sum + (status ? Object.keys(status).length : 0), 0);
+
+    const completed = [
+      currentStatus.completed,
+      currentStatus.complete,
+      currentStatus.available,
+      currentStatus.done,
+    ].reduce((sum, status) => sum + (status ? Object.keys(status).length : 0), 0);
+
+    const errored = currentStatus.error ? Object.keys(currentStatus.error).length : 0;
+
+    return { ongoing, completed, errored };
+  };
+
+  const statusCounts = getStatusCounts();
+  const activeCount = statusCounts.ongoing;
 
   // Compute visibility states
   const hasResults = books.length > 0;
-  const hasActiveDownloads =
-    currentStatus.downloading && Object.keys(currentStatus.downloading).length > 0;
-  const hasStatusItems = Object.values(currentStatus).some(
-    section => section && Object.keys(section).length > 0
-  );
-  const isInitialState = !hasResults && !hasActiveDownloads && !hasStatusItems;
+  const isInitialState = !hasResults;
 
   // Detect status changes and show notifications
   const detectChanges = useCallback((prev: StatusData, curr: StatusData) => {
@@ -78,23 +125,16 @@ function App() {
     });
   }, [showToast]);
 
-  // Fetch status
-  const fetchStatus = useCallback(async () => {
-    try {
-      const data = await getStatus();
-      setCurrentStatus(prevStatus => {
-        // Detect changes and show toasts using previous state
-        detectChanges(prevStatus, data);
-        return data;
-      });
-      
-      // Update active count
-      const downloading = data.downloading || {};
-      setActiveCount(Object.keys(downloading).length);
-    } catch (error) {
-      console.error('Failed to fetch status:', error);
+  // Track previous status for change detection
+  const prevStatusRef = useRef<StatusData>({});
+  
+  // Detect status changes when currentStatus updates
+  useEffect(() => {
+    if (prevStatusRef.current && Object.keys(prevStatusRef.current).length > 0) {
+      detectChanges(prevStatusRef.current, currentStatus);
     }
-  }, [detectChanges]);
+    prevStatusRef.current = currentStatus;
+  }, [currentStatus, detectChanges]);
 
   // Fetch config on mount
   useEffect(() => {
@@ -110,11 +150,18 @@ function App() {
     loadConfig();
   }, []);
 
-  // Auto-refresh status every 5 seconds
+  // Log WebSocket connection status changes
+  useEffect(() => {
+    if (isUsingWebSocket) {
+      console.log('✅ Using WebSocket for real-time updates');
+    } else {
+      console.log('⏳ Using polling fallback (5s interval)');
+    }
+  }, [isUsingWebSocket]);
+
+  // Fetch status immediately on startup
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 5000);
-    return () => clearInterval(interval);
   }, [fetchStatus]);
 
   // Search handler
@@ -162,7 +209,7 @@ function App() {
   const handleCancel = async (id: string) => {
     try {
       await cancelDownload(id);
-      fetchStatus();
+      await fetchStatus();
     } catch (error) {
       console.error('Cancel failed:', error);
     }
@@ -172,73 +219,113 @@ function App() {
   const handleClearCompleted = async () => {
     try {
       await clearCompleted();
-      fetchStatus();
+      await fetchStatus();
     } catch (error) {
       console.error('Clear completed failed:', error);
     }
   };
 
-  // Get button state for a book
-  const getButtonState = (bookId: string): ButtonStateInfo => {
+  // Reset search state (clear books and search input)
+  const handleResetSearch = () => {
+    setBooks([]);
+    setSearchInput('');
+    setShowAdvanced(false);
+    setAdvancedFilters({
+      isbn: '',
+      author: '',
+      title: '',
+      lang: 'all',
+      sort: '',
+      content: '',
+      formats: [],
+    });
+  };
+
+  // Get button state for a book - memoized to ensure proper re-renders when status changes
+  const getButtonState = useCallback((bookId: string): ButtonStateInfo => {
+    // Check error first
+    if (currentStatus.error && currentStatus.error[bookId]) {
+      return { text: 'Failed', state: 'error' };
+    }
+    // Check completed states
+    if (currentStatus.completed && currentStatus.completed[bookId]) {
+      return { text: 'Downloaded', state: 'completed' };
+    }
+    if (currentStatus.complete && currentStatus.complete[bookId]) {
+      return { text: 'Downloaded', state: 'completed' };
+    }
+    if (currentStatus.available && currentStatus.available[bookId]) {
+      return { text: 'Downloaded', state: 'completed' };
+    }
+    if (currentStatus.done && currentStatus.done[bookId]) {
+      return { text: 'Downloaded', state: 'completed' };
+    }
+    // Check in-progress states with detailed status
+    if (currentStatus.ingesting && currentStatus.ingesting[bookId]) {
+      return { text: 'Ingesting', state: 'ingesting' };
+    }
+    if (currentStatus.verifying && currentStatus.verifying[bookId]) {
+      return { text: 'Verifying', state: 'verifying' };
+    }
     if (currentStatus.downloading && currentStatus.downloading[bookId]) {
-      return { text: 'Downloading', state: 'downloading' };
+      const book = currentStatus.downloading[bookId];
+      return {
+        text: 'Downloading',
+        state: 'downloading',
+        progress: book.progress
+      };
+    }
+    if (currentStatus.bypassing && currentStatus.bypassing[bookId]) {
+      return { text: 'Bypassing Cloudflare...', state: 'bypassing' };
+    }
+    if (currentStatus.resolving && currentStatus.resolving[bookId]) {
+      return { text: 'Resolving', state: 'resolving' };
     }
     if (currentStatus.queued && currentStatus.queued[bookId]) {
       return { text: 'Queued', state: 'queued' };
     }
     return { text: 'Download', state: 'download' };
-  };
-
-  // Get active downloads list
-  const activeDownloads = currentStatus.downloading
-    ? Object.values(currentStatus.downloading)
-    : [];
-
-  // Track scroll position and page scrollability
-  useEffect(() => {
-    const handleScroll = () => {
-      const scrollPosition = window.scrollY + window.innerHeight;
-      const documentHeight = document.documentElement.scrollHeight;
-      const windowHeight = window.innerHeight;
-      
-      // Check if page is scrollable (content height > viewport height)
-      setIsPageScrollable(documentHeight > windowHeight);
-      
-      // Consider "near bottom" if within 300px of the bottom
-      setIsNearBottom(scrollPosition >= documentHeight - 300);
-    };
-
-    window.addEventListener('scroll', handleScroll);
-    window.addEventListener('resize', handleScroll); // Also check on resize
-    handleScroll(); // Check initial position
-    return () => {
-      window.removeEventListener('scroll', handleScroll);
-      window.removeEventListener('resize', handleScroll);
-    };
-  }, []);
-
-  // Scroll to downloads or back to top
-  const handleFABClick = () => {
-    if (isNearBottom) {
-      // Scroll to top (search section)
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      // Scroll to downloads section
-      const statusSection = document.getElementById('status-section');
-      if (statusSection) {
-        statusSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    }
-  };
-
-  // Show FAB when there are downloads to show AND the page is scrollable
-  const showDownloadsFAB = (hasActiveDownloads || hasStatusItems) && isPageScrollable;
+  }, [currentStatus]);
 
   return (
     <>
       <Header 
         calibreWebUrl={config?.calibre_web_url || ''} 
-        debug={config?.debug || false} 
+        debug={config?.debug || false}
+        logoUrl="/logo.png"
+        showSearch={!isInitialState}
+        searchInput={searchInput}
+        onSearchChange={setSearchInput}
+        onDownloadsClick={() => setDownloadsSidebarOpen(true)}
+        statusCounts={statusCounts}
+        onLogoClick={handleResetSearch}
+        onSearch={() => {
+          const q: string[] = [];
+          const basic = searchInput.trim();
+          if (basic) q.push(`query=${encodeURIComponent(basic)}`);
+          
+          if (showAdvanced) {
+            if (advancedFilters.isbn) q.push(`isbn=${encodeURIComponent(advancedFilters.isbn)}`);
+            if (advancedFilters.author) q.push(`author=${encodeURIComponent(advancedFilters.author)}`);
+            if (advancedFilters.title) q.push(`title=${encodeURIComponent(advancedFilters.title)}`);
+            if (advancedFilters.lang && advancedFilters.lang !== 'all') q.push(`lang=${encodeURIComponent(advancedFilters.lang)}`);
+            if (advancedFilters.sort) q.push(`sort=${encodeURIComponent(advancedFilters.sort)}`);
+            if (advancedFilters.content) q.push(`content=${encodeURIComponent(advancedFilters.content)}`);
+            advancedFilters.formats.forEach(f => q.push(`format=${encodeURIComponent(f)}`));
+          }
+          
+          handleSearch(q.join('&'));
+        }}
+        onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
+        isLoading={isSearching}
+      />
+      
+      <AdvancedFilters
+        visible={showAdvanced && !isInitialState}
+        bookLanguages={config?.book_languages || DEFAULT_LANGUAGES}
+        defaultLanguage={config?.default_language || 'en'}
+        supportedFormats={config?.supported_formats || DEFAULT_SUPPORTED_FORMATS}
+        onFiltersChange={setAdvancedFilters}
       />
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -250,13 +337,10 @@ function App() {
           defaultLanguage={config?.default_language || 'en'}
           supportedFormats={config?.supported_formats || DEFAULT_SUPPORTED_FORMATS}
           logoUrl="/logo.png"
-        />
-
-        <ActiveDownloadsSection
-          downloads={activeDownloads}
-          visible={!!hasActiveDownloads}
-          onRefresh={fetchStatus}
-          onCancel={handleCancel}
+          searchInput={searchInput}
+          onSearchInputChange={setSearchInput}
+          showAdvanced={showAdvanced}
+          onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
         />
 
         <ResultsSection
@@ -276,15 +360,7 @@ function App() {
           />
         )}
 
-        <StatusSection
-          status={currentStatus}
-          visible={hasStatusItems}
-          activeCount={activeCount}
-          onRefresh={fetchStatus}
-          onClearCompleted={handleClearCompleted}
-          onCancel={handleCancel}
-        />
-      </main>
+        </main>
 
       <Footer 
         buildVersion={config?.build_version || 'dev'} 
@@ -293,53 +369,17 @@ function App() {
       />
       <ToastContainer toasts={toasts} />
       
-      {/* Floating action button to scroll to downloads or back to top */}
-      {showDownloadsFAB && (
-        <button
-          onClick={handleFABClick}
-          className="fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white rounded-full p-4 shadow-lg transition-all duration-200 hover:scale-110 z-40"
-          aria-label={isNearBottom ? 'Back to top' : 'View downloads'}
-        >
-          {isNearBottom ? (
-            // Up arrow
-            <svg
-              className="w-6 h-6"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth="2.5"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4.5 15.75l7.5-7.5 7.5 7.5"
-              />
-            </svg>
-          ) : (
-            // Down arrow
-            <svg
-              className="w-6 h-6"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth="2.5"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M19.5 8.25l-7.5 7.5-7.5-7.5"
-              />
-            </svg>
-          )}
-          {!isNearBottom && activeCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">
-              {activeCount}
-            </span>
-          )}
-        </button>
-      )}
+      {/* Downloads Sidebar */}
+      <DownloadsSidebar
+        isOpen={downloadsSidebarOpen}
+        onClose={() => setDownloadsSidebarOpen(false)}
+        status={currentStatus}
+        onRefresh={fetchStatus}
+        onClearCompleted={handleClearCompleted}
+        onCancel={handleCancel}
+        activeCount={activeCount}
+      />
+      
     </>
   );
 }

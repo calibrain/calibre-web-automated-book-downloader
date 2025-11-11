@@ -10,10 +10,35 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }>
     text: 'text-amber-600',
     label: 'Queued',
   },
+  resolving: {
+    bg: 'bg-indigo-500/10',
+    text: 'text-indigo-600',
+    label: 'Resolving',
+  },
+  bypassing: {
+    bg: 'bg-purple-500/10',
+    text: 'text-purple-600',
+    label: 'Bypassing',
+  },
   downloading: {
     bg: 'bg-blue-500/10',
     text: 'text-blue-600',
     label: 'Downloading',
+  },
+  verifying: {
+    bg: 'bg-cyan-500/10',
+    text: 'text-cyan-600',
+    label: 'Verifying',
+  },
+  ingesting: {
+    bg: 'bg-teal-500/10',
+    text: 'text-teal-600',
+    label: 'Ingesting',
+  },
+  complete: {
+    bg: 'bg-green-500/10',
+    text: 'text-green-600',
+    label: 'Complete',
   },
   completed: {
     bg: 'bg-green-500/10',
@@ -34,6 +59,11 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }>
     bg: 'bg-red-500/10',
     text: 'text-red-600',
     label: 'Error',
+  },
+  cancelled: {
+    bg: 'bg-gray-500/10',
+    text: 'text-gray-600',
+    label: 'Cancelled',
   },
 };
 
@@ -94,7 +124,7 @@ export const StatusSection = ({
             );
 
             const actions =
-              name === 'queued' || name === 'downloading' ? (
+              name === 'queued' || name === 'resolving' || name === 'bypassing' || name === 'downloading' || name === 'verifying' || name === 'ingesting' ? (
                 <button
                   className="px-2 py-1 rounded border text-xs"
                   style={{ borderColor: 'var(--border-muted)' }}
@@ -133,7 +163,7 @@ export const StatusSection = ({
     );
   };
 
-  const sections = ['queued', 'downloading', 'completed', 'available', 'done', 'error'];
+  const sections = ['queued', 'resolving', 'bypassing', 'downloading', 'verifying', 'ingesting', 'complete', 'completed', 'available', 'done', 'error', 'cancelled'];
   const renderedSections = sections
     .map(name => renderSection(name, (status as any)[name] || {}))
     .filter(Boolean);

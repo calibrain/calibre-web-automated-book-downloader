@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Book, ButtonStateInfo } from '../types';
+import { CircularProgress } from './CircularProgress';
 
 interface DetailsModalProps {
   book: Book | null;
@@ -21,10 +22,30 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
     }
   }, [buttonState.state, isQueuing, onClose]);
 
+  // Handle ESC key to close modal
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
+
   if (!book) return null;
 
-  const isDisabled = buttonState.state !== 'download' || isQueuing;
+  const isCompleted = buttonState.state === 'completed';
+  const hasError = buttonState.state === 'error';
+  const isInProgress = ['queued', 'resolving', 'bypassing', 'downloading', 'verifying', 'ingesting'].includes(buttonState.state);
+  const isDisabled = buttonState.state !== 'download' || isQueuing || isCompleted;
   const displayText = isQueuing ? 'Queuing...' : buttonState.text;
+
+  // Show circular progress only for downloading state with progress data
+  const showCircularProgress = buttonState.state === 'downloading' && buttonState.progress !== undefined;
+  // Show spinner for other in-progress states or when queuing
+  const showSpinner = (isInProgress && !showCircularProgress) || isQueuing;
 
   const handleDownload = async () => {
     setIsQueuing(true);
@@ -97,19 +118,32 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
               id="download-button"
               data-id={book.id}
               className={`px-3 py-2 rounded text-white text-sm flex items-center justify-center gap-2 ${
-                buttonState.state !== 'download'
-                  ? 'bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed'
+                isCompleted
+                  ? 'bg-green-600 cursor-not-allowed'
+                  : hasError
+                  ? 'bg-red-600 cursor-not-allowed opacity-75'
+                  : isInProgress
+                  ? 'bg-gray-500 cursor-not-allowed opacity-75'
                   : 'bg-blue-600 hover:bg-blue-700'
               }`}
               onClick={handleDownload}
-              disabled={isDisabled}
+              disabled={isDisabled || isInProgress}
             >
               <span className="download-button-text">{displayText}</span>
-              <div
-                className={`download-spinner w-4 h-4 border-2 border-white border-t-transparent rounded-full ${
-                  buttonState.state !== 'download' || isQueuing ? '' : 'hidden'
-                }`}
-              />
+              {isCompleted && (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+              {hasError && (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              )}
+              {showCircularProgress && <CircularProgress progress={buttonState.progress} size={16} />}
+              {showSpinner && (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              )}
             </button>
             <button
               id="close-details"

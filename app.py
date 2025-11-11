@@ -6,6 +6,7 @@ import sqlite3
 from functools import wraps
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 from werkzeug.wrappers import Response
@@ -18,12 +19,44 @@ from env import FLASK_HOST, FLASK_PORT, APP_ENV, CWA_DB_PATH, DEBUG, USING_EXTER
 import backend
 
 from models import SearchFilters
+from websocket_manager import ws_manager
 
 logger = setup_logger(__name__)
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app)  # type: ignore
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching
 app.config['APPLICATION_ROOT'] = '/'
+
+# Determine async mode based on environment
+# In production with Gunicorn + gevent worker, use 'gevent'
+# In development with Flask dev server, use 'threading'
+if APP_ENV == 'prod':
+    async_mode = 'gevent'
+else:
+    async_mode = 'threading'
+
+# Initialize Flask-SocketIO with reverse proxy support
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode=async_mode,
+    logger=False,
+    engineio_logger=False,
+    # Reverse proxy / Traefik compatibility settings
+    path='/socket.io',
+    ping_timeout=60,  # Time to wait for pong response
+    ping_interval=25,  # Send ping every 25 seconds
+    # Allow both websocket and polling for better compatibility
+    transports=['websocket', 'polling'],
+    # Enable CORS for all origins (you can restrict this in production)
+    allow_upgrades=True,
+    # Important for proxies that buffer
+    http_compression=True
+)
+
+# Initialize WebSocket manager
+ws_manager.init_app(app, socketio)
+logger.info(f"Flask-SocketIO initialized with async_mode='{async_mode}'")
 
 # Enable CORS in development mode for local frontend development
 if DEBUG:
@@ -495,6 +528,11 @@ def api_clear_completed() -> Union[Response, Tuple[Response, int]]:
     """
     try:
         removed_count = backend.clear_completed()
+        
+        # Broadcast status update after clearing
+        if ws_manager and ws_manager.is_enabled():
+            ws_manager.broadcast_status_update(backend.queue_status())
+        
         return jsonify({"status": "cleared", "removed_count": removed_count})
     except Exception as e:
         logger.error_trace(f"Clear completed error: {e}")
@@ -590,12 +628,41 @@ def catch_all(path: str) -> Response:
 # Register all routes with /request prefix
 register_dual_routes(app)
 
+# WebSocket event handlers
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection."""
+    logger.info("WebSocket client connected")
+    # Send initial status to the newly connected client
+    try:
+        status = backend.queue_status()
+        emit('status_update', status)
+    except Exception as e:
+        logger.error(f"Error sending initial status: {e}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection."""
+    logger.info("WebSocket client disconnected")
+
+@socketio.on('request_status')
+def handle_status_request():
+    """Handle manual status request from client."""
+    try:
+        status = backend.queue_status()
+        emit('status_update', status)
+    except Exception as e:
+        logger.error(f"Error handling status request: {e}")
+        emit('error', {'message': 'Failed to get status'})
+
 logger.log_resource_usage()
 
 if __name__ == '__main__':
-    logger.info(f"Starting Flask application on {FLASK_HOST}:{FLASK_PORT} IN {APP_ENV} mode")
-    app.run(
+    logger.info(f"Starting Flask application with WebSocket support on {FLASK_HOST}:{FLASK_PORT} IN {APP_ENV} mode")
+    socketio.run(
+        app,
         host=FLASK_HOST,
         port=FLASK_PORT,
-        debug=DEBUG 
+        debug=DEBUG,
+        allow_unsafe_werkzeug=True  # For development only
     )
