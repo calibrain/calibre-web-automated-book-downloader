@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { StatusData, Book } from '../types';
 
 interface DownloadsSidebarProps {
@@ -103,6 +104,20 @@ export const DownloadsSidebar = ({
   onCancel,
   activeCount,
 }: DownloadsSidebarProps) => {
+  // Handle ESC key to close sidebar
+  useEffect(() => {
+    if (!isOpen) return; // Only listen when sidebar is open
+    
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
+
   // Collect all download items from different status sections
   const allDownloadItems: Array<{ book: Book; status: string; order: number }> = [];
   
