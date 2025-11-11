@@ -88,7 +88,7 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
 
     books = []
     if isinstance(tbody, Tag):
-        for line_tr in tbody.find_all("tr"):
+        for line_tr in tbody.find_all("tr", class_="group"):
             try:
                 book = _parse_search_result_row(line_tr)
                 if book:
