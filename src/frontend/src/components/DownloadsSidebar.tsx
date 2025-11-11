@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { StatusData, Book } from '../types';
 
 interface DownloadsSidebarProps {
@@ -103,6 +104,20 @@ export const DownloadsSidebar = ({
   onCancel,
   activeCount,
 }: DownloadsSidebarProps) => {
+  // Handle ESC key to close sidebar
+  useEffect(() => {
+    if (!isOpen) return; // Only listen when sidebar is open
+    
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [isOpen, onClose]);
+
   // Collect all download items from different status sections
   const allDownloadItems: Array<{ book: Book; status: string; order: number }> = [];
   
@@ -302,14 +317,14 @@ export const DownloadsSidebar = ({
         >
           <button
             onClick={onClearCompleted}
-            className="flex-1 px-3 py-2 rounded border text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="flex-1 flex items-center justify-center px-3 py-2 rounded border text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             style={{ borderColor: 'var(--border-muted)' }}
           >
             Clear Completed
           </button>
           <button
             onClick={onRefresh}
-            className="px-3 py-2 rounded border text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="flex items-center justify-center px-3 py-2 rounded border text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
             style={{ borderColor: 'var(--border-muted)' }}
             aria-label="Refresh"
             title="Refresh"
