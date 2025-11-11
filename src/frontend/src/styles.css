@@ -3,6 +3,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Disable transitions on initial load to prevent flash */
+html.preload *,
+html.preload *::before,
+html.preload *::after {
+    transition: none !important;
+    animation-duration: 0s !important;
+}
+
+/* Smooth theme transitions for all elements using CSS variables */
+header, footer, section,
+input, select, textarea, button,
+.details-container, .modal-overlay {
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
 :root {
     /* Light theme variables */
     --primary-color: oklch(44.3% 0.11 240.79);
@@ -41,8 +56,17 @@
 /* Typography */
 html, body {
     min-height: 100vh;
+    /* Support for iOS notch/dynamic island - extend to full viewport */
+    min-height: 100dvh;
     margin: 0;
     padding: 0;
+}
+
+html {
+    /* Transition on root element ensures smooth theme changes */
+    transition: background-color 0.2s ease, color 0.2s ease;
+    /* Extend background color to safe areas (status bar area) */
+    background-color: var(--background-color);
 }
 
 body {
@@ -50,9 +74,14 @@ body {
     line-height: 1.6;
     color: var(--text-color);
     background: var(--background-color);
-    transition: background-color 0.3s ease, color 0.3s ease;
+    transition: background-color 0.2s ease, color 0.2s ease;
     display: flex;
     flex-direction: column;
+    /* Add padding for iOS safe areas (status bar and home indicator) */
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
 }
 
 #root {
@@ -60,6 +89,9 @@ body {
     flex-direction: column;
     flex: 1;
     min-height: 100vh;
+    min-height: 100dvh;
+    transition: background-color 0.2s ease;
+    background-color: var(--background-color);
 }
 
 main {
@@ -68,6 +100,7 @@ main {
     background: var(--background-color);
     display: flex;
     flex-direction: column;
+    transition: background-color 0.2s ease;
 }
 
 /* Layout */
@@ -81,9 +114,9 @@ footer {
     display: inline-block;
     width: 1.25rem;
     height: 1.25rem;
-    border: 3px solid rgba(0, 0, 0, 0.1);
+    border: 3px solid rgba(255, 255, 255, 0.3);
     border-radius: 50%;
-    border-top-color: var(--primary-color);
+    border-top-color: white;
     animation: spin 1s linear infinite;
 }
 
@@ -501,8 +534,14 @@ button:disabled {
     left: 0;
     right: 0;
     height: 20px;
-    background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 20%, transparent 100%);
+    /* Use background-color instead of gradient with CSS variables for smooth transitions */
+    background: var(--bg);
+    opacity: 1;
     pointer-events: none;
+    /* Create fade effect using mask instead of gradient */
+    mask-image: linear-gradient(to bottom, black 0%, black 20%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 0%, black 20%, transparent 100%);
+    transition: background-color 0.2s ease, opacity 0.2s ease;
 }
 
 /* Skeleton Loader Animation */

@@ -6,7 +6,6 @@ import { useRealtimeStatus } from './hooks/useRealtimeStatus';
 import { Header } from './components/Header';
 import { SearchSection } from './components/SearchSection';
 import { AdvancedFilters } from './components/AdvancedFilters';
-import { ActiveDownloadsSection } from './components/ActiveDownloadsSection';
 import { ResultsSection } from './components/ResultsSection';
 import { DetailsModal } from './components/DetailsModal';
 import { DownloadsSidebar } from './components/DownloadsSidebar';
@@ -79,12 +78,7 @@ function App() {
 
   // Compute visibility states
   const hasResults = books.length > 0;
-  const hasActiveDownloads =
-    currentStatus.downloading && Object.keys(currentStatus.downloading).length > 0;
-  const hasStatusItems = Object.values(currentStatus).some(
-    section => section && Object.keys(section).length > 0
-  );
-  const isInitialState = !hasResults && !hasActiveDownloads && !hasStatusItems;
+  const isInitialState = !hasResults;
 
   // Detect status changes and show notifications
   const detectChanges = useCallback((prev: StatusData, curr: StatusData) => {
@@ -164,6 +158,11 @@ function App() {
       console.log('⏳ Using polling fallback (5s interval)');
     }
   }, [isUsingWebSocket]);
+
+  // Fetch status immediately on startup
+  useEffect(() => {
+    fetchStatus();
+  }, [fetchStatus]);
 
   // Search handler
   const handleSearch = async (query: string) => {
@@ -288,11 +287,6 @@ function App() {
     return { text: 'Download', state: 'download' };
   }, [currentStatus]);
 
-  // Get active downloads list
-  const activeDownloads = currentStatus.downloading
-    ? Object.values(currentStatus.downloading)
-    : [];
-
   return (
     <>
       <Header 
@@ -347,13 +341,6 @@ function App() {
           onSearchInputChange={setSearchInput}
           showAdvanced={showAdvanced}
           onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
-        />
-
-        <ActiveDownloadsSection
-          downloads={activeDownloads}
-          visible={!!hasActiveDownloads}
-          onRefresh={fetchStatus}
-          onCancel={handleCancel}
         />
 
         <ResultsSection

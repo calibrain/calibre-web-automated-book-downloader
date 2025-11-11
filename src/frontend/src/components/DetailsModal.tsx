@@ -22,6 +22,18 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
     }
   }, [buttonState.state, isQueuing, onClose]);
 
+  // Handle ESC key to close modal
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
+
   if (!book) return null;
 
   const isCompleted = buttonState.state === 'completed';
