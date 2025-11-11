@@ -514,7 +514,6 @@ button:disabled {
 /* Sticky Header with Gradient Fade Effect */
 .header-with-fade {
     overflow: visible;
-    position: relative;
 }
 
 .header-with-fade::after {
