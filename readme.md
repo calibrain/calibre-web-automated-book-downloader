@@ -1,6 +1,6 @@
 # 📚 Calibre-Web-Automated-Book-Downloader
 
-![Calibre-Web Automated Book Downloader](static/media/logo.png 'Calibre-Web Automated Book Downloader')
+![Calibre-Web Automated Book Downloader](src/frontend/public/logo.png 'Calibre-Web Automated Book Downloader')
 
 An intuitive web interface for searching and requesting book downloads, designed to work seamlessly with [Calibre-Web-Automated](https://github.com/crocodilestick/Calibre-Web-Automated). This project streamlines the process of downloading books and preparing them for integration into your Calibre library.
 
