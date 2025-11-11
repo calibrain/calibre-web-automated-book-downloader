@@ -6,7 +6,7 @@ interface FooterProps {
 
 export const Footer = ({ buildVersion, releaseVersion, appEnv }: FooterProps) => {
   return (
-    <footer className="mt-10 border-t pt-6 pb-10" style={{ borderColor: 'var(--border-muted)' }}>
+    <footer className="mt-10 border-t pt-6 pb-10" style={{ borderColor: 'var(--border-muted)', paddingBottom: 'calc(2.5rem + env(safe-area-inset-bottom))' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
         <div>
           <p className="text-sm opacity-80">Calibre Web Book Downloader</p>
