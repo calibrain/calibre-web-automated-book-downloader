@@ -242,8 +242,8 @@ function App() {
     });
   };
 
-  // Get button state for a book
-  const getButtonState = (bookId: string): ButtonStateInfo => {
+  // Get button state for a book - memoized to ensure proper re-renders when status changes
+  const getButtonState = useCallback((bookId: string): ButtonStateInfo => {
     // Check error first
     if (currentStatus.error && currentStatus.error[bookId]) {
       return { text: 'Failed', state: 'error' };
@@ -261,27 +261,32 @@ function App() {
     if (currentStatus.done && currentStatus.done[bookId]) {
       return { text: 'Downloaded', state: 'completed' };
     }
-    // Check in-progress states
+    // Check in-progress states with detailed status
+    if (currentStatus.ingesting && currentStatus.ingesting[bookId]) {
+      return { text: 'Ingesting', state: 'ingesting' };
+    }
+    if (currentStatus.verifying && currentStatus.verifying[bookId]) {
+      return { text: 'Verifying', state: 'verifying' };
+    }
     if (currentStatus.downloading && currentStatus.downloading[bookId]) {
-      return { text: 'Downloading', state: 'downloading' };
+      const book = currentStatus.downloading[bookId];
+      return {
+        text: 'Downloading',
+        state: 'downloading',
+        progress: book.progress
+      };
+    }
+    if (currentStatus.bypassing && currentStatus.bypassing[bookId]) {
+      return { text: 'Bypassing Cloudflare...', state: 'bypassing' };
+    }
+    if (currentStatus.resolving && currentStatus.resolving[bookId]) {
+      return { text: 'Resolving', state: 'resolving' };
     }
     if (currentStatus.queued && currentStatus.queued[bookId]) {
       return { text: 'Queued', state: 'queued' };
     }
-    if (currentStatus.resolving && currentStatus.resolving[bookId]) {
-      return { text: 'Resolving', state: 'downloading' };
-    }
-    if (currentStatus.bypassing && currentStatus.bypassing[bookId]) {
-      return { text: 'Processing', state: 'downloading' };
-    }
-    if (currentStatus.verifying && currentStatus.verifying[bookId]) {
-      return { text: 'Verifying', state: 'downloading' };
-    }
-    if (currentStatus.ingesting && currentStatus.ingesting[bookId]) {
-      return { text: 'Ingesting', state: 'downloading' };
-    }
     return { text: 'Download', state: 'download' };
-  };
+  }, [currentStatus]);
 
   // Get active downloads list
   const activeDownloads = currentStatus.downloading

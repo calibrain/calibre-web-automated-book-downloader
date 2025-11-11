@@ -35,11 +35,12 @@ export interface ActiveDownloadsResponse {
 }
 
 // Button states
-export type ButtonState = 'download' | 'queued' | 'downloading' | 'completed' | 'error';
+export type ButtonState = 'download' | 'queued' | 'resolving' | 'bypassing' | 'downloading' | 'verifying' | 'ingesting' | 'completed' | 'error';
 
 export interface ButtonStateInfo {
   text: string;
   state: ButtonState;
+  progress?: number; // Download progress 0-100
 }
 
 // Language option
