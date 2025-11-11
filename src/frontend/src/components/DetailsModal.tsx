@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Book, ButtonStateInfo } from '../types';
+import { CircularProgress } from './CircularProgress';
 
 interface DetailsModalProps {
   book: Book | null;
@@ -37,8 +38,14 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
 
   const isCompleted = buttonState.state === 'completed';
   const hasError = buttonState.state === 'error';
+  const isInProgress = ['queued', 'resolving', 'bypassing', 'downloading', 'verifying', 'ingesting'].includes(buttonState.state);
   const isDisabled = buttonState.state !== 'download' || isQueuing || isCompleted;
   const displayText = isQueuing ? 'Queuing...' : buttonState.text;
+
+  // Show circular progress only for downloading state with progress data
+  const showCircularProgress = buttonState.state === 'downloading' && buttonState.progress !== undefined;
+  // Show spinner for other in-progress states or when queuing
+  const showSpinner = (isInProgress && !showCircularProgress) || isQueuing;
 
   const handleDownload = async () => {
     setIsQueuing(true);
@@ -115,12 +122,12 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
                   ? 'bg-green-600 cursor-not-allowed'
                   : hasError
                   ? 'bg-red-600 cursor-not-allowed opacity-75'
-                  : buttonState.state !== 'download'
-                  ? 'bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed'
+                  : isInProgress
+                  ? 'bg-gray-500 cursor-not-allowed opacity-75'
                   : 'bg-blue-600 hover:bg-blue-700'
               }`}
               onClick={handleDownload}
-              disabled={isDisabled}
+              disabled={isDisabled || isInProgress}
             >
               <span className="download-button-text">{displayText}</span>
               {isCompleted && (
@@ -133,11 +140,10 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               )}
-              <div
-                className={`download-spinner w-4 h-4 border-2 border-white border-t-transparent rounded-full ${
-                  (buttonState.state !== 'download' || isQueuing) && !isCompleted && !hasError ? '' : 'hidden'
-                }`}
-              />
+              {showCircularProgress && <CircularProgress progress={buttonState.progress} size={16} />}
+              {showSpinner && (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              )}
             </button>
             <button
               id="close-details"
