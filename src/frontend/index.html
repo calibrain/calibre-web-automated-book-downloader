@@ -2,11 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="Calibre Web Book Downloader - Modern UI" />
-    <meta name="theme-color" content="#333333" />
+    
+    <!-- Theme color with media queries for light/dark mode -->
+    <meta name="theme-color" content="#f8f8f8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)" />
+    
+    <!-- iOS PWA Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Book Downloader" />
+    
+    <!-- App Icons -->
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <title>Book Downloader • Modern</title>
+    <link rel="apple-touch-icon" href="/logo.png" />
+    <title>Book Downloader</title>
     <script>
       // Apply theme immediately before first paint to prevent flash
       (function() {

@@ -56,6 +56,8 @@ input, select, textarea, button,
 /* Typography */
 html, body {
     min-height: 100vh;
+    /* Support for iOS notch/dynamic island - extend to full viewport */
+    min-height: 100dvh;
     margin: 0;
     padding: 0;
 }
@@ -63,6 +65,8 @@ html, body {
 html {
     /* Transition on root element ensures smooth theme changes */
     transition: background-color 0.2s ease, color 0.2s ease;
+    /* Extend background color to safe areas (status bar area) */
+    background-color: var(--background-color);
 }
 
 body {
@@ -73,6 +77,11 @@ body {
     transition: background-color 0.2s ease, color 0.2s ease;
     display: flex;
     flex-direction: column;
+    /* Add padding for iOS safe areas (status bar and home indicator) */
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
 }
 
 #root {
@@ -80,7 +89,9 @@ body {
     flex-direction: column;
     flex: 1;
     min-height: 100vh;
+    min-height: 100dvh;
     transition: background-color 0.2s ease;
+    background-color: var(--background-color);
 }
 
 main {
