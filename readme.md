@@ -243,9 +243,25 @@ This feature is designed to work with any resolver that implements the `FlareSol
 
 ## 🏗️ Architecture
 
-The application consists of a single service:
+The application consists of a Flask backend with a React-based frontend:
 
-1. **calibre-web-automated-bookdownloader**: Main application providing web interface and download functionality
+### Backend
+- **Flask Application**: Python-based backend (`app.py`, `backend.py`) providing REST API and WebSocket support
+- **Download Manager**: Handles book search, download requests, and queue management (`downloader.py`, `book_manager.py`)
+- **Network Layer**: Cloudflare bypass and proxy support (`cloudflare_bypasser.py`, `network.py`)
+
+### Frontend
+- **React + TypeScript**: Modern web interface built with Vite (`src/frontend`)
+- **Real-time Updates**: WebSocket integration for live download status
+- **Responsive UI**: TailwindCSS-based design for mobile and desktop
+
+For frontend development, use the provided Makefile:
+```bash
+make install  # Install dependencies
+make dev      # Start development server
+make build    # Build for production
+```
+If you run the docker compose file, the frontend will be built and served automatically. But if you run the frontend dev server it will supercede the docker compose frontend.
 
 ## 🏥 Health Monitoring
 
