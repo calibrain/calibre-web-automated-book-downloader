@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Book, ButtonStateInfo } from '../types';
+import { CircularProgress } from './CircularProgress';
 
 const SkeletonLoader = () => (
   <div className="w-full h-full bg-gradient-to-r from-gray-300 via-gray-200 to-gray-300 dark:from-gray-700 dark:via-gray-600 dark:to-gray-700 animate-pulse" />
@@ -28,9 +29,14 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
 
   const isCompleted = buttonState.state === 'completed';
   const hasError = buttonState.state === 'error';
+  const isInProgress = ['queued', 'resolving', 'bypassing', 'downloading', 'verifying', 'ingesting'].includes(buttonState.state);
   const isDisabled = buttonState.state !== 'download' || isQueuing || isCompleted;
   const displayText = isQueuing ? 'Queuing...' : buttonState.text;
-  const isQueued = buttonState.state === 'queued' || buttonState.state === 'downloading';
+
+  // Show circular progress only for downloading state with progress data
+  const showCircularProgress = buttonState.state === 'downloading' && buttonState.progress !== undefined;
+  // Show spinner for other in-progress states or when queuing
+  const showSpinner = (isInProgress && !showCircularProgress) || isQueuing;
 
   const handleDetails = async (id: string) => {
     setIsLoadingDetails(true);
@@ -62,8 +68,8 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
       onMouseLeave={() => setIsHovered(false)}
     >
       {/* Book Cover Image - 2:3 aspect ratio on desktop, fixed width on mobile */}
-      <div 
-        className="relative w-full sm:w-full max-sm:w-[120px] max-sm:h-full max-sm:flex-shrink-0 group" 
+      <div
+        className="relative w-full sm:w-full max-sm:w-[120px] max-sm:h-full max-sm:flex-shrink-0 group"
         style={{ aspectRatio: '2/3' }}
       >
         {book.preview && !imageError ? (
@@ -77,7 +83,7 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
               src={book.preview}
               alt={book.title || 'Book cover'}
               className="w-full h-full"
-              style={{ 
+              style={{
                 opacity: imageLoaded ? 1 : 0,
                 transition: 'opacity 0.3s ease-in-out',
                 objectFit: 'cover',
@@ -95,13 +101,13 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
             No Cover
           </div>
         )}
-        
+
         {/* Hover overlay with 2% white opacity */}
-        <div 
+        <div
           className="absolute inset-0 bg-white transition-opacity duration-300 pointer-events-none"
           style={{ opacity: isHovered ? 0.02 : 0 }}
         />
-        
+
         {/* Info button - appears on hover, positioned bottom-right */}
         <button
           className="absolute bottom-2 right-2 w-8 h-8 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm flex items-center justify-center transition-all duration-300 shadow-lg hover:scale-110 max-sm:hidden"
@@ -119,17 +125,17 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
           {isLoadingDetails ? (
             <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
           ) : (
-            <svg 
-              className="w-4 h-4" 
-              fill="none" 
-              stroke="currentColor" 
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
               viewBox="0 0 24 24"
             >
-              <path 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-                strokeWidth={2} 
-                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" 
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
           )}
@@ -160,7 +166,7 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
             )}
           </div>
         </div>
-        
+
         {/* Mobile: Details and Download buttons side by side */}
         <div className="flex gap-1.5 sm:hidden">
           <button
@@ -184,17 +190,15 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
                 ? 'bg-green-600 cursor-not-allowed'
                 : hasError
                 ? 'bg-red-600 cursor-not-allowed opacity-75'
-                : isQueued
+                : isInProgress
                 ? 'bg-gray-500 cursor-not-allowed opacity-75'
-                : buttonState.state !== 'download'
-                ? 'bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed'
                 : 'bg-sky-700 hover:bg-sky-800'
             }`}
             onClick={handleDownload}
-            disabled={isDisabled || isQueued}
+            disabled={isDisabled || isInProgress}
             data-action="download"
           >
-            <span className="download-button-text">{isQueued ? 'Queued' : displayText}</span>
+            <span className="download-button-text">{displayText}</span>
             {isCompleted && (
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -205,15 +209,14 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             )}
-            <div
-              className={`download-spinner w-3 h-3 border-2 border-white border-t-transparent rounded-full ${
-                (buttonState.state !== 'download' || isQueuing) && !isCompleted && !hasError ? '' : 'hidden'
-              }`}
-            />
+            {showCircularProgress && <CircularProgress progress={buttonState.progress} size={12} />}
+            {showSpinner && (
+              <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            )}
           </button>
         </div>
       </div>
-      
+
       {/* Desktop: Full-width Download button at bottom */}
       <button
         className={`hidden sm:flex w-full px-4 py-3 text-white text-sm items-center justify-center gap-2 ${
@@ -221,21 +224,19 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
             ? 'bg-green-600 cursor-not-allowed'
             : hasError
             ? 'bg-red-600 cursor-not-allowed opacity-75'
-            : isQueued
+            : isInProgress
             ? 'bg-gray-500 cursor-not-allowed opacity-75'
-            : buttonState.state !== 'download'
-            ? 'bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed'
             : 'bg-sky-700 hover:bg-sky-800'
         }`}
         onClick={handleDownload}
-        disabled={isDisabled || isQueued}
+        disabled={isDisabled || isInProgress}
         data-action="download"
         style={{
           borderBottomLeftRadius: '.75rem',
           borderBottomRightRadius: '.75rem'
         }}
       >
-        <span className="download-button-text">{isQueued ? 'Queued' : displayText}</span>
+        <span className="download-button-text">{displayText}</span>
         {isCompleted && (
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -246,11 +247,10 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         )}
-        <div
-          className={`download-spinner w-4 h-4 border-2 border-white border-t-transparent rounded-full ${
-            (buttonState.state !== 'download' || isQueuing) && !isCompleted && !hasError ? '' : 'hidden'
-          }`}
-        />
+        {showCircularProgress && <CircularProgress progress={buttonState.progress} size={16} />}
+        {showSpinner && (
+          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+        )}
       </button>
     </article>
   );

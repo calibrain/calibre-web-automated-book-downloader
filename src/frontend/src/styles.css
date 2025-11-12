@@ -77,9 +77,8 @@ body {
     transition: background-color 0.2s ease, color 0.2s ease;
     display: flex;
     flex-direction: column;
-    /* Add padding for iOS safe areas (status bar and home indicator) */
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
+    /* Safe areas handled by individual components (Header, Footer, Sidebar) */
+    /* Left/right safe areas still needed for notched devices in landscape */
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
 }
