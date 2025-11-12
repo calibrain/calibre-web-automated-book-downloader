@@ -13,7 +13,7 @@ html.preload *::after {
 
 /* Smooth theme transitions for all elements using CSS variables */
 header, footer, section,
-input, select, textarea, button,
+input, select, textarea, button, a,
 .details-container, .modal-overlay {
     transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
