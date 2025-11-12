@@ -4,6 +4,13 @@ from pathlib import Path
 def string_to_bool(s: str) -> bool:
     return s.lower() in ["true", "yes", "1", "y"]
 
+# Authentication and session settings
+# SESSION_COOKIE_SECURE: Controls whether session cookies are marked as secure (HTTPS only)
+#   - 'auto' (default): Uses False for local development, can be overridden
+#   - 'true'/'yes'/'1': Always use secure cookies (recommended for production with HTTPS)
+#   - 'false'/'no'/'0': Never use secure cookies (only for local HTTP)
+SESSION_COOKIE_SECURE_ENV = os.getenv("SESSION_COOKIE_SECURE", "auto")
+
 CWA_DB = os.getenv("CWA_DB_PATH")
 CWA_DB_PATH = Path(CWA_DB) if CWA_DB else None
 LOG_ROOT = Path(os.getenv("LOG_ROOT", "/var/log/"))

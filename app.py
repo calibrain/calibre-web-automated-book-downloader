@@ -3,8 +3,10 @@
 import logging
 import io, re, os
 import sqlite3
+import time
+from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask import Flask, request, jsonify, send_file, send_from_directory, session
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -58,6 +60,63 @@ socketio = SocketIO(
 ws_manager.init_app(app, socketio)
 logger.info(f"Flask-SocketIO initialized with async_mode='{async_mode}'")
 
+# Rate limiting for login attempts
+# Structure: {username: {'count': int, 'lockout_until': datetime}}
+failed_login_attempts: typing.Dict[str, typing.Dict[str, typing.Any]] = {}
+MAX_LOGIN_ATTEMPTS = 10
+LOCKOUT_DURATION_MINUTES = 30
+
+def cleanup_old_lockouts() -> None:
+    """Remove expired lockout entries to prevent memory buildup."""
+    current_time = datetime.now()
+    expired_users = [
+        username for username, data in failed_login_attempts.items()
+        if 'lockout_until' in data and data['lockout_until'] < current_time
+    ]
+    for username in expired_users:
+        logger.info(f"Lockout expired for user: {username}")
+        del failed_login_attempts[username]
+
+def is_account_locked(username: str) -> bool:
+    """Check if an account is currently locked due to failed login attempts."""
+    cleanup_old_lockouts()
+    
+    if username not in failed_login_attempts:
+        return False
+    
+    lockout_until = failed_login_attempts[username].get('lockout_until')
+    if lockout_until and datetime.now() < lockout_until:
+        return True
+    
+    return False
+
+def record_failed_login(username: str, ip_address: str) -> bool:
+    """
+    Record a failed login attempt and lock account if threshold is reached.
+    Returns True if account is now locked, False otherwise.
+    """
+    if username not in failed_login_attempts:
+        failed_login_attempts[username] = {'count': 0}
+    
+    failed_login_attempts[username]['count'] += 1
+    count = failed_login_attempts[username]['count']
+    
+    logger.warning(f"Failed login attempt {count}/{MAX_LOGIN_ATTEMPTS} for user '{username}' from IP {ip_address}")
+    
+    if count >= MAX_LOGIN_ATTEMPTS:
+        lockout_until = datetime.now() + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+        failed_login_attempts[username]['lockout_until'] = lockout_until
+        logger.warning(f"Account locked for user '{username}' until {lockout_until.strftime('%Y-%m-%d %H:%M:%S')} due to {count} failed login attempts")
+        return True
+    
+    return False
+
+def clear_failed_logins(username: str) -> None:
+    """Clear failed login attempts for a user after successful login."""
+    if username in failed_login_attempts:
+        del failed_login_attempts[username]
+        logger.debug(f"Cleared failed login attempts for user: {username}")
+
 # Enable CORS in development mode for local frontend development
 if DEBUG:
     CORS(app, resources={
@@ -80,9 +139,28 @@ werkzeug_logger.setLevel(logger.level)
 # Set up authentication defaults
 # The secret key will reset every time we restart, which will
 # require users to authenticate again
+
+# Auto-detect HTTPS for secure cookies
+# Can be overridden with SESSION_COOKIE_SECURE environment variable
+session_cookie_secure_env = os.getenv('SESSION_COOKIE_SECURE', 'auto').lower()
+if session_cookie_secure_env == 'auto':
+    # Auto-detect: check if we're behind a reverse proxy with HTTPS
+    # This will be determined per-request, but default to False for local HTTP
+    SESSION_COOKIE_SECURE = False
+elif session_cookie_secure_env in ['true', 'yes', '1']:
+    SESSION_COOKIE_SECURE = True
+else:
+    SESSION_COOKIE_SECURE = False
+
 app.config.update(
-    SECRET_KEY = os.urandom(64)
+    SECRET_KEY = os.urandom(64),
+    SESSION_COOKIE_HTTPONLY = True,
+    SESSION_COOKIE_SAMESITE = 'Lax',
+    SESSION_COOKIE_SECURE = SESSION_COOKIE_SECURE,
+    PERMANENT_SESSION_LIFETIME = 604800  # 7 days in seconds
 )
+
+logger.info(f"Session cookie secure setting: {SESSION_COOKIE_SECURE} (from env: {session_cookie_secure_env})")
 
 def login_required(f):
     @wraps(f)
@@ -91,15 +169,16 @@ def login_required(f):
         # path, return a server error
         if CWA_DB_PATH is not None and not os.path.isfile(CWA_DB_PATH):
             logger.error(f"CWA_DB_PATH is set to {CWA_DB_PATH} but this is not a valid path")
-            return Response("Internal Server Error", 500)
-        if not authenticate():
-            return Response(
-                response="Unauthorized",
-                status=401,
-                headers={
-                    "WWW-Authenticate": 'Basic realm="Calibre-Web-Automated-Book-Downloader"',
-                },
-            )
+            return jsonify({"error": "Internal Server Error"}), 500
+        
+        # If no database is configured, allow access
+        if not CWA_DB_PATH:
+            return f(*args, **kwargs)
+        
+        # Check if user has a valid session
+        if 'user_id' not in session:
+            return jsonify({"error": "Unauthorized"}), 401
+        
         return f(*args, **kwargs)
     return decorated_function
 
@@ -151,10 +230,10 @@ def serve_frontend_assets(filename: str) -> Response:
     return send_from_directory(os.path.join(app.root_path, 'frontend-dist', 'assets'), filename)
 
 @app.route('/')
-@login_required
 def index() -> Response:
     """
     Serve the React frontend application.
+    Authentication is handled by the React app itself.
     """
     return send_from_directory(os.path.join(app.root_path, 'frontend-dist'), 'index.html')
 
@@ -566,58 +645,165 @@ def internal_error(error: Exception) -> Union[Response, Tuple[Response, int]]:
     logger.error_trace(f"500 error: {error}")
     return jsonify({"error": "Internal server error"}), 500
 
-def authenticate() -> bool:
+@app.route('/api/auth/login', methods=['POST'])
+def api_login() -> Union[Response, Tuple[Response, int]]:
     """
-    Helper function that validates Basic credentials
-    against a Calibre-Web app.db SQLite database
-
-    Database structure:
-    - Table 'user' with columns: 'name' (username), 'password'
+    Login endpoint that validates credentials and creates a session.
+    Includes rate limiting: 10 failed attempts = 30 minute lockout.
+    
+    Request Body:
+        username (str): Username
+        password (str): Password
+        remember_me (bool): Whether to extend session duration
+        
+    Returns:
+        flask.Response: JSON with success status or error message.
     """
-
-    # If the database doesn't exist, the user is always authenticated
-    if not CWA_DB_PATH:
-        return True
-
-    # If no authorization object exists, return false to prompt
-    # a request to the user
-    if not request.authorization:
-        return False
-
-    username = request.authorization.get("username")
-    password = request.authorization.get("password")
-
-    # Validate credentials against database
     try:
-        # Open database in true read-only mode to avoid journal/WAL writes on RO mounts
-        db_path = os.fspath(CWA_DB_PATH)
-        db_uri = f"file:{db_path}?mode=ro&immutable=1"
-        conn = sqlite3.connect(db_uri, uri=True)
-        cur = conn.cursor()
-        cur.execute("SELECT password FROM user WHERE name = ?", (username,))
-        row = cur.fetchone()
-        conn.close()
-
-        # Check if user exists and password is correct
-        if not row or not row[0] or not check_password_hash(row[0], password):
-            logger.error("User not found or password check failed")
-            return False
-
+        # Get client IP address (handles reverse proxy forwarding)
+        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if ip_address and ',' in ip_address:
+            # X-Forwarded-For can contain multiple IPs, take the first one
+            ip_address = ip_address.split(',')[0].strip()
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+            
+        username = data.get('username', '').strip()
+        password = data.get('password', '')
+        remember_me = data.get('remember_me', False)
+        
+        if not username or not password:
+            return jsonify({"error": "Username and password are required"}), 400
+        
+        # Check if account is locked due to failed login attempts
+        if is_account_locked(username):
+            lockout_until = failed_login_attempts[username].get('lockout_until')
+            remaining_time = (lockout_until - datetime.now()).total_seconds() / 60
+            logger.warning(f"Login attempt blocked for locked account '{username}' from IP {ip_address}")
+            return jsonify({
+                "error": f"Account temporarily locked due to multiple failed login attempts. Try again in {int(remaining_time)} minutes."
+            }), 429
+        
+        # If the database doesn't exist, authentication always succeeds
+        if not CWA_DB_PATH:
+            session['user_id'] = username
+            session.permanent = remember_me
+            clear_failed_logins(username)
+            logger.info(f"Login successful for user '{username}' from IP {ip_address} (no DB configured)")
+            return jsonify({"success": True})
+        
+        # If the CWA_DB_PATH variable exists, but isn't a valid path, return error
+        if not os.path.isfile(CWA_DB_PATH):
+            logger.error(f"CWA_DB_PATH is set to {CWA_DB_PATH} but this is not a valid path")
+            return jsonify({"error": "Database configuration error"}), 500
+        
+        # Validate credentials against database
+        try:
+            db_path = os.fspath(CWA_DB_PATH)
+            db_uri = f"file:{db_path}?mode=ro&immutable=1"
+            conn = sqlite3.connect(db_uri, uri=True)
+            cur = conn.cursor()
+            cur.execute("SELECT password FROM user WHERE name = ?", (username,))
+            row = cur.fetchone()
+            conn.close()
+            
+            # Check if user exists and password is correct
+            if not row or not row[0] or not check_password_hash(row[0], password):
+                # Record failed login attempt
+                is_now_locked = record_failed_login(username, ip_address)
+                
+                if is_now_locked:
+                    return jsonify({
+                        "error": f"Account locked due to {MAX_LOGIN_ATTEMPTS} failed login attempts. Try again in {LOCKOUT_DURATION_MINUTES} minutes."
+                    }), 429
+                else:
+                    attempts_remaining = MAX_LOGIN_ATTEMPTS - failed_login_attempts[username]['count']
+                    # Only show attempts remaining when 5 or fewer attempts remain (after 6+ failed attempts)
+                    if attempts_remaining <= 5:
+                        return jsonify({
+                            "error": f"Invalid username or password. {attempts_remaining} attempts remaining."
+                        }), 401
+                    else:
+                        return jsonify({
+                            "error": "Invalid username or password."
+                        }), 401
+            
+            # Successful authentication - create session and clear failed attempts
+            session['user_id'] = username
+            session.permanent = remember_me
+            clear_failed_logins(username)
+            logger.info(f"Login successful for user '{username}' from IP {ip_address} (remember_me={remember_me})")
+            return jsonify({"success": True})
+            
+        except Exception as e:
+            logger.error_trace(f"Database error during login: {e}")
+            return jsonify({"error": "Authentication system error"}), 500
+            
     except Exception as e:
-        logger.error_trace(f"CWA DB or authentication send_from_directory: {e}")
-        return False
+        logger.error_trace(f"Login error: {e}")
+        return jsonify({"error": "Login failed"}), 500
 
-    logger.info(f"Authentication successful for user {username}")
-    return True
+@app.route('/api/auth/logout', methods=['POST'])
+def api_logout() -> Union[Response, Tuple[Response, int]]:
+    """
+    Logout endpoint that clears the session.
+    
+    Returns:
+        flask.Response: JSON with success status.
+    """
+    try:
+        # Get client IP address (handles reverse proxy forwarding)
+        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if ip_address and ',' in ip_address:
+            ip_address = ip_address.split(',')[0].strip()
+        
+        username = session.get('user_id', 'unknown')
+        session.clear()
+        logger.info(f"Logout successful for user '{username}' from IP {ip_address}")
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error_trace(f"Logout error: {e}")
+        return jsonify({"error": "Logout failed"}), 500
+
+@app.route('/api/auth/check', methods=['GET'])
+def api_auth_check() -> Union[Response, Tuple[Response, int]]:
+    """
+    Check if user has a valid session.
+    
+    Returns:
+        flask.Response: JSON with authentication status and whether auth is required.
+    """
+    try:
+        # If no database is configured, authentication is not required
+        if not CWA_DB_PATH:
+            return jsonify({
+                "authenticated": True,
+                "auth_required": False
+            })
+        
+        # Check if user has a valid session
+        is_authenticated = 'user_id' in session
+        return jsonify({
+            "authenticated": is_authenticated,
+            "auth_required": True
+        })
+    except Exception as e:
+        logger.error_trace(f"Auth check error: {e}")
+        return jsonify({
+            "authenticated": False,
+            "auth_required": True
+        })
 
 # Catch-all route for React Router (must be last)
 # This handles client-side routing by serving index.html for any unmatched routes
 @app.route('/<path:path>')
-@login_required
 def catch_all(path: str) -> Response:
     """
     Serve the React app for any route not matched by API endpoints.
     This allows React Router to handle client-side routing.
+    Authentication is handled by the React app itself.
     """
     # If the request is for an API endpoint or static file, let it 404
     if path.startswith('api/') or path.startswith('assets/'):

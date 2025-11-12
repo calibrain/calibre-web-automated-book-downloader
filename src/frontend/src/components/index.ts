@@ -7,3 +7,4 @@ export { StatusSection } from './StatusSection';
 export { DownloadsSidebar } from './DownloadsSidebar';
 export { ToastContainer } from './ToastContainer';
 export { Footer } from './Footer';
+export { LoginModal } from './LoginModal';

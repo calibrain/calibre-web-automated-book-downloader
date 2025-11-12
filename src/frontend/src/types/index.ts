@@ -67,3 +67,17 @@ export interface AppConfig {
   default_language: string;
   supported_formats: string[];
 }
+
+// Authentication types
+export interface LoginCredentials {
+  username: string;
+  password: string;
+  remember_me: boolean;
+}
+
+export interface AuthResponse {
+  success?: boolean;
+  authenticated?: boolean;
+  auth_required?: boolean;
+  error?: string;
+}
