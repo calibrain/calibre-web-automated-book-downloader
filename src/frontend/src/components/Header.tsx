@@ -43,6 +43,8 @@ export const Header = ({
 }: HeaderProps) => {
   const [theme, setTheme] = useState<string>('auto');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
+  const [shouldAnimateIn, setShouldAnimateIn] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -67,21 +69,30 @@ export const Header = ({
     return () => mq.removeEventListener('change', handler);
   }, []);
 
+  // Helper function to close dropdown with animation
+  const closeDropdown = () => {
+    setIsClosing(true);
+    setTimeout(() => {
+      setIsDropdownOpen(false);
+      setIsClosing(false);
+    }, 150); // Match the animation duration
+  };
+
   // Close dropdown when clicking outside or pressing ESC
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsDropdownOpen(false);
+        closeDropdown();
       }
     };
 
     const handleEscapeKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setIsDropdownOpen(false);
+        closeDropdown();
       }
     };
 
-    if (isDropdownOpen) {
+    if (isDropdownOpen && !isClosing) {
       document.addEventListener('mousedown', handleClickOutside);
       document.addEventListener('keydown', handleEscapeKey);
     }
@@ -90,7 +101,7 @@ export const Header = ({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscapeKey);
     };
-  }, [isDropdownOpen]);
+  }, [isDropdownOpen, isClosing]);
 
   const applyTheme = (pref: string) => {
     if (pref === 'auto') {
@@ -115,8 +126,19 @@ export const Header = ({
   };
 
   const handleLogout = () => {
-    setIsDropdownOpen(false);
+    closeDropdown();
     onLogout?.();
+  };
+
+  const toggleDropdown = () => {
+    if (isDropdownOpen) {
+      closeDropdown();
+    } else {
+      setShouldAnimateIn(true);
+      setIsDropdownOpen(true);
+      // Reset animation flag after animation completes
+      setTimeout(() => setShouldAnimateIn(false), 200);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -192,7 +214,7 @@ export const Header = ({
       {/* User Menu Dropdown */}
       <div className="relative" ref={dropdownRef}>
         <button
-          onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+          onClick={toggleDropdown}
           className={`relative p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
             isDropdownOpen ? 'bg-gray-100 dark:bg-gray-700' : ''
           }`}
@@ -217,9 +239,11 @@ export const Header = ({
         </button>
 
         {/* Dropdown Menu */}
-        {isDropdownOpen && (
+        {(isDropdownOpen || isClosing) && (
           <div
-            className="absolute right-0 mt-2 w-48 rounded-lg shadow-lg border z-50"
+            className={`absolute right-0 mt-2 w-48 rounded-lg shadow-lg border z-50 ${
+              isClosing ? 'animate-fade-out-up' : shouldAnimateIn ? 'animate-fade-in-down' : ''
+            }`}
             style={{
               background: 'var(--bg)',
               borderColor: 'var(--border-muted)',
