@@ -1,0 +1,559 @@
+/* Base styles and CSS reset */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Disable transitions on initial load to prevent flash */
+html.preload *,
+html.preload *::before,
+html.preload *::after {
+    transition: none !important;
+    animation-duration: 0s !important;
+}
+
+/* Smooth theme transitions for all elements using CSS variables */
+header, footer, section,
+input, select, textarea, button,
+.details-container, .modal-overlay {
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+:root {
+    /* Light theme variables */
+    --primary-color: oklch(44.3% 0.11 240.79);
+    --primary-dark: oklch(39.1% 0.09 240.876);
+    --text-color: #333;
+    --background-color: #f8f8f8;
+    --border-color: #e5e5e5;
+    --loading-overlay: rgba(0, 0, 0, 0.5);
+    --card-background: #fff;
+    --input-background: #fff;
+    --heading-color: #333;
+
+    /* Modern UI alias tokens */
+    --bg: var(--background-color);
+    --text: var(--text-color);
+    --border-muted: var(--border-color);
+    --bg-soft: var(--card-background);
+}
+
+[data-theme="dark"] {
+    /* Dark theme variables with improved contrast */
+    --background-color: #121212;
+    --text-color: #ffffff;
+    --heading-color: #ffffff;
+    --card-background: #1e1e1e;
+    --border-color: #404040;
+    --input-background: #2d2d2d;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Typography */
+html, body {
+    min-height: 100vh;
+    /* Support for iOS notch/dynamic island - extend to full viewport */
+    min-height: 100dvh;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    /* Transition on root element ensures smooth theme changes */
+    transition: background-color 0.2s ease, color 0.2s ease;
+    /* Extend background color to safe areas (status bar area) */
+    background-color: var(--background-color);
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    line-height: 1.6;
+    color: var(--text-color);
+    background: var(--background-color);
+    transition: background-color 0.2s ease, color 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    /* Safe areas handled by individual components (Header, Footer, Sidebar) */
+    /* Left/right safe areas still needed for notched devices in landscape */
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+}
+
+#root {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 100vh;
+    min-height: 100dvh;
+    transition: background-color 0.2s ease;
+    background-color: var(--background-color);
+}
+
+main {
+    flex: 1;
+    min-height: 100%;
+    background: var(--background-color);
+    display: flex;
+    flex-direction: column;
+    transition: background-color 0.2s ease;
+}
+
+/* Layout */
+footer {
+    text-align: center;
+    padding: 1rem;
+    margin-top: auto;
+}
+
+.spinner {
+    display: inline-block;
+    width: 1.25rem;
+    height: 1.25rem;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: white;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes slide-up {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fade-in-up {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-slide-up {
+    animation: slide-up 0.5s ease-out;
+}
+
+.animate-fade-in-up {
+    animation: fade-in-up 0.4s ease-out;
+}
+
+/* Button spinner styles */
+#search-spinner {
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    transition: opacity 0.2s ease;
+}
+
+#search-icon {
+    transition: opacity 0.2s ease;
+}
+
+#search-button:disabled {
+    cursor: not-allowed;
+}
+
+/* Download button spinner styles */
+.download-spinner {
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    transition: opacity 0.2s ease;
+    flex-shrink: 0;
+}
+
+.details-spinner {
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    transition: opacity 0.2s ease;
+    flex-shrink: 0;
+}
+
+/* Modal Styles */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--loading-overlay);
+    z-index: 1000;
+}
+
+.modal-overlay.active {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.details-container {
+    background: var(--card-background);
+    color: var(--text-color);
+    padding: 1.5rem;
+    border-radius: 4px;
+    max-width: 800px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+    position: relative;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.details-header {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2rem;
+    margin-bottom: 1.5rem;
+}
+
+.details-header img {
+    max-width: 200px;
+    height: auto;
+    border-radius: 4px;
+}
+
+.details-info h3 {
+    margin-bottom: 1rem;
+    color: var(--text-color);
+}
+
+.details-info p {
+    margin-bottom: 0.5rem;
+}
+
+.details-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1.5rem;
+    justify-content: flex-end;
+}
+
+.details-actions button {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background-color 0.3s ease;
+}
+
+.details-actions button:first-child {
+    background: var(--primary-color);
+    color: white;
+}
+
+.details-actions button:last-child {
+    background: #f5f5f5;
+    color: var(--text-color);
+}
+
+.details-actions button:hover {
+    opacity: 0.9;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .details-header {
+        grid-template-columns: 1fr;
+        text-align: center;
+    }
+
+    .details-header img {
+        margin: 0 auto;
+    }
+
+    .details-actions {
+        flex-direction: column;
+    }
+    
+    /* Minimal equal padding for details container on mobile */
+    .details-container {
+        padding: 1rem;
+    }
+}
+
+/* Accessibility */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Toast Notification Styles */
+#toast-container {
+    max-width: 400px;
+    pointer-events: none;
+}
+
+.toast-notification {
+    opacity: 0;
+    transform: translateX(100%);
+    max-width: 100%;
+    word-wrap: break-word;
+    pointer-events: auto;
+}
+
+.toast-notification.toast-visible {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+/* Disabled button styles for queued/downloading states */
+button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Search wrapper and input - base styles */
+.search-wrapper {
+    width: 100%;
+}
+
+.search-input {
+    min-width: 0; /* Allow input to shrink on mobile flex containers */
+}
+
+/* ============================================
+   MOBILE: Full viewport width, no fixed widths
+   ============================================ */
+@media (max-width: 639px) {
+    /* Break search section out to full viewport width, escaping the centered main container */
+    #search-section {
+        position: relative;
+        left: 50%;
+        right: 50%;
+        margin-left: -50vw;
+        margin-right: -50vw;
+        width: 100vw;
+        padding-left: 1rem;
+        padding-right: 1rem;
+        box-sizing: border-box;
+    }
+    
+    /* Remove any width constraints on search wrapper */
+    .search-wrapper {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: none !important;
+    }
+    
+    /* Ensure flex containers are full width */
+    .search-wrapper > .flex,
+    #search-filters {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+    }
+}
+
+/* ============================================
+   DESKTOP: Fixed px widths for consistency
+   ============================================ */
+/* Medium screens (small tablets/large phones): 640px - 1023px */
+@media (min-width: 640px) and (max-width: 1023px) {
+    .search-wrapper {
+        width: 600px; /* Fixed width for medium screens */
+        max-width: 600px; /* Prevent expansion */
+    }
+}
+
+/* Large screens (desktop): 1024px+ */
+@media (min-width: 1024px) {
+    .search-wrapper {
+        width: 800px; /* Fixed width for large screens */
+        max-width: 800px; /* Prevent expansion */
+    }
+}
+
+/* Search section base styles - always center horizontally on desktop */
+#search-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Keep search box centered horizontally */
+}
+
+/* Center search section vertically when in initial state (no results, no queue) */
+/* Responsive to different window sizes */
+.search-initial-state {
+    flex: 1;
+    justify-content: center; /* Only add vertical centering in initial state */
+}
+
+/* Mobile-friendly book card layout */
+/* On mobile (below 640px), use horizontal layout: image left, text right, buttons below */
+/* Desktop remains unchanged - full width, full height artwork via Tailwind classes */
+@media (max-width: 639px) {
+    .book-card-content {
+        flex-direction: row !important;
+        gap: 0.75rem !important;
+        align-items: flex-start;
+    }
+    
+    .book-card-cover {
+        width: 50% !important;
+        height: auto !important;
+        flex-shrink: 0;
+        aspect-ratio: 2/3; /* Maintain book cover proportions */
+    }
+    
+    .book-card-text {
+        width: 50% !important;
+        flex-shrink: 0;
+        padding-left: 0.5rem;
+    }
+    
+    .book-card-buttons {
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+}
+
+/* Desktop: align details and buttons to bottom, artwork stays at top */
+@media (min-width: 640px) {
+    .book-card {
+        /* Ensure card can grow to accommodate content */
+        display: flex;
+        flex-direction: column;
+        height: 100%; /* Ensure card fills grid cell height */
+    }
+    
+    .book-card-content {
+        /* Grow to fill available space, pushing buttons to bottom */
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0; /* Allow flex shrinking */
+    }
+    
+    .book-card-cover {
+        /* Artwork stays at top, doesn't grow */
+        flex-shrink: 0;
+    }
+    
+    .book-card-text {
+        /* Push text to bottom of content area, right above buttons */
+        margin-top: auto;
+        flex: 0 0 auto !important; /* Override flex-1 from HTML, don't grow or shrink */
+    }
+}
+
+/* Fix download button text clipping on mobile */
+.download-button-text {
+    white-space: nowrap;
+    overflow: visible;
+    flex-shrink: 0;
+    display: inline-block;
+}
+
+/* Ensure download buttons can accommodate their text content */
+[data-action="download"],
+#download-button {
+    min-width: 0;
+    overflow: visible;
+    width: 100%;
+}
+
+/* On mobile, ensure button text is fully visible */
+@media (max-width: 639px) {
+    /* Ensure button container allows overflow */
+    .book-card-buttons {
+        overflow: visible;
+    }
+    
+    /* Make sure download buttons can expand to fit their content */
+    [data-action="download"],
+    #download-button {
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow: visible;
+        box-sizing: border-box;
+    }
+    
+    /* Make text span flexible to use available space */
+    .download-button-text {
+        white-space: nowrap;
+        overflow: visible;
+        /* Take up all available space in the button, allow shrinking if needed */
+        flex: 1 1 0%;
+        min-width: 0;
+        display: block;
+        /* Center text within its available space */
+        text-align: center;
+        box-sizing: border-box;
+        /* Force layout recalculation by ensuring the element is treated as a flex item */
+        position: relative;
+    }
+    
+    /* Ensure button's flex container properly distributes space on mobile */
+    [data-action="download"].flex,
+    #download-button.flex {
+        /* Ensure gap doesn't cause issues */
+        gap: 0.5rem;
+    }
+    
+    /* Ensure spinner doesn't interfere with text layout */
+    .download-spinner {
+        flex-shrink: 0;
+        flex-grow: 0;
+        width: 1rem;
+        height: 1rem;
+    }
+}
+
+/* Sticky Header with Gradient Fade Effect */
+.header-with-fade {
+    overflow: visible;
+}
+
+.header-with-fade::after {
+    content: '';
+    position: absolute;
+    bottom: -20px;
+    left: 0;
+    right: 0;
+    height: 20px;
+    /* Use background-color instead of gradient with CSS variables for smooth transitions */
+    background: var(--bg);
+    opacity: 1;
+    pointer-events: none;
+    /* Create fade effect using mask instead of gradient */
+    mask-image: linear-gradient(to bottom, black 0%, black 20%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 0%, black 20%, transparent 100%);
+    transition: background-color 0.2s ease, opacity 0.2s ease;
+}
+
+/* Skeleton Loader Animation */
+@keyframes shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+.animate-pulse {
+    background-size: 200% 100%;
+    animation: shimmer 2s ease-in-out infinite;
+}

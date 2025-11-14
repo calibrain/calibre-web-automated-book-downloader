@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="Calibre Web Book Downloader - Modern UI" />
+    
+    <!-- Theme color with media queries for light/dark mode -->
+    <meta name="theme-color" content="#f8f8f8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)" />
+    
+    <!-- iOS PWA Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Book Downloader" />
+    
+    <!-- App Icons -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+    <title>Book Downloader</title>
+    <script>
+      // Apply theme immediately before first paint to prevent flash
+      (function() {
+        const savedTheme = localStorage.getItem('preferred-theme') || 'auto';
+        let theme = savedTheme;
+        
+        if (savedTheme === 'auto') {
+          theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        
+        document.documentElement.setAttribute('data-theme', theme);
+        
+        // Add class to prevent transitions on initial load
+        document.documentElement.classList.add('preload');
+      })();
+    </script>
+  </head>
+  <body style="background: var(--bg); color: var(--text);">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

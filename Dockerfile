@@ -1,3 +1,20 @@
+# Frontend build stage
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /frontend
+
+# Copy frontend package files
+COPY src/frontend/package*.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy frontend source
+COPY src/frontend/ ./
+
+# Build the frontend
+RUN npm run build
+
 # Use python-slim as the base image
 FROM python:3.10-slim AS base
 
@@ -69,6 +86,9 @@ RUN pip install --no-cache-dir -r requirements-base.txt && \
 
 # Copy application code *after* dependencies are installed
 COPY . .
+
+# Copy built frontend from frontend-builder stage
+COPY --from=frontend-builder /frontend/dist /app/frontend-dist
 
 # Final setup: permissions and directories in one layer
 # Only creating directories and setting executable bits.

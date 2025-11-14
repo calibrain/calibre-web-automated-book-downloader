@@ -4,7 +4,9 @@ import logging
 import io, re, os
 import sqlite3
 from functools import wraps
-from flask import Flask, request, jsonify, render_template, send_file, send_from_directory
+from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask_cors import CORS
+from flask_socketio import SocketIO, emit
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 from werkzeug.wrappers import Response
@@ -13,16 +15,59 @@ import typing
 
 from logger import setup_logger
 from config import _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE, SUPPORTED_FORMATS
-from env import FLASK_HOST, FLASK_PORT, APP_ENV, CWA_DB_PATH, DEBUG, USING_EXTERNAL_BYPASSER, BUILD_VERSION, RELEASE_VERSION
+from env import FLASK_HOST, FLASK_PORT, APP_ENV, CWA_DB_PATH, DEBUG, USING_EXTERNAL_BYPASSER, BUILD_VERSION, RELEASE_VERSION, CALIBRE_WEB_URL
 import backend
 
 from models import SearchFilters
+from websocket_manager import ws_manager
 
 logger = setup_logger(__name__)
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app)  # type: ignore
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching
 app.config['APPLICATION_ROOT'] = '/'
+
+# Determine async mode based on environment
+# In production with Gunicorn + gevent worker, use 'gevent'
+# In development with Flask dev server, use 'threading'
+if APP_ENV == 'prod':
+    async_mode = 'gevent'
+else:
+    async_mode = 'threading'
+
+# Initialize Flask-SocketIO with reverse proxy support
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode=async_mode,
+    logger=False,
+    engineio_logger=False,
+    # Reverse proxy / Traefik compatibility settings
+    path='/socket.io',
+    ping_timeout=60,  # Time to wait for pong response
+    ping_interval=25,  # Send ping every 25 seconds
+    # Allow both websocket and polling for better compatibility
+    transports=['websocket', 'polling'],
+    # Enable CORS for all origins (you can restrict this in production)
+    allow_upgrades=True,
+    # Important for proxies that buffer
+    http_compression=True
+)
+
+# Initialize WebSocket manager
+ws_manager.init_app(app, socketio)
+logger.info(f"Flask-SocketIO initialized with async_mode='{async_mode}'")
+
+# Enable CORS in development mode for local frontend development
+if DEBUG:
+    CORS(app, resources={
+        r"/*": {
+            "origins": ["http://localhost:5173", "http://127.0.0.1:5173"],
+            "supports_credentials": True,
+            "allow_headers": ["Content-Type", "Authorization"],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+        }
+    })
 
 # Flask logger
 app.logger.handlers = logger.handlers
@@ -91,35 +136,45 @@ def register_dual_routes(app : Flask) -> None:
 
 def url_for_with_request(endpoint : str, **values : typing.Any) -> str:
     """Generate URLs with /request prefix by default."""
-    if endpoint == 'static':
+    if endpoint == 'static' or endpoint == 'serve_frontend_assets':
         # For static files, add /request prefix
         url = flask_url_for(endpoint, **values)
         return f"/request{url}"
     return flask_url_for(endpoint, **values)
 
+# Serve frontend static files
+@app.route('/assets/<path:filename>')
+def serve_frontend_assets(filename: str) -> Response:
+    """
+    Serve static assets from the built frontend.
+    """
+    return send_from_directory(os.path.join(app.root_path, 'frontend-dist', 'assets'), filename)
+
 @app.route('/')
 @login_required
-def index() -> str:
+def index() -> Response:
     """
-    Render main page with search and status table.
+    Serve the React frontend application.
     """
-    return render_template('index.html', 
-                           book_languages=_SUPPORTED_BOOK_LANGUAGE, 
-                           default_language=BOOK_LANGUAGE, 
-                           supported_formats=SUPPORTED_FORMATS,
-                           debug=DEBUG,
-                           build_version=BUILD_VERSION,
-                           release_version=RELEASE_VERSION,
-                           app_env=APP_ENV
-                           )
+    return send_from_directory(os.path.join(app.root_path, 'frontend-dist'), 'index.html')
 
- 
+@app.route('/logo.png')
+def logo() -> Response:
+    """
+    Serve logo from built frontend assets.
+    """
+    return send_from_directory(os.path.join(app.root_path, 'frontend-dist'),
+        'logo.png', mimetype='image/png')
 
+@app.route('/favicon.ico')
 @app.route('/favico<path:_>')
 @app.route('/request/favico<path:_>')
 @app.route('/request/static/favico<path:_>')
-def favicon(_ : typing.Any) -> Response:
-    return send_from_directory(os.path.join(app.root_path, 'static', 'media'),
+def favicon(_ : typing.Any = None) -> Response:
+    """
+    Serve favicon from built frontend assets.
+    """
+    return send_from_directory(os.path.join(app.root_path, 'frontend-dist'),
         'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
 from typing import Union, Tuple
@@ -265,6 +320,28 @@ def api_download() -> Union[Response, Tuple[Response, int]]:
         return jsonify({"error": "Failed to queue book"}), 500
     except Exception as e:
         logger.error_trace(f"Download error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/config', methods=['GET'])
+@login_required
+def api_config() -> Union[Response, Tuple[Response, int]]:
+    """
+    Get application configuration for frontend.
+    """
+    try:
+        config = {
+            "calibre_web_url": CALIBRE_WEB_URL,
+            "debug": DEBUG,
+            "app_env": APP_ENV,
+            "build_version": BUILD_VERSION,
+            "release_version": RELEASE_VERSION,
+            "book_languages": _SUPPORTED_BOOK_LANGUAGE,
+            "default_language": BOOK_LANGUAGE,
+            "supported_formats": SUPPORTED_FORMATS
+        }
+        return jsonify(config)
+    except Exception as e:
+        logger.error_trace(f"Config error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/status', methods=['GET'])
@@ -451,6 +528,11 @@ def api_clear_completed() -> Union[Response, Tuple[Response, int]]:
     """
     try:
         removed_count = backend.clear_completed()
+        
+        # Broadcast status update after clearing
+        if ws_manager and ws_manager.is_enabled():
+            ws_manager.broadcast_status_update(backend.queue_status())
+        
         return jsonify({"status": "cleared", "removed_count": removed_count})
     except Exception as e:
         logger.error_trace(f"Clear completed error: {e}")
@@ -528,15 +610,59 @@ def authenticate() -> bool:
     logger.info(f"Authentication successful for user {username}")
     return True
 
+# Catch-all route for React Router (must be last)
+# This handles client-side routing by serving index.html for any unmatched routes
+@app.route('/<path:path>')
+@login_required
+def catch_all(path: str) -> Response:
+    """
+    Serve the React app for any route not matched by API endpoints.
+    This allows React Router to handle client-side routing.
+    """
+    # If the request is for an API endpoint or static file, let it 404
+    if path.startswith('api/') or path.startswith('assets/'):
+        return jsonify({"error": "Resource not found"}), 404
+    # Otherwise serve the React app
+    return send_from_directory(os.path.join(app.root_path, 'frontend-dist'), 'index.html')
+
 # Register all routes with /request prefix
 register_dual_routes(app)
+
+# WebSocket event handlers
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection."""
+    logger.info("WebSocket client connected")
+    # Send initial status to the newly connected client
+    try:
+        status = backend.queue_status()
+        emit('status_update', status)
+    except Exception as e:
+        logger.error(f"Error sending initial status: {e}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection."""
+    logger.info("WebSocket client disconnected")
+
+@socketio.on('request_status')
+def handle_status_request():
+    """Handle manual status request from client."""
+    try:
+        status = backend.queue_status()
+        emit('status_update', status)
+    except Exception as e:
+        logger.error(f"Error handling status request: {e}")
+        emit('error', {'message': 'Failed to get status'})
 
 logger.log_resource_usage()
 
 if __name__ == '__main__':
-    logger.info(f"Starting Flask application on {FLASK_HOST}:{FLASK_PORT} IN {APP_ENV} mode")
-    app.run(
+    logger.info(f"Starting Flask application with WebSocket support on {FLASK_HOST}:{FLASK_PORT} IN {APP_ENV} mode")
+    socketio.run(
+        app,
         host=FLASK_HOST,
         port=FLASK_PORT,
-        debug=DEBUG 
+        debug=DEBUG,
+        allow_unsafe_werkzeug=True  # For development only
     )
