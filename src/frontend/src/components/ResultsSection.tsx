@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Book, ButtonStateInfo } from '../types';
 import { BookCard } from './BookCard';
 
@@ -16,34 +17,124 @@ export const ResultsSection = ({
   onDownload,
   getButtonState,
 }: ResultsSectionProps) => {
+  const [viewMode, setViewMode] = useState<'card' | 'compact'>(() => {
+    const saved = localStorage.getItem('bookViewMode');
+    return (saved === 'card' || saved === 'compact') ? saved : 'card';
+  });
+
+  const [isMultiColumn, setIsMultiColumn] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('bookViewMode', viewMode);
+  }, [viewMode]);
+
+  // Track whether we're in multi-column layout (sm breakpoint and above)
+  useEffect(() => {
+    const checkMultiColumn = () => {
+      setIsMultiColumn(window.innerWidth >= 640); // sm breakpoint - 2+ columns
+    };
+    
+    checkMultiColumn();
+    window.addEventListener('resize', checkMultiColumn);
+    return () => window.removeEventListener('resize', checkMultiColumn);
+  }, []);
+
   if (!visible) return null;
 
   return (
     <section id="results-section" className="mb-8">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-xl font-semibold animate-fade-in-up">Search Results</h2>
+        
+        {/* View toggle buttons - only show when multi-column layout */}
+        {isMultiColumn && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setViewMode('card')}
+              className={`p-2 rounded-full transition-all duration-200 ${
+                viewMode === 'card'
+                  ? 'text-white bg-sky-700 hover:bg-sky-800'
+                  : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100'
+              }`}
+              title="Card view"
+              aria-label="Card view"
+              aria-pressed={viewMode === 'card'}
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                strokeWidth="1.5"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z"
+                />
+              </svg>
+            </button>
+            <button
+              onClick={() => setViewMode('compact')}
+              className={`p-2 rounded-full transition-all duration-200 ${
+                viewMode === 'compact'
+                  ? 'text-white bg-sky-700 hover:bg-sky-800'
+                  : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100'
+              }`}
+              title="Compact view"
+              aria-label="Compact view"
+              aria-pressed={viewMode === 'compact'}
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                strokeWidth="1.5"
+              >
+                <rect x="3.75" y="4.5" width="6" height="6" rx="1.125" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6h8.25M12 8.25h6" />
+                <rect x="3.75" y="13.5" width="6" height="6" rx="1.125" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15h8.25M12 17.25h6" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
       <div
         id="results-grid"
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8 items-stretch"
+        className={`grid gap-8 ${
+          !isMultiColumn
+            ? 'grid-cols-1 items-start'
+            : viewMode === 'card'
+            ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 items-stretch'
+            : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 items-start'
+        }`}
       >
-        {books.map((book, index) => (
-          <div
-            key={book.id}
-            className="animate-slide-up"
-            style={{
-              animationDelay: `${index * 50}ms`,
-              animationFillMode: 'both',
-            }}
-          >
-            <BookCard
-              book={book}
-              onDetails={onDetails}
-              onDownload={onDownload}
-              buttonState={getButtonState(book.id)}
-            />
-          </div>
-        ))}
+        {books.map((book, index) => {
+          // Single column: always compact. Multi-column: use selected viewMode
+          const effectiveVariant = isMultiColumn ? viewMode : 'compact';
+          
+          return (
+            <div
+              key={book.id}
+              className="animate-slide-up"
+              style={{
+                animationDelay: `${index * 50}ms`,
+                animationFillMode: 'both',
+              }}
+            >
+              <BookCard
+                book={book}
+                onDetails={onDetails}
+                onDownload={onDownload}
+                buttonState={getButtonState(book.id)}
+                variant={effectiveVariant}
+                showDetailsButton={!isMultiColumn}
+              />
+            </div>
+          );
+        })}
       </div>
       {books.length === 0 && (
         <div className="mt-4 text-sm opacity-80">No results found.</div>

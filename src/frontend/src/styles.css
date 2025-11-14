@@ -511,35 +511,10 @@ button:disabled {
         overflow: visible;
     }
     
-    /* Make sure download buttons can expand to fit their content */
-    [data-action="download"],
-    #download-button {
-        min-width: 0;
-        flex: 1 1 auto;
-        overflow: visible;
-        box-sizing: border-box;
-    }
-    
     /* Make text span flexible to use available space */
     .download-button-text {
         white-space: nowrap;
         overflow: visible;
-        /* Take up all available space in the button, allow shrinking if needed */
-        flex: 1 1 0%;
-        min-width: 0;
-        display: block;
-        /* Center text within its available space */
-        text-align: center;
-        box-sizing: border-box;
-        /* Force layout recalculation by ensuring the element is treated as a flex item */
-        position: relative;
-    }
-    
-    /* Ensure button's flex container properly distributes space on mobile */
-    [data-action="download"].flex,
-    #download-button.flex {
-        /* Ensure gap doesn't cause issues */
-        gap: 0.5rem;
     }
     
     /* Ensure spinner doesn't interfere with text layout */
