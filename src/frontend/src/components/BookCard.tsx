@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Book, ButtonStateInfo } from '../types';
-import { CircularProgress } from './CircularProgress';
+import { BookDownloadButton } from './BookDownloadButton';
 
 const SkeletonLoader = () => (
   <div className="w-full h-full bg-gradient-to-r from-gray-300 via-gray-200 to-gray-300 dark:from-gray-700 dark:via-gray-600 dark:to-gray-700 animate-pulse" />
@@ -16,29 +16,10 @@ interface BookCardProps {
 }
 
 export const BookCard = ({ book, onDetails, onDownload, buttonState, variant = 'card', showDetailsButton = false }: BookCardProps) => {
-  const [isQueuing, setIsQueuing] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
-
-  // Clear queuing state once button state changes from download
-  useEffect(() => {
-    if (isQueuing && buttonState.state !== 'download') {
-      setIsQueuing(false);
-    }
-  }, [buttonState.state, isQueuing]);
-
-  const isCompleted = buttonState.state === 'completed';
-  const hasError = buttonState.state === 'error';
-  const isInProgress = ['queued', 'resolving', 'bypassing', 'downloading', 'verifying', 'ingesting'].includes(buttonState.state);
-  const isDisabled = buttonState.state !== 'download' || isQueuing || isCompleted;
-  const displayText = isQueuing ? 'Queuing...' : buttonState.text;
-
-  // Show circular progress only for downloading state with progress data
-  const showCircularProgress = buttonState.state === 'downloading' && buttonState.progress !== undefined;
-  // Show spinner for other in-progress states or when queuing
-  const showSpinner = (isInProgress && !showCircularProgress) || isQueuing;
 
   const handleDetails = async (id: string) => {
     setIsLoadingDetails(true);
@@ -46,15 +27,6 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState, variant = '
       await onDetails(id);
     } finally {
       setIsLoadingDetails(false);
-    }
-  };
-
-  const handleDownload = async () => {
-    setIsQueuing(true);
-    try {
-      await onDownload(book);
-    } catch (error) {
-      setIsQueuing(false);
     }
   };
 
@@ -175,84 +147,36 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState, variant = '
             </div>
 
             {/* Buttons - either single Download button or Details + Download */}
-          {showDetailsButton ? (
-            <div className="flex gap-1.5">
-              <button
-                className="px-2 py-1.5 rounded border text-xs flex-shrink-0 flex items-center justify-center gap-1"
-                onClick={() => handleDetails(book.id)}
-                style={{ borderColor: 'var(--border-muted)' }}
-                disabled={isLoadingDetails}
-              >
-                <span className="details-button-text">
-                  {isLoadingDetails ? 'Loading' : 'Details'}
-                </span>
-                {isLoadingDetails && (
-                  <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                )}
-              </button>
-              <button
-                className={`px-2 py-1.5 rounded text-white text-xs flex-1 flex items-center justify-center gap-1 ${
-                  isCompleted
-                    ? 'bg-green-600 cursor-not-allowed'
-                    : hasError
-                    ? 'bg-red-600 cursor-not-allowed opacity-75'
-                    : isInProgress
-                    ? 'bg-gray-500 cursor-not-allowed opacity-75'
-                    : 'bg-sky-700 hover:bg-sky-800'
-                }`}
-                onClick={handleDownload}
-                disabled={isDisabled || isInProgress}
-                data-action="download"
-              >
-                <span className="download-button-text">{displayText}</span>
-                {isCompleted && (
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
-                {hasError && (
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                )}
-                {showCircularProgress && <CircularProgress progress={buttonState.progress} size={12} />}
-                {showSpinner && (
-                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                )}
-              </button>
-            </div>
-          ) : (
-            <button
-              className={`w-full px-2 py-1.5 rounded text-white text-xs flex items-center justify-center gap-1 ${
-                isCompleted
-                  ? 'bg-green-600 cursor-not-allowed'
-                  : hasError
-                  ? 'bg-red-600 cursor-not-allowed opacity-75'
-                  : isInProgress
-                  ? 'bg-gray-500 cursor-not-allowed opacity-75'
-                  : 'bg-sky-700 hover:bg-sky-800'
-              }`}
-              onClick={handleDownload}
-              disabled={isDisabled || isInProgress}
-              data-action="download"
-            >
-              <span className="download-button-text">{displayText}</span>
-              {isCompleted && (
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              )}
-              {hasError && (
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              )}
-              {showCircularProgress && <CircularProgress progress={buttonState.progress} size={12} />}
-              {showSpinner && (
-                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              )}
-            </button>
-          )}
+            {showDetailsButton ? (
+              <div className="flex gap-1.5">
+                <button
+                  className="px-2 py-1.5 rounded border text-xs flex-shrink-0 flex items-center justify-center gap-1"
+                  onClick={() => handleDetails(book.id)}
+                  style={{ borderColor: 'var(--border-muted)' }}
+                  disabled={isLoadingDetails}
+                >
+                  <span className="details-button-text">
+                    {isLoadingDetails ? 'Loading' : 'Details'}
+                  </span>
+                  {isLoadingDetails && (
+                    <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  )}
+                </button>
+                <BookDownloadButton
+                  buttonState={buttonState}
+                  onDownload={() => onDownload(book)}
+                  size="sm"
+                  className="flex-1"
+                />
+              </div>
+            ) : (
+              <BookDownloadButton
+                buttonState={buttonState}
+                onDownload={() => onDownload(book)}
+                size="sm"
+                fullWidth
+              />
+            )}
           </div>
         </div>
       </article>
@@ -388,74 +312,26 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState, variant = '
               }`}
             />
           </button>
-          <button
-            className={`px-2 py-1.5 rounded text-white text-xs flex-1 flex items-center justify-center gap-1 ${
-              isCompleted
-                ? 'bg-green-600 cursor-not-allowed'
-                : hasError
-                ? 'bg-red-600 cursor-not-allowed opacity-75'
-                : isInProgress
-                ? 'bg-gray-500 cursor-not-allowed opacity-75'
-                : 'bg-sky-700 hover:bg-sky-800'
-            }`}
-            onClick={handleDownload}
-            disabled={isDisabled || isInProgress}
-            data-action="download"
-          >
-            <span className="download-button-text">{displayText}</span>
-            {isCompleted && (
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            )}
-            {hasError && (
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            )}
-            {showCircularProgress && <CircularProgress progress={buttonState.progress} size={12} />}
-            {showSpinner && (
-              <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            )}
-          </button>
+          <BookDownloadButton
+            buttonState={buttonState}
+            onDownload={() => onDownload(book)}
+            size="sm"
+            className="flex-1"
+          />
         </div>
       </div>
 
       {/* Desktop: Full-width Download button at bottom */}
-      <button
-        className={`hidden sm:flex w-full px-4 py-3 text-white text-sm items-center justify-center gap-2 ${
-          isCompleted
-            ? 'bg-green-600 cursor-not-allowed'
-            : hasError
-            ? 'bg-red-600 cursor-not-allowed opacity-75'
-            : isInProgress
-            ? 'bg-gray-500 cursor-not-allowed opacity-75'
-            : 'bg-sky-700 hover:bg-sky-800'
-        }`}
-        onClick={handleDownload}
-        disabled={isDisabled || isInProgress}
-        data-action="download"
+      <BookDownloadButton
+        buttonState={buttonState}
+        onDownload={() => onDownload(book)}
+        className="hidden sm:flex rounded-none"
+        fullWidth
         style={{
           borderBottomLeftRadius: '.75rem',
-          borderBottomRightRadius: '.75rem'
+          borderBottomRightRadius: '.75rem',
         }}
-      >
-        <span className="download-button-text">{displayText}</span>
-        {isCompleted && (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-        )}
-        {hasError && (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        )}
-        {showCircularProgress && <CircularProgress progress={buttonState.progress} size={16} />}
-        {showSpinner && (
-          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-        )}
-      </button>
+      />
     </article>
   );
 };

@@ -80,11 +80,11 @@ export const SearchSection = ({
       className={`transition-all duration-500 ease-in-out ${
         isInitialState 
           ? 'search-initial-state mb-6' 
-          : 'mb-0'
+          : 'mb-3 sm:mb-4'
       }`}
     >
-      <div className={`flex items-center justify-center gap-3 mb-8 transition-all duration-300 ${
-        isInitialState ? 'opacity-100' : 'opacity-0 h-0 mb-0 overflow-hidden'
+      <div className={`flex items-center justify-center gap-3 transition-all duration-300 ${
+        isInitialState ? 'opacity-100 mb-6 sm:mb-8' : 'opacity-0 h-0 mb-0 overflow-hidden'
       }`}>
         <img src={logoUrl} alt="Logo" className="h-8 w-8" />
         <h1 className="text-2xl font-semibold">Book Search & Download</h1>
