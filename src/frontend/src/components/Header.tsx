@@ -135,7 +135,7 @@ export const Header = ({
           href={calibreWebUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200"
+          className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 text-gray-900 dark:text-gray-100"
           aria-label="Open Calibre-Web"
           title="Go To Library"
         >
@@ -150,7 +150,7 @@ export const Header = ({
       {onDownloadsClick && (
         <button
           onClick={onDownloadsClick}
-          className="relative flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200"
+          className="relative flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 text-gray-900 dark:text-gray-100"
           aria-label="View downloads"
           title="Downloads"
         >

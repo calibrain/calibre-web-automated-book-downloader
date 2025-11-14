@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, CSSProperties } from 'react';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { Book, StatusData, ButtonStateInfo, AppConfig, LoginCredentials } from './types';
 import { searchBooks, getBookInfo, downloadBook, cancelDownload, clearCompleted, getConfig, login, logout, checkAuth, AuthenticationError } from './services/api';
 import { useToast } from './hooks/useToast';
@@ -11,7 +12,7 @@ import { DetailsModal } from './components/DetailsModal';
 import { DownloadsSidebar } from './components/DownloadsSidebar';
 import { ToastContainer } from './components/ToastContainer';
 import { Footer } from './components/Footer';
-import { LoginModal } from './components/LoginModal';
+import { LoginPage } from './pages/LoginPage';
 import { DEFAULT_LANGUAGES, DEFAULT_SUPPORTED_FORMATS } from './data/languages';
 import './styles.css';
 
@@ -19,9 +20,10 @@ function App() {
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [authRequired, setAuthRequired] = useState<boolean>(true);
-  const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+  const navigate = useNavigate();
   
   const [books, setBooks] = useState<Book[]>([]);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
@@ -146,17 +148,13 @@ function App() {
         
         setAuthRequired(authIsRequired);
         setIsAuthenticated(authenticated);
-        
-        // Only show login modal if auth is required AND not authenticated
-        if (authIsRequired && !authenticated) {
-          setShowLoginModal(true);
-        }
       } catch (error) {
         console.error('Auth check failed:', error);
         // On error, assume auth is required and user is not authenticated
         setAuthRequired(true);
         setIsAuthenticated(false);
-        setShowLoginModal(true);
+      } finally {
+        setAuthChecked(true);
       }
     };
     verifyAuth();
@@ -170,8 +168,8 @@ function App() {
       const response = await login(credentials);
       if (response.success) {
         setIsAuthenticated(true);
-        setShowLoginModal(false);
         setLoginError(null);
+        navigate('/', { replace: true });
       } else {
         setLoginError(response.error || 'Login failed');
       }
@@ -190,11 +188,11 @@ function App() {
     try {
       await logout();
       setIsAuthenticated(false);
-      setShowLoginModal(true);
       // Clear application state
       setBooks([]);
       setSelectedBook(null);
       setSearchInput('');
+      navigate('/login', { replace: true });
     } catch (error) {
       console.error('Logout failed:', error);
       showToast('Logout failed', 'error');
@@ -253,7 +251,9 @@ function App() {
     } catch (error) {
       if (error instanceof AuthenticationError) {
         setIsAuthenticated(false);
-        setShowLoginModal(true);
+        if (authRequired) {
+          navigate('/login', { replace: true });
+        }
       } else {
         console.error('Search failed:', error);
         setBooks([]);
@@ -368,116 +368,149 @@ function App() {
     return { text: 'Download', state: 'download' };
   }, [currentStatus]);
 
-  return (
+  const mainAppContent = (
     <>
-      {/* Login Modal */}
-      {showLoginModal && (
-        <LoginModal
-          onLogin={handleLogin}
-          error={loginError}
-          isLoading={isLoggingIn}
+      <Header 
+        calibreWebUrl={config?.calibre_web_url || ''} 
+        debug={config?.debug || false}
+        logoUrl="/logo.png"
+        showSearch={!isInitialState}
+        searchInput={searchInput}
+        onSearchChange={setSearchInput}
+        onDownloadsClick={() => setDownloadsSidebarOpen(true)}
+        statusCounts={statusCounts}
+        onLogoClick={handleResetSearch}
+        authRequired={authRequired}
+        isAuthenticated={isAuthenticated}
+        onLogout={handleLogout}
+        onSearch={() => {
+          const q: string[] = [];
+          const basic = searchInput.trim();
+          if (basic) q.push(`query=${encodeURIComponent(basic)}`);
+          
+          if (showAdvanced) {
+            if (advancedFilters.isbn) q.push(`isbn=${encodeURIComponent(advancedFilters.isbn)}`);
+            if (advancedFilters.author) q.push(`author=${encodeURIComponent(advancedFilters.author)}`);
+            if (advancedFilters.title) q.push(`title=${encodeURIComponent(advancedFilters.title)}`);
+            if (advancedFilters.lang && advancedFilters.lang !== 'all') q.push(`lang=${encodeURIComponent(advancedFilters.lang)}`);
+            if (advancedFilters.sort) q.push(`sort=${encodeURIComponent(advancedFilters.sort)}`);
+            if (advancedFilters.content) q.push(`content=${encodeURIComponent(advancedFilters.content)}`);
+            advancedFilters.formats.forEach(f => q.push(`format=${encodeURIComponent(f)}`));
+          }
+          
+          handleSearch(q.join('&'));
+        }}
+        onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
+        isLoading={isSearching}
+      />
+      
+      <AdvancedFilters
+        visible={showAdvanced && !isInitialState}
+        bookLanguages={config?.book_languages || DEFAULT_LANGUAGES}
+        defaultLanguage={config?.default_language || 'en'}
+        supportedFormats={config?.supported_formats || DEFAULT_SUPPORTED_FORMATS}
+        onFiltersChange={setAdvancedFilters}
+      />
+      
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <SearchSection
+          onSearch={handleSearch}
+          isLoading={isSearching}
+          isInitialState={isInitialState}
+          bookLanguages={config?.book_languages || DEFAULT_LANGUAGES}
+          defaultLanguage={config?.default_language || 'en'}
+          supportedFormats={config?.supported_formats || DEFAULT_SUPPORTED_FORMATS}
+          logoUrl="/logo.png"
+          searchInput={searchInput}
+          onSearchInputChange={setSearchInput}
+          showAdvanced={showAdvanced}
+          onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
         />
-      )}
 
-      {/* Main App Content - Only render when authenticated */}
-      {isAuthenticated && (
-        <>
-          <Header 
-            calibreWebUrl={config?.calibre_web_url || ''} 
-            debug={config?.debug || false}
-            logoUrl="/logo.png"
-            showSearch={!isInitialState}
-            searchInput={searchInput}
-            onSearchChange={setSearchInput}
-            onDownloadsClick={() => setDownloadsSidebarOpen(true)}
-            statusCounts={statusCounts}
-            onLogoClick={handleResetSearch}
-            authRequired={authRequired}
-            isAuthenticated={isAuthenticated}
-            onLogout={handleLogout}
-            onSearch={() => {
-              const q: string[] = [];
-              const basic = searchInput.trim();
-              if (basic) q.push(`query=${encodeURIComponent(basic)}`);
-              
-              if (showAdvanced) {
-                if (advancedFilters.isbn) q.push(`isbn=${encodeURIComponent(advancedFilters.isbn)}`);
-                if (advancedFilters.author) q.push(`author=${encodeURIComponent(advancedFilters.author)}`);
-                if (advancedFilters.title) q.push(`title=${encodeURIComponent(advancedFilters.title)}`);
-                if (advancedFilters.lang && advancedFilters.lang !== 'all') q.push(`lang=${encodeURIComponent(advancedFilters.lang)}`);
-                if (advancedFilters.sort) q.push(`sort=${encodeURIComponent(advancedFilters.sort)}`);
-                if (advancedFilters.content) q.push(`content=${encodeURIComponent(advancedFilters.content)}`);
-                advancedFilters.formats.forEach(f => q.push(`format=${encodeURIComponent(f)}`));
-              }
-              
-              handleSearch(q.join('&'));
-            }}
-            onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
-            isLoading={isSearching}
+        <ResultsSection
+          books={books}
+          visible={hasResults}
+          onDetails={handleShowDetails}
+          onDownload={handleDownload}
+          getButtonState={getButtonState}
+        />
+
+        {selectedBook && (
+          <DetailsModal
+            book={selectedBook}
+            onClose={() => setSelectedBook(null)}
+            onDownload={handleDownload}
+            buttonState={getButtonState(selectedBook.id)}
           />
-          
-          <AdvancedFilters
-            visible={showAdvanced && !isInitialState}
-            bookLanguages={config?.book_languages || DEFAULT_LANGUAGES}
-            defaultLanguage={config?.default_language || 'en'}
-            supportedFormats={config?.supported_formats || DEFAULT_SUPPORTED_FORMATS}
-            onFiltersChange={setAdvancedFilters}
-          />
-          
-          <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <SearchSection
-              onSearch={handleSearch}
-              isLoading={isSearching}
-              isInitialState={isInitialState}
-              bookLanguages={config?.book_languages || DEFAULT_LANGUAGES}
-              defaultLanguage={config?.default_language || 'en'}
-              supportedFormats={config?.supported_formats || DEFAULT_SUPPORTED_FORMATS}
-              logoUrl="/logo.png"
-              searchInput={searchInput}
-              onSearchInputChange={setSearchInput}
-              showAdvanced={showAdvanced}
-              onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
-            />
+        )}
 
-            <ResultsSection
-              books={books}
-              visible={hasResults}
-              onDetails={handleShowDetails}
-              onDownload={handleDownload}
-              getButtonState={getButtonState}
-            />
+      </main>
 
-            {selectedBook && (
-              <DetailsModal
-                book={selectedBook}
-                onClose={() => setSelectedBook(null)}
-                onDownload={handleDownload}
-                buttonState={getButtonState(selectedBook.id)}
-              />
-            )}
-
-          </main>
-
-          <Footer 
-            buildVersion={config?.build_version || 'dev'} 
-            releaseVersion={config?.release_version || 'dev'} 
-            appEnv={config?.app_env || 'development'}
-          />
-          <ToastContainer toasts={toasts} />
-          
-          {/* Downloads Sidebar */}
-          <DownloadsSidebar
-            isOpen={downloadsSidebarOpen}
-            onClose={() => setDownloadsSidebarOpen(false)}
-            status={currentStatus}
-            onRefresh={fetchStatus}
-            onClearCompleted={handleClearCompleted}
-            onCancel={handleCancel}
-            activeCount={activeCount}
-          />
-        </>
-      )}
+      <Footer 
+        buildVersion={config?.build_version || 'dev'} 
+        releaseVersion={config?.release_version || 'dev'} 
+        appEnv={config?.app_env || 'development'}
+      />
+      <ToastContainer toasts={toasts} />
+      
+      {/* Downloads Sidebar */}
+      <DownloadsSidebar
+        isOpen={downloadsSidebarOpen}
+        onClose={() => setDownloadsSidebarOpen(false)}
+        status={currentStatus}
+        onRefresh={fetchStatus}
+        onClearCompleted={handleClearCompleted}
+        onCancel={handleCancel}
+        activeCount={activeCount}
+      />
     </>
+  );
+
+  const visuallyHiddenStyle: CSSProperties = {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    border: 0,
+  };
+
+  if (!authChecked) {
+    return (
+      <div aria-live="polite" style={visuallyHiddenStyle}>
+        Checking authentication…
+      </div>
+    );
+  }
+
+  const shouldRedirectFromLogin = !authRequired || isAuthenticated;
+  const appElement = authRequired && !isAuthenticated ? (
+    <Navigate to="/login" replace />
+  ) : (
+    mainAppContent
+  );
+
+  return (
+    <Routes>
+      <Route
+        path="/login"
+        element={
+          shouldRedirectFromLogin ? (
+            <Navigate to="/" replace />
+          ) : (
+            <LoginPage
+              onLogin={handleLogin}
+              error={loginError}
+              isLoading={isLoggingIn}
+            />
+          )
+        }
+      />
+      <Route path="/*" element={appElement} />
+    </Routes>
   );
 }
 

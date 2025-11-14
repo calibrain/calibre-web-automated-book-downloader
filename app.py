@@ -128,6 +128,17 @@ if DEBUG:
         }
     })
 
+# Custom log filter to exclude routine status endpoint polling
+class StatusEndpointFilter(logging.Filter):
+    """Filter out routine status endpoint requests to reduce log noise."""
+    def filter(self, record):
+        # Exclude GET /api/status and GET /request/api/status requests
+        if hasattr(record, 'getMessage'):
+            message = record.getMessage()
+            if 'GET /api/status' in message or 'GET /request/api/status' in message:
+                return False
+        return True
+
 # Flask logger
 app.logger.handlers = logger.handlers
 app.logger.setLevel(logger.level)
@@ -135,6 +146,8 @@ app.logger.setLevel(logger.level)
 werkzeug_logger = logging.getLogger('werkzeug')
 werkzeug_logger.handlers = logger.handlers
 werkzeug_logger.setLevel(logger.level)
+# Add filter to suppress routine status endpoint polling logs
+werkzeug_logger.addFilter(StatusEndpointFilter())
 
 # Set up authentication defaults
 # The secret key will reset every time we restart, which will
