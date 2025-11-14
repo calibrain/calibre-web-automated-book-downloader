@@ -11,9 +11,11 @@ interface BookCardProps {
   onDetails: (id: string) => Promise<void>;
   onDownload: (book: Book) => Promise<void>;
   buttonState: ButtonStateInfo;
+  variant?: 'card' | 'compact';
+  showDetailsButton?: boolean;
 }
 
-export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardProps) => {
+export const BookCard = ({ book, onDetails, onDownload, buttonState, variant = 'card', showDetailsButton = false }: BookCardProps) => {
   const [isQueuing, setIsQueuing] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -56,6 +58,208 @@ export const BookCard = ({ book, onDetails, onDownload, buttonState }: BookCardP
     }
   };
 
+  // Compact variant - recreates mobile layout for desktop
+  if (variant === 'compact') {
+    return (
+      <article
+        className="book-card overflow-hidden !flex !flex-row w-full !h-[180px] transition-shadow duration-300"
+        style={{ 
+          background: 'var(--bg-soft)',
+          borderRadius: '.75rem',
+          boxShadow: isHovered ? '0 10px 30px rgba(0, 0, 0, 0.15)' : 'none'
+        }}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >
+        {/* Book Cover Image - Fixed width on left */}
+        <div className="relative w-[120px] h-full flex-shrink-0">
+          {book.preview && !imageError ? (
+            <>
+              {!imageLoaded && (
+                <div className="absolute inset-0">
+                  <SkeletonLoader />
+                </div>
+              )}
+              <img
+                src={book.preview}
+                alt={book.title || 'Book cover'}
+                className="w-full h-full"
+                style={{
+                  opacity: imageLoaded ? 1 : 0,
+                  transition: 'opacity 0.3s ease-in-out',
+                  objectFit: 'cover',
+                  objectPosition: 'top'
+                }}
+                onLoad={() => setImageLoaded(true)}
+                onError={() => setImageError(true)}
+              />
+            </>
+          ) : (
+            <div
+              className="w-full h-full flex items-center justify-center text-sm opacity-50"
+              style={{ background: 'var(--border-muted)' }}
+            >
+              No Cover
+            </div>
+          )}
+
+          {/* Hover overlay */}
+          <div
+            className="absolute inset-0 bg-white transition-opacity duration-300 pointer-events-none"
+            style={{ opacity: isHovered ? 0.02 : 0 }}
+          />
+
+          {/* Info button - appears on hover, positioned bottom-right (only when Details button not shown) */}
+          {!showDetailsButton && (
+            <button
+              className="absolute bottom-2 right-2 w-8 h-8 rounded-full bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm flex items-center justify-center transition-all duration-300 shadow-lg hover:scale-110"
+              style={{ 
+                opacity: (isHovered || isLoadingDetails) ? 1 : 0,
+                pointerEvents: (isHovered || isLoadingDetails) ? 'auto' : 'none'
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDetails(book.id);
+              }}
+              disabled={isLoadingDetails}
+              aria-label="Book details"
+            >
+              {isLoadingDetails ? (
+                <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Book Details Section */}
+        <div className="p-3 py-2 flex flex-col flex-1 min-w-0">
+          <div className="space-y-0.5 min-w-0">
+            <h3 
+              className="font-semibold leading-tight line-clamp-3 text-base min-w-0" 
+              title={book.title || 'Untitled'}
+            >
+              {book.title || 'Untitled'}
+            </h3>
+            <p className="text-xs opacity-80 truncate min-w-0">{book.author || 'Unknown author'}</p>
+            <div className="text-[10px] opacity-70">
+              <span>{book.year || '-'}</span>
+            </div>
+          </div>
+
+          {/* Bottom section with details and buttons */}
+          <div className="mt-auto flex flex-col gap-2">
+            <div className="text-[10px] opacity-70 flex flex-wrap gap-1">
+              <span>{book.language || '-'}</span>
+              <span>•</span>
+              <span>{book.format || '-'}</span>
+              {book.size && (
+                <>
+                  <span>•</span>
+                  <span>{book.size}</span>
+                </>
+              )}
+            </div>
+
+            {/* Buttons - either single Download button or Details + Download */}
+          {showDetailsButton ? (
+            <div className="flex gap-1.5">
+              <button
+                className="px-2 py-1.5 rounded border text-xs flex-shrink-0 flex items-center justify-center gap-1"
+                onClick={() => handleDetails(book.id)}
+                style={{ borderColor: 'var(--border-muted)' }}
+                disabled={isLoadingDetails}
+              >
+                <span className="details-button-text">
+                  {isLoadingDetails ? 'Loading' : 'Details'}
+                </span>
+                {isLoadingDetails && (
+                  <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                )}
+              </button>
+              <button
+                className={`px-2 py-1.5 rounded text-white text-xs flex-1 flex items-center justify-center gap-1 ${
+                  isCompleted
+                    ? 'bg-green-600 cursor-not-allowed'
+                    : hasError
+                    ? 'bg-red-600 cursor-not-allowed opacity-75'
+                    : isInProgress
+                    ? 'bg-gray-500 cursor-not-allowed opacity-75'
+                    : 'bg-sky-700 hover:bg-sky-800'
+                }`}
+                onClick={handleDownload}
+                disabled={isDisabled || isInProgress}
+                data-action="download"
+              >
+                <span className="download-button-text">{displayText}</span>
+                {isCompleted && (
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+                {hasError && (
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                )}
+                {showCircularProgress && <CircularProgress progress={buttonState.progress} size={12} />}
+                {showSpinner && (
+                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                )}
+              </button>
+            </div>
+          ) : (
+            <button
+              className={`w-full px-2 py-1.5 rounded text-white text-xs flex items-center justify-center gap-1 ${
+                isCompleted
+                  ? 'bg-green-600 cursor-not-allowed'
+                  : hasError
+                  ? 'bg-red-600 cursor-not-allowed opacity-75'
+                  : isInProgress
+                  ? 'bg-gray-500 cursor-not-allowed opacity-75'
+                  : 'bg-sky-700 hover:bg-sky-800'
+              }`}
+              onClick={handleDownload}
+              disabled={isDisabled || isInProgress}
+              data-action="download"
+            >
+              <span className="download-button-text">{displayText}</span>
+              {isCompleted && (
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+              {hasError && (
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              )}
+              {showCircularProgress && <CircularProgress progress={buttonState.progress} size={12} />}
+              {showSpinner && (
+                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              )}
+            </button>
+          )}
+          </div>
+        </div>
+      </article>
+    );
+  }
+
+  // Card variant - existing layout with responsive design
   return (
     <article
       className="book-card overflow-hidden flex flex-col sm:flex-col max-sm:flex-row space-between w-full sm:max-w-[292px] max-sm:h-[180px] h-full transition-shadow duration-300"
