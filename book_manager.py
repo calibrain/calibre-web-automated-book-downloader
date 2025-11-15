@@ -227,15 +227,9 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     # Filter out divs that are not text
     original_divs = divs
-    divs = [div.text.strip() for div in divs if div.text.strip() != ""]
+    divs = [div for div in divs if div.text.strip() != ""]
 
-    separator_index = 6
-    for i, div in enumerate(divs):
-        if "·" in div.strip():
-            separator_index = i
-            break
-            
-    _details = divs[separator_index].lower().split(" · ")
+    _details = _find_in_divs(divs, " · ").split(" · ")
     format = ""
     size = ""
     for f in _details:
@@ -252,15 +246,15 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                 size = f.strip().lower()
 
     
-    book_title = divs[separator_index-3].strip("🔍")
+    book_title = _find_in_divs(divs, "🔍").strip("🔍").strip()
 
     # Extract basic information
     book_info = BookInfo(
         id=book_id,
         preview=preview,
         title=book_title,
-        publisher=divs[separator_index-1],
-        author=divs[separator_index-2],
+        publisher=_find_in_divs(divs, "icon-[mdi--company]", isClass=True),
+        author=_find_in_divs(divs, "icon-[mdi--user-edit]", isClass=True),
         format=format,
         size=size,
         download_urls=urls,
@@ -276,7 +270,21 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     if info.get("Year"):
         book_info.year = info["Year"][0]
 
+    # TODO :
+    # Backfill missing metadata from original book 
+    # To do this, we need to cache the results of search_books() in some kind of LRU
+
     return book_info
+
+def _find_in_divs(divs: List[str], text: str, isClass: bool = False) -> str:
+    for div in divs:
+        if isClass:
+            if div.find(class_ = text):
+                return div.text.strip()
+        else:
+            if text in div.text.strip():
+                return div.text.strip()
+    return ""
 
 def _get_download_urls_from_welib(book_id: str) -> set[str]:
     if ALLOW_USE_WELIB == False:
