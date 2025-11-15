@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Book, ButtonStateInfo } from '../types';
-import { BookCard } from './BookCard';
-import { BookListView } from './BookListView';
+import { CardView } from './resultsViews/CardView';
+import { CompactView } from './resultsViews/CompactView';
+import { ListView } from './resultsViews/ListView';
+import { Dropdown } from './Dropdown';
+import { SORT_OPTIONS } from '../data/filterOptions';
 
 interface ResultsSectionProps {
   books: Book[];
@@ -9,6 +12,8 @@ interface ResultsSectionProps {
   onDetails: (id: string) => Promise<void>;
   onDownload: (book: Book) => Promise<void>;
   getButtonState: (bookId: string) => ButtonStateInfo;
+  sortValue: string;
+  onSortChange: (value: string) => void;
 }
 
 export const ResultsSection = ({
@@ -17,6 +22,8 @@ export const ResultsSection = ({
   onDetails,
   onDownload,
   getButtonState,
+  sortValue,
+  onSortChange,
 }: ResultsSectionProps) => {
   const [viewMode, setViewMode] = useState<'card' | 'compact' | 'list'>(() => {
     const saved = localStorage.getItem('bookViewMode');
@@ -45,7 +52,7 @@ export const ResultsSection = ({
   return (
     <section id="results-section" className="mb-4 sm:mb-8 w-full">
       <div className="flex items-center justify-between mb-2 sm:mb-3">
-        <h2 className="text-lg sm:text-xl font-semibold animate-fade-in-up">Search Results</h2>
+        <SortControl value={sortValue} onChange={onSortChange} />
         
         {/* View toggle buttons - Desktop: show all 3, Mobile: show Compact and List only */}
         <div className="flex items-center gap-2">
@@ -128,12 +135,7 @@ export const ResultsSection = ({
         </div>
       </div>
       {viewMode === 'list' ? (
-        <BookListView
-          books={books}
-          onDetails={onDetails}
-          onDownload={onDownload}
-          getButtonState={getButtonState}
-        />
+        <ListView books={books} onDetails={onDetails} onDownload={onDownload} getButtonState={getButtonState} />
       ) : (
         <div
           id="results-grid"
@@ -146,29 +148,29 @@ export const ResultsSection = ({
           }`}
         >
           {books.map((book, index) => {
-            // Desktop: use selected viewMode. Mobile: always compact
-            const effectiveVariant: 'card' | 'compact' = isDesktop
-              ? viewMode
-              : 'compact';
-            
-            return (
-              <div
+            const shouldUseCardLayout = isDesktop && viewMode === 'card';
+
+            const animationDelay = index * 50;
+
+            return shouldUseCardLayout ? (
+              <CardView
                 key={book.id}
-                className="animate-slide-up"
-                style={{
-                  animationDelay: `${index * 50}ms`,
-                  animationFillMode: 'both',
-                }}
-              >
-                <BookCard
-                  book={book}
-                  onDetails={onDetails}
-                  onDownload={onDownload}
-                  buttonState={getButtonState(book.id)}
-                  variant={effectiveVariant}
-                  showDetailsButton={!isDesktop}
-                />
-              </div>
+                book={book}
+                onDetails={onDetails}
+                onDownload={onDownload}
+                buttonState={getButtonState(book.id)}
+                animationDelay={animationDelay}
+              />
+            ) : (
+              <CompactView
+                key={book.id}
+                book={book}
+                onDetails={onDetails}
+                onDownload={onDownload}
+                buttonState={getButtonState(book.id)}
+                showDetailsButton={!isDesktop}
+                animationDelay={animationDelay}
+              />
             );
           })}
         </div>
@@ -177,5 +179,86 @@ export const ResultsSection = ({
         <div className="mt-4 text-sm opacity-80">No results found.</div>
       )}
     </section>
+  );
+};
+
+interface SortControlProps {
+  value: string;
+  onChange: (value: string) => void;
+}
+
+const SortControl = ({ value, onChange }: SortControlProps) => {
+  const selected = SORT_OPTIONS.find(option => option.value === value) ?? SORT_OPTIONS[0];
+
+  return (
+    <Dropdown
+      align="left"
+      widthClassName="w-60 sm:w-72"
+      renderTrigger={({ isOpen, toggle }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          className={`relative flex items-center gap-2 px-3 py-2 rounded-full transition-all duration-200 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 ${
+            isOpen ? 'bg-gray-100 dark:bg-gray-700' : ''
+          } animate-fade-in-up`}
+          aria-haspopup="listbox"
+          aria-expanded={isOpen}
+          aria-label="Change sort order"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth={1.5}
+            stroke="currentColor"
+            className="w-5 h-5 sm:w-6 sm:h-6"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"
+            />
+          </svg>
+          <span className="text-sm font-medium whitespace-nowrap">{selected.label}</span>
+        </button>
+      )}
+    >
+      {({ close }) => (
+        <div role="listbox" aria-label="Sort results">
+          {SORT_OPTIONS.map(option => {
+            const isSelected = option.value === selected.value;
+            return (
+              <button
+                type="button"
+                key={option.value || 'default'}
+                className={`w-full px-3 py-2 text-left text-base flex items-center justify-between gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${
+                  isSelected ? 'text-sky-600 dark:text-sky-300 font-medium' : ''
+                }`}
+                onClick={() => {
+                  onChange(option.value);
+                  close();
+                }}
+                role="option"
+                aria-selected={isSelected}
+              >
+                <span>{option.label}</span>
+                {isSelected && (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                    className="w-4 h-4"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </Dropdown>
   );
 };

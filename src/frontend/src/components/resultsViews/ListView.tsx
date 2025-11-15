@@ -1,20 +1,20 @@
 import { useState, useEffect } from 'react';
-import { Book, ButtonStateInfo } from '../types';
-import { CircularProgress } from './CircularProgress';
+import { Book, ButtonStateInfo } from '../../types';
+import { CircularProgress } from '../CircularProgress';
 
-interface BookListViewProps {
+interface ListViewProps {
   books: Book[];
   onDetails: (id: string) => Promise<void>;
   onDownload: (book: Book) => Promise<void>;
   getButtonState: (bookId: string) => ButtonStateInfo;
 }
 
-interface BookListDownloadButtonProps {
+interface ListViewDownloadButtonProps {
   buttonState: ButtonStateInfo;
   onDownload: () => Promise<void>;
 }
 
-const BookListDownloadButton = ({ buttonState, onDownload }: BookListDownloadButtonProps) => {
+const ListViewDownloadButton = ({ buttonState, onDownload }: ListViewDownloadButtonProps) => {
   const [isQueuing, setIsQueuing] = useState(false);
 
   useEffect(() => {
@@ -68,7 +68,18 @@ const BookListDownloadButton = ({ buttonState, onDownload }: BookListDownloadBut
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
         </svg>
       ) : showCircularProgress ? (
-        <CircularProgress progress={buttonState.progress} size={16} />
+        <>
+          <CircularProgress
+            progress={buttonState.progress}
+            size={16}
+            className="block sm:hidden"
+          />
+          <CircularProgress
+            progress={buttonState.progress}
+            size={20}
+            className="hidden sm:block"
+          />
+        </>
       ) : showSpinner ? (
         <div className="w-4 h-4 sm:w-5 sm:h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
       ) : (
@@ -80,7 +91,7 @@ const BookListDownloadButton = ({ buttonState, onDownload }: BookListDownloadBut
   );
 };
 
-const BookListThumbnail = ({ preview, title }: { preview?: string; title?: string }) => {
+const ListViewThumbnail = ({ preview, title }: { preview?: string; title?: string }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
 
@@ -156,7 +167,7 @@ const getFormatColor = (format?: string): string => {
   return colorMap[fmt] || 'bg-cyan-500 dark:bg-cyan-600';
 };
 
-export const BookListView = ({ books, onDetails, onDownload, getButtonState }: BookListViewProps) => {
+export const ListView = ({ books, onDetails, onDownload, getButtonState }: ListViewProps) => {
   const [detailsLoadingId, setDetailsLoadingId] = useState<string | null>(null);
 
   if (books.length === 0) {
@@ -198,9 +209,11 @@ export const BookListView = ({ books, onDetails, onDownload, getButtonState }: B
               role="article"
             >
               {/* Mobile and Desktop: Single row layout */}
-              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:grid-cols-[auto_minmax(0,2fr)_minmax(50px,0.25fr)_minmax(60px,0.3fr)_minmax(60px,0.3fr)_minmax(60px,0.3fr)_auto] items-center gap-2 sm:gap-1 w-full">
+              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:grid-cols-[auto_minmax(0,2fr)_minmax(50px,0.25fr)_minmax(60px,0.3fr)_minmax(60px,0.3fr)_minmax(60px,0.3fr)_auto] items-center gap-2 sm:gap-y-1 sm:gap-x-0.5 w-full">
                 {/* Thumbnail */}
-                <BookListThumbnail preview={book.preview} title={book.title} />
+                <div className="flex items-center pl-1 sm:pl-3">
+                  <ListViewThumbnail preview={book.preview} title={book.title} />
+                </div>
 
                 {/* Title and Author */}
                 <div className="min-w-0 flex flex-col justify-center sm:pl-3">
@@ -265,7 +278,7 @@ export const BookListView = ({ books, onDetails, onDownload, getButtonState }: B
                       </svg>
                     )}
                   </button>
-                  <BookListDownloadButton
+                  <ListViewDownloadButton
                     buttonState={buttonState}
                     onDownload={() => onDownload(book)}
                   />

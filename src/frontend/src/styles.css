@@ -217,103 +217,37 @@ footer {
 .modal-overlay {
     display: none;
     position: fixed;
-    top: 0;
-    left: 0;
+    inset: 0;
     width: 100%;
     height: 100%;
     background: var(--loading-overlay);
     z-index: 1000;
+    padding: 1.5rem;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
 }
 
 .modal-overlay.active {
     display: flex;
-    justify-content: center;
-    align-items: center;
 }
 
 .details-container {
-    background: var(--card-background);
-    color: var(--text-color);
-    padding: 1.5rem;
-    border-radius: 4px;
-    max-width: 800px;
-    width: 90%;
+    width: 100%;
+    max-width: 64rem;
     max-height: 90vh;
-    overflow-y: auto;
-    position: relative;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-.details-header {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 2rem;
-    margin-bottom: 1.5rem;
-}
-
-.details-header img {
-    max-width: 200px;
-    height: auto;
-    border-radius: 4px;
-}
-
-.details-info h3 {
-    margin-bottom: 1rem;
-    color: var(--text-color);
-}
-
-.details-info p {
-    margin-bottom: 0.5rem;
-}
-
-.details-actions {
-    display: flex;
-    gap: 1rem;
-    margin-top: 1.5rem;
-    justify-content: flex-end;
-}
-
-.details-actions button {
-    padding: 0.75rem 1.5rem;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 1rem;
-    transition: background-color 0.3s ease;
-}
-
-.details-actions button:first-child {
-    background: var(--primary-color);
-    color: white;
-}
-
-.details-actions button:last-child {
-    background: #f5f5f5;
-    color: var(--text-color);
-}
-
-.details-actions button:hover {
-    opacity: 0.9;
+    pointer-events: auto;
 }
 
 /* Responsive Design */
 @media (max-width: 768px) {
-    .details-header {
-        grid-template-columns: 1fr;
-        text-align: center;
-    }
-
-    .details-header img {
-        margin: 0 auto;
-    }
-
-    .details-actions {
-        flex-direction: column;
-    }
-    
-    /* Minimal equal padding for details container on mobile */
-    .details-container {
+    .modal-overlay {
         padding: 1rem;
+    }
+
+    .details-container {
+        max-width: none;
     }
 }
 

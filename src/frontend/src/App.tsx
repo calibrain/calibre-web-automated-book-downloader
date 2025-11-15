@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback, useRef, CSSProperties } from 'react';
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
-import { Book, StatusData, ButtonStateInfo, AppConfig, LoginCredentials } from './types';
+import {
+  Book,
+  StatusData,
+  ButtonStateInfo,
+  AppConfig,
+  LoginCredentials,
+  AdvancedFilterState,
+} from './types';
 import { searchBooks, getBookInfo, downloadBook, cancelDownload, clearCompleted, getConfig, login, logout, checkAuth, AuthenticationError } from './services/api';
 import { useToast } from './hooks/useToast';
 import { useRealtimeStatus } from './hooks/useRealtimeStatus';
@@ -14,7 +21,10 @@ import { ToastContainer } from './components/ToastContainer';
 import { Footer } from './components/Footer';
 import { LoginPage } from './pages/LoginPage';
 import { DEFAULT_LANGUAGES, DEFAULT_SUPPORTED_FORMATS } from './data/languages';
+import { getLanguageFilterValues, LANGUAGE_OPTION_DEFAULT } from './utils/languageFilters';
 import './styles.css';
+
+const DEFAULT_FORMAT_SELECTION = DEFAULT_SUPPORTED_FORMATS.filter(format => format !== 'pdf');
 
 function App() {
   // Authentication state
@@ -32,16 +42,20 @@ function App() {
   const [searchInput, setSearchInput] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [downloadsSidebarOpen, setDownloadsSidebarOpen] = useState(false);
-  const [advancedFilters, setAdvancedFilters] = useState({
+  const [lastSearchQuery, setLastSearchQuery] = useState('');
+  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilterState>({
     isbn: '',
     author: '',
     title: '',
-    lang: 'all',
+    lang: [LANGUAGE_OPTION_DEFAULT],
     sort: '',
     content: '',
-    formats: [] as string[],
+    formats: DEFAULT_FORMAT_SELECTION,
   });
   const { toasts, showToast } = useToast();
+  const updateAdvancedFilters = useCallback((updates: Partial<AdvancedFilterState>) => {
+    setAdvancedFilters(prev => ({ ...prev, ...updates }));
+  }, []);
   
   // Determine WebSocket URL based on current location
   // In production, use the same origin as the page; in dev, use localhost
@@ -192,6 +206,7 @@ function App() {
       setBooks([]);
       setSelectedBook(null);
       setSearchInput('');
+      setLastSearchQuery('');
       navigate('/login', { replace: true });
     } catch (error) {
       console.error('Logout failed:', error);
@@ -242,9 +257,11 @@ function App() {
   const handleSearch = async (query: string) => {
     if (!query) {
       setBooks([]);
+      setLastSearchQuery('');
       return;
     }
     setIsSearching(true);
+    setLastSearchQuery(query);
     try {
       const results = await searchBooks(query);
       setBooks(results);
@@ -311,15 +328,32 @@ function App() {
     setBooks([]);
     setSearchInput('');
     setShowAdvanced(false);
+    setLastSearchQuery('');
     setAdvancedFilters({
       isbn: '',
       author: '',
       title: '',
-      lang: 'all',
+      lang: [LANGUAGE_OPTION_DEFAULT],
       sort: '',
       content: '',
-      formats: [],
+      formats: DEFAULT_FORMAT_SELECTION,
     });
+  };
+
+  const handleSortChange = (value: string) => {
+    updateAdvancedFilters({ sort: value });
+    if (!lastSearchQuery) return;
+
+    const params = new URLSearchParams(lastSearchQuery);
+    if (value) {
+      params.set('sort', value);
+    } else {
+      params.delete('sort');
+    }
+
+    const nextQuery = params.toString();
+    if (!nextQuery) return;
+    handleSearch(nextQuery);
   };
 
   // Get button state for a book - memoized to ensure proper re-renders when status changes
@@ -368,6 +402,13 @@ function App() {
     return { text: 'Download', state: 'download' };
   }, [currentStatus]);
 
+  const bookLanguages = config?.book_languages || DEFAULT_LANGUAGES;
+  const supportedFormats = config?.supported_formats || DEFAULT_SUPPORTED_FORMATS;
+  const defaultLanguageCodes =
+    config?.default_language && config.default_language.length > 0
+      ? config.default_language
+      : [bookLanguages[0]?.code || 'en'];
+
   const mainAppContent = (
     <>
       <Header 
@@ -392,10 +433,18 @@ function App() {
             if (advancedFilters.isbn) q.push(`isbn=${encodeURIComponent(advancedFilters.isbn)}`);
             if (advancedFilters.author) q.push(`author=${encodeURIComponent(advancedFilters.author)}`);
             if (advancedFilters.title) q.push(`title=${encodeURIComponent(advancedFilters.title)}`);
-            if (advancedFilters.lang && advancedFilters.lang !== 'all') q.push(`lang=${encodeURIComponent(advancedFilters.lang)}`);
-            if (advancedFilters.sort) q.push(`sort=${encodeURIComponent(advancedFilters.sort)}`);
             if (advancedFilters.content) q.push(`content=${encodeURIComponent(advancedFilters.content)}`);
             advancedFilters.formats.forEach(f => q.push(`format=${encodeURIComponent(f)}`));
+            const resolvedLangs = getLanguageFilterValues(
+              advancedFilters.lang,
+              bookLanguages,
+              defaultLanguageCodes,
+            );
+            resolvedLangs?.forEach(code => q.push(`lang=${encodeURIComponent(code)}`));
+          }
+
+          if (advancedFilters.sort) {
+            q.push(`sort=${encodeURIComponent(advancedFilters.sort)}`);
           }
           
           handleSearch(q.join('&'));
@@ -406,10 +455,11 @@ function App() {
       
       <AdvancedFilters
         visible={showAdvanced && !isInitialState}
-        bookLanguages={config?.book_languages || DEFAULT_LANGUAGES}
-        defaultLanguage={config?.default_language || 'en'}
-        supportedFormats={config?.supported_formats || DEFAULT_SUPPORTED_FORMATS}
-        onFiltersChange={setAdvancedFilters}
+        bookLanguages={bookLanguages}
+        defaultLanguage={defaultLanguageCodes}
+        supportedFormats={supportedFormats}
+        filters={advancedFilters}
+        onFiltersChange={updateAdvancedFilters}
       />
       
       <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-6">
@@ -417,14 +467,16 @@ function App() {
           onSearch={handleSearch}
           isLoading={isSearching}
           isInitialState={isInitialState}
-          bookLanguages={config?.book_languages || DEFAULT_LANGUAGES}
-          defaultLanguage={config?.default_language || 'en'}
+          bookLanguages={bookLanguages}
+          defaultLanguage={defaultLanguageCodes}
           supportedFormats={config?.supported_formats || DEFAULT_SUPPORTED_FORMATS}
           logoUrl="/logo.png"
           searchInput={searchInput}
           onSearchInputChange={setSearchInput}
           showAdvanced={showAdvanced}
           onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
+        advancedFilters={advancedFilters}
+        onAdvancedFiltersChange={updateAdvancedFilters}
         />
 
         <ResultsSection
@@ -433,6 +485,8 @@ function App() {
           onDetails={handleShowDetails}
           onDownload={handleDownload}
           getButtonState={getButtonState}
+          sortValue={advancedFilters.sort}
+          onSortChange={handleSortChange}
         />
 
         {selectedBook && (

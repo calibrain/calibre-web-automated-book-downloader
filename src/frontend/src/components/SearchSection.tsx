@@ -1,18 +1,24 @@
-import { useState } from 'react';
-import { Language } from '../types';
+import { KeyboardEvent } from 'react';
+import { AdvancedFilterState, Language } from '../types';
+import { getLanguageFilterValues, normalizeLanguageSelection } from '../utils/languageFilters';
+import { LanguageMultiSelect } from './LanguageMultiSelect';
+import { DropdownList } from './DropdownList';
+import { CONTENT_OPTIONS } from '../data/filterOptions';
 
 interface SearchSectionProps {
   onSearch: (query: string) => void;
   isLoading: boolean;
   isInitialState: boolean;
   bookLanguages: Language[];
-  defaultLanguage: string;
+  defaultLanguage: string[];
   supportedFormats: string[];
   logoUrl: string;
   searchInput: string;
   onSearchInputChange: (value: string) => void;
   showAdvanced: boolean;
   onAdvancedToggle: () => void;
+  advancedFilters: AdvancedFilterState;
+  onAdvancedFiltersChange: (updates: Partial<AdvancedFilterState>) => void;
 }
 
 export const SearchSection = ({
@@ -27,16 +33,10 @@ export const SearchSection = ({
   onSearchInputChange,
   showAdvanced,
   onAdvancedToggle,
+  advancedFilters,
+  onAdvancedFiltersChange,
 }: SearchSectionProps) => {
-  const [isbn, setIsbn] = useState('');
-  const [author, setAuthor] = useState('');
-  const [title, setTitle] = useState('');
-  const [lang, setLang] = useState(defaultLanguage || 'all');
-  const [sort, setSort] = useState('');
-  const [content, setContent] = useState('');
-  const [formats, setFormats] = useState<string[]>(
-    supportedFormats.filter(f => f !== 'pdf')
-  );
+  const { isbn, author, title, lang, content, formats } = advancedFilters;
 
   const buildQuery = () => {
     const q: string[] = [];
@@ -48,8 +48,8 @@ export const SearchSection = ({
     if (isbn) q.push(`isbn=${encodeURIComponent(isbn)}`);
     if (author) q.push(`author=${encodeURIComponent(author)}`);
     if (title) q.push(`title=${encodeURIComponent(title)}`);
-    if (lang && lang !== 'all') q.push(`lang=${encodeURIComponent(lang)}`);
-    if (sort) q.push(`sort=${encodeURIComponent(sort)}`);
+    const selectedLanguages = getLanguageFilterValues(lang, bookLanguages, defaultLanguage);
+    selectedLanguages?.forEach(code => q.push(`lang=${encodeURIComponent(code)}`));
     if (content) q.push(`content=${encodeURIComponent(content)}`);
     formats.forEach(f => q.push(`format=${encodeURIComponent(f)}`));
 
@@ -61,17 +61,27 @@ export const SearchSection = ({
     onSearch(query);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter') {
       handleSearch();
       (e.target as HTMLInputElement).blur();
     }
   };
 
+  const handleLanguageChange = (next: string[]) => {
+    onAdvancedFiltersChange({ lang: normalizeLanguageSelection(next) });
+  };
+
+  const handleContentChange = (next: string[] | string) => {
+    const value = Array.isArray(next) ? next[0] ?? '' : next;
+    onAdvancedFiltersChange({ content: value });
+  };
+
   const toggleFormat = (format: string) => {
-    setFormats(prev =>
-      prev.includes(format) ? prev.filter(f => f !== format) : [...prev, format]
-    );
+    const nextFormats = formats.includes(format)
+      ? formats.filter(f => f !== format)
+      : [...formats, format];
+    onAdvancedFiltersChange({ formats: nextFormats });
   };
 
   return (
@@ -191,7 +201,7 @@ export const SearchSection = ({
                 borderColor: 'var(--border-muted)',
               }}
               value={isbn}
-              onChange={e => setIsbn(e.target.value)}
+            onChange={e => onAdvancedFiltersChange({ isbn: e.target.value })}
             />
           </div>
           <div>
@@ -210,7 +220,7 @@ export const SearchSection = ({
                 borderColor: 'var(--border-muted)',
               }}
               value={author}
-              onChange={e => setAuthor(e.target.value)}
+            onChange={e => onAdvancedFiltersChange({ author: e.target.value })}
             />
           </div>
           <div>
@@ -229,83 +239,23 @@ export const SearchSection = ({
                 borderColor: 'var(--border-muted)',
               }}
               value={title}
-              onChange={e => setTitle(e.target.value)}
+            onChange={e => onAdvancedFiltersChange({ title: e.target.value })}
             />
           </div>
-          <div>
-            <label htmlFor="lang-input" className="block text-sm mb-1 opacity-80">
-              Language
-            </label>
-            <select
-              id="lang-input"
-              className="w-full px-3 py-2 rounded-md border"
-              style={{
-                background: 'var(--bg-soft)',
-                color: 'var(--text)',
-                borderColor: 'var(--border-muted)',
-              }}
-              value={lang}
-              onChange={e => setLang(e.target.value)}
-            >
-              <option value="all">All</option>
-              {bookLanguages.map(l => (
-                <option key={l.code} value={l.code}>
-                  {l.language}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="sort-input" className="block text-sm mb-1 opacity-80">
-              Sort
-            </label>
-            <select
-              id="sort-input"
-              className="w-full px-3 py-2 rounded-md border"
-              style={{
-                background: 'var(--bg-soft)',
-                color: 'var(--text)',
-                borderColor: 'var(--border-muted)',
-              }}
-              value={sort}
-              onChange={e => setSort(e.target.value)}
-            >
-              <option value="">Most relevant</option>
-              <option value="newest">Newest (publication year)</option>
-              <option value="oldest">Oldest (publication year)</option>
-              <option value="largest">Largest (filesize)</option>
-              <option value="smallest">Smallest (filesize)</option>
-              <option value="newest_added">Newest (open sourced)</option>
-              <option value="oldest_added">Oldest (open sourced)</option>
-            </select>
-          </div>
-          <div>
-            <label htmlFor="content-input" className="block text-sm mb-1 opacity-80">
-              Content
-            </label>
-            <select
-              id="content-input"
-              className="w-full px-3 py-2 rounded-md border"
-              style={{
-                background: 'var(--bg-soft)',
-                color: 'var(--text)',
-                borderColor: 'var(--border-muted)',
-              }}
-              value={content}
-              onChange={e => setContent(e.target.value)}
-            >
-              <option value="">All</option>
-              <option value="book_nonfiction">Book (non-fiction)</option>
-              <option value="book_fiction">Book (fiction)</option>
-              <option value="book_unknown">Book (unknown)</option>
-              <option value="magazine">Magazine</option>
-              <option value="book_comic">Comic Book</option>
-              <option value="standards_document">Standards document</option>
-              <option value="other">Other</option>
-              <option value="musical_score">Musical score</option>
-              <option value="audiobook">Audiobook</option>
-            </select>
-          </div>
+          <LanguageMultiSelect
+            options={bookLanguages}
+            value={lang}
+            onChange={handleLanguageChange}
+            defaultLanguageCodes={defaultLanguage}
+            label="Language"
+          />
+          <DropdownList
+            label="Content"
+            options={CONTENT_OPTIONS}
+            value={content}
+            onChange={handleContentChange}
+            placeholder="All"
+          />
           <div className="md:col-span-2 lg:col-span-3">
             <label className="block text-sm mb-1 opacity-80">Formats</label>
             <div className="flex flex-wrap gap-3 text-sm">
