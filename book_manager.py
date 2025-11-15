@@ -110,6 +110,9 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
 def _parse_search_result_row(row: Tag) -> Optional[BookInfo]:
     """Parse a single search result row into a BookInfo object."""
     try:
+        # Skip ad rows
+        if row.text.strip().lower().startswith("your ad here"):
+            return None
         cells = row.find_all("td")
         preview_img = cells[0].find("img")
         preview = preview_img["src"] if preview_img else None
