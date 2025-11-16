@@ -49,6 +49,16 @@ export interface Language {
   language: string;
 }
 
+export interface AdvancedFilterState {
+  isbn: string;
+  author: string;
+  title: string;
+  lang: string[];
+  sort: string;
+  content: string;
+  formats: string[];
+}
+
 // Toast notification
 export interface Toast {
   id: string;
@@ -64,6 +74,20 @@ export interface AppConfig {
   build_version: string;
   release_version: string;
   book_languages: Language[];
-  default_language: string;
+  default_language: string[];
   supported_formats: string[];
+}
+
+// Authentication types
+export interface LoginCredentials {
+  username: string;
+  password: string;
+  remember_me: boolean;
+}
+
+export interface AuthResponse {
+  success?: boolean;
+  authenticated?: boolean;
+  auth_required?: boolean;
+  error?: string;
 }

@@ -145,12 +145,42 @@ footer {
     }
 }
 
+@keyframes fade-in-down {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fade-out-up {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+}
+
 .animate-slide-up {
     animation: slide-up 0.5s ease-out;
 }
 
 .animate-fade-in-up {
     animation: fade-in-up 0.4s ease-out;
+}
+
+.animate-fade-in-down {
+    animation: fade-in-down 0.2s ease-out;
+}
+
+.animate-fade-out-up {
+    animation: fade-out-up 0.15s ease-in;
 }
 
 /* Button spinner styles */
@@ -187,103 +217,37 @@ footer {
 .modal-overlay {
     display: none;
     position: fixed;
-    top: 0;
-    left: 0;
+    inset: 0;
     width: 100%;
     height: 100%;
     background: var(--loading-overlay);
     z-index: 1000;
+    padding: 1.5rem;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
 }
 
 .modal-overlay.active {
     display: flex;
-    justify-content: center;
-    align-items: center;
 }
 
 .details-container {
-    background: var(--card-background);
-    color: var(--text-color);
-    padding: 1.5rem;
-    border-radius: 4px;
-    max-width: 800px;
-    width: 90%;
+    width: 100%;
+    max-width: 64rem;
     max-height: 90vh;
-    overflow-y: auto;
-    position: relative;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-.details-header {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 2rem;
-    margin-bottom: 1.5rem;
-}
-
-.details-header img {
-    max-width: 200px;
-    height: auto;
-    border-radius: 4px;
-}
-
-.details-info h3 {
-    margin-bottom: 1rem;
-    color: var(--text-color);
-}
-
-.details-info p {
-    margin-bottom: 0.5rem;
-}
-
-.details-actions {
-    display: flex;
-    gap: 1rem;
-    margin-top: 1.5rem;
-    justify-content: flex-end;
-}
-
-.details-actions button {
-    padding: 0.75rem 1.5rem;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 1rem;
-    transition: background-color 0.3s ease;
-}
-
-.details-actions button:first-child {
-    background: var(--primary-color);
-    color: white;
-}
-
-.details-actions button:last-child {
-    background: #f5f5f5;
-    color: var(--text-color);
-}
-
-.details-actions button:hover {
-    opacity: 0.9;
+    pointer-events: auto;
 }
 
 /* Responsive Design */
 @media (max-width: 768px) {
-    .details-header {
-        grid-template-columns: 1fr;
-        text-align: center;
-    }
-
-    .details-header img {
-        margin: 0 auto;
-    }
-
-    .details-actions {
-        flex-direction: column;
-    }
-    
-    /* Minimal equal padding for details container on mobile */
-    .details-container {
+    .modal-overlay {
         padding: 1rem;
+    }
+
+    .details-container {
+        max-width: none;
     }
 }
 
@@ -481,35 +445,10 @@ button:disabled {
         overflow: visible;
     }
     
-    /* Make sure download buttons can expand to fit their content */
-    [data-action="download"],
-    #download-button {
-        min-width: 0;
-        flex: 1 1 auto;
-        overflow: visible;
-        box-sizing: border-box;
-    }
-    
     /* Make text span flexible to use available space */
     .download-button-text {
         white-space: nowrap;
         overflow: visible;
-        /* Take up all available space in the button, allow shrinking if needed */
-        flex: 1 1 0%;
-        min-width: 0;
-        display: block;
-        /* Center text within its available space */
-        text-align: center;
-        box-sizing: border-box;
-        /* Force layout recalculation by ensuring the element is treated as a flex item */
-        position: relative;
-    }
-    
-    /* Ensure button's flex container properly distributes space on mobile */
-    [data-action="download"].flex,
-    #download-button.flex {
-        /* Ensure gap doesn't cause issues */
-        gap: 0.5rem;
     }
     
     /* Ensure spinner doesn't interfere with text layout */

@@ -1,20 +1,22 @@
 interface CircularProgressProps {
   progress?: number;
   size?: number;
+  className?: string;
 }
 
 /**
  * Circular progress indicator component
  * Displays a circular SVG progress ring that fills based on the progress percentage
  */
-export const CircularProgress = ({ progress, size = 16 }: CircularProgressProps) => {
+export const CircularProgress = ({ progress, size = 16, className }: CircularProgressProps) => {
   const radius = (size - 2) / 2;
   const circumference = 2 * Math.PI * radius;
   const progressValue = progress ?? 0;
   const strokeDashoffset = circumference - (progressValue / 100) * circumference;
+  const svgClassName = className ? `transform -rotate-90 ${className}` : 'transform -rotate-90';
 
   return (
-    <svg width={size} height={size} className="transform -rotate-90">
+    <svg width={size} height={size} className={svgClassName}>
       {/* Background circle */}
       <circle
         cx={size / 2}
