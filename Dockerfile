@@ -1,5 +1,13 @@
-# Frontend build stage
-FROM node:20-alpine AS frontend-builder
+ARG TARGETPLATFORM
+ARG TARGETARCH
+ARG BUILDPLATFORM
+ARG BUILDARCH
+
+# Frontend build stage.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-builder
+
+# Helpful debug output to see what platforms BuildKit thinks it's using
+RUN echo "BUILDPLATFORM=$BUILDPLATFORM BUILDARCH=$BUILDARCH TARGETPLATFORM=$TARGETPLATFORM TARGETARCH=$TARGETARCH"
 
 WORKDIR /frontend
 
