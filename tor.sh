@@ -11,6 +11,36 @@ echo "Log file: $LOG_FILE"
 set +x
 set -e
 
+#!/bin/bash
+
+# Check if EXT_BYPASSER_URL is defined
+if [ -n "$EXT_BYPASSER_URL" ]; then
+    echo "Extracting hostname and ip from bypasser into /etc/hosts"
+    
+    # Extract hostname
+    hostname=$(echo "$EXT_BYPASSER_URL" | cut -d'/' -f3 | cut -d':' -f1)
+    
+    # Resolve to IP (using current DNS before switching to TOR)
+    ip=$(getent hosts "$hostname" 2>/dev/null | awk '{print $1}')
+    
+    # If getent fails, try dig
+    if [ -z "$ip" ]; then
+        ip=$(dig +short "$hostname" 2>/dev/null | head -n1)
+    fi
+    
+    # Only proceed if we got an IP and hostname is not already an IP
+    if [ -n "$ip" ] && [ "$ip" != "$hostname" ]; then
+        # Add to /etc/hosts (remove existing entry first to avoid duplicates)
+        sudo sed -i "/[[:space:]]$hostname$/d" /etc/hosts
+        echo "$ip $hostname" | sudo tee -a /etc/hosts > /dev/null
+        echo "Added to /etc/hosts: $ip $hostname"
+    else
+        echo "Skipping: $hostname is already an IP or could not be resolved"
+    fi
+else
+    echo "EXT_BYPASSER_URL not defined, skipping /etc/hosts update"
+fi
+
 echo "[*] Running tor script..."
 
 echo "Build version: $BUILD_VERSION"
@@ -56,12 +86,6 @@ iptables -t nat -F
 # Allow loopback
 iptables -t nat -A OUTPUT -o lo -j RETURN
 
-# Bypass TOR for local/private networks
-iptables -t nat -A OUTPUT -d 10.0.0.0/8 -j RETURN
-iptables -t nat -A OUTPUT -d 172.16.0.0/12 -j RETURN
-iptables -t nat -A OUTPUT -d 192.168.0.0/16 -j RETURN
-iptables -t nat -A OUTPUT -d 127.0.0.0/8 -j RETURN
-
 # Redirect all TCP to Tor's TransPort
 iptables -t nat -A OUTPUT -p tcp --syn -j REDIRECT --to-ports 9040
 
@@ -77,7 +101,7 @@ echo "[✓] Transparent Tor routing enabled."
 sleep 5
 # Check if outgoing IP is using Tor
 echo "[*] Verifying Tor connectivity..."
-RESULT=$(pyrequests https://check.torproject.org/api/ip)
+RESULT=$(curl -s https://check.torproject.org/api/ip)
 echo "RESULT: $RESULT"
 IS_TOR=$(echo "$RESULT" | grep -oP '"IsTor":\s*\K(true|false)')
 IP=$(echo "$RESULT" | grep -oP '"IP":\s*"\K[^"]+')
@@ -94,10 +118,10 @@ fi
 
 # Get timezone from IP
 sleep 1
-TIMEZONE=$(pyrequests https://ipapi.co/timezone) || \
-TIMEZONE=$(pyrequests http://ip-api.com/line?fields=timezone) || \
-TIMEZONE=$(pyrequests http://worldtimeapi.org/api/ip | grep -oP '"timezone":"\K[^"]+') || \
-TIMEZONE=$(pyrequests https://ip2tz.isthe.link/v2 | grep -oP '"timezone": *"\K[^"]+') || \
+TIMEZONE=$(curl -s https://ipapi.co/timezone) || \
+TIMEZONE=$(curl -s http://ip-api.com/line?fields=timezone) || \
+TIMEZONE=$(curl -s http://worldtimeapi.org/api/ip | grep -oP '"timezone":"\K[^"]+') || \
+TIMEZONE=$(curl -s https://ip2tz.isthe.link/v2 | grep -oP '"timezone": *"\K[^"]+') || \
 true
 
 # If TIMEZONE is not set, use the default timezone
