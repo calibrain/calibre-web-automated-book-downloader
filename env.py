@@ -6,7 +6,7 @@ def string_to_bool(s: str) -> bool:
 
 # Authentication and session settings
 # SESSION_COOKIE_SECURE: Controls whether session cookies are marked as secure (HTTPS only)
-#   - 'auto' (default): Uses False for local development, can be overridden
+#   - 'auto' (default): Uses False in dev, True in prod, can be overridden with environment variable
 #   - 'true'/'yes'/'1': Always use secure cookies (recommended for production with HTTPS)
 #   - 'false'/'no'/'0': Never use secure cookies (only for local HTTP)
 SESSION_COOKIE_SECURE_ENV = os.getenv("SESSION_COOKIE_SECURE", "auto")

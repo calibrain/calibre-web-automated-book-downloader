@@ -153,17 +153,16 @@ werkzeug_logger.addFilter(StatusEndpointFilter())
 # The secret key will reset every time we restart, which will
 # require users to authenticate again
 
-# Auto-detect HTTPS for secure cookies
+# Secure cookie handling (HTTP vs HTTPS)
 # Can be overridden with SESSION_COOKIE_SECURE environment variable
 session_cookie_secure_env = os.getenv('SESSION_COOKIE_SECURE', 'auto').lower()
-if session_cookie_secure_env == 'auto':
-    # Auto-detect: check if we're behind a reverse proxy with HTTPS
-    # This will be determined per-request, but default to False for local HTTP
-    SESSION_COOKIE_SECURE = False
-elif session_cookie_secure_env in ['true', 'yes', '1']:
+if session_cookie_secure_env in ['true', 'yes', '1']:
     SESSION_COOKIE_SECURE = True
-else:
+elif session_cookie_secure_env in ['false', 'no', '0']:
     SESSION_COOKIE_SECURE = False
+else:
+    # Auto mode: align with deployment environment
+    SESSION_COOKIE_SECURE = APP_ENV == 'prod'
 
 app.config.update(
     SECRET_KEY = os.urandom(64),
