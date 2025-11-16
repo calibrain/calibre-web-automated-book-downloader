@@ -192,7 +192,7 @@ export const DownloadsSidebar = ({
               <h3 className="font-semibold text-sm truncate" title={book.title}>
                 {isCompleted && book.download_path ? (
                   <a
-                    href={`/request/api/localdownload?id=${encodeURIComponent(book.id)}`}
+                    href={`/api/localdownload?id=${encodeURIComponent(book.id)}`}
                     className="text-sky-600 hover:underline"
                   >
                     {book.title || 'Unknown Title'}

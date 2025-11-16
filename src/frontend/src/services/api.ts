@@ -1,6 +1,6 @@
 import { Book, StatusData, AppConfig, LoginCredentials, AuthResponse } from '../types';
 
-const API_BASE = '/request/api';
+const API_BASE = '/api';
 
 // API endpoints
 const API = {

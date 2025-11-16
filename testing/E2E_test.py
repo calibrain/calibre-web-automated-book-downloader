@@ -124,7 +124,7 @@ print(f"Verified file exists: {expected_filepath}")
 
 # Step 6 : Download the book
 print(f"Step 6: Downloading book {book_id}...")
-download_response = requests.get(f"{server_url}/request/api/localdownload?id={book_id}")
+download_response = requests.get(f"{server_url}/api/localdownload?id={book_id}")
 download_response.raise_for_status()
 # Write book to temp file :
 temp_file_path = os.path.join("/tmp", f"{book_id}.epub")

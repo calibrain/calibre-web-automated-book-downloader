@@ -275,7 +275,7 @@ Checks run every 30 seconds with a 30-second timeout and 3 retries.
 You can enable by adding this to your compose :
 ```
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD pyrequests http://localhost:8084/request/api/status || exit 1
+    CMD curl -s http://localhost:8084/api/status || exit 1
 ```
 
 ## 📝 Logging
