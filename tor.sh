@@ -56,6 +56,12 @@ iptables -t nat -F
 # Allow loopback
 iptables -t nat -A OUTPUT -o lo -j RETURN
 
+# Bypass TOR for local/private networks
+iptables -t nat -A OUTPUT -d 10.0.0.0/8 -j RETURN
+iptables -t nat -A OUTPUT -d 172.16.0.0/12 -j RETURN
+iptables -t nat -A OUTPUT -d 192.168.0.0/16 -j RETURN
+iptables -t nat -A OUTPUT -d 127.0.0.0/8 -j RETURN
+
 # Redirect all TCP to Tor's TransPort
 iptables -t nat -A OUTPUT -p tcp --syn -j REDIRECT --to-ports 9040
 
