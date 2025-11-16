@@ -12,7 +12,6 @@ from flask_socketio import SocketIO, emit
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 from werkzeug.wrappers import Response
-from flask import url_for as flask_url_for
 import typing
 
 from logger import setup_logger
@@ -132,10 +131,10 @@ if DEBUG:
 class StatusEndpointFilter(logging.Filter):
     """Filter out routine status endpoint requests to reduce log noise."""
     def filter(self, record):
-        # Exclude GET /api/status and GET /request/api/status requests
+        # Exclude GET /api/status requests
         if hasattr(record, 'getMessage'):
             message = record.getMessage()
-            if 'GET /api/status' in message or 'GET /request/api/status' in message:
+            if 'GET /api/status' in message:
                 return False
         return True
 
@@ -194,44 +193,6 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-def register_dual_routes(app : Flask) -> None:
-    """
-    Register each route both with and without the /request prefix.
-    This function should be called after all routes are defined.
-    """
-    # Store original url_map rules
-    rules = list(app.url_map.iter_rules())
-    
-    # Add /request prefix to each rule
-    for rule in rules:
-        if rule.rule != '/request/' and rule.rule != '/request':  # Skip if it's already a request route
-            # Create new routes with /request prefix, both with and without trailing slash
-            base_rule = rule.rule[:-1] if rule.rule.endswith('/') else rule.rule
-            if base_rule == '':  # Special case for root path
-                app.add_url_rule('/request', f"root_request", 
-                               view_func=app.view_functions[rule.endpoint],
-                               methods=rule.methods)
-                app.add_url_rule('/request/', f"root_request_slash", 
-                               view_func=app.view_functions[rule.endpoint],
-                               methods=rule.methods)
-            else:
-                app.add_url_rule(f"/request{base_rule}", 
-                               f"{rule.endpoint}_request",
-                               view_func=app.view_functions[rule.endpoint],
-                               methods=rule.methods)
-                app.add_url_rule(f"/request{base_rule}/", 
-                               f"{rule.endpoint}_request_slash",
-                               view_func=app.view_functions[rule.endpoint],
-                               methods=rule.methods)
-    app.jinja_env.globals['url_for'] = url_for_with_request
-
-def url_for_with_request(endpoint : str, **values : typing.Any) -> str:
-    """Generate URLs with /request prefix by default."""
-    if endpoint == 'static' or endpoint == 'serve_frontend_assets':
-        # For static files, add /request prefix
-        url = flask_url_for(endpoint, **values)
-        return f"/request{url}"
-    return flask_url_for(endpoint, **values)
 
 # Serve frontend static files
 @app.route('/assets/<path:filename>')
@@ -259,8 +220,6 @@ def logo() -> Response:
 
 @app.route('/favicon.ico')
 @app.route('/favico<path:_>')
-@app.route('/request/favico<path:_>')
-@app.route('/request/static/favico<path:_>')
 def favicon(_ : typing.Any = None) -> Response:
     """
     Serve favicon from built frontend assets.
@@ -822,9 +781,6 @@ def catch_all(path: str) -> Response:
         return jsonify({"error": "Resource not found"}), 404
     # Otherwise serve the React app
     return send_from_directory(os.path.join(app.root_path, 'frontend-dist'), 'index.html')
-
-# Register all routes with /request prefix
-register_dual_routes(app)
 
 # WebSocket event handlers
 @socketio.on('connect')
