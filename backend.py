@@ -11,7 +11,10 @@ from threading import Event
 
 from logger import setup_logger
 from config import CUSTOM_SCRIPT
-from env import INGEST_DIR, TMP_DIR, MAIN_LOOP_SLEEP_TIME, USE_BOOK_TITLE, MAX_CONCURRENT_DOWNLOADS, DOWNLOAD_PROGRESS_UPDATE_INTERVAL
+from env import (INGEST_DIR, INGEST_DIR_BOOK_FICTION, INGEST_DIR_BOOK_NON_FICTION, INGEST_DIR_BOOK_UNKNOWN,
+                 INGEST_DIR_MAGAZINE, INGEST_DIR_COMIC_BOOK, INGEST_DIR_AUDIOBOOK, INGEST_DIR_STANDARDS_DOCUMENT,
+                 INGEST_DIR_MUSICAL_SCORE, TMP_DIR, MAIN_LOOP_SLEEP_TIME, USE_BOOK_TITLE,
+                 MAX_CONCURRENT_DOWNLOADS, DOWNLOAD_PROGRESS_UPDATE_INTERVAL)
 from models import book_queue, BookInfo, ContentType, QueueStatus, SearchFilters
 import book_manager
 
@@ -123,12 +126,12 @@ def _book_info_to_dict(book: BookInfo) -> Dict[str, Any]:
 def _prepare_download_folder(book_info: BookInfo) -> Path:
     """Prepare final content-type subdir"""
     content = book_info.content
-    types = [x.value for x in ContentType]
-    content_str = next(filter(lambda x: x in content, types))
-    content_dir = INGEST_DIR / content_str
+    content_type = [x for x in ContentType if x.value in content]
+    dir_name = eval("INGEST_DIR_" + content_type[0].name) if content_type else None
+    content_dir = INGEST_DIR / dir_name if dir_name else INGEST_DIR
     if not os.path.exists(content_dir):
         os.makedirs(content_dir)
-    return INGEST_DIR / content_str
+    return content_dir
 
 def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Optional[str]:
     """Download and process a book with cancellation support.

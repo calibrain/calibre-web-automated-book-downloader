@@ -87,6 +87,24 @@ Note that if using TOR, the TZ will be calculated automatically based on IP.
 
 If you change `BOOK_LANGUAGE`, you can add multiple comma separated languages, such as `en,fr,ru` etc.  
 
+Use the following environment variables to choose sub-folders of `/tmp/data/calibre-web/ingest` in which to download 
+different content types (Book, Magazine, Comic, etc.):
+
+| Variable                        | Description                    | Default Value |
+|---------------------------------|--------------------------------|---------------|
+| `INGEST_DIR_BOOK_FICTION`       | Book (fiction) folder name     | ``            |
+| `INGEST_DIR_BOOK_NON_FICTION`   | Book (non-fiction) folder name | ``            |
+| `INGEST_DIR_BOOK_UNKNOWN`       | Book (unknown) folder name     | ``            |
+| `INGEST_DIR_MAGAZINE`           | Magazine folder name           | ``            |
+| `INGEST_DIR_COMIC_BOOK`         | Comic book folder name         | ``            |
+| `INGEST_DIR_AUDIOBOOK`          | Audiobook folder name          | ``            |
+| `INGEST_DIR_STANDARDS_DOCUMENT` | Standards document folder name | ``            |
+| `INGEST_DIR_MUSICAL_SCORE`      | Musical score folder name      | ``            |
+
+Content types that are not assigned a specific sub-folder name will be saved in `/tmp/data/calibre-web/ingest` (or wherever
+you are binding `INGEST_DIR` to). 
+
+
 #### AA 
 
 | Variable               | Description                                               | Default Value                     |

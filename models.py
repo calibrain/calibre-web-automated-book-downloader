@@ -32,7 +32,6 @@ class ContentType(str, Enum):
     MUSICAL_SCORE = "Musical score"
     OTHER = "Other"
 
-
 @dataclass
 class QueueItem:
     """Queue item with priority and metadata."""
