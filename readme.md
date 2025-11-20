@@ -1,6 +1,6 @@
 # 📚 Calibre-Web-Automated-Book-Downloader
 
-![Calibre-Web Automated Book Downloader](static/media/logo.png 'Calibre-Web Automated Book Downloader')
+![Calibre-Web Automated Book Downloader](src/frontend/public/logo.png 'Calibre-Web Automated Book Downloader')
 
 An intuitive web interface for searching and requesting book downloads, designed to work seamlessly with [Calibre-Web-Automated](https://github.com/crocodilestick/Calibre-Web-Automated). This project streamlines the process of downloading books and preparing them for integration into your Calibre library.
 
@@ -87,7 +87,7 @@ Note that if using TOR, the TZ will be calculated automatically based on IP.
 
 If you change `BOOK_LANGUAGE`, you can add multiple comma separated languages, such as `en,fr,ru` etc.  
 
-Use the following environment variables to choose sub-folders of `/tmp/data/calibre-web/ingest` in which to download 
+Use the following environment variables to set specific folders in which to download 
 different content types (Book, Magazine, Comic, etc.):
 
 | Variable                        | Description                    | Default Value |
@@ -101,8 +101,14 @@ different content types (Book, Magazine, Comic, etc.):
 | `INGEST_DIR_STANDARDS_DOCUMENT` | Standards document folder name | ``            |
 | `INGEST_DIR_MUSICAL_SCORE`      | Musical score folder name      | ``            |
 
-Content types that are not assigned a specific sub-folder name will be saved in `/tmp/data/calibre-web/ingest` (or wherever
-you are binding `INGEST_DIR` to). 
+If no specific path is set for a content type the default is `INGEST_DIR`.  
+Remember to map the specified paths to where your instance of Calibre-Web-Automated (CWA) will find them, e.g.:  
+```
+volumes:
+    - /tmp/data/calibre-web/comicbook-ingest:/cwa-comicbook-ingest
+```
+if `INGEST_DIR_COMIC_BOOK=/cwa-comicbook-ingest` and your CWA is configured to use `/tmp/data/calibre-web/comicbook-ingest` 
+for comic books.
 
 
 #### AA 
@@ -261,9 +267,25 @@ This feature is designed to work with any resolver that implements the `FlareSol
 
 ## 🏗️ Architecture
 
-The application consists of a single service:
+The application consists of a Flask backend with a React-based frontend:
 
-1. **calibre-web-automated-bookdownloader**: Main application providing web interface and download functionality
+### Backend
+- **Flask Application**: Python-based backend (`app.py`, `backend.py`) providing REST API and WebSocket support
+- **Download Manager**: Handles book search, download requests, and queue management (`downloader.py`, `book_manager.py`)
+- **Network Layer**: Cloudflare bypass and proxy support (`cloudflare_bypasser.py`, `network.py`)
+
+### Frontend
+- **React + TypeScript**: Modern web interface built with Vite (`src/frontend`)
+- **Real-time Updates**: WebSocket integration for live download status
+- **Responsive UI**: TailwindCSS-based design for mobile and desktop
+
+For frontend development, use the provided Makefile:
+```bash
+make install  # Install dependencies
+make dev      # Start development server
+make build    # Build for production
+```
+If you run the docker compose file, the frontend will be built and served automatically. But if you run the frontend dev server it will supercede the docker compose frontend.
 
 ## 🏥 Health Monitoring
 
@@ -277,7 +299,7 @@ Checks run every 30 seconds with a 30-second timeout and 3 retries.
 You can enable by adding this to your compose :
 ```
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD pyrequests http://localhost:8084/request/api/status || exit 1
+    CMD curl -s http://localhost:8084/api/status || exit 1
 ```
 
 ## 📝 Logging

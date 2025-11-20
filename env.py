@@ -4,6 +4,13 @@ from pathlib import Path
 def string_to_bool(s: str) -> bool:
     return s.lower() in ["true", "yes", "1", "y"]
 
+# Authentication and session settings
+# SESSION_COOKIE_SECURE: Controls whether session cookies are marked as secure (HTTPS only)
+#   - 'auto' (default): Uses False in dev, True in prod, can be overridden with environment variable
+#   - 'true'/'yes'/'1': Always use secure cookies (recommended for production with HTTPS)
+#   - 'false'/'no'/'0': Never use secure cookies (only for local HTTP)
+SESSION_COOKIE_SECURE_ENV = os.getenv("SESSION_COOKIE_SECURE", "auto")
+
 CWA_DB = os.getenv("CWA_DB_PATH")
 CWA_DB_PATH = Path(CWA_DB) if CWA_DB else None
 LOG_ROOT = Path(os.getenv("LOG_ROOT", "/var/log/"))
@@ -19,14 +26,14 @@ INGEST_DIR_AUDIOBOOK = os.getenv("INGEST_DIR_AUDIOBOOK", "")
 INGEST_DIR_STANDARDS_DOCUMENT = os.getenv("INGEST_DIR_STANDARDS_DOCUMENT", "")
 INGEST_DIR_MUSICAL_SCORE = os.getenv("INGEST_DIR_MUSICAL_SCORE", "")
 DOWNLOAD_PATHS = {
-    "BOOK_FICTION": Path(INGEST_DIR_BOOK_FICTION) if INGEST_DIR_BOOK_FICTION else "",
-    "BOOK_NON_FICTION": Path(INGEST_DIR_BOOK_NON_FICTION) if INGEST_DIR_BOOK_NON_FICTION else "",
-    "BOOK_UNKNOWN": Path(INGEST_DIR_BOOK_UNKNOWN) if INGEST_DIR_BOOK_UNKNOWN else "",
-    "MAGAZINE": Path(INGEST_DIR_MAGAZINE) if INGEST_DIR_MAGAZINE else "",
-    "COMIC_BOOK": Path(INGEST_DIR_COMIC_BOOK) if INGEST_DIR_COMIC_BOOK else "",
-    "AUDIOBOOK": Path(INGEST_DIR_AUDIOBOOK) if INGEST_DIR_AUDIOBOOK else "",
-    "STANDARDS_DOCUMENT": Path(INGEST_DIR_STANDARDS_DOCUMENT) if INGEST_DIR_STANDARDS_DOCUMENT else "",
-    "MUSICAL_SCORE": Path(INGEST_DIR_MUSICAL_SCORE) if INGEST_DIR_MUSICAL_SCORE else "",
+    "BOOK_FICTION": Path(INGEST_DIR_BOOK_FICTION) if INGEST_DIR_BOOK_FICTION else INGEST_DIR,
+    "BOOK_NON_FICTION": Path(INGEST_DIR_BOOK_NON_FICTION) if INGEST_DIR_BOOK_NON_FICTION else INGEST_DIR,
+    "BOOK_UNKNOWN": Path(INGEST_DIR_BOOK_UNKNOWN) if INGEST_DIR_BOOK_UNKNOWN else INGEST_DIR,
+    "MAGAZINE": Path(INGEST_DIR_MAGAZINE) if INGEST_DIR_MAGAZINE else INGEST_DIR,
+    "COMIC_BOOK": Path(INGEST_DIR_COMIC_BOOK) if INGEST_DIR_COMIC_BOOK else INGEST_DIR,
+    "AUDIOBOOK": Path(INGEST_DIR_AUDIOBOOK) if INGEST_DIR_AUDIOBOOK else INGEST_DIR,
+    "STANDARDS_DOCUMENT": Path(INGEST_DIR_STANDARDS_DOCUMENT) if INGEST_DIR_STANDARDS_DOCUMENT else INGEST_DIR,
+    "MUSICAL_SCORE": Path(INGEST_DIR_MUSICAL_SCORE) if INGEST_DIR_MUSICAL_SCORE else INGEST_DIR,
     "DEFAULT" : INGEST_DIR,
 }
 
@@ -84,4 +91,7 @@ if USING_TOR:
     USE_DOH = False
     HTTP_PROXY = ""
     HTTPS_PROXY = ""
+
+# Calibre-Web URL for navigation button
+CALIBRE_WEB_URL = os.getenv("CALIBRE_WEB_URL", "").strip()
     

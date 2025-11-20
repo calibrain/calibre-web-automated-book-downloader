@@ -13,7 +13,12 @@ from env import INGEST_DIR, STATUS_TIMEOUT
 class QueueStatus(str, Enum):
     """Enum for possible book queue statuses."""
     QUEUED = "queued"
+    RESOLVING = "resolving"
+    BYPASSING = "bypassing"
     DOWNLOADING = "downloading"
+    VERIFYING = "verifying"
+    INGESTING = "ingesting"
+    COMPLETE = "complete"
     AVAILABLE = "available"
     ERROR = "error"
     DONE = "done"
@@ -130,7 +135,7 @@ class BookQueue:
             self._update_status(book_id, status)
             
             # Clean up active download tracking when finished
-            if status in [QueueStatus.AVAILABLE, QueueStatus.ERROR, QueueStatus.DONE, QueueStatus.CANCELLED]:
+            if status in [QueueStatus.COMPLETE, QueueStatus.AVAILABLE, QueueStatus.ERROR, QueueStatus.DONE, QueueStatus.CANCELLED]:
                 self._active_downloads.pop(book_id, None)
                 self._cancel_flags.pop(book_id, None)
     
@@ -198,7 +203,8 @@ class BookQueue:
         with self._lock:
             current_status = self._status.get(book_id)
             
-            if current_status == QueueStatus.DOWNLOADING:
+            # Allow cancellation during any active state
+            if current_status in [QueueStatus.RESOLVING, QueueStatus.BYPASSING, QueueStatus.DOWNLOADING, QueueStatus.VERIFYING, QueueStatus.INGESTING]:
                 # Signal active download to stop
                 if book_id in self._cancel_flags:
                     self._cancel_flags[book_id].set()
@@ -297,7 +303,7 @@ class BookQueue:
         with self._lock:
             to_remove = []
             for book_id, status in self._status.items():
-                if status in [QueueStatus.DONE, QueueStatus.ERROR, QueueStatus.CANCELLED]:
+                if status in [QueueStatus.COMPLETE, QueueStatus.DONE, QueueStatus.AVAILABLE, QueueStatus.ERROR, QueueStatus.CANCELLED]:
                     to_remove.append(book_id)
             
             removed_count = len(to_remove)
@@ -332,7 +338,7 @@ class BookQueue:
                 # Check for stale status entries
                 last_update = self._status_timestamps.get(book_id)
                 if last_update and (current_time - last_update) > self._status_timeout:
-                    if status in [QueueStatus.DONE, QueueStatus.ERROR, QueueStatus.AVAILABLE, QueueStatus.CANCELLED]:
+                    if status in [QueueStatus.COMPLETE, QueueStatus.DONE, QueueStatus.ERROR, QueueStatus.AVAILABLE, QueueStatus.CANCELLED]:
                         to_remove.append(book_id)
             
             # Remove stale entries
