@@ -215,8 +215,8 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
         if ws_manager and ws_manager.is_enabled():
             ws_manager.broadcast_status_update(queue_status())
         
-        intermediate_path = INGEST_DIR / f"{book_id}.crdownload"
         final_dir = _prepare_download_folder(book_info)
+        intermediate_path = final_dir / f"{book_id}.crdownload"
         final_path = final_dir / book_name
         
         if os.path.exists(book_path):
