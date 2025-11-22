@@ -16,12 +16,6 @@ export default defineConfig({
     cors: true,
     proxy: {
       // Proxy API requests to the Docker backend
-      '/request/api': {
-        target: 'http://localhost:8084',
-        changeOrigin: true,
-        secure: false,
-      },
-      // Also proxy direct API calls (without /request prefix)
       '/api': {
         target: 'http://localhost:8084',
         changeOrigin: true,

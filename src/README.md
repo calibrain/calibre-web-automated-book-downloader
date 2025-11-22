@@ -69,8 +69,8 @@ The development server supports HMR for instant feedback during development.
 
 ### API Integration
 The frontend communicates with the Flask backend via:
-- REST API endpoints (`/request/api/*`)
-- WebSocket connection (`ws://localhost:8084/request/ws`)
+- REST API endpoints (`/api/*`)
+- WebSocket connection (`ws://localhost:8084/ws`)
 
 ### Building for Production
 The production build is optimized and minified:

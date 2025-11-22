@@ -277,7 +277,7 @@ export const Header = ({
               {/* Debug Buttons */}
               {debug && (
                 <>
-                  <form action="/request/debug" method="get" className="w-full">
+                  <form action="/debug" method="get" className="w-full">
                     <button
                       className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 text-orange-600 dark:text-orange-400"
                       type="submit"
@@ -288,7 +288,7 @@ export const Header = ({
                       <span>Debug</span>
                     </button>
                   </form>
-                  <form action="/request/api/restart" method="get" className="w-full">
+                  <form action="/api/restart" method="get" className="w-full">
                     <button
                       className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 text-orange-600 dark:text-orange-400"
                       type="submit"
