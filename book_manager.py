@@ -250,6 +250,8 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     book_title = _find_in_divs(divs, "🔍").strip("🔍").strip()
 
     # Extract basic information
+    description = _extract_book_description(soup)
+
     book_info = BookInfo(
         id=book_id,
         preview=preview,
@@ -258,6 +260,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         author=_find_in_divs(divs, "icon-[mdi--user-edit]", isClass=True),
         format=format,
         size=size,
+        description=description,
         download_urls=urls,
     )
 
@@ -303,9 +306,53 @@ def _get_download_urls_from_welib(book_id: str) -> set[str]:
     download_links = [downloader.get_absolute_url(url, link) for link in download_links]
     return set(download_links)
 
-def _extract_book_metadata(
-    metadata_divs
-) -> Dict[str, List[str]]:
+def _get_next_value_div(label_div: Tag) -> Optional[Tag]:
+    """Find the next sibling div that holds the value for a metadata label."""
+    sibling = label_div.next_sibling
+    while sibling:
+        if isinstance(sibling, Tag) and sibling.name == "div":
+            return sibling
+        sibling = sibling.next_sibling
+    return None
+
+def _extract_book_description(soup: BeautifulSoup) -> Optional[str]:
+    """Extract the primary or alternative description from the book page."""
+    container = soup.select_one(".js-md5-top-box-description")
+    if not container:
+        return None
+
+    description: Optional[str] = None
+    alternative: Optional[str] = None
+
+    label_divs = container.select("div.text-xs.text-gray-500.uppercase")
+    for label_div in label_divs:
+        label_text = label_div.get_text(strip=True).lower()
+        value_div = _get_next_value_div(label_div)
+        if not value_div:
+            continue
+
+        value_text = value_div.get_text(separator=" ", strip=True)
+        if not value_text:
+            continue
+
+        if label_text == "description":
+            return value_text
+        if label_text == "alternative description" and not alternative:
+            alternative = value_text
+
+    if alternative:
+        return alternative
+
+    # Fallback to the first text block inside the description container
+    fallback_div = container.find("div", class_="mb-1")
+    if fallback_div:
+        fallback_text = fallback_div.get_text(separator=" ", strip=True)
+        if fallback_text:
+            return fallback_text
+
+    return None
+
+def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
     """Extract metadata from book info divs."""
     info: Dict[str, List[str]] = {}
 

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Book, ButtonStateInfo } from '../types';
-import { CircularProgress } from './CircularProgress';
+import { BookDownloadButton } from './BookDownloadButton';
 
 interface DetailsModalProps {
   book: Book | null;
@@ -45,17 +45,6 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
   if (!book) return null;
 
   const titleId = `book-details-title-${book.id}`;
-
-  const isCompleted = buttonState.state === 'completed';
-  const hasError = buttonState.state === 'error';
-  const isInProgress = ['queued', 'resolving', 'bypassing', 'downloading', 'verifying', 'ingesting'].includes(buttonState.state);
-  const isDisabled = buttonState.state !== 'download' || isQueuing || isCompleted;
-  const displayText = isQueuing ? 'Queuing...' : buttonState.text;
-
-  // Show circular progress only for downloading state with progress data
-  const showCircularProgress = buttonState.state === 'downloading' && buttonState.progress !== undefined;
-  // Show spinner for other in-progress states or when queuing
-  const showSpinner = (isInProgress && !showCircularProgress) || isQueuing;
 
   const handleDownload = async () => {
     setIsQueuing(true);
@@ -113,7 +102,7 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
             <button
               type="button"
               onClick={onClose}
-              className="rounded-full p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+              className="rounded-full p-2 text-gray-500 transition-colors hover-action hover:text-gray-900 dark:hover:text-gray-100"
               aria-label="Close details"
             >
               <svg
@@ -154,16 +143,19 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
               </div>
 
               <div className="flex flex-1 flex-col gap-4 sm:gap-5 lg:min-h-0">
-                <div className="space-y-4 text-sm">
-                  <div
-                    className="rounded-2xl border border-[var(--border-muted)] px-4 py-3"
+                {book.description && (
+                  <section
+                    className="space-y-3 rounded-2xl border border-[var(--border-muted)] px-4 py-4"
                     style={{ background: 'var(--bg)' }}
                   >
-                    <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                      {publisherInfo.label}
+                    <h4 className="text-sm font-semibold">Description</h4>
+                    <p className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-line">
+                      {book.description}
                     </p>
-                    <p className="font-medium text-gray-900 dark:text-gray-100">{publisherInfo.value}</p>
-                  </div>
+                  </section>
+                )}
+
+                <div className="space-y-4 text-sm">
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
                     {metadata.map(item => (
                       <div
@@ -178,6 +170,16 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
                       </div>
                     ))}
                   </div>
+                </div>
+
+                <div
+                  className="rounded-2xl border border-[var(--border-muted)] px-4 py-3 text-sm"
+                  style={{ background: 'var(--bg)' }}
+                >
+                  <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    {publisherInfo.label}
+                  </p>
+                  <p className="font-medium text-gray-900 dark:text-gray-100">{publisherInfo.value}</p>
                 </div>
 
                 {additionalInfo.length > 0 && (
@@ -206,38 +208,14 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
 
           <footer className="border-t border-[var(--border-muted)] bg-[var(--bg-soft)] px-5 py-4">
             <div className="flex justify-end">
-              <button
-                id="download-button"
-                data-id={book.id}
-                type="button"
-                className={`inline-flex items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-medium text-white transition-colors ${
-                  isCompleted
-                    ? 'bg-green-600'
-                    : hasError
-                    ? 'bg-red-600'
-                    : isInProgress || isQueuing
-                    ? 'bg-gray-500'
-                    : 'bg-sky-700 hover:bg-sky-800'
-                } ${isDisabled ? 'cursor-not-allowed opacity-75' : ''}`}
-                onClick={handleDownload}
-                disabled={isDisabled || isInProgress}
-              >
-                <span className="download-button-text">{displayText}</span>
-                {isCompleted && (
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
-                {hasError && (
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                )}
-                {showCircularProgress && <CircularProgress progress={buttonState.progress} size={16} />}
-                {showSpinner && (
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                )}
-              </button>
+              <BookDownloadButton
+                buttonState={buttonState}
+                onDownload={handleDownload}
+                size="md"
+                fullWidth
+                className="rounded-full px-4 py-3 text-sm font-medium"
+                ariaLabel={`Download ${book.title || 'book'}`}
+              />
             </div>
           </footer>
         </div>

@@ -1,8 +1,8 @@
 export { Header } from './Header';
 export { SearchSection } from './SearchSection';
+export { SearchBar } from './SearchBar';
 export { ResultsSection } from './ResultsSection';
 export { DetailsModal } from './DetailsModal';
-export { StatusSection } from './StatusSection';
 export { DownloadsSidebar } from './DownloadsSidebar';
 export { ToastContainer } from './ToastContainer';
 export { Footer } from './Footer';

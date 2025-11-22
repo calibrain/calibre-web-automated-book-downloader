@@ -18,13 +18,19 @@ export const ToastContainer = ({ toasts }: ToastContainerProps) => {
     });
   }, [toasts]);
 
+  const toastTypeClasses: Record<Toast['type'], string> = {
+    success: 'bg-green-600 text-white',
+    error: 'bg-red-600 text-white',
+    info: 'bg-blue-600 text-white',
+  };
+
   return (
     <div id="toast-container" className="fixed bottom-4 right-4 z-50 space-y-2">
       {toasts.map(toast => (
         <div
           key={toast.id}
           className={`toast-notification px-4 py-3 rounded-md shadow-lg text-sm font-medium transition-all duration-300 ${
-            toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-blue-600 text-white'
+            toastTypeClasses[toast.type]
           } ${visibleToasts.has(toast.id) ? 'toast-visible' : ''}`}
         >
           {toast.message}

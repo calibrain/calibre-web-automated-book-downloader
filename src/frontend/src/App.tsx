@@ -21,7 +21,8 @@ import { ToastContainer } from './components/ToastContainer';
 import { Footer } from './components/Footer';
 import { LoginPage } from './pages/LoginPage';
 import { DEFAULT_LANGUAGES, DEFAULT_SUPPORTED_FORMATS } from './data/languages';
-import { getLanguageFilterValues, LANGUAGE_OPTION_DEFAULT } from './utils/languageFilters';
+import { LANGUAGE_OPTION_DEFAULT } from './utils/languageFilters';
+import { buildSearchQuery } from './utils/buildSearchQuery';
 import './styles.css';
 
 const DEFAULT_FORMAT_SELECTION = DEFAULT_SUPPORTED_FORMATS.filter(format => format !== 'pdf');
@@ -265,6 +266,9 @@ function App() {
     try {
       const results = await searchBooks(query);
       setBooks(results);
+      if (results.length === 0) {
+        showToast('No results found', 'error');
+      }
     } catch (error) {
       if (error instanceof AuthenticationError) {
         setIsAuthenticated(false);
@@ -425,29 +429,14 @@ function App() {
         isAuthenticated={isAuthenticated}
         onLogout={handleLogout}
         onSearch={() => {
-          const q: string[] = [];
-          const basic = searchInput.trim();
-          if (basic) q.push(`query=${encodeURIComponent(basic)}`);
-          
-          if (showAdvanced) {
-            if (advancedFilters.isbn) q.push(`isbn=${encodeURIComponent(advancedFilters.isbn)}`);
-            if (advancedFilters.author) q.push(`author=${encodeURIComponent(advancedFilters.author)}`);
-            if (advancedFilters.title) q.push(`title=${encodeURIComponent(advancedFilters.title)}`);
-            if (advancedFilters.content) q.push(`content=${encodeURIComponent(advancedFilters.content)}`);
-            advancedFilters.formats.forEach(f => q.push(`format=${encodeURIComponent(f)}`));
-            const resolvedLangs = getLanguageFilterValues(
-              advancedFilters.lang,
-              bookLanguages,
-              defaultLanguageCodes,
-            );
-            resolvedLangs?.forEach(code => q.push(`lang=${encodeURIComponent(code)}`));
-          }
-
-          if (advancedFilters.sort) {
-            q.push(`sort=${encodeURIComponent(advancedFilters.sort)}`);
-          }
-          
-          handleSearch(q.join('&'));
+          const query = buildSearchQuery({
+            searchInput,
+            showAdvanced,
+            advancedFilters,
+            bookLanguages,
+            defaultLanguage: defaultLanguageCodes,
+          });
+          handleSearch(query);
         }}
         onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
         isLoading={isSearching}

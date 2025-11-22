@@ -31,7 +31,6 @@ export const ResultsSection = ({
   });
 
   const [isDesktop, setIsDesktop] = useState(false);
-
   useEffect(() => {
     localStorage.setItem('bookViewMode', viewMode);
   }, [viewMode]);
@@ -51,7 +50,7 @@ export const ResultsSection = ({
 
   return (
     <section id="results-section" className="mb-4 sm:mb-8 w-full">
-      <div className="flex items-center justify-between mb-2 sm:mb-3">
+      <div className="flex items-center justify-between mb-2 sm:mb-3 relative z-10">
         <SortControl value={sortValue} onChange={onSortChange} />
         
         {/* View toggle buttons - Desktop: show all 3, Mobile: show Compact and List only */}
@@ -62,7 +61,7 @@ export const ResultsSection = ({
               className={`p-2 rounded-full transition-all duration-200 ${
                 viewMode === 'card'
                   ? 'text-white bg-sky-700 hover:bg-sky-800'
-                  : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100'
+                  : 'hover-action text-gray-900 dark:text-gray-100'
               }`}
               title="Card view"
               aria-label="Card view"
@@ -88,7 +87,7 @@ export const ResultsSection = ({
             className={`p-2 rounded-full transition-all duration-200 ${
               viewMode === 'compact'
                 ? 'text-white bg-sky-700 hover:bg-sky-800'
-                : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100'
+                : 'hover-action text-gray-900 dark:text-gray-100'
             }`}
             title="Compact view"
             aria-label="Compact view"
@@ -112,7 +111,7 @@ export const ResultsSection = ({
             className={`p-2 rounded-full transition-all duration-200 ${
               viewMode === 'list'
                 ? 'text-white bg-sky-700 hover:bg-sky-800'
-                : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100'
+                : 'hover-action text-gray-900 dark:text-gray-100'
             }`}
             title="List view"
             aria-label="List view"
@@ -198,7 +197,7 @@ const SortControl = ({ value, onChange }: SortControlProps) => {
         <button
           type="button"
           onClick={toggle}
-          className={`relative flex items-center gap-2 px-3 py-2 rounded-full transition-all duration-200 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 ${
+          className={`relative flex items-center gap-2 px-3 py-2 rounded-full transition-all duration-200 text-gray-900 dark:text-gray-100 hover-action ${
             isOpen ? 'bg-gray-100 dark:bg-gray-700' : ''
           } animate-fade-in-up`}
           aria-haspopup="listbox"
@@ -231,7 +230,7 @@ const SortControl = ({ value, onChange }: SortControlProps) => {
               <button
                 type="button"
                 key={option.value || 'default'}
-                className={`w-full px-3 py-2 text-left text-base flex items-center justify-between gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${
+                className={`w-full px-3 py-2 text-left text-base flex items-center justify-between gap-2 hover-surface ${
                   isSelected ? 'text-sky-600 dark:text-sky-300 font-medium' : ''
                 }`}
                 onClick={() => {
