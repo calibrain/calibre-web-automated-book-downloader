@@ -240,10 +240,11 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     if format == "" or size == "":
         for f in _details:
-            if f == "" and not " " in f.strip().lower():
-                format = f.strip().lower()
-            if size == "" and "." in f.strip().lower():
-                size = f.strip().lower()
+            stripped = f.strip().lower()
+            if format == "" and stripped and " " not in stripped:
+                format = stripped
+            if size == "" and "." in stripped:
+                size = stripped
 
     
     book_title = _find_in_divs(divs, "🔍").strip("🔍").strip()
