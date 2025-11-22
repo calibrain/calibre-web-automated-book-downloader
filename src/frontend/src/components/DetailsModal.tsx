@@ -189,13 +189,12 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
                     className="space-y-3 rounded-2xl border border-[var(--border-muted)] px-4 py-4"
                     style={{ background: 'var(--bg)' }}
                   >
-                    <h4 className="text-sm font-semibold">Further Information</h4>
                     <ul className="space-y-2 text-sm">
                       {additionalInfo.map(([key, value]) => (
                         <li key={key} className="flex flex-col gap-1">
-                          <span className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
                             {key}
-                          </span>
+                          </p>
                           <span className="text-gray-900 dark:text-gray-100">
                             {Array.isArray(value) ? value.join(', ') : value}
                           </span>
