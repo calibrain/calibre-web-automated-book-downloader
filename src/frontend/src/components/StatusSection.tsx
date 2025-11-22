@@ -114,7 +114,7 @@ export const StatusSection = ({
           {Object.values(items).map((book: any) => {
             const maybeLinkedTitle = book.download_path ? (
               <a
-                href={`/request/api/localdownload?id=${encodeURIComponent(book.id)}`}
+                href={`/api/localdownload?id=${encodeURIComponent(book.id)}`}
                 className="text-blue-600 hover:underline"
               >
                 {book.title || '-'}
