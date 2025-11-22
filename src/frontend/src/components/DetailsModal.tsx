@@ -148,7 +148,9 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
                     className="space-y-3 rounded-2xl border border-[var(--border-muted)] px-4 py-4"
                     style={{ background: 'var(--bg)' }}
                   >
-                    <h4 className="text-sm font-semibold">Description</h4>
+                    <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Description
+                    </p>
                     <p className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-line">
                       {book.description}
                     </p>
