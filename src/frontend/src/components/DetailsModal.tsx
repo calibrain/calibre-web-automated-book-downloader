@@ -74,6 +74,11 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
           return normalized !== 'language' && normalized !== 'year';
         })
       : [];
+  const extendedInfoEntries = [[publisherInfo.label, publisherInfo.value], ...additionalInfo];
+  const infoCardClass = 'rounded-2xl border border-[var(--border-muted)] px-4 py-3 text-sm';
+  const infoCardStyle = { background: 'var(--bg)' };
+  const infoLabelClass = 'text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400';
+  const infoValueClass = 'text-gray-900 dark:text-gray-100';
 
   return (
     <div
@@ -144,64 +149,32 @@ export const DetailsModal = ({ book, onClose, onDownload, buttonState }: Details
 
               <div className="flex flex-1 flex-col gap-4 sm:gap-5 lg:min-h-0">
                 {book.description && (
-                  <section
-                    className="space-y-3 rounded-2xl border border-[var(--border-muted)] px-4 py-4"
-                    style={{ background: 'var(--bg)' }}
-                  >
-                    <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                      Description
-                    </p>
-                    <p className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-line">
-                      {book.description}
-                    </p>
-                  </section>
+                  <div className={`${infoCardClass} space-y-1`} style={infoCardStyle}>
+                    <p className={infoLabelClass}>Description</p>
+                    <p className={`${infoValueClass} whitespace-pre-line`}>{book.description}</p>
+                  </div>
                 )}
 
-                <div className="space-y-4 text-sm">
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
-                    {metadata.map(item => (
-                      <div
-                        key={item.label}
-                        className="rounded-2xl border border-[var(--border-muted)] px-4 py-3"
-                        style={{ background: 'var(--bg)' }}
-                      >
-                        <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                          {item.label}
-                        </p>
-                        <p className="font-medium text-gray-900 dark:text-gray-100">{item.value}</p>
-                      </div>
-                    ))}
-                  </div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
+                  {metadata.map(item => (
+                    <div key={item.label} className={`${infoCardClass} space-y-1`} style={infoCardStyle}>
+                      <p className={infoLabelClass}>{item.label}</p>
+                      <p className={infoValueClass}>{item.value}</p>
+                    </div>
+                  ))}
                 </div>
 
-                <div
-                  className="rounded-2xl border border-[var(--border-muted)] px-4 py-3 text-sm"
-                  style={{ background: 'var(--bg)' }}
-                >
-                  <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    {publisherInfo.label}
-                  </p>
-                  <p className="font-medium text-gray-900 dark:text-gray-100">{publisherInfo.value}</p>
-                </div>
-
-                {additionalInfo.length > 0 && (
-                  <section
-                    className="space-y-3 rounded-2xl border border-[var(--border-muted)] px-4 py-4"
-                    style={{ background: 'var(--bg)' }}
-                  >
-                    <ul className="space-y-2 text-sm">
-                      {additionalInfo.map(([key, value]) => (
-                        <li key={key} className="flex flex-col gap-1">
-                          <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                            {key}
-                          </p>
-                          <span className="text-gray-900 dark:text-gray-100">
-                            {Array.isArray(value) ? value.join(', ') : value}
-                          </span>
+                {extendedInfoEntries.length > 0 && (
+                  <div className={`${infoCardClass} space-y-3`} style={infoCardStyle}>
+                    <ul className="space-y-3 list-none">
+                      {extendedInfoEntries.map(([key, value]) => (
+                        <li key={key} className="space-y-1">
+                          <p className={infoLabelClass}>{key}</p>
+                          <p className={infoValueClass}>{Array.isArray(value) ? value.join(', ') : value}</p>
                         </li>
                       ))}
                     </ul>
-                  </section>
+                  </div>
                 )}
               </div>
             </div>
