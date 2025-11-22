@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Book, ButtonStateInfo } from '../../types';
-import { CircularProgress } from '../CircularProgress';
+import { BookDownloadButton } from '../BookDownloadButton';
 
 interface ListViewProps {
   books: Book[];
@@ -8,88 +8,6 @@ interface ListViewProps {
   onDownload: (book: Book) => Promise<void>;
   getButtonState: (bookId: string) => ButtonStateInfo;
 }
-
-interface ListViewDownloadButtonProps {
-  buttonState: ButtonStateInfo;
-  onDownload: () => Promise<void>;
-}
-
-const ListViewDownloadButton = ({ buttonState, onDownload }: ListViewDownloadButtonProps) => {
-  const [isQueuing, setIsQueuing] = useState(false);
-
-  useEffect(() => {
-    if (isQueuing && buttonState.state !== 'download') {
-      setIsQueuing(false);
-    }
-  }, [buttonState.state, isQueuing]);
-
-  const isCompleted = buttonState.state === 'completed';
-  const hasError = buttonState.state === 'error';
-  const isInProgress = ['queued', 'resolving', 'bypassing', 'downloading', 'verifying', 'ingesting'].includes(
-    buttonState.state,
-  );
-  const isDisabled = buttonState.state !== 'download' || isQueuing || isCompleted;
-  const showCircularProgress = buttonState.state === 'downloading' && buttonState.progress !== undefined;
-  const showSpinner = (isInProgress && !showCircularProgress) || isQueuing;
-
-  const handleDownload = async () => {
-    if (isDisabled) return;
-    setIsQueuing(true);
-    try {
-      await onDownload();
-    } catch (error) {
-      setIsQueuing(false);
-    }
-  };
-
-  const baseClasses = 'flex items-center justify-center p-1.5 sm:p-2 rounded-full transition-all duration-200';
-  const stateClasses = isCompleted
-    ? 'bg-green-600 text-white cursor-not-allowed'
-    : hasError
-    ? 'bg-red-600 text-white cursor-not-allowed opacity-75'
-    : isInProgress
-    ? 'bg-gray-500 text-white cursor-not-allowed opacity-75'
-    : 'text-gray-600 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700';
-
-  return (
-    <button
-      className={`${baseClasses} ${stateClasses}`}
-      onClick={handleDownload}
-      disabled={isDisabled || isInProgress}
-      data-action="download"
-      aria-label={buttonState.text}
-    >
-      {isCompleted ? (
-        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-        </svg>
-      ) : hasError ? (
-        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      ) : showCircularProgress ? (
-        <>
-          <CircularProgress
-            progress={buttonState.progress}
-            size={16}
-            className="block sm:hidden"
-          />
-          <CircularProgress
-            progress={buttonState.progress}
-            size={20}
-            className="hidden sm:block"
-          />
-        </>
-      ) : showSpinner ? (
-        <div className="w-4 h-4 sm:w-5 sm:h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-      ) : (
-        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.5">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-        </svg>
-      )}
-    </button>
-  );
-};
 
 const ListViewThumbnail = ({ preview, title }: { preview?: string; title?: string }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -201,7 +119,7 @@ export const ListView = ({ books, onDetails, onDownload, getButtonState }: ListV
           return (
             <div
               key={book.id}
-              className="px-1.5 sm:px-2 py-1.5 sm:py-2 transition-colors duration-200 hover:bg-white/60 dark:hover:bg-gray-800/40 w-full animate-slide-up"
+              className="px-1.5 sm:px-2 py-1.5 sm:py-2 transition-colors duration-200 hover-row w-full animate-slide-up will-change-transform"
               style={{
                 animationDelay: `${index * 50}ms`,
                 animationFillMode: 'both',
@@ -265,7 +183,7 @@ export const ListView = ({ books, onDetails, onDownload, getButtonState }: ListV
                 {/* Action Buttons */}
                 <div className="flex flex-row justify-end gap-0.5 sm:gap-1">
                   <button
-                    className="flex items-center justify-center p-1.5 sm:p-2 rounded-full text-gray-600 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200"
+                    className="flex items-center justify-center p-1.5 sm:p-2 rounded-full text-gray-600 dark:text-gray-200 hover-action transition-all duration-200"
                     onClick={() => handleDetails(book.id)}
                     disabled={isLoadingDetails}
                     aria-label={`View details for ${book.title || 'this book'}`}
@@ -278,9 +196,12 @@ export const ListView = ({ books, onDetails, onDownload, getButtonState }: ListV
                       </svg>
                     )}
                   </button>
-                  <ListViewDownloadButton
+                  <BookDownloadButton
                     buttonState={buttonState}
                     onDownload={() => onDownload(book)}
+                    variant="icon"
+                    size="md"
+                    ariaLabel={buttonState.text}
                   />
                 </div>
               </div>

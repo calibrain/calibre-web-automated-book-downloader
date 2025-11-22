@@ -220,7 +220,7 @@ export const DownloadsSidebar = ({
                   <button
                     type="button"
                     onClick={() => onCancel(book.id)}
-                    className="text-xs px-2 py-1 rounded border hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    className="text-xs px-2 py-1 rounded border hover-action transition-colors"
                     style={{ borderColor: 'var(--border-muted)' }}
                     title="Cancel download"
                   >
@@ -288,15 +288,12 @@ export const DownloadsSidebar = ({
         style={{ background: 'var(--bg)' }}
       >
         {/* Header */}
-        <div
-          className="flex items-center justify-between p-4 border-b"
-          style={{ borderColor: 'var(--border-muted)' }}
-        >
+        <div className="flex items-center justify-between p-4">
           <h2 className="text-lg font-semibold">Downloads</h2>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="flex h-10 w-10 items-center justify-center rounded-full hover-action transition-colors"
             aria-label="Close sidebar"
           >
             <svg
@@ -320,7 +317,7 @@ export const DownloadsSidebar = ({
           <button
             type="button"
             onClick={onClearCompleted}
-            className="flex-1 flex items-center justify-center px-3 py-2 rounded border text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            className="flex-1 flex items-center justify-center px-3 py-2 h-10 rounded border text-sm hover-action transition-colors"
             style={{ borderColor: 'var(--border-muted)' }}
           >
             Clear Completed
@@ -328,8 +325,7 @@ export const DownloadsSidebar = ({
           <button
             type="button"
             onClick={onRefresh}
-            className="flex items-center justify-center px-3 py-2 rounded border text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-            style={{ borderColor: 'var(--border-muted)' }}
+            className="flex items-center justify-center h-10 w-10 rounded-full text-sm hover-action transition-colors ml-auto"
             aria-label="Refresh"
             title="Refresh"
           >

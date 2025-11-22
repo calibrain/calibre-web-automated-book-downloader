@@ -102,7 +102,7 @@ export const DropdownList = ({
             <button
               type="button"
               key={option.value}
-              className={`w-full px-3 py-2 text-left text-base flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${
+              className={`w-full px-3 py-2 text-left text-base flex items-center gap-2 hover-surface ${
                 option.disabled ? 'opacity-50 cursor-not-allowed' : ''
               }`}
               onClick={() => handleOptionClick(option, close)}

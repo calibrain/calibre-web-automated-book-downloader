@@ -32,7 +32,7 @@ export const CompactView = ({ book, onDetails, onDownload, buttonState, showDeta
 
   return (
     <article
-      className="book-card overflow-hidden !flex !flex-row w-full !h-[180px] transition-shadow duration-300 animate-slide-up"
+      className="book-card overflow-hidden !flex !flex-row w-full !h-[180px] transition-shadow duration-300 animate-slide-up will-change-transform"
       style={{
         background: 'var(--bg-soft)',
         borderRadius: '.75rem',

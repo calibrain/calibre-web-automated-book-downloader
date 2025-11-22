@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { SearchBar } from './SearchBar';
 
 interface StatusCounts {
   ongoing: number;
@@ -141,11 +142,12 @@ export const Header = ({
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && onSearch) {
-      onSearch();
-      (e.target as HTMLInputElement).blur();
-    }
+  const handleHeaderSearch = () => {
+    onSearch?.();
+  };
+
+  const handleSearchChange = (value: string) => {
+    onSearchChange?.(value);
   };
 
   // Icon buttons component - reused for both states
@@ -157,7 +159,7 @@ export const Header = ({
           href={calibreWebUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 text-gray-900 dark:text-gray-100"
+          className="flex items-center gap-2 px-3 py-2 rounded-full hover-action transition-all duration-200 text-gray-900 dark:text-gray-100"
           aria-label="Open Calibre-Web"
           title="Go To Library"
         >
@@ -172,7 +174,7 @@ export const Header = ({
       {onDownloadsClick && (
         <button
           onClick={onDownloadsClick}
-          className="relative flex items-center gap-2 px-3 py-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-all duration-200 text-gray-900 dark:text-gray-100"
+          className="relative flex items-center gap-2 px-3 py-2 rounded-full hover-action transition-all duration-200 text-gray-900 dark:text-gray-100"
           aria-label="View downloads"
           title="Downloads"
         >
@@ -193,8 +195,8 @@ export const Header = ({
             </svg>
             {/* Show badge with appropriate color based on status */}
             {(statusCounts.ongoing > 0 || statusCounts.completed > 0 || statusCounts.errored > 0) && (
-              <span 
-                className={`absolute -top-1 -right-1 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center ${
+            <span 
+              className={`absolute -top-1 -right-1 text-white text-[0.55rem] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center ${
                   statusCounts.errored > 0 
                     ? 'bg-red-500' 
                     : statusCounts.ongoing > 0 
@@ -215,7 +217,7 @@ export const Header = ({
       <div className="relative" ref={dropdownRef}>
         <button
           onClick={toggleDropdown}
-          className={`relative p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
+          className={`relative p-2 rounded-full hover-action transition-colors ${
             isDropdownOpen ? 'bg-gray-100 dark:bg-gray-700' : ''
           }`}
           aria-label="User menu"
@@ -254,7 +256,7 @@ export const Header = ({
               <button
                 type="button"
                 onClick={cycleTheme}
-                className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3"
+                className="w-full text-left px-4 py-2 hover-surface transition-colors flex items-center gap-3"
               >
                 {theme === 'light' && (
                   <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
@@ -274,12 +276,36 @@ export const Header = ({
                 <span>Theme: {theme.charAt(0).toUpperCase() + theme.slice(1)}</span>
               </button>
 
+              <a
+                href="https://github.com/calibrain/calibre-web-automated-book-downloader/issues"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full text-left px-4 py-2 hover-surface transition-colors flex items-center gap-3 text-slate-700 dark:text-slate-200"
+                title="Submit a bug report"
+              >
+                <svg
+                  className="w-5 h-5"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth="1.5"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M3 3v1.5M3 21v-6m0 0 2.77-.693a9 9 0 0 1 6.208.682l.108.054a9 9 0 0 0 6.086.71l3.114-.732a48.524 48.524 0 0 1-.005-10.499l-3.11.732a9 9 0 0 1-6.085-.711l-.108-.054a9 9 0 0 0-6.208-.682L3 4.5M3 15V4.5"
+                  />
+                </svg>
+                <span>Report a Bug</span>
+              </a>
+
               {/* Debug Buttons */}
               {debug && (
                 <>
                   <form action="/debug" method="get" className="w-full">
                     <button
-                      className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 text-orange-600 dark:text-orange-400"
+                      className="w-full text-left px-4 py-2 hover-surface transition-colors flex items-center gap-3 text-orange-600 dark:text-orange-400"
                       type="submit"
                     >
                       <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
@@ -290,7 +316,7 @@ export const Header = ({
                   </form>
                   <form action="/api/restart" method="get" className="w-full">
                     <button
-                      className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 text-orange-600 dark:text-orange-400"
+                      className="w-full text-left px-4 py-2 hover-surface transition-colors flex items-center gap-3 text-orange-600 dark:text-orange-400"
                       type="submit"
                     >
                       <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
@@ -307,7 +333,7 @@ export const Header = ({
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 text-red-600 dark:text-red-400"
+                  className="w-full text-left px-4 py-2 hover-surface transition-colors flex items-center gap-3 text-red-600 dark:text-red-400"
                 >
                   <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
@@ -356,77 +382,15 @@ export const Header = ({
                   className="hidden lg:block h-12 w-12 flex-shrink-0 cursor-pointer" 
                 />
               )}
-              <div className="relative flex-1 lg:flex-initial">
-                <input
-                  type="search"
-                  placeholder="Search by ISBN, title, author..."
-                  aria-label="Search books"
-                  autoComplete="off"
-                  enterKeyHint="search"
-                  className="w-full lg:w-[50vw] pl-4 pr-28 py-3 rounded-full border outline-none search-input"
-                  style={{
-                    background: 'var(--bg-soft)',
-                    color: 'var(--text)',
-                    borderColor: 'var(--border-muted)',
-                  }}
-                  value={searchInput}
-                  onChange={(e) => onSearchChange?.(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                />
-                <div className="absolute inset-y-0 right-0 flex items-center gap-1 pr-2">
-                  <button
-                    type="button"
-                    onClick={onAdvancedToggle}
-                    className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center transition-colors"
-                    aria-label="Advanced Search"
-                    title="Advanced Search"
-                  >
-                    <svg
-                      className="w-5 h-5"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth="1.5"
-                      stroke="currentColor"
-                      style={{ color: 'var(--text)' }}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"
-                      />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onSearch}
-                    className="p-2 rounded-full text-white bg-sky-700 hover:bg-sky-800 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
-                    aria-label="Search books"
-                    title="Search"
-                    disabled={isLoading}
-                  >
-                    {!isLoading && (
-                      <svg
-                        className="w-5 h-5"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        strokeWidth="2"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
-                        />
-                      </svg>
-                    )}
-                    {isLoading && (
-                      <div className="spinner w-3 h-3 border-2 border-white border-t-transparent" />
-                    )}
-                  </button>
-                </div>
-              </div>
+              <SearchBar
+                className="flex-1 lg:flex-initial"
+                inputClassName="lg:w-[50vw]"
+                value={searchInput}
+                onChange={handleSearchChange}
+                onSubmit={handleHeaderSearch}
+                onAdvancedToggle={onAdvancedToggle}
+                isLoading={isLoading}
+              />
             </div>
           </div>
         )}

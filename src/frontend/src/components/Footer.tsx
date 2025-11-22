@@ -6,16 +6,16 @@ interface FooterProps {
 
 export const Footer = ({ buildVersion, releaseVersion, appEnv }: FooterProps) => {
   return (
-    <footer className="mt-10 border-t pt-6 pb-10" style={{ borderColor: 'var(--border-muted)' }}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
-        <div>
+    <footer className="mt-8 border-t py-6" style={{ borderColor: 'var(--border-muted)' }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0 text-left">
           <p className="text-sm opacity-80">Calibre Web Book Downloader</p>
           <p className="text-xs opacity-60 mt-1">
             Build: {buildVersion || 'dev'} • Release: {releaseVersion || 'dev'} • Env:{' '}
             {appEnv || 'development'}
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 shrink-0">
           <a
             href="https://github.com/calibrain/calibre-web-automated-book-downloader"
             className="opacity-80 hover:opacity-100"

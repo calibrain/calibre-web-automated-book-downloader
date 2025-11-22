@@ -1,8 +1,11 @@
+import { ReactNode } from 'react';
 import { AdvancedFilterState, Language } from '../types';
 import { normalizeLanguageSelection } from '../utils/languageFilters';
 import { LanguageMultiSelect } from './LanguageMultiSelect';
 import { DropdownList } from './DropdownList';
 import { CONTENT_OPTIONS } from '../data/filterOptions';
+
+const FORMAT_TYPES = ['pdf', 'epub', 'mobi', 'azw3', 'fb2', 'djvu', 'cbz', 'cbr'] as const;
 
 interface AdvancedFiltersProps {
   visible: boolean;
@@ -11,6 +14,8 @@ interface AdvancedFiltersProps {
   supportedFormats: string[];
   filters: AdvancedFilterState;
   onFiltersChange: (updates: Partial<AdvancedFilterState>) => void;
+  formClassName?: string;
+  renderWrapper?: (form: ReactNode) => ReactNode;
 }
 
 export const AdvancedFilters = ({
@@ -20,6 +25,8 @@ export const AdvancedFilters = ({
   supportedFormats,
   filters,
   onFiltersChange,
+  formClassName,
+  renderWrapper,
 }: AdvancedFiltersProps) => {
   const { isbn, author, title, lang, content, formats } = filters;
 
@@ -33,22 +40,27 @@ export const AdvancedFilters = ({
     onFiltersChange({ content: value });
   };
 
-  const toggleFormat = (format: string) => {
-    const newFormats = formats.includes(format)
-      ? formats.filter(f => f !== format)
-      : [...formats, format];
-    onFiltersChange({ formats: newFormats });
+  const handleFormatsChange = (next: string[] | string) => {
+    const nextFormats = Array.isArray(next) ? next : next ? [next] : [];
+    onFiltersChange({ formats: nextFormats });
   };
+
+  const formatOptions = FORMAT_TYPES.map(format => ({
+    value: format,
+    label: format.toUpperCase(),
+    disabled: !supportedFormats.includes(format),
+  }));
 
   if (!visible) return null;
 
-  return (
-    <div className="w-full border-b pt-6 pb-4 mb-4" style={{ borderColor: 'var(--border-muted)' }}>
-      <div className="w-full px-4 sm:px-6 lg:px-8">
-        <form
-          id="search-filters"
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 px-2 lg:ml-[calc(3rem+1rem)] lg:w-[50vw]"
-        >
+  const form = (
+    <form
+      id="search-filters"
+      className={
+        formClassName ??
+        'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 px-2 lg:ml-[calc(3rem+1rem)] lg:w-[50vw]'
+      }
+    >
           <div>
             <label htmlFor="isbn-input" className="block text-sm mb-1 opacity-80">
               ISBN
@@ -126,33 +138,28 @@ export const AdvancedFilters = ({
             onChange={handleContentChange}
             placeholder="All"
           />
-          <div className="md:col-span-2 lg:col-span-3">
-            <label className="block text-sm mb-1 opacity-80">Formats</label>
-            <div className="flex flex-wrap gap-3 text-sm">
-              {['pdf', 'epub', 'mobi', 'azw3', 'fb2', 'djvu', 'cbz', 'cbr'].map(format => {
-                const isSupported = supportedFormats.includes(format);
-                return (
-                  <label
-                    key={format}
-                    className={`inline-flex items-center gap-2 ${
-                      !isSupported ? 'opacity-50 cursor-not-allowed' : ''
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      value={format}
-                      checked={formats.includes(format)}
-                      onChange={() => toggleFormat(format)}
-                      disabled={!isSupported}
-                    />
-                    {format.toUpperCase()}
-                  </label>
-                );
-              })}
-            </div>
+          <div>
+            <DropdownList
+              label="Formats"
+              placeholder="Any"
+              options={formatOptions}
+              value={formats}
+              onChange={handleFormatsChange}
+              multiple
+              showCheckboxes
+              keepOpenOnSelect
+            />
           </div>
-        </form>
-      </div>
+    </form>
+  );
+
+  const wrappedForm = renderWrapper ? (
+    renderWrapper(form)
+  ) : (
+    <div className="w-full border-b pt-6 pb-4 mb-4" style={{ borderColor: 'var(--border-muted)' }}>
+      <div className="w-full px-4 sm:px-6 lg:px-8">{form}</div>
     </div>
   );
+
+  return wrappedForm;
 };

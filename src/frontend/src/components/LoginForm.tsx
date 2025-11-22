@@ -164,7 +164,7 @@ export const LoginForm = ({
               type="button"
               onClick={() => setShowPassword((current) => !current)}
               disabled={isLoading}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1.5 rounded-full hover-action disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
               {showPassword ? <EyeSlashIcon /> : <EyeIcon />}

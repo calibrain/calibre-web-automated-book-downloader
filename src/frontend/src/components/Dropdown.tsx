@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef, useState } from 'react';
+import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 interface DropdownProps {
   label?: string;
@@ -25,6 +25,8 @@ export const Dropdown = ({
 }: DropdownProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelDirection, setPanelDirection] = useState<'down' | 'up'>('down');
 
   const toggleOpen = () => {
     if (disabled) return;
@@ -54,6 +56,33 @@ export const Dropdown = ({
     return () => {
       document.removeEventListener('mousedown', handleClick);
       document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isOpen]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+
+    const updatePanelDirection = () => {
+      if (!containerRef.current || !panelRef.current) {
+        return;
+      }
+
+      const rect = containerRef.current.getBoundingClientRect();
+      const panelHeight = panelRef.current.offsetHeight || panelRef.current.scrollHeight;
+      const spaceBelow = window.innerHeight - rect.bottom - 8;
+      const spaceAbove = rect.top - 8;
+      const shouldOpenUp = spaceBelow < panelHeight && spaceAbove >= panelHeight;
+
+      setPanelDirection(shouldOpenUp ? 'up' : 'down');
+    };
+
+    updatePanelDirection();
+    window.addEventListener('resize', updatePanelDirection);
+    window.addEventListener('scroll', updatePanelDirection, true);
+
+    return () => {
+      window.removeEventListener('resize', updatePanelDirection);
+      window.removeEventListener('scroll', updatePanelDirection, true);
     };
   }, [isOpen]);
 
@@ -95,7 +124,10 @@ export const Dropdown = ({
 
       {isOpen && (
         <div
-          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} mt-2 rounded-md border shadow-lg z-20 ${panelClassName || widthClassName}`}
+          ref={panelRef}
+          className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} ${
+            panelDirection === 'down' ? 'mt-2' : 'bottom-full mb-2'
+          } rounded-md border shadow-lg z-20 ${panelClassName || widthClassName}`}
           style={{
             background: 'var(--bg)',
             borderColor: 'var(--border-muted)',
