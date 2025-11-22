@@ -7,12 +7,14 @@ import hashlib
 # Use absolute import since the script is run from the root directory
 import env as SERVER_ENV
 from backend import _sanitize_filename # Moved import to top level
+from models import ContentType
 
 # Now let's test the server:
 port = SERVER_ENV.FLASK_PORT
 server_url = f"http://localhost:{port}"
 book_title = "077484a10743e5dd5d151013e8c732f4" # "Moby Dick"
 # Directory where downloads should appear
+download_paths = SERVER_ENV.DOWNLOAD_PATHS
 download_dir = SERVER_ENV.INGEST_DIR
 # Timeout for waiting for download
 download_timeout_seconds = 60 * 5
@@ -38,7 +40,7 @@ def check_download_status(book_id):
             continue
 
         # Check success conditions based on download_path
-        for status_key in ["available", "done"]:
+        for status_key in ["available", "done", "complete"]:
             if status_key in status_data and book_id in status_data[status_key]:
                 book_status_info = status_data[status_key].get(book_id)
                 # Check if the status info is a dictionary and has a non-empty download_path
@@ -117,6 +119,9 @@ if SERVER_ENV.USE_BOOK_TITLE:
 else:
     expected_filename = f"{book_id}.epub"
 
+if book_details.get("content"):
+    content_type = [x for x in ContentType if x.value in book_details.get("content")]
+    download_dir = SERVER_ENV.DOWNLOAD_PATHS.get(content_type[0].name)
 expected_filepath = os.path.join(download_dir, expected_filename)
 
 assert os.path.exists(expected_filepath), f"Expected downloaded file not found at: {expected_filepath}"
