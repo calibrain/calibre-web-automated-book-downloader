@@ -407,6 +407,16 @@ button:disabled {
 /* On mobile (below 640px), use horizontal layout: image left, text right, buttons below */
 /* Desktop remains unchanged - full width, full height artwork via Tailwind classes */
 @media (max-width: 639px) {
+    .search-initial-state {
+        justify-content: flex-start;
+        padding-top: 18vh; /* push the search UI toward the upper third */
+    }
+
+    /* When advanced filters are visible, pull the search bar to the very top */
+    .search-initial-state.search-advanced-visible {
+        padding-top: calc(env(safe-area-inset-top) + 1rem);
+    }
+
     .book-card-content {
         flex-direction: row !important;
         gap: 0.75rem !important;

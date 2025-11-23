@@ -52,7 +52,7 @@ export const SearchSection = ({
         isInitialState 
           ? 'search-initial-state mb-6' 
           : 'mb-3 sm:mb-4'
-      }`}
+      } ${showAdvanced ? 'search-advanced-visible' : ''}`}
     >
       <div className={`flex items-center justify-center gap-3 transition-all duration-300 ${
         isInitialState ? 'opacity-100 mb-6 sm:mb-8' : 'opacity-0 h-0 mb-0 overflow-hidden'
