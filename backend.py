@@ -13,7 +13,7 @@ from logger import setup_logger
 from config import CUSTOM_SCRIPT
 from env import (INGEST_DIR, DOWNLOAD_PATHS, TMP_DIR, MAIN_LOOP_SLEEP_TIME, USE_BOOK_TITLE,
                  MAX_CONCURRENT_DOWNLOADS, DOWNLOAD_PROGRESS_UPDATE_INTERVAL)
-from models import book_queue, BookInfo, ContentType, QueueStatus, SearchFilters
+from models import book_queue, BookInfo, QueueStatus, SearchFilters
 import book_manager
 
 logger = setup_logger(__name__)
@@ -139,10 +139,8 @@ def _book_info_to_dict(book: BookInfo) -> Dict[str, Any]:
 def _prepare_download_folder(book_info: BookInfo) -> Path:
     """Prepare final content-type subdir"""
     content = book_info.content
-    content_type = [x for x in ContentType if x.value in content]
-    content_dir = DOWNLOAD_PATHS.get(content_type[0].name) if content_type else DOWNLOAD_PATHS.get("DEFAULT")
-    if not os.path.exists(content_dir):
-        os.makedirs(content_dir)
+    content_dir = DOWNLOAD_PATHS.get(content) if content and content in DOWNLOAD_PATHS else INGEST_DIR
+    os.makedirs(content_dir, exist_ok=True)
     return content_dir
 
 def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Optional[str]:

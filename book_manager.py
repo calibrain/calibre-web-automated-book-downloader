@@ -10,8 +10,8 @@ from bs4 import BeautifulSoup, Tag, NavigableString, ResultSet
 import downloader
 from logger import setup_logger
 from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_BASE_URL
-from env import AA_DONATOR_KEY, USE_CF_BYPASS, PRIORITIZE_WELIB, ALLOW_USE_WELIB
-from models import BookInfo, ContentType, SearchFilters
+from env import AA_DONATOR_KEY, USE_CF_BYPASS, PRIORITIZE_WELIB, ALLOW_USE_WELIB, DOWNLOAD_PATHS
+from models import BookInfo, SearchFilters
 logger = setup_logger(__name__)
 
 
@@ -125,7 +125,7 @@ def _parse_search_result_row(row: Tag) -> Optional[BookInfo]:
             publisher=cells[3].find("span").next,
             year=cells[4].find("span").next,
             language=cells[7].find("span").next,
-            content=cells[8].find("span").next,
+            content=cells[8].find("span").next.lower(),
             format=cells[9].find("span").next.lower(),
             size=cells[10].find("span").next,
         )
@@ -234,7 +234,6 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     format = ""
     size = ""
     content = ""
-    content_types = [c.value for c in ContentType]
     
     for _details in all_details:
         _details = _details.split(" · ")
@@ -243,9 +242,11 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                 format = f.strip().lower()
             if size == "" and any(u in f.strip().lower() for u in ["mb", "kb", "gb"]):
                 size = f.strip().lower()
-            if content == "" and any(ct.lower() in f.strip().lower() for ct in content_types):
-                content = [ct for ct in content_types if ct.lower() in f.strip().lower()][0]
-
+            if content == "":
+                for ct in DOWNLOAD_PATHS.keys():
+                    if ct in f.strip().lower():
+                        content = ct
+                        break
         if format == "" or size == "":
             for f in _details:
                 stripped = f.strip().lower()
@@ -253,8 +254,6 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                     format = stripped
                 if size == "" and "." in stripped:
                     size = stripped
-    if content == "":
-        content = ContentType.OTHER
     
     book_title = _find_in_divs(divs, "🔍")[0].strip("🔍").strip()
 
