@@ -13,21 +13,25 @@ class CustomLogger(logging.Logger):
     def error_trace(self, msg: Any, *args: Any, **kwargs: Any) -> None:
         """Log an error message with full stack trace."""
         self.log_resource_usage()
+        kwargs.pop('exc_info', None)
         self.error(msg, *args, exc_info=True, **kwargs)
 
     def warning_trace(self, msg: Any, *args: Any, **kwargs: Any) -> None:
         """Log a warning message with full stack trace."""
         self.log_resource_usage()
+        kwargs.pop('exc_info', None)
         self.warning(msg, *args, exc_info=True, **kwargs)
     
     def info_trace(self, msg: Any, *args: Any, **kwargs: Any) -> None:
         """Log an info message with full stack trace."""
         self.log_resource_usage()
+        kwargs.pop('exc_info', None)
         self.info(msg, *args, exc_info=True, **kwargs)
     
     def debug_trace(self, msg: Any, *args: Any, **kwargs: Any) -> None:
         """Log a debug message with full stack trace."""
         self.log_resource_usage()
+        kwargs.pop('exc_info', None)
         self.debug(msg, *args, exc_info=True, **kwargs)
     
     def log_resource_usage(self):
