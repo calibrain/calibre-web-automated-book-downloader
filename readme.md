@@ -87,6 +87,30 @@ Note that if using TOR, the TZ will be calculated automatically based on IP.
 
 If you change `BOOK_LANGUAGE`, you can add multiple comma separated languages, such as `en,fr,ru` etc.  
 
+Use the following environment variables to set specific folders in which to download 
+different content types (Book, Magazine, Comic, etc.):
+
+| Variable                        | Description                    | Default Value |
+|---------------------------------|--------------------------------|---------------|
+| `INGEST_DIR_BOOK_FICTION`       | Book (fiction) folder name     | ``            |
+| `INGEST_DIR_BOOK_NON_FICTION`   | Book (non-fiction) folder name | ``            |
+| `INGEST_DIR_BOOK_UNKNOWN`       | Book (unknown) folder name     | ``            |
+| `INGEST_DIR_MAGAZINE`           | Magazine folder name           | ``            |
+| `INGEST_DIR_COMIC_BOOK`         | Comic book folder name         | ``            |
+| `INGEST_DIR_AUDIOBOOK`          | Audiobook folder name          | ``            |
+| `INGEST_DIR_STANDARDS_DOCUMENT` | Standards document folder name | ``            |
+| `INGEST_DIR_MUSICAL_SCORE`      | Musical score folder name      | ``            |
+
+If no specific path is set for a content type the default is `INGEST_DIR`.  
+Remember to map the specified paths to where your instance of Calibre-Web-Automated (CWA) will find them, e.g.:  
+```
+volumes:
+    - /tmp/data/calibre-web/comicbook-ingest:/cwa-comicbook-ingest
+```
+if `INGEST_DIR_COMIC_BOOK=/cwa-comicbook-ingest` and your CWA is configured to use `/tmp/data/calibre-web/comicbook-ingest` 
+for comic books.
+
+
 #### AA 
 
 | Variable               | Description                                               | Default Value                     |
