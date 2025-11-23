@@ -229,22 +229,24 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     original_divs = divs
     divs = [div for div in divs if div.text.strip() != ""]
 
-    _details = _find_in_divs(divs, " · ").split(" · ")
+    all_details = _find_in_divs(divs, " · ")
     format = ""
     size = ""
-    for f in _details:
-        if format == "" and f.strip().lower() in SUPPORTED_FORMATS:
-            format = f.strip().lower()
-        if size == "" and any(u in f.strip().lower() for u in ["mb", "kb", "gb"]):
-            size = f.strip().lower()
-
-    if format == "" or size == "":
+    for _details in all_details:
+        _details = _details.split(" · ")
         for f in _details:
-            stripped = f.strip().lower()
-            if format == "" and stripped and " " not in stripped:
-                format = stripped
-            if size == "" and "." in stripped:
-                size = stripped
+            if format == "" and f.strip().lower() in SUPPORTED_FORMATS:
+                format = f.strip().lower()
+            if size == "" and any(u in f.strip().lower() for u in ["mb", "kb", "gb"]):
+                size = f.strip().lower()
+
+        if format == "" or size == "":
+            for f in _details:
+                stripped = f.strip().lower()
+                if format == "" and stripped and " " not in stripped:
+                    format = stripped
+                if size == "" and "." in stripped:
+                    size = stripped
 
     
     book_title = _find_in_divs(divs, "🔍").strip("🔍").strip()
@@ -280,15 +282,16 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     return book_info
 
-def _find_in_divs(divs: List[str], text: str, isClass: bool = False) -> str:
+def _find_in_divs(divs: List[str], text: str, isClass: bool = False) -> List[str]:
+    divs_found = []
     for div in divs:
         if isClass:
             if div.find(class_ = text):
-                return div.text.strip()
+                divs_found.append(div.text.strip())
         else:
             if text in div.text.strip():
-                return div.text.strip()
-    return ""
+                divs_found.append(div.text.strip())
+    return divs_found
 
 def _get_download_urls_from_welib(book_id: str) -> set[str]:
     if ALLOW_USE_WELIB == False:
@@ -390,7 +393,7 @@ def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
     }
 
 
-def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None) -> bool:
+def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None) -> Optional[str]:
     """Download a book from available sources.
 
     Args:
@@ -401,7 +404,7 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
         status_callback: Optional callback for status updates
 
     Returns:
-        bool: True if successful, False otherwise
+        str: Download URL if successful, None otherwise
     """
 
     if len(book_info.download_urls) == 0:
@@ -437,13 +440,13 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
                 with open(book_path, "wb") as f:
                     f.write(data.getbuffer())
                 logger.info(f"Writing `{book_info.title}` successfully")
-                return True
+                return download_url
 
         except Exception as e:
             logger.error_trace(f"Failed to download from {link}: {e}")
             continue
 
-    return False
+    return None
 
 
 def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None) -> str:
