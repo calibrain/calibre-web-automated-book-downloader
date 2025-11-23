@@ -35,6 +35,9 @@ input, select, textarea, button,
     --text: var(--text-color);
     --border-muted: var(--border-color);
     --bg-soft: var(--card-background);
+    --hover-surface: rgba(15, 23, 42, 0.05);
+    --hover-action: rgba(15, 23, 42, 0.08);
+    --hover-row: rgba(15, 23, 42, 0.07);
 }
 
 [data-theme="dark"] {
@@ -45,6 +48,9 @@ input, select, textarea, button,
     --card-background: #1e1e1e;
     --border-color: #404040;
     --input-background: #2d2d2d;
+    --hover-surface: rgba(255, 255, 255, 0.05);
+    --hover-action: rgba(255, 255, 255, 0.12);
+    --hover-row: rgba(255, 255, 255, 0.08);
 }
 
 * {
@@ -184,17 +190,17 @@ footer {
 }
 
 /* Button spinner styles */
-#search-spinner {
+.search-bar-spinner {
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
     transition: opacity 0.2s ease;
 }
 
-#search-icon {
+.search-bar-icon {
     transition: opacity 0.2s ease;
 }
 
-#search-button:disabled {
+.search-bar-button:disabled {
     cursor: not-allowed;
 }
 
@@ -289,6 +295,24 @@ button:disabled {
     cursor: not-allowed;
 }
 
+.hover-surface,
+.hover-action,
+.hover-row {
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.hover-surface:hover {
+    background-color: var(--hover-surface);
+}
+
+.hover-action:hover {
+    background-color: var(--hover-action);
+}
+
+.hover-row:hover {
+    background-color: var(--hover-row);
+}
+
 /* Search wrapper and input - base styles */
 .search-wrapper {
     width: 100%;
@@ -296,6 +320,21 @@ button:disabled {
 
 .search-input {
     min-width: 0; /* Allow input to shrink on mobile flex containers */
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.search-input::-webkit-search-cancel-button,
+.search-input::-webkit-search-decoration,
+.search-input::-webkit-search-results-button,
+.search-input::-webkit-search-results-decoration {
+    display: none;
+}
+
+.search-input::-ms-clear {
+    display: none;
+    width: 0;
+    height: 0;
 }
 
 /* ============================================

@@ -10,6 +10,7 @@ export interface Book {
   preview?: string;
   publisher?: string;
   info?: Record<string, string | string[]>;
+  description?: string;
   download_path?: string;
   progress?: number;
 }
