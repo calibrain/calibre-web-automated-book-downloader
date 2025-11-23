@@ -7,7 +7,6 @@ import hashlib
 # Use absolute import since the script is run from the root directory
 import env as SERVER_ENV
 from backend import _sanitize_filename # Moved import to top level
-from models import ContentType
 
 # Now let's test the server:
 port = SERVER_ENV.FLASK_PORT
@@ -120,8 +119,11 @@ else:
     expected_filename = f"{book_id}.epub"
 
 if book_details.get("content"):
-    content_type = [x for x in ContentType if x.value in book_details.get("content")]
-    download_dir = SERVER_ENV.DOWNLOAD_PATHS.get(content_type[0].name)
+    content = book_details.get("content")
+    for key, path in SERVER_ENV.DOWNLOAD_PATHS.items():
+        if key in content:
+            download_dir = path
+            break
 expected_filepath = os.path.join(download_dir, expected_filename)
 
 assert os.path.exists(expected_filepath), f"Expected downloaded file not found at: {expected_filepath}"
