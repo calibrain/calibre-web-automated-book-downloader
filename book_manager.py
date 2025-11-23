@@ -249,7 +249,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                     size = stripped
 
     
-    book_title = _find_in_divs(divs, "🔍").strip("🔍").strip()
+    book_title = _find_in_divs(divs, "🔍")[0].strip("🔍").strip()
 
     # Extract basic information
     description = _extract_book_description(soup)
@@ -258,8 +258,8 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         id=book_id,
         preview=preview,
         title=book_title,
-        publisher=_find_in_divs(divs, "icon-[mdi--company]", isClass=True),
-        author=_find_in_divs(divs, "icon-[mdi--user-edit]", isClass=True),
+        publisher=_find_in_divs(divs, "icon-[mdi--company]", isClass=True)[0],
+        author=_find_in_divs(divs, "icon-[mdi--user-edit]", isClass=True)[0],
         format=format,
         size=size,
         description=description,
