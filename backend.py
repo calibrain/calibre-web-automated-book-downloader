@@ -168,6 +168,9 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
             book_name = _sanitize_filename(book_info.title)
         else:
             book_name = book_id
+        # If format is not set, use the format of the first download URL
+        if book_info.format == "":
+            book_info.format = book_info.download_urls[0].split(".")[-1]
         book_name += f".{book_info.format}"
         book_path = TMP_DIR / book_name
 
@@ -178,7 +181,7 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
         
         progress_callback = lambda progress: update_download_progress(book_id, progress)
         status_callback = lambda status: update_download_status(book_id, status)
-        success = book_manager.download_book(book_info, book_path, progress_callback, cancel_flag, status_callback)
+        success_download_url = book_manager.download_book(book_info, book_path, progress_callback, cancel_flag, status_callback)
         
         # Stop progress updates
         cancel_flag.wait(0.1)  # Brief pause for progress thread cleanup
@@ -190,7 +193,7 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
                 book_path.unlink()
             return None
             
-        if not success:
+        if not success_download_url:
             raise Exception("Unknown error downloading book")
 
         # Check cancellation before post-processing
@@ -215,6 +218,10 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
         if ws_manager and ws_manager.is_enabled():
             ws_manager.broadcast_status_update(queue_status())
         
+        if success_download_url and book_info.format == "":
+            book_info.format = success_download_url.split(".")[-1]
+            book_name += f".{book_info.format}"
+
         final_dir = _prepare_download_folder(book_info)
         intermediate_path = final_dir / f"{book_id}.crdownload"
         final_path = final_dir / book_name

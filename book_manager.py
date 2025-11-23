@@ -230,42 +230,47 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     original_divs = divs
     divs = [div for div in divs if div.text.strip() != ""]
 
-    _details = _find_in_divs(divs, " · ").split(" · ")
+    all_details = _find_in_divs(divs, " · ")
     format = ""
     size = ""
     content = ""
     content_types = [c.value for c in ContentType]
-    for f in _details:
-        if format == "" and f.strip().lower() in SUPPORTED_FORMATS:
-            format = f.strip().lower()
-        if size == "" and any(u in f.strip().lower() for u in ["mb", "kb", "gb"]):
-            size = f.strip().lower()
-        if content == "" and any(ct.lower() in f.strip().lower() for ct in content_types):
-            content = [ct for ct in content_types if ct.lower() in f.strip().lower()][0]
-
-    if format == "" or size == "":
+    
+    for _details in all_details:
+        _details = _details.split(" · ")
         for f in _details:
-            stripped = f.strip().lower()
-            if format == "" and stripped and " " not in stripped:
-                format = stripped
-            if size == "" and "." in stripped:
-                size = stripped
+            if format == "" and f.strip().lower() in SUPPORTED_FORMATS:
+                format = f.strip().lower()
+            if size == "" and any(u in f.strip().lower() for u in ["mb", "kb", "gb"]):
+                size = f.strip().lower()
+            if content == "" and any(ct.lower() in f.strip().lower() for ct in content_types):
+                content = [ct for ct in content_types if ct.lower() in f.strip().lower()][0]
+
+        if format == "" or size == "":
+            for f in _details:
+                stripped = f.strip().lower()
+                if format == "" and stripped and " " not in stripped:
+                    format = stripped
+                if size == "" and "." in stripped:
+                    size = stripped
     if content == "":
         content = ContentType.OTHER
-
     
-    book_title = _find_in_divs(divs, "🔍").strip("🔍").strip()
+    book_title = _find_in_divs(divs, "🔍")[0].strip("🔍").strip()
 
     # Extract basic information
+    description = _extract_book_description(soup)
+
     book_info = BookInfo(
         id=book_id,
         preview=preview,
         title=book_title,
         content=content,
-        publisher=_find_in_divs(divs, "icon-[mdi--company]", isClass=True),
-        author=_find_in_divs(divs, "icon-[mdi--user-edit]", isClass=True),
+        publisher=_find_in_divs(divs, "icon-[mdi--company]", isClass=True)[0],
+        author=_find_in_divs(divs, "icon-[mdi--user-edit]", isClass=True)[0],
         format=format,
         size=size,
+        description=description,
         download_urls=urls,
     )
 
@@ -285,15 +290,16 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     return book_info
 
-def _find_in_divs(divs: List[str], text: str, isClass: bool = False) -> str:
+def _find_in_divs(divs: List[str], text: str, isClass: bool = False) -> List[str]:
+    divs_found = []
     for div in divs:
         if isClass:
             if div.find(class_ = text):
-                return div.text.strip()
+                divs_found.append(div.text.strip())
         else:
             if text in div.text.strip():
-                return div.text.strip()
-    return ""
+                divs_found.append(div.text.strip())
+    return divs_found
 
 def _get_download_urls_from_welib(book_id: str) -> set[str]:
     if ALLOW_USE_WELIB == False:
@@ -311,9 +317,53 @@ def _get_download_urls_from_welib(book_id: str) -> set[str]:
     download_links = [downloader.get_absolute_url(url, link) for link in download_links]
     return set(download_links)
 
-def _extract_book_metadata(
-    metadata_divs
-) -> Dict[str, List[str]]:
+def _get_next_value_div(label_div: Tag) -> Optional[Tag]:
+    """Find the next sibling div that holds the value for a metadata label."""
+    sibling = label_div.next_sibling
+    while sibling:
+        if isinstance(sibling, Tag) and sibling.name == "div":
+            return sibling
+        sibling = sibling.next_sibling
+    return None
+
+def _extract_book_description(soup: BeautifulSoup) -> Optional[str]:
+    """Extract the primary or alternative description from the book page."""
+    container = soup.select_one(".js-md5-top-box-description")
+    if not container:
+        return None
+
+    description: Optional[str] = None
+    alternative: Optional[str] = None
+
+    label_divs = container.select("div.text-xs.text-gray-500.uppercase")
+    for label_div in label_divs:
+        label_text = label_div.get_text(strip=True).lower()
+        value_div = _get_next_value_div(label_div)
+        if not value_div:
+            continue
+
+        value_text = value_div.get_text(separator=" ", strip=True)
+        if not value_text:
+            continue
+
+        if label_text == "description":
+            return value_text
+        if label_text == "alternative description" and not alternative:
+            alternative = value_text
+
+    if alternative:
+        return alternative
+
+    # Fallback to the first text block inside the description container
+    fallback_div = container.find("div", class_="mb-1")
+    if fallback_div:
+        fallback_text = fallback_div.get_text(separator=" ", strip=True)
+        if fallback_text:
+            return fallback_text
+
+    return None
+
+def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
     """Extract metadata from book info divs."""
     info: Dict[str, List[str]] = {}
 
@@ -351,7 +401,7 @@ def _extract_book_metadata(
     }
 
 
-def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None) -> bool:
+def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None) -> Optional[str]:
     """Download a book from available sources.
 
     Args:
@@ -362,7 +412,7 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
         status_callback: Optional callback for status updates
 
     Returns:
-        bool: True if successful, False otherwise
+        str: Download URL if successful, None otherwise
     """
 
     if len(book_info.download_urls) == 0:
@@ -398,13 +448,13 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
                 with open(book_path, "wb") as f:
                     f.write(data.getbuffer())
                 logger.info(f"Writing `{book_info.title}` successfully")
-                return True
+                return download_url
 
         except Exception as e:
             logger.error_trace(f"Failed to download from {link}: {e}")
             continue
 
-    return False
+    return None
 
 
 def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None) -> str:

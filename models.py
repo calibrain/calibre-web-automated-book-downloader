@@ -64,6 +64,7 @@ class BookInfo:
     format: Optional[str] = None
     size: Optional[str] = None
     info: Optional[Dict[str, List[str]]] = None
+    description: Optional[str] = None
     download_urls: List[str] = field(default_factory=list)
     download_path: Optional[str] = None
     priority: int = 0
