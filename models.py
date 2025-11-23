@@ -47,6 +47,7 @@ class BookInfo:
     publisher: Optional[str] = None
     year: Optional[str] = None
     language: Optional[str] = None
+    content: Optional[str] = None
     format: Optional[str] = None
     size: Optional[str] = None
     info: Optional[Dict[str, List[str]]] = None

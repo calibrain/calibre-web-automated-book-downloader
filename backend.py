@@ -11,7 +11,8 @@ from threading import Event
 
 from logger import setup_logger
 from config import CUSTOM_SCRIPT
-from env import INGEST_DIR, TMP_DIR, MAIN_LOOP_SLEEP_TIME, USE_BOOK_TITLE, MAX_CONCURRENT_DOWNLOADS, DOWNLOAD_PROGRESS_UPDATE_INTERVAL
+from env import (INGEST_DIR, DOWNLOAD_PATHS, TMP_DIR, MAIN_LOOP_SLEEP_TIME, USE_BOOK_TITLE,
+                 MAX_CONCURRENT_DOWNLOADS, DOWNLOAD_PROGRESS_UPDATE_INTERVAL)
 from models import book_queue, BookInfo, QueueStatus, SearchFilters
 import book_manager
 
@@ -135,6 +136,13 @@ def _book_info_to_dict(book: BookInfo) -> Dict[str, Any]:
         if value is not None
     }
 
+def _prepare_download_folder(book_info: BookInfo) -> Path:
+    """Prepare final content-type subdir"""
+    content = book_info.content
+    content_dir = DOWNLOAD_PATHS.get(content) if content and content in DOWNLOAD_PATHS else INGEST_DIR
+    os.makedirs(content_dir, exist_ok=True)
+    return content_dir
+
 def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Optional[str]:
     """Download and process a book with cancellation support.
     
@@ -212,8 +220,9 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
             book_info.format = success_download_url.split(".")[-1]
             book_name += f".{book_info.format}"
 
-        intermediate_path = INGEST_DIR / f"{book_id}.crdownload"
-        final_path = INGEST_DIR / book_name
+        final_dir = _prepare_download_folder(book_info)
+        intermediate_path = final_dir / f"{book_id}.crdownload"
+        final_path = final_dir / book_name
         
         if os.path.exists(book_path):
             logger.info(f"Moving book to ingest directory: {book_path} -> {final_path}")

@@ -1,6 +1,6 @@
 """Book download manager handling search and retrieval operations."""
 
-import time, json, re
+import time, json, os, re
 from pathlib import Path
 from urllib.parse import quote
 from typing import List, Optional, Dict, Union, Callable
@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup, Tag, NavigableString, ResultSet
 import downloader
 from logger import setup_logger
 from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_BASE_URL
-from env import AA_DONATOR_KEY, USE_CF_BYPASS, PRIORITIZE_WELIB, ALLOW_USE_WELIB
+from env import AA_DONATOR_KEY, USE_CF_BYPASS, PRIORITIZE_WELIB, ALLOW_USE_WELIB, DOWNLOAD_PATHS
 from models import BookInfo, SearchFilters
 logger = setup_logger(__name__)
 
@@ -125,6 +125,7 @@ def _parse_search_result_row(row: Tag) -> Optional[BookInfo]:
             publisher=cells[3].find("span").next,
             year=cells[4].find("span").next,
             language=cells[7].find("span").next,
+            content=cells[8].find("span").next.lower(),
             format=cells[9].find("span").next.lower(),
             size=cells[10].find("span").next,
         )
@@ -232,6 +233,8 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     all_details = _find_in_divs(divs, " · ")
     format = ""
     size = ""
+    content = ""
+    
     for _details in all_details:
         _details = _details.split(" · ")
         for f in _details:
@@ -239,7 +242,11 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                 format = f.strip().lower()
             if size == "" and any(u in f.strip().lower() for u in ["mb", "kb", "gb"]):
                 size = f.strip().lower()
-
+            if content == "":
+                for ct in DOWNLOAD_PATHS.keys():
+                    if ct in f.strip().lower():
+                        content = ct
+                        break
         if format == "" or size == "":
             for f in _details:
                 stripped = f.strip().lower()
@@ -247,7 +254,6 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                     format = stripped
                 if size == "" and "." in stripped:
                     size = stripped
-
     
     book_title = _find_in_divs(divs, "🔍")[0].strip("🔍").strip()
 
@@ -258,6 +264,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         id=book_id,
         preview=preview,
         title=book_title,
+        content=content,
         publisher=_find_in_divs(divs, "icon-[mdi--company]", isClass=True)[0],
         author=_find_in_divs(divs, "icon-[mdi--user-edit]", isClass=True)[0],
         format=format,
@@ -277,7 +284,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         book_info.year = info["Year"][0]
 
     # TODO :
-    # Backfill missing metadata from original book 
+    # Backfill missing metadata from original book
     # To do this, we need to cache the results of search_books() in some kind of LRU
 
     return book_info
@@ -423,13 +430,13 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
             # Update status to resolving before attempting download URL fetch
             if status_callback:
                 status_callback("resolving")
-            
+
             download_url = _get_download_url(link, book_info.title, cancel_flag, status_callback)
             if download_url != "":
                 # Update status to downloading before starting actual download
                 if status_callback:
                     status_callback("downloading")
-                    
+
                 logger.info(f"Downloading `{book_info.title}` from `{download_url}`")
 
                 data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag)
