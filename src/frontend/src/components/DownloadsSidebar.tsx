@@ -288,7 +288,10 @@ export const DownloadsSidebar = ({
         style={{ background: 'var(--bg)' }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-4">
+        <div
+          className="flex items-center justify-between p-4"
+          style={{ paddingTop: 'calc(1rem + env(safe-area-inset-top))' }}
+        >
           <h2 className="text-lg font-semibold">Downloads</h2>
           <button
             type="button"
@@ -347,7 +350,10 @@ export const DownloadsSidebar = ({
         </div>
 
         {/* Queue Items */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div
+          className="flex-1 overflow-y-auto p-4 space-y-3"
+          style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+        >
           {allDownloadItems.length > 0 ? (
             allDownloadItems.map((item) => renderDownloadItem(item))
           ) : (
@@ -361,7 +367,10 @@ export const DownloadsSidebar = ({
         {activeCount > 0 && (
           <div
             className="p-3 border-t text-xs text-center opacity-70"
-            style={{ borderColor: 'var(--border-muted)' }}
+            style={{
+              borderColor: 'var(--border-muted)',
+              paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))',
+            }}
           >
             {activeCount} active {activeCount === 1 ? 'download' : 'downloads'}
           </div>
