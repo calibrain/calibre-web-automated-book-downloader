@@ -796,7 +796,7 @@ def handle_connect():
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    """Handle client disconnection."""
+    """Handle client disconnection."""  
     logger.info("WebSocket client disconnected")
 
 @socketio.on('request_status')
