@@ -5,14 +5,7 @@ def string_to_bool(s: str) -> bool:
     return s.lower() in ["true", "yes", "1", "y"]
 
 # Authentication and session settings
-# SESSION_COOKIE_SECURE: Controls whether session cookies are marked as secure (HTTPS only)
-#   - 'auto' (default): Uses False (most home users access over HTTP)
-#   - 'true'/'yes'/'1': Always use secure cookies (set this if you ONLY access via HTTPS)
-#   - 'false'/'no'/'0': Never use secure cookies (for HTTP access)
-# NOTE: If set to 'true' and you access over HTTP, login will appear to work but
-# authentication will fail on subsequent requests because browsers reject secure
-# cookies over insecure connections.
-SESSION_COOKIE_SECURE_ENV = os.getenv("SESSION_COOKIE_SECURE", "auto")
+SESSION_COOKIE_SECURE_ENV = os.getenv("SESSION_COOKIE_SECURE", "false")
 
 CWA_DB = os.getenv("CWA_DB_PATH")
 CWA_DB_PATH = Path(CWA_DB) if CWA_DB else None
