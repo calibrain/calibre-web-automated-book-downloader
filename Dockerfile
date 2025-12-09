@@ -49,8 +49,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     # UID/GID will be handled by entrypoint script, but TZ/Locale are still needed
     LANG=en_US.UTF-8 \
     LANGUAGE=en_US:en \
-    LC_ALL=en_US.UTF-8 \
-    APP_ENV=prod
+    LC_ALL=en_US.UTF-8
 
 # Set ARG for build-time expansion (FLASK_PORT), ENV for runtime access
 ENV FLASK_PORT=8084

@@ -1,10 +1,15 @@
 interface FooterProps {
   buildVersion?: string;
   releaseVersion?: string;
-  appEnv?: string;
+  debug?: boolean;
 }
 
-export const Footer = ({ buildVersion, releaseVersion, appEnv }: FooterProps) => {
+export const Footer = ({ buildVersion, releaseVersion, debug }: FooterProps) => {
+  // Determine version display - show "dev" if no version is set
+  const versionDisplay = releaseVersion && releaseVersion !== 'N/A' 
+    ? releaseVersion 
+    : 'dev';
+  
   return (
     <footer
       className="mt-8 border-t py-6"
@@ -17,8 +22,9 @@ export const Footer = ({ buildVersion, releaseVersion, appEnv }: FooterProps) =>
         <div className="min-w-0 text-left">
           <p className="text-sm opacity-80">Calibre Web Book Downloader</p>
           <p className="text-xs opacity-60 mt-1">
-            Build: {buildVersion || 'dev'} • Release: {releaseVersion || 'dev'} • Env:{' '}
-            {appEnv || 'development'}
+            Version: {versionDisplay}
+            {buildVersion && buildVersion !== 'N/A' && ` (${buildVersion})`}
+            {debug && ' • Debug Mode'}
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">

@@ -9,7 +9,6 @@ services:
       target: cwa-bd-tor
     environment:
       DEBUG: true
-      APP_ENV: dev
     volumes:
       - /tmp/cwa-book-downloader:/tmp/cwa-book-downloader
       - /tmp/cwa-book-downloader-log:/var/log/cwa-book-downloader

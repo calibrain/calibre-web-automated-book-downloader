@@ -7,7 +7,8 @@ services:
       BOOK_LANGUAGE: en
       USE_BOOK_TITLE: true
       TZ: America/New_York
-      APP_ENV: prod
+      # SESSION_COOKIE_SECURE: 'true'  # Set to 'true' if accessing ONLY via HTTPS
+      # DEBUG: 'true'  # Enable debug mode (debug button, verbose logging)
       UID: 1000
       GID: 100
       EXT_BYPASSER_URL: http://flaresolverr:8191
