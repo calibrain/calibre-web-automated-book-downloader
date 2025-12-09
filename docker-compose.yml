@@ -13,7 +13,7 @@ services:
       TZ: America/New_York
       UID: 1000
       GID: 100
-      # CWA_DB_PATH: /auth/app.db  # Comment out to disable authentication
+      # CWA_DB_PATH: /auth/app.db  # Uncomment to enable authentication (also uncomment volume below)
       # SESSION_COOKIE_SECURE: 'true'  # Set to 'true' if accessing ONLY via HTTPS
       # DEBUG: 'true'  # Enable debug mode (debug button, verbose logging)
       # Queue management settings
@@ -27,5 +27,5 @@ services:
       # the same as whatever you gave in "calibre-web-automated"
       - /tmp/data/calibre-web/ingest:/cwa-book-ingest
       # This is the location of CWA's app.db, which contains authentication
-      # details. Comment out to disable authentication
+      # details. Uncomment to enable authentication (also uncomment CWA_DB_PATH above)
       #- /cwa/config/path/app.db:/auth/app.db:ro

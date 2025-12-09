@@ -397,6 +397,17 @@ def api_config() -> Union[Response, Tuple[Response, int]]:
         logger.error_trace(f"Config error: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/health', methods=['GET'])
+def api_health() -> Union[Response, Tuple[Response, int]]:
+    """
+    Health check endpoint for container orchestration.
+    No authentication required.
+    
+    Returns:
+        flask.Response: JSON with status "ok".
+    """
+    return jsonify({"status": "ok"})
+
 @app.route('/api/status', methods=['GET'])
 @login_required
 def api_status() -> Union[Response, Tuple[Response, int]]:

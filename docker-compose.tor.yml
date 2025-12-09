@@ -8,6 +8,7 @@ services:
       USE_BOOK_TITLE: true
       TZ: America/New_York
       USING_TOR: true
+      # CWA_DB_PATH: /auth/app.db  # Uncomment to enable authentication
       # SESSION_COOKIE_SECURE: 'true'  # Set to 'true' if accessing ONLY via HTTPS
       # DEBUG: 'true'  # Enable debug mode (debug button, verbose logging)
     cap_add:
@@ -17,6 +18,9 @@ services:
       - 8084:8084
     restart: unless-stopped
     volumes:
-    # This is where the books will be downloaded to, usually it would be 
-    # the same as whatever you gave in "calibre-web-automated"
+      # This is where the books will be downloaded to, usually it would be 
+      # the same as whatever you gave in "calibre-web-automated"
       - /tmp/data/calibre-web/ingest:/cwa-book-ingest
+      # This is the location of CWA's app.db, which contains authentication
+      # details. Uncomment to enable authentication (also uncomment CWA_DB_PATH above)
+      #- /cwa/config/path/app.db:/auth/app.db:ro
