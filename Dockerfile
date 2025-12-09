@@ -107,9 +107,9 @@ RUN mkdir -p /var/log/cwa-book-downloader /cwa-book-ingest && \
 EXPOSE ${FLASK_PORT}
 
 # Add healthcheck for container status
-# This will run as root initially, but check localhost which should work if the app binds correctly.
+# Uses /api/health which doesn't require authentication
 HEALTHCHECK --interval=60s --timeout=60s --start-period=60s --retries=3 \
-    CMD curl -s http://localhost:${FLASK_PORT}/api/status > /dev/null || exit 1
+    CMD curl -s http://localhost:${FLASK_PORT}/api/health > /dev/null || exit 1
 
 # Use dumb-init as the entrypoint to handle signals properly
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
