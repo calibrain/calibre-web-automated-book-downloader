@@ -495,9 +495,9 @@ function App() {
       </main>
 
       <Footer 
-        buildVersion={config?.build_version || 'dev'} 
-        releaseVersion={config?.release_version || 'dev'} 
-        appEnv={config?.app_env || 'development'}
+        buildVersion={config?.build_version} 
+        releaseVersion={config?.release_version} 
+        debug={config?.debug}
       />
       <ToastContainer toasts={toasts} />
       

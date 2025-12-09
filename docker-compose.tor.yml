@@ -8,7 +8,8 @@ services:
       USE_BOOK_TITLE: true
       TZ: America/New_York
       USING_TOR: true
-      APP_ENV: prod
+      # SESSION_COOKIE_SECURE: 'true'  # Set to 'true' if accessing ONLY via HTTPS
+      # DEBUG: 'true'  # Enable debug mode (debug button, verbose logging)
     cap_add:
       - NET_ADMIN
       - NET_RAW

@@ -71,7 +71,6 @@ export interface Toast {
 export interface AppConfig {
   calibre_web_url: string;
   debug: boolean;
-  app_env: string;
   build_version: string;
   release_version: string;
   book_languages: Language[];

@@ -10,7 +10,6 @@ services:
       target: cwa-bd-extbp
     environment:
       DEBUG: true
-      APP_ENV: dev
       USE_DOH: true
       CUSTOM_DNS: cloudflare
       USE_CF_BYPASS: true  # Enable Cloudflare bypass (default: true)

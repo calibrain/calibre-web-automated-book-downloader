@@ -105,16 +105,17 @@ change_ownership /tmp/cwa-book-downloader
 # Test write to all folders
 make_writable /cwa-book-ingest
 
-# Set the command to run based on the environment
-is_prod=$(echo "$APP_ENV" | tr '[:upper:]' '[:lower:]')
-if [ "$is_prod" = "prod" ]; then 
+# Set the command to run based on DEBUG setting
+# DEBUG=true uses Flask dev server, otherwise uses gunicorn for production
+is_debug=$(echo "$DEBUG" | tr '[:upper:]' '[:lower:]')
+if [ "$is_debug" = "true" ]; then
+    command="python3 app.py"
+else
     # Use geventwebsocket worker for SocketIO + WebSocket compatibility
     # This special worker class handles WebSocket upgrades properly
     # --workers 1: SocketIO requires sticky sessions, use 1 worker or configure sticky sessions
     # -t 300: 300 second timeout for long-running requests
     command="gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --workers 1 -t 300 -b ${FLASK_HOST:-0.0.0.0}:${FLASK_PORT:-8084} app:app"
-else
-    command="python3 app.py"
 fi
 
 # If DEBUG and not using an external bypass
@@ -179,7 +180,7 @@ sum=$(python3 -c "print(sum(int(l.strip()) for l in open('/tmp/test.cwa-bd').rea
 [ "$sum" == 11250075000 ] && echo "Success: /tmp is writable" || (echo "Failure: /tmp is not writable" && exit 1)
 rm /tmp/test.cwa-bd
 
-echo "Running command: '$command' as '$USERNAME' in '$APP_ENV' mode"
+echo "Running command: '$command' as '$USERNAME' (debug=$is_debug)"
 
 # Stop logging
 exec 1>&3 2>&4

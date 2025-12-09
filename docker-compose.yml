@@ -11,10 +11,11 @@ services:
       BOOK_LANGUAGE: en
       USE_BOOK_TITLE: true
       TZ: America/New_York
-      APP_ENV: prod
       UID: 1000
       GID: 100
       # CWA_DB_PATH: /auth/app.db  # Comment out to disable authentication
+      # SESSION_COOKIE_SECURE: 'true'  # Set to 'true' if accessing ONLY via HTTPS
+      # DEBUG: 'true'  # Enable debug mode (debug button, verbose logging)
       # Queue management settings
       MAX_CONCURRENT_DOWNLOADS: 3
       DOWNLOAD_PROGRESS_UPDATE_INTERVAL: 5
