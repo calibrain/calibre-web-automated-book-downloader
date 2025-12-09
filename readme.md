@@ -63,6 +63,7 @@ An intuitive web interface for searching and requesting book downloads, designed
 | `CWA_DB_PATH`     | Calibre-Web's database  | None               |
 | `ENABLE_LOGGING`  | Enable log file         | `true`             |
 | `LOG_LEVEL`       | Log level to use        | `info`             |
+| `SESSION_COOKIE_SECURE` | Secure cookie enforcement - Use for HTTPS connections only | `false` |
 
 If you wish to enable authentication, you must set `CWA_DB_PATH` to point to Calibre-Web's `app.db`, in order to match the username and password.
 
