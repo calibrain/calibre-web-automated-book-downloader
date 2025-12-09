@@ -152,20 +152,9 @@ werkzeug_logger.addFilter(StatusEndpointFilter())
 # The secret key will reset every time we restart, which will
 # require users to authenticate again
 
-# Secure cookie handling (HTTP vs HTTPS)
-# Can be overridden with SESSION_COOKIE_SECURE environment variable
-# NOTE: Secure cookies will ONLY work over HTTPS. If you're accessing the app
-# over plain HTTP, secure cookies will be silently rejected by the browser,
-# causing authentication to fail after login.
-session_cookie_secure_env = os.getenv('SESSION_COOKIE_SECURE', 'auto').lower()
-if session_cookie_secure_env in ['true', 'yes', '1']:
-    SESSION_COOKIE_SECURE = True
-elif session_cookie_secure_env in ['false', 'no', '0']:
-    SESSION_COOKIE_SECURE = False
-else:
-    # Auto mode: default to False since most home users access over HTTP.
-    # Users with HTTPS should explicitly set SESSION_COOKIE_SECURE=true
-    SESSION_COOKIE_SECURE = False
+# Session cookie security - set to 'true' if exclusively using HTTPS
+session_cookie_secure_env = os.getenv('SESSION_COOKIE_SECURE', 'false').lower()
+SESSION_COOKIE_SECURE = session_cookie_secure_env in ['true', 'yes', '1']
 
 app.config.update(
     SECRET_KEY = os.urandom(64),
