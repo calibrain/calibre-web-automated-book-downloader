@@ -215,6 +215,7 @@ def resolve_with_custom_dns(resolver, hostname: str, record_type: str) -> List[s
         if env._CUSTOM_DNS.lower().strip() == "auto" and not _is_local_address(hostname) and not _is_ip_address(hostname):
             # Only switch if we're using system DNS or a custom provider (not if already exhausted)
             if _current_dns_index < len(_dns_providers):
+                logger.info(f"Requesting DNS provider switch after {record_type} resolution failure for {hostname}")
                 switch_dns_provider()
         return []
 
@@ -249,11 +250,15 @@ def create_custom_getaddrinfo(
             logger.debug(f"Using system DNS for IP address or local/private address: {host_str}")
             return original_getaddrinfo(host, port, family, type, proto, flags)
         
+        # Anna's Archive often works only on IPv4 for some ISPs; prefer IPv4
+        aa_host = host_str.endswith("annas-archive.li") or host_str.endswith("annas-archive.org") or host_str.endswith("annas-archive.se")
+        prefer_ipv4_only = aa_host
+        
         results: list[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]] = []
         
         try:
-            # Try IPv6 first if family allows it
-            if family == 0 or family == socket.AF_INET6:
+            # Try IPv6 first if family allows it and not forced to IPv4
+            if not prefer_ipv4_only and (family == 0 or family == socket.AF_INET6):
                 logger.debug(f"Resolving IPv6 address for {host_str}")
                 ipv6_answers = resolve_ipv6(host_str)
                 for answer in ipv6_answers:
@@ -280,6 +285,7 @@ def create_custom_getaddrinfo(
             if env._CUSTOM_DNS.lower().strip() == "auto" and not _is_local_address(host_str) and not _is_ip_address(host_str):
                 # Only switch if we're using system DNS or a custom provider (not if already exhausted)
                 if _current_dns_index < len(_dns_providers):
+                    logger.info(f"Requesting DNS provider switch after custom resolver failure for {host_str}")
                     switch_dns_provider()
         
         # Fall back to system DNS if custom resolution fails
@@ -295,6 +301,35 @@ def create_custom_getaddrinfo(
                 raise  # Re-raise the exception if we can't provide a last resort
     
     return custom_getaddrinfo
+
+def create_system_failover_getaddrinfo():
+    """Wrap system getaddrinfo to trigger DNS provider switch on failure."""
+    def system_failover_getaddrinfo(
+        host: Union[str, bytes, None],
+        port: Union[str, bytes, int, None],
+        family: int = 0,
+        type: int = 0,
+        proto: int = 0,
+        flags: int = 0
+    ) -> Sequence[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]]:
+        host_str = _decode_host(host)
+        port_int = _decode_port(port)
+        try:
+            return original_getaddrinfo(host, port, family, type, proto, flags)
+        except Exception as e:
+            logger.warning(f"System DNS resolution failed for {host_str}: {e}")
+            # Trigger DNS switch only in auto mode for non-local targets
+            if env._CUSTOM_DNS.lower().strip() == "auto" and not env.USING_TOR:
+                if not _is_ip_address(host_str) and not _is_local_address(host_str):
+                    if _current_dns_index + 1 < len(_dns_providers):
+                        logger.info(f"Switching DNS provider after system DNS failure for {host_str}")
+                        switch_dns_provider()
+                        # After switching, socket.getaddrinfo points to the new resolver
+                        return socket.getaddrinfo(host, port, family, type, proto, flags)
+            # Re-raise if we cannot switch or still fail
+            raise
+    
+    return system_failover_getaddrinfo
 
 def init_doh_resolver(doh_server: str = DOH_SERVER):
     """Initialize DNS over HTTPS resolver.
@@ -381,6 +416,28 @@ def switch_dns_provider():
     _save_state(dns_provider=name)
     init_dns_resolvers()
 
+def rotate_dns_and_reset_aa() -> bool:
+    """
+    Switch DNS provider (auto mode) and reset AA URL list to the first entry.
+    Returns True if DNS switched; False if no providers left or not in auto mode.
+    """
+    global AA_BASE_URL, _current_aa_url_index
+    if env._CUSTOM_DNS.lower().strip() != "auto" or env.USING_TOR:
+        return False
+    # If we already tried all providers, wrap back to the first one
+    if _current_dns_index + 1 >= len(_dns_providers):
+        logger.warning("DNS rotation requested but all providers exhausted; cycling back to first provider")
+        _current_dns_index = -1  # so switch_dns_provider() moves to index 0
+    switch_dns_provider()
+    # Reset AA URL to first available auto option if using auto AA
+    if AA_BASE_URL == "auto" or AA_BASE_URL in _aa_urls:
+        _current_aa_url_index = 0
+        AA_BASE_URL = _aa_urls[0]
+        config.AA_BASE_URL = AA_BASE_URL
+        logger.info(f"After DNS switch, resetting AA URL to: {AA_BASE_URL}")
+        _save_state(aa_url=AA_BASE_URL)
+    return True
+
 def switch_aa_url():
     """Switch to next AA URL (only if current URL is in available list)."""
     global AA_BASE_URL, _current_aa_url_index
@@ -418,6 +475,8 @@ def init_dns_resolvers():
             config.CUSTOM_DNS = CUSTOM_DNS
             config.DOH_SERVER = DOH_SERVER
             logger.info("Using system DNS (auto mode - will switch on failure)")
+            # Install failover wrapper so we can detect failures and rotate DNS
+            socket.getaddrinfo = cast(Any, create_system_failover_getaddrinfo())
     
     if len(CUSTOM_DNS) > 0:
         init_custom_resolver()
@@ -465,7 +524,7 @@ if AA_BASE_URL == "auto":
             _current_aa_url_index = 0
 elif AA_BASE_URL not in _aa_urls:
     # User-specified custom URL - don't allow switching
-    pass
+    logger.info(f"AA_BASE_URL set to custom value {AA_BASE_URL}; skipping auto-switch")
 else:
     # URL is in available list
     _current_aa_url_index = _aa_urls.index(AA_BASE_URL)

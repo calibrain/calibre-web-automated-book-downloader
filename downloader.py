@@ -70,6 +70,21 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False, 
                     new_url = url.replace(current_aa_url, network.get_aa_base_url())
                     logger.info(f"Retrying with new AA URL: {new_url}")
                     return html_get_page(new_url, retry, use_bypasser, status_callback)
+                else:
+                    #region agent log
+                    network._agent_debug_log(
+                        "H4",
+                        "downloader.py:html_get_page",
+                        "aa_switch_exhausted_no_dns_switch",
+                        {"url": url, "retry": retry, "status_code": status_code, "is_conn_err": is_connection_error}
+                    )
+                    #endregion
+                    # No AA mirrors left; rotate DNS and reset AA list if possible
+                    if network.rotate_dns_and_reset_aa():
+                        base = network.get_aa_base_url()
+                        new_url = url.replace(current_aa_url, base)
+                        logger.warning(f"No AA mirrors left; switched DNS and retrying: {new_url}")
+                        return html_get_page(new_url, retry, use_bypasser, status_callback)
             # If Cloudflare is blocking (403) and bypasser is off/unavailable, switch mirror
             if status_code == 403 and not USE_CF_BYPASS:
                 if network.switch_aa_url():
@@ -158,6 +173,12 @@ def download_url(link: str, size: str = "", progress_callback: Optional[Callable
                     new_link = link.replace(current_aa_url, network.get_aa_base_url())
                     logger.info(f"Retrying download with new AA URL: {new_link}")
                     return download_url(new_link, size, progress_callback, cancel_flag)
+                else:
+                    if network.rotate_dns_and_reset_aa():
+                        base = network.get_aa_base_url()
+                        new_link = link.replace(current_aa_url, base)
+                        logger.warning(f"No AA mirrors left; switched DNS and retrying download: {new_link}")
+                        return download_url(new_link, size, progress_callback, cancel_flag)
         
         logger.error_trace(f"Failed to download from {link}: {e}")
         return None

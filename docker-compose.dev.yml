@@ -9,9 +9,6 @@ services:
       target: cwa-bd
     environment:
       DEBUG: true
-      APP_ENV: dev
-      USE_DOH: true
-      CUSTOM_DNS: cloudflare
     volumes:
       - /tmp/cwa-book-downloader:/tmp/cwa-book-downloader
       - /tmp/cwa-book-downloader-log:/var/log/cwa-book-downloader
