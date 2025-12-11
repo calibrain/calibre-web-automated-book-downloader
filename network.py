@@ -24,6 +24,14 @@ logger = setup_logger(__name__)
 STATE_FILE = env.LOG_DIR / "network_state.json"
 STATE_TTL_DAYS = 30
 
+def _agent_debug_log(code: str, source: str, reason: str, meta: Optional[dict] = None) -> None:
+    """Lightweight debug hook for automated runs; safe no-op on failure."""
+    try:
+        logger.debug(f"[agent] code={code} source={source} reason={reason} meta={meta or {}}")
+    except Exception as exc:
+        # Avoid raising inside debug logger
+        logger.debug(f"[agent] log failed: {exc}")
+
 def _load_state():
     """Load persisted network state."""
     if not STATE_FILE.exists():
@@ -421,7 +429,7 @@ def rotate_dns_and_reset_aa() -> bool:
     Switch DNS provider (auto mode) and reset AA URL list to the first entry.
     Returns True if DNS switched; False if no providers left or not in auto mode.
     """
-    global AA_BASE_URL, _current_aa_url_index
+    global AA_BASE_URL, _current_aa_url_index, _current_dns_index
     if env._CUSTOM_DNS.lower().strip() != "auto" or env.USING_TOR:
         return False
     # If we already tried all providers, wrap back to the first one
@@ -535,6 +543,22 @@ logger.info(f"AA_BASE_URL: {AA_BASE_URL}")
 def get_aa_base_url():
     """Get current AA base URL."""
     return AA_BASE_URL
+
+def get_available_aa_urls():
+    """Get list of configured AA URLs (copy)."""
+    return _aa_urls.copy()
+
+def set_aa_url_index(new_index: int) -> bool:
+    """Set AA base URL by index in available list; returns True if applied."""
+    global AA_BASE_URL, _current_aa_url_index
+    if new_index < 0 or new_index >= len(_aa_urls):
+        return False
+    _current_aa_url_index = new_index
+    AA_BASE_URL = _aa_urls[_current_aa_url_index]
+    config.AA_BASE_URL = AA_BASE_URL
+    logger.info(f"Set AA URL to: {AA_BASE_URL}")
+    _save_state(aa_url=AA_BASE_URL)
+    return True
 
 # Configure urllib opener with appropriate headers
 opener = urllib.request.build_opener()

@@ -15,6 +15,7 @@ from env import (INGEST_DIR, DOWNLOAD_PATHS, TMP_DIR, MAIN_LOOP_SLEEP_TIME, USE_
                  MAX_CONCURRENT_DOWNLOADS, DOWNLOAD_PROGRESS_UPDATE_INTERVAL)
 from models import book_queue, BookInfo, QueueStatus, SearchFilters
 import book_manager
+from book_manager import SearchUnavailable
 
 logger = setup_logger(__name__)
 
@@ -43,6 +44,9 @@ def search_books(query: str, filters: SearchFilters) -> List[Dict[str, Any]]:
     try:
         books = book_manager.search_books(query, filters)
         return [_book_info_to_dict(book) for book in books]
+    except SearchUnavailable as e:
+        logger.warning(f"Search unavailable: {e}")
+        raise
     except Exception as e:
         logger.error_trace(f"Error searching books: {e}")
         return []

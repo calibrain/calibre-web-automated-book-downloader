@@ -21,6 +21,7 @@ import backend
 
 from models import SearchFilters
 from websocket_manager import ws_manager
+from book_manager import SearchUnavailable
 
 logger = setup_logger(__name__)
 app = Flask(__name__)
@@ -317,6 +318,9 @@ def api_search() -> Union[Response, Tuple[Response, int]]:
     try:
         books = backend.search_books(query, filters)
         return jsonify(books)
+    except SearchUnavailable as e:
+        logger.warning(f"Search unavailable: {e}")
+        return jsonify({"error": str(e)}), 503
     except Exception as e:
         logger.error_trace(f"Search error: {e}")
         return jsonify({"error": str(e)}), 500

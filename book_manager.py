@@ -7,6 +7,11 @@ from typing import List, Optional, Dict, Union, Callable
 from threading import Event
 from bs4 import BeautifulSoup, Tag, NavigableString, ResultSet
 
+
+class SearchUnavailable(Exception):
+    """Raised when Anna's Archive cannot be reached via any mirror/DNS."""
+    pass
+
 import downloader
 from logger import setup_logger
 from config import SUPPORTED_FORMATS, BOOK_LANGUAGE
@@ -74,11 +79,12 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
 
     html = downloader.html_get_page(url)
     if not html:
-        raise Exception("Failed to fetch search results")
+        # Network/mirror exhaustion path bubbles up so API can notify clients
+        raise SearchUnavailable("Unable to reach Anna's Archive. Network restricted or mirrors are blocked.")
 
     if "No files found." in html:
         logger.info(f"No books found for query: {query}")
-        raise Exception("No books found. Please try another query.")
+        return []
 
     soup = BeautifulSoup(html, "html.parser")
     tbody: Tag | NavigableString | None = soup.find("table")

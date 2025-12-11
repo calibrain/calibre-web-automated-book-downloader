@@ -278,6 +278,11 @@ function App() {
       } else {
         console.error('Search failed:', error);
         setBooks([]);
+        const message = error instanceof Error ? error.message : 'Search failed';
+        const friendly = message.includes("Anna's Archive") || message.includes('Network restricted')
+          ? message
+          : "Unable to reach Anna's Archive. Network may be restricted or mirrors blocked.";
+        showToast(friendly, 'error');
       }
     } finally {
       setIsSearching(false);
