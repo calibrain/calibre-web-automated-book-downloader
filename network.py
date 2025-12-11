@@ -9,7 +9,6 @@ from socket import AddressFamily, SocketKind
 import urllib.parse
 import ssl
 import ipaddress
-import threading
 
 from logger import setup_logger
 from config import PROXIES, AA_BASE_URL, CUSTOM_DNS, AA_AVAILABLE_URLS, DOH_SERVER
@@ -24,7 +23,6 @@ STATE_TTL_DAYS = 30
 _initialized = False
 _dns_initialized = False
 _aa_initialized = False
-_state_lock = threading.Lock()
 state: dict[str, Any] = {}
 
 def _agent_debug_log(code: str, source: str, reason: str, meta: Optional[dict] = None) -> None:
@@ -45,12 +43,11 @@ def _load_state():
 
 def _save_state(aa_url=None, dns_provider=None):
     """Update in-memory network state (no disk persistence)."""
-    with _state_lock:
-        if aa_url:
-            state['aa_base_url'] = aa_url
-        if dns_provider:
-            state['dns_provider'] = dns_provider
-        state['chosen_at'] = datetime.now().isoformat()
+    if aa_url:
+        state['aa_base_url'] = aa_url
+    if dns_provider:
+        state['dns_provider'] = dns_provider
+    state['chosen_at'] = datetime.now().isoformat()
 
 # AA URL failover state
 _current_aa_url_index = 0
@@ -71,6 +68,17 @@ _dns_providers = [
     ("opendns", ["208.67.222.222", "208.67.220.220"], "https://doh.opendns.com/dns-query"),
 ]
 _current_dns_index = -1  # Start with system DNS
+
+def _current_dns_label() -> str:
+    """Readable label for the active DNS choice (system or named provider)."""
+    # If using the provider list (auto mode), show provider name only
+    if _current_dns_index >= 0:
+        name, _, _ = _dns_providers[_current_dns_index]
+        return name
+    # If a manual custom DNS is configured, surface those IPs
+    if CUSTOM_DNS:
+        return f"custom {CUSTOM_DNS}"
+    return "system"
 
 # Common helper functions for DNS resolution
 def _decode_host(host: Union[str, bytes, None]) -> str:
@@ -257,27 +265,30 @@ def create_custom_getaddrinfo(
     ) -> Sequence[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]]:
         host_str = _decode_host(host)
         port_int = _decode_port(port)
+        def _log_results(source: str, provider_label: str, res: Sequence[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]]) -> None:
+            """Emit a unified resolver log with the IPs returned."""
+            try:
+                ips = [entry[4][0] for entry in res if len(entry) >= 5 and entry[4]]
+                logger.info(f"Resolved {host_str} via {source} [{provider_label}]: {ips}")
+            except Exception:
+                logger.info(f"Resolved {host_str} via {source} [{provider_label}]")
         
         # Skip custom resolution for IP addresses, local addresses, or if skip check passes
         if _is_ip_address(host_str) or _is_local_address(host_str) or (skip_check and skip_check(host_str)):
-            logger.debug(f"Using system DNS for IP address or local/private address: {host_str}")
-            return original_getaddrinfo(host, port, family, type, proto, flags)
+            # Quietly bypass custom resolution for IP/local targets
+            res = original_getaddrinfo(host, port, family, type, proto, flags)
+            _log_results("system resolver (bypass)", "system", res)
+            return res
         
-        # Anna's Archive often works only on IPv4 for some ISPs; prefer IPv4 based on configured mirrors
-        prefer_ipv4_only = _is_aa_hostname(host_str)
+        # Force IPv4-only resolution to avoid noisy IPv6/AAAA failures
+        prefer_ipv4_only = True
         
         results: list[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]] = []
         
         try:
-            # Try IPv6 first if family allows it and not forced to IPv4
-            if not prefer_ipv4_only and (family == 0 or family == socket.AF_INET6):
-                logger.debug(f"Resolving IPv6 address for {host_str}")
-                ipv6_answers = resolve_ipv6(host_str)
-                for answer in ipv6_answers:
-                    results.append((socket.AF_INET6, cast(SocketKind, type), proto, '', (answer, port_int, 0, 0)))
-                if ipv6_answers:
-                    logger.debug(f"Found {len(ipv6_answers)} IPv6 addresses for {host_str}")
-            
+            if prefer_ipv4_only:
+                logger.debug(f"IPv6 resolution disabled; skipping AAAA lookup for {host_str}")
+            # Try IPv4
             # Then try IPv4
             if family == 0 or family == socket.AF_INET:
                 logger.debug(f"Resolving IPv4 address for {host_str}")
@@ -288,7 +299,7 @@ def create_custom_getaddrinfo(
                     logger.debug(f"Found {len(ipv4_answers)} IPv4 addresses for {host_str}")
             
             if results:
-                logger.debug(f"Resolved {host_str} to {len(results)} addresses")
+                _log_results("custom resolver", _current_dns_label(), results)
                 return results
                 
         except Exception as e:
@@ -301,8 +312,11 @@ def create_custom_getaddrinfo(
                     switch_dns_provider()
         
         # Fall back to system DNS if custom resolution fails
+        logger.info(f"Custom DNS returned no addresses for {host_str}; falling back to system resolver")
         try:
-            return original_getaddrinfo(host, port, family, type, proto, flags)
+            res = original_getaddrinfo(host, port, family, type, proto, flags)
+            _log_results("system resolver (fallback)", "system", res)
+            return res
         except Exception as e:
             logger.error(f"System DNS resolution also failed for {host_str}: {e}")
             # Last resort: Try to connect to the hostname directly
@@ -416,18 +430,17 @@ def switch_dns_provider() -> bool:
     """Switch to next DNS provider (auto mode only). Starts with system DNS, switches on first failure."""
     _ensure_initialized()
     global CUSTOM_DNS, DOH_SERVER, _current_dns_index
-    with _state_lock:
-        if _current_dns_index + 1 >= len(_dns_providers):
-            logger.warning("All DNS providers exhausted, staying with current")
-            return False
-        _current_dns_index += 1
-        name, servers, doh = _dns_providers[_current_dns_index]
-        CUSTOM_DNS = servers
-        DOH_SERVER = doh if env.USE_DOH else ""
-        config.CUSTOM_DNS = CUSTOM_DNS
-        config.DOH_SERVER = DOH_SERVER
-        logger.warning(f"Switched DNS provider to: {name}")
-        _save_state(dns_provider=name)
+    if _current_dns_index + 1 >= len(_dns_providers):
+        logger.warning("All DNS providers exhausted, staying with current")
+        return False
+    _current_dns_index += 1
+    name, servers, doh = _dns_providers[_current_dns_index]
+    CUSTOM_DNS = servers
+    DOH_SERVER = doh if env.USE_DOH else ""
+    config.CUSTOM_DNS = CUSTOM_DNS
+    config.DOH_SERVER = DOH_SERVER
+    logger.warning(f"Switched DNS provider to: {name}")
+    _save_state(dns_provider=name)
     init_dns_resolvers()
     return True
 
@@ -440,10 +453,9 @@ def rotate_dns_provider() -> bool:
     global _current_dns_index
     if env._CUSTOM_DNS.lower().strip() != "auto" or env.USING_TOR:
         return False
-    with _state_lock:
-        if _current_dns_index + 1 >= len(_dns_providers):
-            logger.warning("DNS rotation requested but all providers exhausted; cycling back to first provider")
-            _current_dns_index = -1
+    if _current_dns_index + 1 >= len(_dns_providers):
+        logger.warning("DNS rotation requested but all providers exhausted; cycling back to first provider")
+        _current_dns_index = -1
     return switch_dns_provider()
 
 def rotate_dns_and_reset_aa() -> bool:
@@ -605,12 +617,11 @@ def set_aa_url_index(new_index: int) -> bool:
     global AA_BASE_URL, _current_aa_url_index
     if new_index < 0 or new_index >= len(_aa_urls):
         return False
-    with _state_lock:
-        _current_aa_url_index = new_index
-        AA_BASE_URL = _aa_urls[_current_aa_url_index]
-        config.AA_BASE_URL = AA_BASE_URL
-        logger.info(f"Set AA URL to: {AA_BASE_URL}")
-        _save_state(aa_url=AA_BASE_URL)
+    _current_aa_url_index = new_index
+    AA_BASE_URL = _aa_urls[_current_aa_url_index]
+    config.AA_BASE_URL = AA_BASE_URL
+    logger.info(f"Set AA URL to: {AA_BASE_URL}")
+    _save_state(aa_url=AA_BASE_URL)
     return True
 
 class AAMirrorSelector:
