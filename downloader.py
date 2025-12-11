@@ -22,6 +22,9 @@ if USE_CF_BYPASS:
 
 logger = setup_logger(__name__)
 
+# Keep AA fetches snappy; connect/read timeout
+REQUEST_TIMEOUT = (5, 15)
+
 
 def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False, status_callback: Optional[Callable[[str], None]] = None) -> str:
     """Fetch HTML content from a URL with retry mechanism.
@@ -45,7 +48,7 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False, 
             return get_bypassed_page(url)
         else:
             logger.info(f"GET: {url}")
-            response = requests.get(url, proxies=PROXIES)
+            response = requests.get(url, proxies=PROXIES, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
             logger.debug(f"Success getting: {url}")
             time.sleep(1)
@@ -60,11 +63,18 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False, 
                                                   requests.exceptions.Timeout,
                                                   requests.exceptions.SSLError))
             is_http_error = isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response
+            status_code = e.response.status_code if is_http_error else None
             if is_connection_error or (is_http_error and e.response.status_code != 403):
                 # Try to switch AA URL
                 if network.switch_aa_url():
                     new_url = url.replace(current_aa_url, network.get_aa_base_url())
                     logger.info(f"Retrying with new AA URL: {new_url}")
+                    return html_get_page(new_url, retry, use_bypasser, status_callback)
+            # If Cloudflare is blocking (403) and bypasser is off/unavailable, switch mirror
+            if status_code == 403 and not USE_CF_BYPASS:
+                if network.switch_aa_url():
+                    new_url = url.replace(current_aa_url, network.get_aa_base_url())
+                    logger.info(f"Retrying with new AA URL after 403: {new_url}")
                     return html_get_page(new_url, retry, use_bypasser, status_callback)
         
         if retry == 0:
@@ -100,7 +110,7 @@ def download_url(link: str, size: str = "", progress_callback: Optional[Callable
     """
     try:
         logger.info(f"Downloading from: {link}")
-        response = requests.get(link, stream=True, proxies=PROXIES)
+        response = requests.get(link, stream=True, proxies=PROXIES, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
         total_size : float = 0.0
@@ -138,7 +148,12 @@ def download_url(link: str, size: str = "", progress_callback: Optional[Callable
                                                   requests.exceptions.Timeout,
                                                   requests.exceptions.SSLError))
             is_http_error = isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response
-            if is_connection_error or (is_http_error and e.response.status_code != 403):
+            status_code = e.response.status_code if is_http_error else None
+            should_switch = is_connection_error or (is_http_error and status_code != 403)
+            # Rotate on hard blocks or overloads even when not a transport error
+            if is_http_error and status_code in (403, 429, 500, 502, 503, 504):
+                should_switch = True
+            if should_switch:
                 if network.switch_aa_url():
                     new_link = link.replace(current_aa_url, network.get_aa_base_url())
                     logger.info(f"Retrying download with new AA URL: {new_link}")
