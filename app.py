@@ -16,7 +16,7 @@ import typing
 
 from logger import setup_logger
 from config import _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE, SUPPORTED_FORMATS
-from env import FLASK_HOST, FLASK_PORT, APP_ENV, CWA_DB_PATH, DEBUG, USING_EXTERNAL_BYPASSER, BUILD_VERSION, RELEASE_VERSION, CALIBRE_WEB_URL
+from env import FLASK_HOST, FLASK_PORT, CWA_DB_PATH, DEBUG, USING_EXTERNAL_BYPASSER, BUILD_VERSION, RELEASE_VERSION, CALIBRE_WEB_URL
 import backend
 
 from models import SearchFilters
@@ -28,13 +28,13 @@ app.wsgi_app = ProxyFix(app.wsgi_app)  # type: ignore
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching
 app.config['APPLICATION_ROOT'] = '/'
 
-# Determine async mode based on environment
-# In production with Gunicorn + gevent worker, use 'gevent'
-# In development with Flask dev server, use 'threading'
-if APP_ENV == 'prod':
-    async_mode = 'gevent'
-else:
+# Determine async mode based on DEBUG setting
+# In production (DEBUG=False) with Gunicorn + gevent worker, use 'gevent'
+# In development (DEBUG=True) with Flask dev server, use 'threading'
+if DEBUG:
     async_mode = 'threading'
+else:
+    async_mode = 'gevent'
 
 # Initialize Flask-SocketIO with reverse proxy support
 socketio = SocketIO(
@@ -152,16 +152,9 @@ werkzeug_logger.addFilter(StatusEndpointFilter())
 # The secret key will reset every time we restart, which will
 # require users to authenticate again
 
-# Secure cookie handling (HTTP vs HTTPS)
-# Can be overridden with SESSION_COOKIE_SECURE environment variable
-session_cookie_secure_env = os.getenv('SESSION_COOKIE_SECURE', 'auto').lower()
-if session_cookie_secure_env in ['true', 'yes', '1']:
-    SESSION_COOKIE_SECURE = True
-elif session_cookie_secure_env in ['false', 'no', '0']:
-    SESSION_COOKIE_SECURE = False
-else:
-    # Auto mode: align with deployment environment
-    SESSION_COOKIE_SECURE = APP_ENV == 'prod'
+# Session cookie security - set to 'true' if exclusively using HTTPS
+session_cookie_secure_env = os.getenv('SESSION_COOKIE_SECURE', 'false').lower()
+SESSION_COOKIE_SECURE = session_cookie_secure_env in ['true', 'yes', '1']
 
 app.config.update(
     SECRET_KEY = os.urandom(64),
@@ -382,7 +375,6 @@ def api_config() -> Union[Response, Tuple[Response, int]]:
         config = {
             "calibre_web_url": CALIBRE_WEB_URL,
             "debug": DEBUG,
-            "app_env": APP_ENV,
             "build_version": BUILD_VERSION,
             "release_version": RELEASE_VERSION,
             "book_languages": _SUPPORTED_BOOK_LANGUAGE,
@@ -393,6 +385,17 @@ def api_config() -> Union[Response, Tuple[Response, int]]:
     except Exception as e:
         logger.error_trace(f"Config error: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/health', methods=['GET'])
+def api_health() -> Union[Response, Tuple[Response, int]]:
+    """
+    Health check endpoint for container orchestration.
+    No authentication required.
+    
+    Returns:
+        flask.Response: JSON with status "ok".
+    """
+    return jsonify({"status": "ok"})
 
 @app.route('/api/status', methods=['GET'])
 @login_required
@@ -812,7 +815,7 @@ def handle_status_request():
 logger.log_resource_usage()
 
 if __name__ == '__main__':
-    logger.info(f"Starting Flask application with WebSocket support on {FLASK_HOST}:{FLASK_PORT} IN {APP_ENV} mode")
+    logger.info(f"Starting Flask application with WebSocket support on {FLASK_HOST}:{FLASK_PORT} (debug={DEBUG})")
     socketio.run(
         app,
         host=FLASK_HOST,

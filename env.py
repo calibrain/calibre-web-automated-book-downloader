@@ -5,11 +5,7 @@ def string_to_bool(s: str) -> bool:
     return s.lower() in ["true", "yes", "1", "y"]
 
 # Authentication and session settings
-# SESSION_COOKIE_SECURE: Controls whether session cookies are marked as secure (HTTPS only)
-#   - 'auto' (default): Uses False in dev, True in prod, can be overridden with environment variable
-#   - 'true'/'yes'/'1': Always use secure cookies (recommended for production with HTTPS)
-#   - 'false'/'no'/'0': Never use secure cookies (only for local HTTP)
-SESSION_COOKIE_SECURE_ENV = os.getenv("SESSION_COOKIE_SECURE", "auto")
+SESSION_COOKIE_SECURE_ENV = os.getenv("SESSION_COOKIE_SECURE", "false")
 
 CWA_DB = os.getenv("CWA_DB_PATH")
 CWA_DB_PATH = Path(CWA_DB) if CWA_DB else None
@@ -54,7 +50,6 @@ _CUSTOM_SCRIPT = os.getenv("CUSTOM_SCRIPT", "").strip()
 FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = int(os.getenv("FLASK_PORT", "8084"))
 DEBUG = string_to_bool(os.getenv("DEBUG", "false"))
-APP_ENV = os.getenv("APP_ENV", "N/A").lower()
 PRIORITIZE_WELIB = string_to_bool(os.getenv("PRIORITIZE_WELIB", "false"))
 ALLOW_USE_WELIB = string_to_bool(os.getenv("ALLOW_USE_WELIB", "true"))
 

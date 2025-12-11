@@ -11,10 +11,12 @@ services:
       BOOK_LANGUAGE: en
       USE_BOOK_TITLE: true
       TZ: America/New_York
-      APP_ENV: prod
       UID: 1000
       GID: 100
-      # CWA_DB_PATH: /auth/app.db  # Comment out to disable authentication
+      # CWA_DB_PATH: /auth/app.db  # Uncomment to enable authentication (also uncomment volume below)
+      # CALIBRE_WEB_URL: http://localhost:8080 # Uncomment and add your custom library URL to enable "Go To Library" button in the Web UI
+      # SESSION_COOKIE_SECURE: 'true'  # Set to 'true' if accessing ONLY via HTTPS
+      # DEBUG: 'true'  # Enable debug mode (debug button, verbose logging)
       # Queue management settings
       MAX_CONCURRENT_DOWNLOADS: 3
       DOWNLOAD_PROGRESS_UPDATE_INTERVAL: 5
@@ -26,5 +28,5 @@ services:
       # the same as whatever you gave in "calibre-web-automated"
       - /tmp/data/calibre-web/ingest:/cwa-book-ingest
       # This is the location of CWA's app.db, which contains authentication
-      # details. Comment out to disable authentication
+      # details. Uncomment to enable authentication (also uncomment CWA_DB_PATH above)
       #- /cwa/config/path/app.db:/auth/app.db:ro

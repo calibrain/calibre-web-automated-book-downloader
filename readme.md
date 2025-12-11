@@ -63,10 +63,14 @@ An intuitive web interface for searching and requesting book downloads, designed
 | `CWA_DB_PATH`     | Calibre-Web's database  | None               |
 | `ENABLE_LOGGING`  | Enable log file         | `true`             |
 | `LOG_LEVEL`       | Log level to use        | `info`             |
+| `SESSION_COOKIE_SECURE` | Secure cookie enforcement - Use for HTTPS connections only | `false` |
+| `CALIBRE_WEB_URL` | Custom WebUI library link | None |
 
 If you wish to enable authentication, you must set `CWA_DB_PATH` to point to Calibre-Web's `app.db`, in order to match the username and password.
 
-If logging is enabld, log folder default location is `/var/log/cwa-book-downloader`
+Set `CALIBRE_WEB_URL` to your Calibre-Web / Booklore base URL. A ‘Go to library’ button will appear in the Web UI for quick access while downloading, and it also provides library access when CWA-BD is installed as a mobile PWA.
+
+If logging is enabled, log folder default location is `/var/log/cwa-book-downloader`
 Available log levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Higher levels show fewer messages.
 
 Note that if using TOR, the TZ will be calculated automatically based on IP.
