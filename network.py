@@ -16,6 +16,15 @@ import config
 import env
 from datetime import datetime, timedelta
 
+# Try to use gevent locks if available (for gevent worker compatibility)
+# Fall back to threading locks for non-gevent environments
+try:
+    from gevent.lock import RLock as _RLock
+    _using_gevent_locks = True
+except ImportError:
+    from threading import RLock as _RLock
+    _using_gevent_locks = False
+
 logger = setup_logger(__name__)
 
 # In-memory state (no disk persistence)
@@ -24,6 +33,11 @@ _initialized = False
 _dns_initialized = False
 _aa_initialized = False
 state: dict[str, Any] = {}
+
+# Locks for greenlet-safe initialization and DNS switching
+# Use RLock (reentrant lock) since init() calls init_dns() and init_aa()
+_init_lock = _RLock()
+_dns_switch_lock = _RLock()
 
 def _agent_debug_log(code: str, source: str, reason: str, meta: Optional[dict] = None) -> None:
     """Lightweight debug hook for automated runs; safe no-op on failure."""
@@ -55,8 +69,13 @@ _aa_urls = AA_AVAILABLE_URLS.copy()
 
 def _ensure_initialized() -> None:
     """Lazy guard so runtime setup happens once and late calls still work."""
-    if not _initialized:
-        init()
+    global _initialized
+    if _initialized:
+        return
+    with _init_lock:
+        # Double-check after acquiring lock
+        if not _initialized:
+            init()
 
 # DNS provider rotation state
 # _current_dns_index = -1 means using system DNS (no custom DNS)
@@ -68,6 +87,7 @@ _dns_providers = [
     ("opendns", ["208.67.222.222", "208.67.220.220"], "https://doh.opendns.com/dns-query"),
 ]
 _current_dns_index = -1  # Start with system DNS
+_dns_exhausted_logged = False  # Track if we've logged the exhaustion message
 
 def _current_dns_label() -> str:
     """Readable label for the active DNS choice (system or named provider)."""
@@ -231,13 +251,8 @@ def resolve_with_custom_dns(resolver, hostname: str, record_type: str) -> List[s
         return [str(answer) for answer in answers]
     except Exception as e:
         logger.debug(f"{record_type} resolution failed for {hostname}: {e}")
-        # Trigger DNS switch on failure (if auto mode)
-        # Only switch if we're in auto mode and it's not a local address
-        if env._CUSTOM_DNS.lower().strip() == "auto" and not _is_local_address(hostname) and not _is_ip_address(hostname):
-            # Only switch if we're using system DNS or a custom provider (not if already exhausted)
-            if _current_dns_index < len(_dns_providers):
-                logger.info(f"Requesting DNS provider switch after {record_type} resolution failure for {hostname}")
-                switch_dns_provider()
+        # Don't trigger DNS switch here - let the caller handle it
+        # This prevents spam from multiple concurrent resolution attempts
         return []
 
 def create_custom_getaddrinfo(
@@ -330,6 +345,9 @@ def create_custom_getaddrinfo(
 
 def create_system_failover_getaddrinfo():
     """Wrap system getaddrinfo to trigger DNS provider switch on failure."""
+    # Track if we've already logged a switch for this host to avoid spam
+    _switch_logged = set()
+    
     def system_failover_getaddrinfo(
         host: Union[str, bytes, None],
         port: Union[str, bytes, int, None],
@@ -343,15 +361,20 @@ def create_system_failover_getaddrinfo():
         try:
             return original_getaddrinfo(host, port, family, type, proto, flags)
         except Exception as e:
-            logger.warning(f"System DNS resolution failed for {host_str}: {e}")
+            # Only log first failure for each host to reduce spam
+            if host_str not in _switch_logged:
+                logger.warning(f"System DNS resolution failed for {host_str}: {e}")
+            
             # Trigger DNS switch only in auto mode for non-local targets
             if env._CUSTOM_DNS.lower().strip() == "auto" and not env.USING_TOR:
                 if not _is_ip_address(host_str) and not _is_local_address(host_str):
                     if _current_dns_index + 1 < len(_dns_providers):
-                        logger.info(f"Switching DNS provider after system DNS failure for {host_str}")
-                        switch_dns_provider()
-                        # After switching, socket.getaddrinfo points to the new resolver
-                        return socket.getaddrinfo(host, port, family, type, proto, flags)
+                        if host_str not in _switch_logged:
+                            logger.info(f"Switching DNS provider after system DNS failure for {host_str}")
+                            _switch_logged.add(host_str)
+                        if switch_dns_provider():
+                            # After switching, socket.getaddrinfo points to the new resolver
+                            return socket.getaddrinfo(host, port, family, type, proto, flags)
             # Re-raise if we cannot switch or still fail
             raise
     
@@ -427,29 +450,41 @@ def init_custom_resolver():
     return custom_resolver
 
 def switch_dns_provider() -> bool:
-    """Switch to next DNS provider (auto mode only). Starts with system DNS, switches on first failure."""
-    _ensure_initialized()
-    global CUSTOM_DNS, DOH_SERVER, _current_dns_index
-    if _current_dns_index + 1 >= len(_dns_providers):
-        logger.warning("All DNS providers exhausted, staying with current")
-        return False
-    _current_dns_index += 1
-    name, servers, doh = _dns_providers[_current_dns_index]
-    CUSTOM_DNS = servers
-    DOH_SERVER = doh if env.USE_DOH else ""
-    config.CUSTOM_DNS = CUSTOM_DNS
-    config.DOH_SERVER = DOH_SERVER
-    logger.warning(f"Switched DNS provider to: {name}")
-    _save_state(dns_provider=name)
-    init_dns_resolvers()
-    return True
+    """Switch to next DNS provider (auto mode only). Starts with system DNS, switches on first failure.
+    
+    Note: This function can be called during initialization (from DNS failover handlers),
+    so we must NOT call _ensure_initialized() here to avoid recursive init loops.
+    """
+    global CUSTOM_DNS, DOH_SERVER, _current_dns_index, _dns_exhausted_logged
+    
+    # Use lock to prevent concurrent switches
+    with _dns_switch_lock:
+        if _current_dns_index + 1 >= len(_dns_providers):
+            # Only log once when exhausted (avoid spam)
+            if not _dns_exhausted_logged:
+                logger.warning("All DNS providers exhausted, staying with current")
+                _dns_exhausted_logged = True
+            return False
+        _current_dns_index += 1
+        name, servers, doh = _dns_providers[_current_dns_index]
+        CUSTOM_DNS = servers
+        # Auto mode always uses DoH for better resilience
+        DOH_SERVER = doh
+        config.CUSTOM_DNS = CUSTOM_DNS
+        config.DOH_SERVER = DOH_SERVER
+        logger.warning(f"Switched DNS provider to: {name} (using DoH)")
+        _save_state(dns_provider=name)
+        init_dns_resolvers()
+        return True
 
 def rotate_dns_provider() -> bool:
     """
     Switch DNS provider (auto mode only). Does not alter AA selection.
     Returns True if DNS switched.
+    
+    Note: This function can be called during initialization, so we must NOT call
+    _ensure_initialized() here to avoid recursive init loops.
     """
-    _ensure_initialized()
     global _current_dns_index
     if env._CUSTOM_DNS.lower().strip() != "auto" or env.USING_TOR:
         return False
@@ -462,8 +497,10 @@ def rotate_dns_and_reset_aa() -> bool:
     """
     Switch DNS provider (auto mode) and reset AA URL list to the first entry.
     Returns True if DNS switched; False if no providers left or not in auto mode.
+    
+    Note: This function can be called during initialization, so we must NOT call
+    _ensure_initialized() here to avoid recursive init loops.
     """
-    _ensure_initialized()
     if not rotate_dns_provider():
         return False
     # Reset AA URL to first available auto option if using auto AA
@@ -477,8 +514,11 @@ def rotate_dns_and_reset_aa() -> bool:
     return True
 
 def switch_aa_url():
-    """Switch to next AA URL (only if current URL is in available list)."""
-    _ensure_initialized()
+    """Switch to next AA URL (only if current URL is in available list).
+    
+    Note: This function can be called during initialization, so we must NOT call
+    _ensure_initialized() here to avoid recursive init loops.
+    """
     global AA_BASE_URL, _current_aa_url_index
     # Don't switch if current URL is not in available list (user-specified custom URL)
     if AA_BASE_URL not in _aa_urls:
@@ -500,13 +540,13 @@ def init_dns_resolvers():
     # If auto mode, use current DNS provider (or system DNS if _current_dns_index == -1)
     if env._CUSTOM_DNS.lower().strip() == "auto" and not env.USING_TOR:
         if _current_dns_index >= 0:
-            # Using a custom DNS provider
+            # Using a custom DNS provider - auto mode always uses DoH for better resilience
             name, servers, doh = _dns_providers[_current_dns_index]
             CUSTOM_DNS = servers
-            DOH_SERVER = doh if env.USE_DOH else ""
+            DOH_SERVER = doh
             config.CUSTOM_DNS = CUSTOM_DNS
             config.DOH_SERVER = DOH_SERVER
-            logger.info(f"Using DNS provider: {name}")
+            logger.info(f"Using DNS provider: {name} (DoH enabled)")
         else:
             # Using system DNS (no custom DNS)
             CUSTOM_DNS = []
@@ -573,33 +613,63 @@ def init_dns(force: bool = False) -> None:
     global state, _dns_initialized
     if _dns_initialized and not force:
         return
-    state = _load_state()
-    _initialize_dns_state()
-    init_dns_resolvers()
-    _dns_initialized = True
+    with _init_lock:
+        # Double-check after acquiring lock
+        if _dns_initialized and not force:
+            return
+        # Set flag BEFORE doing work to prevent recursive calls during init
+        _dns_initialized = True
+        try:
+            logger.debug(f"Initializing DNS (using {'gevent' if _using_gevent_locks else 'threading'} locks)")
+            state = _load_state()
+            _initialize_dns_state()
+            init_dns_resolvers()
+        except Exception:
+            _dns_initialized = False
+            raise
 
 def init_aa(force: bool = False) -> None:
     """Initialize AA mirror selection."""
     global state, _aa_initialized
     if _aa_initialized and not force:
         return
-    state = _load_state()
-    _initialize_aa_state()
-    _aa_initialized = True
+    with _init_lock:
+        # Double-check after acquiring lock
+        if _aa_initialized and not force:
+            return
+        # Set flag BEFORE doing work to prevent recursive calls during init
+        _aa_initialized = True
+        try:
+            state = _load_state()
+            _initialize_aa_state()
+        except Exception:
+            _aa_initialized = False
+            raise
 
 def init(force: bool = False) -> None:
     """
-    Perform network bootstrap once at startup.
+    Initialize network state (DNS resolvers and AA mirror selection).
 
-    Safe to call repeatedly; later calls no-op unless force=True.
+    Called lazily on first network operation. Safe to call repeatedly;
+    later calls no-op unless force=True.
     """
     global _initialized
     if _initialized and not force:
         return
-
-    init_dns(force=force)
-    init_aa(force=force)
-    _initialized = True
+    with _init_lock:
+        # Double-check after acquiring lock
+        if _initialized and not force:
+            return
+        # Set flag BEFORE doing work to prevent recursive calls during init
+        # (e.g., DNS failover handlers calling back into init)
+        _initialized = True
+        try:
+            init_dns(force=force)
+            init_aa(force=force)
+        except Exception:
+            # Reset flag on failure so retry is possible
+            _initialized = False
+            raise
 
 def get_aa_base_url():
     """Get current AA base URL."""

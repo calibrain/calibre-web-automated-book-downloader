@@ -24,7 +24,6 @@ from env import MAX_RETRY, DEFAULT_SLEEP
 from config import PROXIES, CUSTOM_DNS, DOH_SERVER, VIRTUAL_SCREEN_SIZE, RECORDING_DIR
 
 logger = setup_logger(__name__)
-network.init()
 
 DRIVER = None
 DISPLAY = {

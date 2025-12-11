@@ -206,14 +206,15 @@ export const DownloadsSidebar = ({
               </p>
             </div>
 
-            {/* Status Badge and Details Row */}
+            {/* Details Row */}
             <div className="space-y-1">
               <div className="flex items-center justify-between gap-2">
-                <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}
-                >
-                  {statusStyle.label}
-                </span>
+                {/* Format and Size */}
+                <div className="text-xs opacity-70">
+                  {book.format && <span className="uppercase">{book.format}</span>}
+                  {book.format && book.size && <span> • </span>}
+                  {book.size && <span>{formatSize(book.size)}</span>}
+                </div>
                 
                 {/* Cancel Button for in-progress items */}
                 {isInProgress && (
@@ -229,13 +230,6 @@ export const DownloadsSidebar = ({
                 )}
               </div>
 
-              {/* Format and Size */}
-              <div className="text-xs opacity-70">
-                {book.format && <span className="uppercase">{book.format}</span>}
-                {book.format && book.size && <span> • </span>}
-                {book.size && <span>{formatSize(book.size)}</span>}
-              </div>
-
               {/* Error Message */}
               {hasError && (
                 <p className="text-xs text-red-600">Download failed</p>
@@ -246,7 +240,13 @@ export const DownloadsSidebar = ({
 
         {/* Progress Bar - absolute positioned at bottom - always visible */}
         <div className="absolute bottom-0 left-0 right-0">
-          <p className="text-xs opacity-70 mt-0.5 text-right p-2">{progressText}</p>
+          <div className="flex justify-end p-2">
+            <span
+              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}
+            >
+              {progressText}
+            </span>
+          </div>
           <div className="h-1.5 bg-gray-200 dark:bg-gray-700 overflow-hidden relative">
             <div
               className={`h-full ${progressBarColor} transition-all duration-300 relative overflow-hidden`}

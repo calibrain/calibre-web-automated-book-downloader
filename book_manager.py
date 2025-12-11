@@ -566,7 +566,7 @@ def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None
                     if cancel_flag is not None and cancel_flag.wait(timeout=sleep_time):
                         logger.info(f"Cancelled wait for {title}")
                         return ""
-                    url = _get_download_url(link, title, cancel_flag, status_callback)
+                    url = _get_download_url(link, title, cancel_flag, status_callback, sel)
             else:
                 url = download_links[0]["href"]
         else:

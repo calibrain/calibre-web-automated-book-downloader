@@ -183,6 +183,10 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
         
         progress_callback = lambda progress: update_download_progress(book_id, progress)
         status_callback = lambda status: update_download_status(book_id, status)
+        
+        # Set status to resolving immediately when processing starts
+        update_download_status(book_id, "resolving")
+        
         success_download_url = book_manager.download_book(book_info, book_path, progress_callback, cancel_flag, status_callback)
         
         # Stop progress updates
