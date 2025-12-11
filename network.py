@@ -60,13 +60,15 @@ _current_aa_url_index = 0
 _aa_urls = AA_AVAILABLE_URLS.copy()
 
 # DNS provider rotation state
+# _current_dns_index = -1 means using system DNS (no custom DNS)
+# _current_dns_index >= 0 means using provider at that index
 _dns_providers = [
     ("cloudflare", ["1.1.1.1", "1.0.0.1"], "https://cloudflare-dns.com/dns-query"),
     ("google", ["8.8.8.8", "8.8.4.4"], "https://dns.google/dns-query"),
     ("quad9", ["9.9.9.9", "149.112.112.112"], "https://dns.quad9.net/dns-query"),
     ("opendns", ["208.67.222.222", "208.67.220.220"], "https://doh.opendns.com/dns-query"),
 ]
-_current_dns_index = 0
+_current_dns_index = -1  # Start with system DNS
 
 # Common helper functions for DNS resolution
 def _decode_host(host: Union[str, bytes, None]) -> str:
@@ -209,8 +211,11 @@ def resolve_with_custom_dns(resolver, hostname: str, record_type: str) -> List[s
     except Exception as e:
         logger.debug(f"{record_type} resolution failed for {hostname}: {e}")
         # Trigger DNS switch on failure (if auto mode)
+        # Only switch if we're in auto mode and it's not a local address
         if env._CUSTOM_DNS.lower().strip() == "auto" and not _is_local_address(hostname) and not _is_ip_address(hostname):
-            switch_dns_provider()
+            # Only switch if we're using system DNS or a custom provider (not if already exhausted)
+            if _current_dns_index < len(_dns_providers):
+                switch_dns_provider()
         return []
 
 def create_custom_getaddrinfo(
@@ -273,7 +278,9 @@ def create_custom_getaddrinfo(
             logger.warning(f"Custom DNS resolution failed for {host_str}: {e}, falling back to system DNS")
             # Trigger DNS switch on failure (if auto mode)
             if env._CUSTOM_DNS.lower().strip() == "auto" and not _is_local_address(host_str) and not _is_ip_address(host_str):
-                switch_dns_provider()
+                # Only switch if we're using system DNS or a custom provider (not if already exhausted)
+                if _current_dns_index < len(_dns_providers):
+                    switch_dns_provider()
         
         # Fall back to system DNS if custom resolution fails
         try:
@@ -359,9 +366,10 @@ def init_custom_resolver():
     return custom_resolver
 
 def switch_dns_provider():
-    """Switch to next DNS provider (auto mode only)."""
+    """Switch to next DNS provider (auto mode only). Starts with system DNS, switches on first failure."""
     global CUSTOM_DNS, DOH_SERVER, _current_dns_index
     if _current_dns_index + 1 >= len(_dns_providers):
+        logger.warning("All DNS providers exhausted, staying with current")
         return
     _current_dns_index += 1
     name, servers, doh = _dns_providers[_current_dns_index]
@@ -393,14 +401,23 @@ def init_dns_resolvers():
     """Initialize DNS resolvers based on configuration."""
     global CUSTOM_DNS, DOH_SERVER
     
-    # If auto mode, use current DNS provider
+    # If auto mode, use current DNS provider (or system DNS if _current_dns_index == -1)
     if env._CUSTOM_DNS.lower().strip() == "auto" and not env.USING_TOR:
-        name, servers, doh = _dns_providers[_current_dns_index]
-        CUSTOM_DNS = servers
-        DOH_SERVER = doh if env.USE_DOH else ""
-        config.CUSTOM_DNS = CUSTOM_DNS
-        config.DOH_SERVER = DOH_SERVER
-        logger.info(f"Using DNS provider: {name}")
+        if _current_dns_index >= 0:
+            # Using a custom DNS provider
+            name, servers, doh = _dns_providers[_current_dns_index]
+            CUSTOM_DNS = servers
+            DOH_SERVER = doh if env.USE_DOH else ""
+            config.CUSTOM_DNS = CUSTOM_DNS
+            config.DOH_SERVER = DOH_SERVER
+            logger.info(f"Using DNS provider: {name}")
+        else:
+            # Using system DNS (no custom DNS)
+            CUSTOM_DNS = []
+            DOH_SERVER = ""
+            config.CUSTOM_DNS = CUSTOM_DNS
+            config.DOH_SERVER = DOH_SERVER
+            logger.info("Using system DNS (auto mode - will switch on failure)")
     
     if len(CUSTOM_DNS) > 0:
         init_custom_resolver()
@@ -409,11 +426,18 @@ def init_dns_resolvers():
 
 # Load persisted state
 state = _load_state()
-if state.get('dns_provider') and env._CUSTOM_DNS.lower().strip() == "auto":
-    for i, (name, _, _) in enumerate(_dns_providers):
-        if name == state['dns_provider']:
-            _current_dns_index = i
-            break
+if env._CUSTOM_DNS.lower().strip() == "auto":
+    if state.get('dns_provider'):
+        # Restore persisted DNS provider
+        for i, (name, _, _) in enumerate(_dns_providers):
+            if name == state['dns_provider']:
+                _current_dns_index = i
+                logger.info(f"Restored DNS provider from state: {name}")
+                break
+    else:
+        # No persisted state, start with system DNS
+        _current_dns_index = -1
+        logger.info("Starting with system DNS (auto mode)")
 
 # Initialize DNS
 init_dns_resolvers()
