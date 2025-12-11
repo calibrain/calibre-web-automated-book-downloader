@@ -13,8 +13,60 @@ import ipaddress
 from logger import setup_logger
 from config import PROXIES, AA_BASE_URL, CUSTOM_DNS, AA_AVAILABLE_URLS, DOH_SERVER
 import config
+import env
+import json
+from datetime import datetime, timedelta
+from pathlib import Path
 
 logger = setup_logger(__name__)
+
+# Simple state persistence
+STATE_FILE = env.LOG_DIR / "network_state.json"
+STATE_TTL_DAYS = 30
+
+def _load_state():
+    """Load persisted network state."""
+    if not STATE_FILE.exists():
+        return {}
+    try:
+        with open(STATE_FILE, 'r') as f:
+            state = json.load(f)
+        # Check expiry
+        if state.get('chosen_at'):
+            chosen = datetime.fromisoformat(state['chosen_at'])
+            if datetime.now() - chosen > timedelta(days=STATE_TTL_DAYS):
+                return {}
+        return state
+    except:
+        return {}
+
+def _save_state(aa_url=None, dns_provider=None):
+    """Save network state."""
+    state = _load_state()
+    if aa_url:
+        state['aa_base_url'] = aa_url
+    if dns_provider:
+        state['dns_provider'] = dns_provider
+    state['chosen_at'] = datetime.now().isoformat()
+    try:
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(STATE_FILE, 'w') as f:
+            json.dump(state, f)
+    except:
+        pass
+
+# AA URL failover state
+_current_aa_url_index = 0
+_aa_urls = AA_AVAILABLE_URLS.copy()
+
+# DNS provider rotation state
+_dns_providers = [
+    ("cloudflare", ["1.1.1.1", "1.0.0.1"], "https://cloudflare-dns.com/dns-query"),
+    ("google", ["8.8.8.8", "8.8.4.4"], "https://dns.google/dns-query"),
+    ("quad9", ["9.9.9.9", "149.112.112.112"], "https://dns.quad9.net/dns-query"),
+    ("opendns", ["208.67.222.222", "208.67.220.220"], "https://doh.opendns.com/dns-query"),
+]
+_current_dns_index = 0
 
 # Common helper functions for DNS resolution
 def _decode_host(host: Union[str, bytes, None]) -> str:
@@ -150,21 +202,15 @@ def create_custom_resolver():
     return custom_resolver
 
 def resolve_with_custom_dns(resolver, hostname: str, record_type: str) -> List[str]:
-    """Resolve hostname using custom DNS resolver.
-    
-    Args:
-        resolver: The DNS resolver to use
-        hostname: The hostname to resolve
-        record_type: The DNS record type (A or AAAA)
-        
-    Returns:
-        List of resolved IP addresses
-    """
+    """Resolve hostname using custom DNS resolver."""
     try:
         answers = resolver.resolve(hostname, record_type)
         return [str(answer) for answer in answers]
     except Exception as e:
         logger.debug(f"{record_type} resolution failed for {hostname}: {e}")
+        # Trigger DNS switch on failure (if auto mode)
+        if env._CUSTOM_DNS.lower().strip() == "auto" and not _is_local_address(hostname) and not _is_ip_address(hostname):
+            switch_dns_provider()
         return []
 
 def create_custom_getaddrinfo(
@@ -225,6 +271,9 @@ def create_custom_getaddrinfo(
                 
         except Exception as e:
             logger.warning(f"Custom DNS resolution failed for {host_str}: {e}, falling back to system DNS")
+            # Trigger DNS switch on failure (if auto mode)
+            if env._CUSTOM_DNS.lower().strip() == "auto" and not _is_local_address(host_str) and not _is_ip_address(host_str):
+                switch_dns_provider()
         
         # Fall back to system DNS if custom resolution fails
         try:
@@ -309,32 +358,100 @@ def init_custom_resolver():
     logger.info("Custom DNS resolver successfully configured and activated")
     return custom_resolver
 
+def switch_dns_provider():
+    """Switch to next DNS provider (auto mode only)."""
+    global CUSTOM_DNS, DOH_SERVER, _current_dns_index
+    if _current_dns_index + 1 >= len(_dns_providers):
+        return
+    _current_dns_index += 1
+    name, servers, doh = _dns_providers[_current_dns_index]
+    CUSTOM_DNS = servers
+    DOH_SERVER = doh if env.USE_DOH else ""
+    config.CUSTOM_DNS = CUSTOM_DNS
+    config.DOH_SERVER = DOH_SERVER
+    logger.warning(f"Switched DNS provider to: {name}")
+    _save_state(dns_provider=name)
+    init_dns_resolvers()
+
+def switch_aa_url():
+    """Switch to next AA URL (only if current URL is in available list)."""
+    global AA_BASE_URL, _current_aa_url_index
+    # Don't switch if current URL is not in available list (user-specified custom URL)
+    if AA_BASE_URL not in _aa_urls:
+        return False
+    if _current_aa_url_index + 1 >= len(_aa_urls):
+        return False
+    _current_aa_url_index += 1
+    AA_BASE_URL = _aa_urls[_current_aa_url_index]
+    config.AA_BASE_URL = AA_BASE_URL
+    logger.warning(f"Switched AA URL to: {AA_BASE_URL}")
+    _save_state(aa_url=AA_BASE_URL)
+    return True
+
 # Initialize DNS resolvers based on configuration
 def init_dns_resolvers():
     """Initialize DNS resolvers based on configuration."""
+    global CUSTOM_DNS, DOH_SERVER
+    
+    # If auto mode, use current DNS provider
+    if env._CUSTOM_DNS.lower().strip() == "auto" and not env.USING_TOR:
+        name, servers, doh = _dns_providers[_current_dns_index]
+        CUSTOM_DNS = servers
+        DOH_SERVER = doh if env.USE_DOH else ""
+        config.CUSTOM_DNS = CUSTOM_DNS
+        config.DOH_SERVER = DOH_SERVER
+        logger.info(f"Using DNS provider: {name}")
+    
     if len(CUSTOM_DNS) > 0:
         init_custom_resolver()
         if DOH_SERVER:
             init_doh_resolver()
 
-# Initialize DNS resolvers
+# Load persisted state
+state = _load_state()
+if state.get('dns_provider') and env._CUSTOM_DNS.lower().strip() == "auto":
+    for i, (name, _, _) in enumerate(_dns_providers):
+        if name == state['dns_provider']:
+            _current_dns_index = i
+            break
+
+# Initialize DNS
 init_dns_resolvers()
 
-# Check available AA_BASE_URLs if set to auto
+# Initialize AA URL
 if AA_BASE_URL == "auto":
-    logger.info(f"AA_BASE_URL: auto, checking available urls {AA_AVAILABLE_URLS}")
-    for url in AA_AVAILABLE_URLS:
-        try:
-            response = requests.get(url, proxies=PROXIES)
-            if response.status_code == 200:
-                AA_BASE_URL = url
-                break
-        except Exception as e:
-            logger.error_trace(f"Error checking {url}: {e}")
-    if AA_BASE_URL == "auto":
-        AA_BASE_URL = AA_AVAILABLE_URLS[0]
+    # Load persisted AA URL or find first working
+    if state.get('aa_base_url') and state['aa_base_url'] in _aa_urls:
+        _current_aa_url_index = _aa_urls.index(state['aa_base_url'])
+        AA_BASE_URL = state['aa_base_url']
+    else:
+        logger.info(f"AA_BASE_URL: auto, checking available urls {_aa_urls}")
+        for i, url in enumerate(_aa_urls):
+            try:
+                response = requests.get(url, proxies=PROXIES, timeout=5)
+                if response.status_code == 200:
+                    _current_aa_url_index = i
+                    AA_BASE_URL = url
+                    _save_state(aa_url=AA_BASE_URL)
+                    break
+            except:
+                pass
+        if AA_BASE_URL == "auto":
+            AA_BASE_URL = _aa_urls[0]
+            _current_aa_url_index = 0
+elif AA_BASE_URL not in _aa_urls:
+    # User-specified custom URL - don't allow switching
+    pass
+else:
+    # URL is in available list
+    _current_aa_url_index = _aa_urls.index(AA_BASE_URL)
+
 config.AA_BASE_URL = AA_BASE_URL
 logger.info(f"AA_BASE_URL: {AA_BASE_URL}")
+
+def get_aa_base_url():
+    """Get current AA base URL."""
+    return AA_BASE_URL
 
 # Configure urllib opener with appropriate headers
 opener = urllib.request.build_opener()

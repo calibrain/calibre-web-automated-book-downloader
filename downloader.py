@@ -13,6 +13,7 @@ from threading import Event
 from logger import setup_logger
 from config import PROXIES
 from env import MAX_RETRY, DEFAULT_SLEEP, USE_CF_BYPASS, USING_EXTERNAL_BYPASSER
+import network
 if USE_CF_BYPASS:
     if USING_EXTERNAL_BYPASSER:
         from cloudflare_bypasser_external import get_bypassed_page
@@ -51,6 +52,21 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False, 
         return str(response.text)
         
     except Exception as e:
+        # Check if this is an AA URL and handle failover
+        current_aa_url = network.get_aa_base_url()
+        if url.startswith(current_aa_url):
+            # Check if this is a connection error (not Cloudflare 403)
+            is_connection_error = isinstance(e, (requests.exceptions.ConnectionError,
+                                                  requests.exceptions.Timeout,
+                                                  requests.exceptions.SSLError))
+            is_http_error = isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response
+            if is_connection_error or (is_http_error and e.response.status_code != 403):
+                # Try to switch AA URL
+                if network.switch_aa_url():
+                    new_url = url.replace(current_aa_url, network.get_aa_base_url())
+                    logger.info(f"Retrying with new AA URL: {new_url}")
+                    return html_get_page(new_url, retry, use_bypasser, status_callback)
+        
         if retry == 0:
             logger.error_trace(f"Failed to fetch page: {url}, error: {e}")
             return ""
@@ -115,6 +131,19 @@ def download_url(link: str, size: str = "", progress_callback: Optional[Callable
                 return None
         return buffer
     except requests.exceptions.RequestException as e:
+        # Check if this is an AA URL and handle failover
+        current_aa_url = network.get_aa_base_url()
+        if link.startswith(current_aa_url):
+            is_connection_error = isinstance(e, (requests.exceptions.ConnectionError,
+                                                  requests.exceptions.Timeout,
+                                                  requests.exceptions.SSLError))
+            is_http_error = isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response
+            if is_connection_error or (is_http_error and e.response.status_code != 403):
+                if network.switch_aa_url():
+                    new_link = link.replace(current_aa_url, network.get_aa_base_url())
+                    logger.info(f"Retrying download with new AA URL: {new_link}")
+                    return download_url(new_link, size, progress_callback, cancel_flag)
+        
         logger.error_trace(f"Failed to download from {link}: {e}")
         return None
 

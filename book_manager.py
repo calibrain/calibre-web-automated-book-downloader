@@ -9,9 +9,10 @@ from bs4 import BeautifulSoup, Tag, NavigableString, ResultSet
 
 import downloader
 from logger import setup_logger
-from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_BASE_URL
+from config import SUPPORTED_FORMATS, BOOK_LANGUAGE
 from env import AA_DONATOR_KEY, USE_CF_BYPASS, PRIORITIZE_WELIB, ALLOW_USE_WELIB, DOWNLOAD_PATHS
 from models import BookInfo, SearchFilters
+import network
 logger = setup_logger(__name__)
 
 
@@ -63,7 +64,7 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
                 index += 1
 
     url = (
-        f"{AA_BASE_URL}"
+        f"{network.get_aa_base_url()}"
         f"/search?index=&page=1&display=table"
         f"&acc=aa_download&acc=external_download"
         f"&ext={'&ext='.join(formats_to_use)}"
@@ -143,7 +144,7 @@ def get_book_info(book_id: str) -> BookInfo:
     Returns:
         BookInfo: Detailed book information
     """
-    url = f"{AA_BASE_URL}/md5/{book_id}"
+    url = f"{network.get_aa_base_url()}/md5/{book_id}"
     html = downloader.html_get_page(url)
 
     if not html:
@@ -221,7 +222,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     urls += list(external_urls_z_lib)
 
     for i in range(len(urls)):
-        urls[i] = downloader.get_absolute_url(AA_BASE_URL, urls[i])
+        urls[i] = downloader.get_absolute_url(network.get_aa_base_url(), urls[i])
 
     # Remove empty urls
     urls = [url for url in urls if url != ""]
@@ -422,7 +423,7 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
     if AA_DONATOR_KEY != "":
         download_links.insert(
             0,
-            f"{AA_BASE_URL}/dyn/api/fast_download.json?md5={book_info.id}&key={AA_DONATOR_KEY}",
+            f"{network.get_aa_base_url()}/dyn/api/fast_download.json?md5={book_info.id}&key={AA_DONATOR_KEY}",
         )
 
     for link in download_links:
@@ -461,7 +462,7 @@ def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None
 
     url = ""
 
-    if link.startswith(f"{AA_BASE_URL}/dyn/api/fast_download.json"):
+    if link.startswith(f"{network.get_aa_base_url()}/dyn/api/fast_download.json"):
         page = downloader.html_get_page(link, status_callback=status_callback)
         url = json.loads(page).get("download_url")
     else:
