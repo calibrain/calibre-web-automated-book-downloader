@@ -1,7 +1,6 @@
 """Network operations manager for the book downloader application."""
 
 import network
-network.init()
 import requests
 import time
 from io import BytesIO
@@ -25,26 +24,31 @@ logger = setup_logger(__name__)
 # Keep AA fetches snappy; connect/read timeout
 REQUEST_TIMEOUT = (5, 15)
 
+def _backoff_delay(attempt: int, base: float = 0.25, cap: float = 3.0) -> float:
+    """
+    Exponential backoff with jitter; attempt starts at 1.
+    """
+    import random
+    delay = min(cap, base * (2 ** (attempt - 1)))
+    return delay + random.random() * base
 
-def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False, status_callback: Optional[Callable[[str], None]] = None) -> str:
+
+def html_get_page(
+    url: str,
+    retry: int = MAX_RETRY,
+    use_bypasser: bool = False,
+    status_callback: Optional[Callable[[str], None]] = None,
+    selector: Optional[network.AAMirrorSelector] = None,
+) -> str:
     """Fetch HTML content from a URL with retry mechanism (iterative, bounded attempts)."""
     remaining = retry
     current_use_bypasser = use_bypasser
+    selector = selector or network.AAMirrorSelector()
+    original_url = url
+    current_url = selector.rewrite(original_url)
+    dns_rotations = 0
 
-    # Build AA mirror list and track attempts per DNS cycle
-    aa_urls = network.get_available_aa_urls()
-    current_aa = network.get_aa_base_url()
-    try:
-        aa_idx = aa_urls.index(current_aa)
-    except ValueError:
-        aa_idx = 0
-        network.set_aa_url_index(aa_idx)
-
-    current_url = url.replace(current_aa, aa_urls[aa_idx])
-    # Track which AA base is actually present in current_url so replacements are accurate
-    current_url_base = aa_urls[aa_idx]
-    aa_attempts_this_dns = 0
-
+    attempt = 1
     while remaining > 0:
         try:
             logger.debug(f"html_get_page: {current_url}, retry_left: {remaining}, use_bypasser: {current_use_bypasser}")
@@ -52,7 +56,7 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False, 
                 if status_callback:
                     status_callback("bypassing")
                 logger.info(f"GET Using Cloudflare Bypasser for: {current_url}")
-                return get_bypassed_page(current_url)
+                return get_bypassed_page(current_url, selector)
 
             logger.info(f"GET: {current_url}")
             response = requests.get(current_url, proxies=PROXIES, timeout=REQUEST_TIMEOUT)
@@ -63,6 +67,7 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False, 
 
         except Exception as e:
             remaining -= 1
+            attempt += 1
 
             current_aa_url = network.get_aa_base_url()
             is_connection_error = isinstance(e, (requests.exceptions.ConnectionError,
@@ -74,77 +79,50 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False, 
             if current_url.startswith(current_aa_url):
                 # Transport / non-403 errors: try mirror switch, else DNS rotate
                 if is_connection_error or (is_http_error and status_code != 403):
-                    aa_attempts_this_dns += 1
-                    if aa_attempts_this_dns >= len(aa_urls):
+                    new_base, action = selector.next_mirror_or_rotate_dns()
+                    if action == "mirror" and new_base:
+                        current_url = selector.rewrite(original_url)
+                        logger.info(f"[aa-retry] action=mirror url={current_url}")
+                        continue
+                    if action == "dns" and new_base:
                         network._agent_debug_log(
                             "H4",
                             "downloader.py:html_get_page",
                             "aa_switch_exhausted_trigger_dns",
                             {"url": current_url, "retry": remaining, "status_code": status_code, "is_conn_err": is_connection_error}
                         )
-                        if network.rotate_dns_and_reset_aa():
-                            previous_base = current_url_base
-                            current_aa_url = network.get_aa_base_url()
-                            try:
-                                aa_idx = aa_urls.index(current_aa_url)
-                            except ValueError:
-                                aa_idx = 0
-                                network.set_aa_url_index(aa_idx)
-                            aa_attempts_this_dns = 0
-                            current_url_base = aa_urls[aa_idx]
-                            new_url = current_url.replace(previous_base, current_url_base)
-                            logger.warning(f"No AA mirrors left; switched DNS and retrying: {new_url}")
-                            current_url = new_url
-                            continue
-                    else:
-                        previous_base = current_url_base
-                        aa_idx = (aa_idx + 1) % len(aa_urls)
-                        network.set_aa_url_index(aa_idx)
-                        current_url_base = aa_urls[aa_idx]
-                        new_url = current_url.replace(previous_base, current_url_base)
-                        logger.info(f"Retrying with new AA URL: {new_url}")
-                        current_url = new_url
+                        current_url = selector.rewrite(original_url)
+                        logger.warning(f"[aa-retry] action=dns url={current_url}")
                         continue
 
                 # 403 without bypasser: try next mirror
                 if status_code == 403 and not USE_CF_BYPASS:
-                    aa_attempts_this_dns += 1
-                    if aa_attempts_this_dns >= len(aa_urls):
-                        if network.rotate_dns_and_reset_aa():
-                            previous_base = current_url_base
-                            current_aa_url = network.get_aa_base_url()
-                            try:
-                                aa_idx = aa_urls.index(current_aa_url)
-                            except ValueError:
-                                aa_idx = 0
-                                network.set_aa_url_index(aa_idx)
-                            aa_attempts_this_dns = 0
-                            current_url_base = aa_urls[aa_idx]
-                            new_url = current_url.replace(previous_base, current_url_base)
-                            logger.warning(f"No AA mirrors left after 403; switched DNS and retrying: {new_url}")
-                            current_url = new_url
-                            continue
-                    else:
-                        previous_base = current_url_base
-                        aa_idx = (aa_idx + 1) % len(aa_urls)
-                        network.set_aa_url_index(aa_idx)
-                        current_url_base = aa_urls[aa_idx]
-                        new_url = current_url.replace(previous_base, current_url_base)
-                        logger.info(f"Retrying with new AA URL after 403: {new_url}")
-                        current_url = new_url
+                    new_base, action = selector.next_mirror_or_rotate_dns()
+                    if action in ("mirror", "dns") and new_base:
+                        current_url = selector.rewrite(original_url)
+                        log_fn = logger.warning if action == "dns" else logger.info
+                        log_fn(f"[aa-retry] action={action} url={current_url}")
                         continue
                     if USE_CF_BYPASS:
                         current_use_bypasser = True
                         logger.info(f"403 detected; enabling cloudflare bypasser for: {current_url}")
                         continue
+            else:
+                # Non-AA target: optionally rotate DNS on repeated transport/5xx/429/403 issues
+                should_dns_rotate = is_connection_error or (
+                    is_http_error and status_code in (403, 429, 500, 502, 503, 504)
+                )
+                if should_dns_rotate:
+                    if network.rotate_dns_provider():
+                        dns_rotations += 1
+                        current_url = original_url
+                        logger.warning(f"[dns-rotate] target={current_url}")
+                        continue
 
             # If we reach here and no special handling took over
             if remaining <= 0:
                 # All AA mirrors and DNS options exhausted; log clean summary without traceback noise
-                logger.error(
-                    f"Giving up fetching {current_url_base} after {retry} attempts; "
-                    f"last error: {type(e).__name__}: {e}"
-                )
+                logger.error(f"Giving up fetching {current_url} after {retry} attempts; last error: {type(e).__name__}: {e}")
                 return ""
 
             # Simplified logging to avoid noisy trace spam on repeated failures
@@ -157,11 +135,12 @@ def html_get_page(url: str, retry: int = MAX_RETRY, use_bypasser: bool = False, 
                 continue
 
             logger.warning(f"Retrying GET {current_url} (remaining: {remaining}) due to {type(e).__name__}: {e}")
+            time.sleep(_backoff_delay(attempt))
             continue
 
     return ""
 
-def download_url(link: str, size: str = "", progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None) -> Optional[BytesIO]:
+def download_url(link: str, size: str = "", progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None, _selector: Optional[network.AAMirrorSelector] = None) -> Optional[BytesIO]:
     """Download content from URL into a BytesIO buffer.
     
     Args:
@@ -170,9 +149,12 @@ def download_url(link: str, size: str = "", progress_callback: Optional[Callable
     Returns:
         BytesIO: Buffer containing downloaded content if successful
     """
+    selector = _selector or network.AAMirrorSelector()
+    link_to_use = selector.rewrite(link)
+    attempt = 1
     try:
-        logger.info(f"Downloading from: {link}")
-        response = requests.get(link, stream=True, proxies=PROXIES, timeout=REQUEST_TIMEOUT)
+        logger.info(f"Downloading from: {link_to_use}")
+        response = requests.get(link_to_use, stream=True, proxies=PROXIES, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
 
         total_size : float = 0.0
@@ -205,29 +187,36 @@ def download_url(link: str, size: str = "", progress_callback: Optional[Callable
     except requests.exceptions.RequestException as e:
         # Check if this is an AA URL and handle failover
         current_aa_url = network.get_aa_base_url()
-        if link.startswith(current_aa_url):
-            is_connection_error = isinstance(e, (requests.exceptions.ConnectionError,
-                                                  requests.exceptions.Timeout,
-                                                  requests.exceptions.SSLError))
-            is_http_error = isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response
-            status_code = e.response.status_code if is_http_error else None
+        is_connection_error = isinstance(e, (requests.exceptions.ConnectionError,
+                                              requests.exceptions.Timeout,
+                                              requests.exceptions.SSLError))
+        is_http_error = isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response
+        status_code = e.response.status_code if is_http_error else None
+
+        if link_to_use.startswith(current_aa_url):
             should_switch = is_connection_error or (is_http_error and status_code != 403)
             # Rotate on hard blocks or overloads even when not a transport error
             if is_http_error and status_code in (403, 429, 500, 502, 503, 504):
                 should_switch = True
             if should_switch:
-                if network.switch_aa_url():
-                    new_link = link.replace(current_aa_url, network.get_aa_base_url())
-                    logger.info(f"Retrying download with new AA URL: {new_link}")
-                    return download_url(new_link, size, progress_callback, cancel_flag)
-                else:
-                    if network.rotate_dns_and_reset_aa():
-                        base = network.get_aa_base_url()
-                        new_link = link.replace(current_aa_url, base)
-                        logger.warning(f"No AA mirrors left; switched DNS and retrying download: {new_link}")
-                        return download_url(new_link, size, progress_callback, cancel_flag)
+                new_base, action = selector.next_mirror_or_rotate_dns()
+                if action in ("mirror", "dns") and new_base:
+                    new_link = selector.rewrite(link)
+                    log_fn = logger.warning if action == "dns" else logger.info
+                    log_fn(f"[aa-download] action={action} url={new_link}")
+                    return download_url(new_link, size, progress_callback, cancel_flag, selector)
+        else:
+            # Non-AA target: rotate DNS on transport/5xx/429/403 failures
+            should_dns_rotate = is_connection_error or (
+                is_http_error and status_code in (403, 429, 500, 502, 503, 504)
+            )
+            if should_dns_rotate and network.rotate_dns_provider():
+                new_link = link  # same URL, new DNS
+                logger.warning(f"[dns-rotate] target={new_link}")
+                return download_url(new_link, size, progress_callback, cancel_flag, selector)
         
-        logger.error_trace(f"Failed to download from {link}: {e}")
+        time.sleep(_backoff_delay(attempt))
+        logger.error_trace(f"Failed to download from {link_to_use}: {e}")
         return None
 
 def get_absolute_url(base_url: str, url: str) -> str:

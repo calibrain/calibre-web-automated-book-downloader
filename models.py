@@ -56,6 +56,7 @@ class BookInfo:
     download_path: Optional[str] = None
     priority: int = 0
     progress: Optional[float] = None
+    fast_remaining: Optional[int] = None
 
 class BookQueue:
     """Thread-safe book queue manager with priority support and cancellation."""

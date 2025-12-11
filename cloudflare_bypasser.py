@@ -474,7 +474,7 @@ def wait_for_result(func, timeout : int = 10, condition : any = True):
 _init_cleanup_thread()
 
 
-def get_bypassed_page(url: str) -> Optional[str]:
+def get_bypassed_page(url: str, selector: Optional[network.AAMirrorSelector] = None) -> Optional[str]:
     """Fetch HTML content from a URL using the internal Cloudflare Bypasser.
 
     Args:
@@ -482,8 +482,19 @@ def get_bypassed_page(url: str) -> Optional[str]:
     Returns:
         str: HTML content if successful, None otherwise
     """
+    sel = selector or network.AAMirrorSelector()
+    attempt_url = sel.rewrite(url)
+    try:
+        response_html = get(attempt_url)
+    except Exception:
+        # On failure, try mirror/DNS rotation for AA-like URLs
+        new_base, action = sel.next_mirror_or_rotate_dns()
+        if action in ("mirror", "dns") and new_base:
+            attempt_url = sel.rewrite(url)
+            response_html = get(attempt_url)
+        else:
+            raise
 
-    response_html = get(url)
     logger.debug(f"Cloudflare Bypasser response length: {len(response_html)}")
     if response_html.strip() != "":
         return response_html

@@ -9,20 +9,23 @@ from socket import AddressFamily, SocketKind
 import urllib.parse
 import ssl
 import ipaddress
+import threading
 
 from logger import setup_logger
 from config import PROXIES, AA_BASE_URL, CUSTOM_DNS, AA_AVAILABLE_URLS, DOH_SERVER
 import config
 import env
-import json
 from datetime import datetime, timedelta
-from pathlib import Path
 
 logger = setup_logger(__name__)
 
-# Simple state persistence
-STATE_FILE = env.LOG_DIR / "network_state.json"
+# In-memory state (no disk persistence)
 STATE_TTL_DAYS = 30
+_initialized = False
+_dns_initialized = False
+_aa_initialized = False
+_state_lock = threading.Lock()
+state: dict[str, Any] = {}
 
 def _agent_debug_log(code: str, source: str, reason: str, meta: Optional[dict] = None) -> None:
     """Lightweight debug hook for automated runs; safe no-op on failure."""
@@ -33,39 +36,30 @@ def _agent_debug_log(code: str, source: str, reason: str, meta: Optional[dict] =
         logger.debug(f"[agent] log failed: {exc}")
 
 def _load_state():
-    """Load persisted network state."""
-    if not STATE_FILE.exists():
-        return {}
-    try:
-        with open(STATE_FILE, 'r') as f:
-            state = json.load(f)
-        # Check expiry
-        if state.get('chosen_at'):
-            chosen = datetime.fromisoformat(state['chosen_at'])
-            if datetime.now() - chosen > timedelta(days=STATE_TTL_DAYS):
-                return {}
-        return state
-    except:
-        return {}
+    """Return current in-memory network state (no disk persistence)."""
+    if state.get('chosen_at'):
+        chosen = datetime.fromisoformat(state['chosen_at'])
+        if datetime.now() - chosen > timedelta(days=STATE_TTL_DAYS):
+            state.clear()
+    return state
 
 def _save_state(aa_url=None, dns_provider=None):
-    """Save network state."""
-    state = _load_state()
-    if aa_url:
-        state['aa_base_url'] = aa_url
-    if dns_provider:
-        state['dns_provider'] = dns_provider
-    state['chosen_at'] = datetime.now().isoformat()
-    try:
-        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(STATE_FILE, 'w') as f:
-            json.dump(state, f)
-    except:
-        pass
+    """Update in-memory network state (no disk persistence)."""
+    with _state_lock:
+        if aa_url:
+            state['aa_base_url'] = aa_url
+        if dns_provider:
+            state['dns_provider'] = dns_provider
+        state['chosen_at'] = datetime.now().isoformat()
 
 # AA URL failover state
 _current_aa_url_index = 0
 _aa_urls = AA_AVAILABLE_URLS.copy()
+
+def _ensure_initialized() -> None:
+    """Lazy guard so runtime setup happens once and late calls still work."""
+    if not _initialized:
+        init()
 
 # DNS provider rotation state
 # _current_dns_index = -1 means using system DNS (no custom DNS)
@@ -128,6 +122,17 @@ def _is_ip_address(host_str: str) -> bool:
         return True
     except ValueError:
         return False
+
+def _aa_hostnames() -> List[str]:
+    """Return hostname portions for all configured AA URLs."""
+    return [
+        parsed.hostname for parsed in (urllib.parse.urlparse(url) for url in _aa_urls)
+        if parsed.hostname
+    ]
+
+def _is_aa_hostname(host_str: str) -> bool:
+    """Check if a hostname matches any configured AA mirror host."""
+    return any(host_str.endswith(hostname) for hostname in _aa_hostnames())
 
 # Store the original getaddrinfo function
 original_getaddrinfo = socket.getaddrinfo
@@ -258,9 +263,8 @@ def create_custom_getaddrinfo(
             logger.debug(f"Using system DNS for IP address or local/private address: {host_str}")
             return original_getaddrinfo(host, port, family, type, proto, flags)
         
-        # Anna's Archive often works only on IPv4 for some ISPs; prefer IPv4
-        aa_host = host_str.endswith("annas-archive.li") or host_str.endswith("annas-archive.org") or host_str.endswith("annas-archive.se")
-        prefer_ipv4_only = aa_host
+        # Anna's Archive often works only on IPv4 for some ISPs; prefer IPv4 based on configured mirrors
+        prefer_ipv4_only = _is_aa_hostname(host_str)
         
         results: list[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]] = []
         
@@ -408,36 +412,50 @@ def init_custom_resolver():
     logger.info("Custom DNS resolver successfully configured and activated")
     return custom_resolver
 
-def switch_dns_provider():
+def switch_dns_provider() -> bool:
     """Switch to next DNS provider (auto mode only). Starts with system DNS, switches on first failure."""
+    _ensure_initialized()
     global CUSTOM_DNS, DOH_SERVER, _current_dns_index
-    if _current_dns_index + 1 >= len(_dns_providers):
-        logger.warning("All DNS providers exhausted, staying with current")
-        return
-    _current_dns_index += 1
-    name, servers, doh = _dns_providers[_current_dns_index]
-    CUSTOM_DNS = servers
-    DOH_SERVER = doh if env.USE_DOH else ""
-    config.CUSTOM_DNS = CUSTOM_DNS
-    config.DOH_SERVER = DOH_SERVER
-    logger.warning(f"Switched DNS provider to: {name}")
-    _save_state(dns_provider=name)
+    with _state_lock:
+        if _current_dns_index + 1 >= len(_dns_providers):
+            logger.warning("All DNS providers exhausted, staying with current")
+            return False
+        _current_dns_index += 1
+        name, servers, doh = _dns_providers[_current_dns_index]
+        CUSTOM_DNS = servers
+        DOH_SERVER = doh if env.USE_DOH else ""
+        config.CUSTOM_DNS = CUSTOM_DNS
+        config.DOH_SERVER = DOH_SERVER
+        logger.warning(f"Switched DNS provider to: {name}")
+        _save_state(dns_provider=name)
     init_dns_resolvers()
+    return True
+
+def rotate_dns_provider() -> bool:
+    """
+    Switch DNS provider (auto mode only). Does not alter AA selection.
+    Returns True if DNS switched.
+    """
+    _ensure_initialized()
+    global _current_dns_index
+    if env._CUSTOM_DNS.lower().strip() != "auto" or env.USING_TOR:
+        return False
+    with _state_lock:
+        if _current_dns_index + 1 >= len(_dns_providers):
+            logger.warning("DNS rotation requested but all providers exhausted; cycling back to first provider")
+            _current_dns_index = -1
+    return switch_dns_provider()
 
 def rotate_dns_and_reset_aa() -> bool:
     """
     Switch DNS provider (auto mode) and reset AA URL list to the first entry.
     Returns True if DNS switched; False if no providers left or not in auto mode.
     """
-    global AA_BASE_URL, _current_aa_url_index, _current_dns_index
-    if env._CUSTOM_DNS.lower().strip() != "auto" or env.USING_TOR:
+    _ensure_initialized()
+    if not rotate_dns_provider():
         return False
-    # If we already tried all providers, wrap back to the first one
-    if _current_dns_index + 1 >= len(_dns_providers):
-        logger.warning("DNS rotation requested but all providers exhausted; cycling back to first provider")
-        _current_dns_index = -1  # so switch_dns_provider() moves to index 0
-    switch_dns_provider()
     # Reset AA URL to first available auto option if using auto AA
+    global AA_BASE_URL, _current_aa_url_index
     if AA_BASE_URL == "auto" or AA_BASE_URL in _aa_urls:
         _current_aa_url_index = 0
         AA_BASE_URL = _aa_urls[0]
@@ -448,6 +466,7 @@ def rotate_dns_and_reset_aa() -> bool:
 
 def switch_aa_url():
     """Switch to next AA URL (only if current URL is in available list)."""
+    _ensure_initialized()
     global AA_BASE_URL, _current_aa_url_index
     # Don't switch if current URL is not in available list (user-specified custom URL)
     if AA_BASE_URL not in _aa_urls:
@@ -491,74 +510,153 @@ def init_dns_resolvers():
         if DOH_SERVER:
             init_doh_resolver()
 
-# Load persisted state
-state = _load_state()
-if env._CUSTOM_DNS.lower().strip() == "auto":
-    if state.get('dns_provider'):
-        # Restore persisted DNS provider
-        for i, (name, _, _) in enumerate(_dns_providers):
-            if name == state['dns_provider']:
-                _current_dns_index = i
-                logger.info(f"Restored DNS provider from state: {name}")
-                break
-    else:
-        # No persisted state, start with system DNS
-        _current_dns_index = -1
-        logger.info("Starting with system DNS (auto mode)")
-
-# Initialize DNS
-init_dns_resolvers()
-
-# Initialize AA URL
-if AA_BASE_URL == "auto":
-    # Load persisted AA URL or find first working
-    if state.get('aa_base_url') and state['aa_base_url'] in _aa_urls:
-        _current_aa_url_index = _aa_urls.index(state['aa_base_url'])
-        AA_BASE_URL = state['aa_base_url']
-    else:
-        logger.info(f"AA_BASE_URL: auto, checking available urls {_aa_urls}")
-        for i, url in enumerate(_aa_urls):
-            try:
-                response = requests.get(url, proxies=PROXIES, timeout=5)
-                if response.status_code == 200:
-                    _current_aa_url_index = i
-                    AA_BASE_URL = url
-                    _save_state(aa_url=AA_BASE_URL)
+def _initialize_dns_state() -> None:
+    """Restore persisted DNS choice or start fresh."""
+    global _current_dns_index, state
+    if env._CUSTOM_DNS.lower().strip() == "auto":
+        if state.get('dns_provider'):
+            for i, (name, _, _) in enumerate(_dns_providers):
+                if name == state['dns_provider']:
+                    _current_dns_index = i
+                    logger.info(f"Restored DNS provider from state: {name}")
                     break
-            except:
-                pass
-        if AA_BASE_URL == "auto":
-            AA_BASE_URL = _aa_urls[0]
-            _current_aa_url_index = 0
-elif AA_BASE_URL not in _aa_urls:
-    # User-specified custom URL - don't allow switching
-    logger.info(f"AA_BASE_URL set to custom value {AA_BASE_URL}; skipping auto-switch")
-else:
-    # URL is in available list
-    _current_aa_url_index = _aa_urls.index(AA_BASE_URL)
+        else:
+            _current_dns_index = -1
+            logger.info("Starting with system DNS (auto mode)")
+    else:
+        _current_dns_index = -1
 
-config.AA_BASE_URL = AA_BASE_URL
-logger.info(f"AA_BASE_URL: {AA_BASE_URL}")
+def _initialize_aa_state() -> None:
+    """Restore or probe AA URL state."""
+    global AA_BASE_URL, _current_aa_url_index
+    if AA_BASE_URL == "auto":
+        if state.get('aa_base_url') and state['aa_base_url'] in _aa_urls:
+            _current_aa_url_index = _aa_urls.index(state['aa_base_url'])
+            AA_BASE_URL = state['aa_base_url']
+        else:
+            logger.info(f"AA_BASE_URL: auto, checking available urls {_aa_urls}")
+            for i, url in enumerate(_aa_urls):
+                try:
+                    response = requests.get(url, proxies=PROXIES, timeout=3)
+                    if response.status_code == 200:
+                        _current_aa_url_index = i
+                        AA_BASE_URL = url
+                        _save_state(aa_url=AA_BASE_URL)
+                        break
+                except Exception:
+                    pass
+            if AA_BASE_URL == "auto":
+                AA_BASE_URL = _aa_urls[0]
+                _current_aa_url_index = 0
+    elif AA_BASE_URL not in _aa_urls:
+        logger.info(f"AA_BASE_URL set to custom value {AA_BASE_URL}; skipping auto-switch")
+    else:
+        _current_aa_url_index = _aa_urls.index(AA_BASE_URL)
+
+    config.AA_BASE_URL = AA_BASE_URL
+    logger.info(f"AA_BASE_URL: {AA_BASE_URL}")
+
+def init_dns(force: bool = False) -> None:
+    """Initialize DNS state and resolvers."""
+    global state, _dns_initialized
+    if _dns_initialized and not force:
+        return
+    state = _load_state()
+    _initialize_dns_state()
+    init_dns_resolvers()
+    _dns_initialized = True
+
+def init_aa(force: bool = False) -> None:
+    """Initialize AA mirror selection."""
+    global state, _aa_initialized
+    if _aa_initialized and not force:
+        return
+    state = _load_state()
+    _initialize_aa_state()
+    _aa_initialized = True
+
+def init(force: bool = False) -> None:
+    """
+    Perform network bootstrap once at startup.
+
+    Safe to call repeatedly; later calls no-op unless force=True.
+    """
+    global _initialized
+    if _initialized and not force:
+        return
+
+    init_dns(force=force)
+    init_aa(force=force)
+    _initialized = True
 
 def get_aa_base_url():
     """Get current AA base URL."""
+    _ensure_initialized()
     return AA_BASE_URL
 
 def get_available_aa_urls():
     """Get list of configured AA URLs (copy)."""
+    _ensure_initialized()
     return _aa_urls.copy()
 
 def set_aa_url_index(new_index: int) -> bool:
     """Set AA base URL by index in available list; returns True if applied."""
+    _ensure_initialized()
     global AA_BASE_URL, _current_aa_url_index
     if new_index < 0 or new_index >= len(_aa_urls):
         return False
-    _current_aa_url_index = new_index
-    AA_BASE_URL = _aa_urls[_current_aa_url_index]
-    config.AA_BASE_URL = AA_BASE_URL
-    logger.info(f"Set AA URL to: {AA_BASE_URL}")
-    _save_state(aa_url=AA_BASE_URL)
+    with _state_lock:
+        _current_aa_url_index = new_index
+        AA_BASE_URL = _aa_urls[_current_aa_url_index]
+        config.AA_BASE_URL = AA_BASE_URL
+        logger.info(f"Set AA URL to: {AA_BASE_URL}")
+        _save_state(aa_url=AA_BASE_URL)
     return True
+
+class AAMirrorSelector:
+    """
+    Small helper to keep AA mirror switching consistent across call sites.
+    Tracks attempts per DNS cycle and rewrites URLs safely.
+    """
+    def __init__(self) -> None:
+        self._ensure_fresh_state(reset_attempts=True)
+
+    def _ensure_fresh_state(self, reset_attempts: bool = False) -> None:
+        _ensure_initialized()
+        self.aa_urls = get_available_aa_urls()
+        self._index = self._safe_index(get_aa_base_url())
+        self.current_base = self.aa_urls[self._index] if self.aa_urls else ""
+        if reset_attempts:
+            self.attempts_this_dns = 0
+
+    def _safe_index(self, base: str) -> int:
+        if base in self.aa_urls:
+            return self.aa_urls.index(base)
+        return 0
+
+    def rewrite(self, url: str) -> str:
+        """Replace any known AA base in url with current_base."""
+        for base in self.aa_urls:
+            if url.startswith(base):
+                return url.replace(base, self.current_base, 1)
+        return url
+
+    def next_mirror_or_rotate_dns(self, allow_dns: bool = True) -> tuple[Optional[str], str]:
+        """
+        Advance to next mirror; if exhausted and allowed, rotate DNS and reset to first.
+        Returns (new_base, action) where action is 'mirror', 'dns', or 'exhausted'.
+        """
+        self.attempts_this_dns += 1
+        if self.attempts_this_dns >= len(self.aa_urls):
+            if allow_dns and rotate_dns_and_reset_aa():
+                self._ensure_fresh_state(reset_attempts=True)
+                return self.current_base, "dns"
+            return None, "exhausted"
+
+        next_index = (self._index + 1) % len(self.aa_urls)
+        set_aa_url_index(next_index)
+        self._ensure_fresh_state(reset_attempts=False)
+        return self.current_base, "mirror"
 
 # Configure urllib opener with appropriate headers
 opener = urllib.request.build_opener()
@@ -568,7 +666,3 @@ opener.addheaders = [
         'Chrome/129.0.0.0 Safari/537.3')
 ]
 urllib.request.install_opener(opener)
-
-# Need an empty function to be called by downloader.py
-def init():
-    pass

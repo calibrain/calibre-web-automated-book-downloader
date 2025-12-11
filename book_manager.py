@@ -68,6 +68,8 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
                 )
                 index += 1
 
+    selector = network.AAMirrorSelector()
+
     url = (
         f"{network.get_aa_base_url()}"
         f"/search?index=&page=1&display=table"
@@ -77,7 +79,7 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
         f"{filters_query}"
     )
 
-    html = downloader.html_get_page(url)
+    html = downloader.html_get_page(url, selector=selector)
     if not html:
         # Network/mirror exhaustion path bubbles up so API can notify clients
         raise SearchUnavailable("Unable to reach Anna's Archive. Network restricted or mirrors are blocked.")
@@ -151,7 +153,8 @@ def get_book_info(book_id: str) -> BookInfo:
         BookInfo: Detailed book information
     """
     url = f"{network.get_aa_base_url()}/md5/{book_id}"
-    html = downloader.html_get_page(url)
+    selector = network.AAMirrorSelector()
+    html = downloader.html_get_page(url, selector=selector)
 
     if not html:
         raise Exception(f"Failed to fetch book info for ID: {book_id}")
@@ -217,15 +220,33 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         except:
             pass
 
-    external_urls_welib = _get_download_urls_from_welib(book_id) if USE_CF_BYPASS else set()
+    welib_selector = network.AAMirrorSelector() if USE_CF_BYPASS else None
+    external_urls_welib = _get_download_urls_from_welib(book_id, selector=welib_selector) if USE_CF_BYPASS else set()
+
+    logger.debug(
+        "Source inventory for %s -> welib=%d, aa_no_wait=%d, aa_wait=%d, libgen=%d, zlib=%d",
+        book_id,
+        len(external_urls_welib),
+        len(slow_urls_no_waitlist),
+        len(slow_urls_with_waitlist),
+        len(external_urls_libgen),
+        len(external_urls_z_lib),
+    )
 
     urls = []
+    # Optional: push welib to the front only when explicitly requested
     urls += list(external_urls_welib) if PRIORITIZE_WELIB else []
+
+    # Prefer AA / partner and other mirrors first
     urls += list(slow_urls_no_waitlist) if USE_CF_BYPASS else []
     urls += list(external_urls_libgen)
-    urls += list(external_urls_welib) if not PRIORITIZE_WELIB else []
     urls += list(slow_urls_with_waitlist)  if USE_CF_BYPASS else []
     urls += list(external_urls_z_lib)
+
+    # Fallback: try welib at the very end when not prioritized
+    if external_urls_welib and not PRIORITIZE_WELIB:
+        logger.info("Adding welib links as fallback for %s", book_id)
+    urls += list(external_urls_welib) if not PRIORITIZE_WELIB else []
 
     for i in range(len(urls)):
         urls[i] = downloader.get_absolute_url(network.get_aa_base_url(), urls[i])
@@ -307,15 +328,35 @@ def _find_in_divs(divs: List[str], text: str, isClass: bool = False) -> List[str
                 divs_found.append(div.text.strip())
     return divs_found
 
-def _get_download_urls_from_welib(book_id: str) -> set[str]:
+def _label_source(link: str) -> str:
+    """Lightweight source tag for logging/metrics."""
+    if "welib.org" in link:
+        return "welib"
+    if "/dyn/api/fast_download" in link:
+        return "aa-fast"
+    if "/slow_download/" in link or "annas-" in link:
+        return "aa-slow"
+    if "libgen" in link:
+        return "libgen"
+    if "z-lib" in link or "zlibrary" in link:
+        return "z-lib"
+    return "unknown"
+
+def _get_download_urls_from_welib(book_id: str, selector: Optional[network.AAMirrorSelector] = None) -> set[str]:
     if ALLOW_USE_WELIB == False:
         return set()
     """Get download urls from welib.org."""
     url = f"https://welib.org/md5/{book_id}"
     logger.info(f"Getting download urls from welib.org for {book_id}. While this uses the bypasser, it will not start downloading them yet.")
-    html = downloader.html_get_page(url, use_bypasser=True)
+    sel = selector or network.AAMirrorSelector()
+    try:
+        html = downloader.html_get_page(url, use_bypasser=True, selector=sel)
+    except Exception as exc:
+        logger.error_trace(f"Welib fetch failed for {book_id}: {exc}")
+        return set()
     if not html:
-        return []
+        logger.warning("Welib page empty for %s; skipping fallback URLs", book_id)
+        return set()
     soup = BeautifulSoup(html, "html.parser")
     download_links = soup.find_all("a", href=True)
     download_links = [link["href"] for link in download_links]
@@ -421,6 +462,8 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
         str: Download URL if successful, None otherwise
     """
 
+    selector = network.AAMirrorSelector()
+
     if len(book_info.download_urls) == 0:
         book_info = get_book_info(book_info.id)
     download_links = book_info.download_urls
@@ -434,19 +477,22 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
 
     for link in download_links:
         try:
+            source_label = _label_source(link)
+            logger.info("Trying download source [%s]: %s", source_label, link)
             # Update status to resolving before attempting download URL fetch
             if status_callback:
                 status_callback("resolving")
 
-            download_url = _get_download_url(link, book_info.title, cancel_flag, status_callback)
+            download_url = _get_download_url(link, book_info.title, cancel_flag, status_callback, selector, book_info)
             if download_url != "":
+                logger.info("Resolved download URL [%s]: %s", source_label, download_url)
                 # Update status to downloading before starting actual download
                 if status_callback:
                     status_callback("downloading")
 
                 logger.info(f"Downloading `{book_info.title}` from `{download_url}`")
 
-                data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag)
+                data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag, selector)
                 if not data:
                     raise Exception("No data received")
 
@@ -457,22 +503,48 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
                 return download_url
 
         except Exception as e:
-            logger.error_trace(f"Failed to download from {link}: {e}")
+            logger.error_trace(f"Failed to download from {link} (source={source_label}): {e}")
             continue
 
     return None
 
 
-def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None) -> str:
+def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None, selector: Optional[network.AAMirrorSelector] = None, book_info: Optional[BookInfo] = None) -> str:
     """Extract actual download URL from various source pages."""
 
     url = ""
+    sel = selector or network.AAMirrorSelector()
 
     if link.startswith(f"{network.get_aa_base_url()}/dyn/api/fast_download.json"):
-        page = downloader.html_get_page(link, status_callback=status_callback)
-        url = json.loads(page).get("download_url")
+        page = downloader.html_get_page(link, status_callback=status_callback, selector=sel)
+        try:
+            data = json.loads(page)
+        except Exception as exc:
+            logger.error_trace(f"fast_download response was not JSON for {title}: {exc}")
+            return ""
+
+        url = data.get("download_url") or data.get("url")
+
+        # Capture any remaining quota hints if present; AA keys vary
+        remaining_hint = None
+        for key in ("fast_downloads_remaining", "fast_downloads_left", "downloads_left", "requests_left", "remaining"):
+            if key in data:
+                remaining_hint = data.get(key)
+                break
+        if remaining_hint is not None:
+            try:
+                remaining_int = int(str(remaining_hint))
+                if book_info is not None:
+                    book_info.fast_remaining = remaining_int
+                logger.info("AA fast downloads remaining: %s", remaining_int)
+            except Exception:
+                logger.debug("AA fast remaining hint not numeric: %s", remaining_hint)
+
+        if not url:
+            logger.warning(f"fast_download JSON missing download_url for {title}. keys={list(data.keys())}")
+            return ""
     else:
-        html = downloader.html_get_page(link, status_callback=status_callback)
+        html = downloader.html_get_page(link, status_callback=status_callback, selector=sel)
 
         if html == "":
             return ""
