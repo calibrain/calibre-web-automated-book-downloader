@@ -14,6 +14,7 @@ services:
       UID: 1000
       GID: 100
       # CWA_DB_PATH: /auth/app.db  # Uncomment to enable authentication (also uncomment volume below)
+      # CALIBRE_WEB_URL: http://localhost:8080 # Uncomment and add your custom library URL to enable "Go To Library" button in the Web UI
       # SESSION_COOKIE_SECURE: 'true'  # Set to 'true' if accessing ONLY via HTTPS
       # DEBUG: 'true'  # Enable debug mode (debug button, verbose logging)
       # Queue management settings
