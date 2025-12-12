@@ -489,6 +489,8 @@ def _get_driver():
     global LAST_USED
     logger.info("Getting driver...")
     LAST_USED = time.time()
+    
+    # Initialize display if not already done (e.g., warmup didn't run)
     if env.DOCKERMODE and env.USE_CF_BYPASS and not DISPLAY["xvfb"]:
         from pyvirtualdisplay import Display
         display = Display(visible=False, size=VIRTUAL_SCREEN_SIZE)
@@ -497,33 +499,37 @@ def _get_driver():
         DISPLAY["xvfb"] = display
         time.sleep(DEFAULT_SLEEP)
         _reset_pyautogui_display_state()
+    
+    # Start FFmpeg recording on first actual bypass request (not during warmup)
+    # This ensures we only record active bypass sessions, not idle time
+    if env.DEBUG and DISPLAY["xvfb"] and not DISPLAY["ffmpeg"]:
+        display = DISPLAY["xvfb"]
+        timestamp = datetime.now().strftime("%y%m%d-%H%M%S")
+        output_file = RECORDING_DIR / f"screen_recording_{timestamp}.mp4"
 
-        if env.DEBUG:
-            timestamp = datetime.now().strftime("%y%m%d-%H%M%S")
-            output_file = RECORDING_DIR / f"screen_recording_{timestamp}.mp4"
-
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-y",
-                "-f", "x11grab",
-                "-video_size", f"{VIRTUAL_SCREEN_SIZE[0]}x{VIRTUAL_SCREEN_SIZE[1]}",
-                "-i", f":{display.display}",
-                "-c:v", "libx264",
-                "-preset", "ultrafast",  # or "veryfast" (trade speed for slightly better compression)
-                "-maxrate", "700k",      # Slightly higher bitrate for text clarity
-                "-bufsize", "1400k",    # Buffer size (2x maxrate)
-                "-crf", "36",  # Adjust as needed:  higher = smaller, lower = better quality (23 is visually lossless)
-                "-pix_fmt", "yuv420p",  # Crucial for compatibility with most players
-                "-tune", "animation",   # Optimize encoding for screen content
-                "-x264-params", "bframes=0:deblock=-1,-1", # Optimize for text, disable b-frames and deblocking
-                "-r", "15",         # Reduce frame rate (if content allows)
-                "-an",                # Disable audio recording (if not needed)
-                output_file.as_posix(),
-                "-nostats", "-loglevel", "0"
-            ]
-            logger.info("Starting FFmpeg recording to %s", output_file)
-            logger.debug_trace(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
-            DISPLAY["ffmpeg"] = subprocess.Popen(ffmpeg_cmd)
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-y",
+            "-f", "x11grab",
+            "-video_size", f"{VIRTUAL_SCREEN_SIZE[0]}x{VIRTUAL_SCREEN_SIZE[1]}",
+            "-i", f":{display.display}",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",  # or "veryfast" (trade speed for slightly better compression)
+            "-maxrate", "700k",      # Slightly higher bitrate for text clarity
+            "-bufsize", "1400k",    # Buffer size (2x maxrate)
+            "-crf", "36",  # Adjust as needed:  higher = smaller, lower = better quality (23 is visually lossless)
+            "-pix_fmt", "yuv420p",  # Crucial for compatibility with most players
+            "-tune", "animation",   # Optimize encoding for screen content
+            "-x264-params", "bframes=0:deblock=-1,-1", # Optimize for text, disable b-frames and deblocking
+            "-r", "15",         # Reduce frame rate (if content allows)
+            "-an",                # Disable audio recording (if not needed)
+            output_file.as_posix(),
+            "-nostats", "-loglevel", "0"
+        ]
+        logger.info("Starting FFmpeg recording to %s", output_file)
+        logger.debug_trace(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
+        DISPLAY["ffmpeg"] = subprocess.Popen(ffmpeg_cmd)
+    
     if not DRIVER:
         return _init_driver()
     logger.log_resource_usage()
@@ -592,11 +598,12 @@ def _init_cleanup_thread():
     cleanup_thread.start()
 
 def warmup():
-    """Pre-initialize the virtual display to reduce cold start time.
+    """Pre-initialize the virtual display and Chrome browser to eliminate cold start time.
     
     This function can be called when a user connects to the web UI to
     warm up the bypasser environment before it's actually needed.
-    The Chrome driver itself is still lazy-loaded on first use.
+    Both the display and Chrome driver are initialized so the first
+    bypass request is nearly instant.
     
     Warmup is skipped in the following scenarios:
     - BYPASS_WARMUP_ON_CONNECT is false (explicit disable)
@@ -607,7 +614,7 @@ def warmup():
     Note: Even when warmup is skipped, the bypasser can still start on-demand
     when actually needed for a download.
     """
-    global DISPLAY, LOCKED
+    global DISPLAY, DRIVER, LOCKED, LAST_USED
     
     if not BYPASS_WARMUP_ON_CONNECT:
         logger.debug("Bypasser warmup disabled via BYPASS_WARMUP_ON_CONNECT")
@@ -626,58 +633,45 @@ def warmup():
         return
     
     with LOCKED:
-        # Check if display is already initialized
-        if DISPLAY["xvfb"] is not None:
-            logger.debug("Bypasser already warmed up - display exists")
+        # Check if already fully warmed up
+        if DISPLAY["xvfb"] is not None and DRIVER is not None:
+            logger.debug("Bypasser already fully warmed up")
             return
         
-        logger.info("Warming up Cloudflare bypasser (pre-initializing virtual display)...")
+        logger.info("Warming up Cloudflare bypasser (pre-initializing display and browser)...")
         
         try:
-            from pyvirtualdisplay import Display
-            display = Display(visible=False, size=VIRTUAL_SCREEN_SIZE)
-            display.start()
-            DISPLAY["xvfb"] = display
-            logger.info("Virtual display started successfully (warmup complete)")
-            
-            time.sleep(DEFAULT_SLEEP)
-            _reset_pyautogui_display_state()
-            
-            # Optionally start ffmpeg recording in debug mode
-            if env.DEBUG:
-                from datetime import datetime
-                timestamp = datetime.now().strftime("%y%m%d-%H%M%S")
-                output_file = RECORDING_DIR / f"screen_recording_{timestamp}.mp4"
+            # Step 1: Initialize virtual display
+            if DISPLAY["xvfb"] is None:
+                from pyvirtualdisplay import Display
+                display = Display(visible=False, size=VIRTUAL_SCREEN_SIZE)
+                display.start()
+                DISPLAY["xvfb"] = display
+                logger.info("Virtual display started")
                 
-                ffmpeg_cmd = [
-                    "ffmpeg",
-                    "-y",
-                    "-f", "x11grab",
-                    "-video_size", f"{VIRTUAL_SCREEN_SIZE[0]}x{VIRTUAL_SCREEN_SIZE[1]}",
-                    "-i", f":{display.display}",
-                    "-c:v", "libx264",
-                    "-preset", "ultrafast",
-                    "-maxrate", "700k",
-                    "-bufsize", "1400k",
-                    "-crf", "36",
-                    "-pix_fmt", "yuv420p",
-                    "-tune", "animation",
-                    "-x264-params", "bframes=0:deblock=-1,-1",
-                    "-r", "15",
-                    "-an",
-                    output_file.as_posix(),
-                    "-nostats", "-loglevel", "0"
-                ]
-                logger.info("Starting FFmpeg recording for warmup to %s", output_file)
-                logger.debug_trace(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
-                DISPLAY["ffmpeg"] = subprocess.Popen(ffmpeg_cmd)
+                time.sleep(DEFAULT_SLEEP)
+                _reset_pyautogui_display_state()
+                
+                # Note: FFmpeg recording is NOT started during warmup.
+                # It will start in _get_driver() when an actual bypass request
+                # comes in, so we only record active bypass sessions.
+            
+            # Step 2: Initialize Chrome driver
+            if DRIVER is None:
+                logger.info("Pre-initializing Chrome browser...")
+                _init_driver()
+                LAST_USED = time.time()
+                logger.info("Chrome browser ready")
+            
+            logger.info("Bypasser warmup complete - ready for instant bypass")
+            logger.log_resource_usage()
                 
         except Exception as e:
             logger.warning(f"Failed to warm up bypasser: {e}")
 
 def is_warmed_up() -> bool:
-    """Check if the bypasser is already warmed up (display initialized)."""
-    return DISPLAY["xvfb"] is not None
+    """Check if the bypasser is fully warmed up (display and browser initialized)."""
+    return DISPLAY["xvfb"] is not None and DRIVER is not None
 
 def shutdown_if_idle():
     """Shut down the bypasser if there's no pending work.
