@@ -26,6 +26,22 @@ from config import PROXIES, VIRTUAL_SCREEN_SIZE, RECORDING_DIR
 
 logger = setup_logger(__name__)
 
+# Challenge detection indicators (shared between detection and bypass verification)
+CLOUDFLARE_INDICATORS = [
+    "just a moment",
+    "verify you are human",
+    "verifying you are human",
+    "cloudflare.com/products/turnstile",
+]
+
+DDOS_GUARD_INDICATORS = [
+    "ddos-guard",
+    "ddos guard",
+    "checking your browser before accessing",
+    "complete the manual check to continue",
+    "could not verify your browser automatically",
+]
+
 DRIVER = None
 DISPLAY = {
     "xvfb": None,
@@ -70,26 +86,13 @@ def _detect_challenge_type(sb) -> str:
             current_url = ""
         
         # DDOS-Guard indicators
-        ddos_guard_indicators = [
-            "ddos-guard",
-            "ddos guard",
-            "checking your browser before accessing",
-            "complete the manual check to continue",
-            "could not verify your browser automatically"
-        ]
-        for indicator in ddos_guard_indicators:
+        for indicator in DDOS_GUARD_INDICATORS:
             if indicator in title or indicator in body or indicator in page_source:
                 logger.debug(f"DDOS-Guard indicator found: '{indicator}'")
                 return "ddos_guard"
         
         # Cloudflare indicators
-        cloudflare_indicators = [
-            "just a moment",
-            "verify you are human",
-            "verifying you are human",
-            "cloudflare.com/products/turnstile"
-        ]
-        for indicator in cloudflare_indicators:
+        for indicator in CLOUDFLARE_INDICATORS:
             if indicator in title or indicator in body:
                 logger.debug(f"Cloudflare indicator found: '{indicator}'")
                 return "cloudflare"
@@ -138,29 +141,14 @@ def _is_bypassed(sb, escape_emojis : bool = True) -> bool:
                 logger.debug(f"Detected emoji in page, we are probably bypassed len: {len(emoji_list)}")
                 return True
 
-        # Enhanced verification texts for newer Cloudflare versions
-        verification_texts = [
-            "just a moment",
-            "verify you are human",
-            "verifying you are human",
-            "cloudflare.com/products/turnstile/?utm_source=turnstile"
-        ]
-        
         # Check for Cloudflare indicators
-        for text in verification_texts:
+        for text in CLOUDFLARE_INDICATORS:
             if text in title or text in body:
                 logger.debug(f"Cloudflare indicator found: '{text}' in page")
                 return False
         
         # DDOS-Guard indicators - these mean we're NOT bypassed
-        ddos_guard_texts = [
-            "ddos-guard",
-            "ddos guard", 
-            "checking your browser before accessing",
-            "complete the manual check to continue",
-            "could not verify your browser automatically"
-        ]
-        for text in ddos_guard_texts:
+        for text in DDOS_GUARD_INDICATORS:
             if text in title or text in body:
                 logger.debug(f"DDOS-Guard indicator found: '{text}' in page")
                 return False

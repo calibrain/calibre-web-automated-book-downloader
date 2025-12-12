@@ -332,31 +332,39 @@ def _find_in_divs(divs: List[str], text: str, isClass: bool = False) -> List[str
                 divs_found.append(div.text.strip())
     return divs_found
 
+# Download source definitions: (log_label, friendly_name, url_patterns)
+_DOWNLOAD_SOURCES = [
+    ("welib", "Welib", ["welib.org"]),
+    ("aa-fast", "AA", ["/dyn/api/fast_download"]),
+    ("aa-slow", "AA", ["/slow_download/", "annas-"]),
+    ("libgen", "Libgen", ["libgen"]),
+    ("z-lib", "Z-Library", ["z-lib", "zlibrary"]),
+]
+
+
+def _get_source_info(link: str) -> tuple[str, str]:
+    """Get source label and friendly name for a download link.
+    
+    Args:
+        link: Download URL
+        
+    Returns:
+        Tuple of (log_label, friendly_name)
+    """
+    for log_label, friendly_name, patterns in _DOWNLOAD_SOURCES:
+        if any(pattern in link for pattern in patterns):
+            return log_label, friendly_name
+    return "unknown", "Mirror"
+
+
 def _label_source(link: str) -> str:
-    """Lightweight source tag for logging/metrics."""
-    if "welib.org" in link:
-        return "welib"
-    if "/dyn/api/fast_download" in link:
-        return "aa-fast"
-    if "/slow_download/" in link or "annas-" in link:
-        return "aa-slow"
-    if "libgen" in link:
-        return "libgen"
-    if "z-lib" in link or "zlibrary" in link:
-        return "z-lib"
-    return "unknown"
+    """Get lightweight source tag for logging/metrics."""
+    return _get_source_info(link)[0]
+
 
 def _friendly_source_name(link: str) -> str:
-    """Get a user-friendly name for a download source."""
-    if "welib.org" in link:
-        return "Welib"
-    if "/dyn/api/fast_download" in link or "/slow_download/" in link or "annas-" in link:
-        return "AA"
-    if "libgen" in link:
-        return "Libgen"
-    if "z-lib" in link or "zlibrary" in link:
-        return "Z-Library"
-    return "Mirror"
+    """Get user-friendly name for a download source."""
+    return _get_source_info(link)[1]
 
 def _get_download_urls_from_welib(book_id: str, selector: Optional[network.AAMirrorSelector] = None) -> list[str]:
     """Get download urls from welib.org."""
