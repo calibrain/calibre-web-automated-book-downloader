@@ -469,7 +469,7 @@ def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
 
 
 # After N consecutive failures of the same source type, skip remaining sources of that type
-SOURCE_FAILURE_THRESHOLD = 2
+SOURCE_FAILURE_THRESHOLD = 4
 
 # Minimum valid file size in bytes (10KB) - anything smaller is likely an error page
 MIN_VALID_FILE_SIZE = 10 * 1024
