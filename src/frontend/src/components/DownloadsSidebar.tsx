@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { StatusData, Book } from '../types';
 
 interface DownloadsSidebarProps {
@@ -9,7 +9,17 @@ interface DownloadsSidebarProps {
   onClearCompleted: () => void;
   onCancel: (id: string) => void;
   activeCount: number;
+  calibreWebUrl?: string;
+  onShowToast?: (message: string, type: 'success' | 'error' | 'info') => void;
 }
+
+// Track when books were completed for "moved to library" logic
+interface CompletionTimestamp {
+  [bookId: string]: number;
+}
+
+// Time after which we consider the book "moved to library" (15 seconds)
+const LIBRARY_TRANSITION_MS = 15000;
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
   queued: { bg: 'bg-amber-500/10', text: 'text-amber-600', label: 'Queued' },
@@ -26,12 +36,46 @@ const formatSize = (sizeStr?: string): string => {
   return sizeStr;
 };
 
-// Add keyframe animation for wave effect
+// Add keyframe animation for wave effect and text shimmer
 const styleSheet = document.createElement('style');
 styleSheet.textContent = `
   @keyframes wave {
     0% { background-position: -200% 0; }
     100% { background-position: 200% 0; }
+  }
+  @keyframes textShimmer {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  .shimmer-text {
+    background: linear-gradient(
+      90deg,
+      currentColor 0%,
+      currentColor 40%,
+      rgba(255, 255, 255, 0.9) 50%,
+      currentColor 60%,
+      currentColor 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: textShimmer 2s ease-in-out infinite;
+  }
+  .dark .shimmer-text {
+    background: linear-gradient(
+      90deg,
+      currentColor 0%,
+      currentColor 40%,
+      rgba(255, 255, 255, 0.95) 50%,
+      currentColor 60%,
+      currentColor 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: textShimmer 2s ease-in-out infinite;
   }
 `;
 if (!document.head.querySelector('style[data-wave-animation]')) {
@@ -141,6 +185,8 @@ export const DownloadsSidebar = ({
       progressText = 'Complete';
     } else if (hasError) {
       progressText = 'Failed';
+    } else if (statusName === 'cancelled') {
+      progressText = 'Cancelled';
     }
 
     return (
@@ -229,7 +275,9 @@ export const DownloadsSidebar = ({
             <span
               className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}
             >
-              {progressText}
+              <span className={['resolving', 'downloading'].includes(statusName) ? 'shimmer-text' : ''}>
+                {progressText}
+              </span>
             </span>
           </div>
           <div className="h-1.5 bg-gray-200 dark:bg-gray-700 overflow-hidden relative">

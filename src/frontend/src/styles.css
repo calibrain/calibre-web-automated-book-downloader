@@ -545,3 +545,83 @@ button:disabled {
     background-size: 200% 100%;
     animation: shimmer 2s ease-in-out infinite;
 }
+
+/* Animated gradient text effect for in-progress status (ChatGPT-style) */
+@keyframes gradient-wave {
+    0% {
+        background-position: 0% 50%;
+    }
+    50% {
+        background-position: 100% 50%;
+    }
+    100% {
+        background-position: 0% 50%;
+    }
+}
+
+.animate-gradient-text {
+    background: linear-gradient(
+        90deg,
+        oklch(55% 0.15 240) 0%,
+        oklch(70% 0.12 240) 25%,
+        oklch(55% 0.15 240) 50%,
+        oklch(70% 0.12 240) 75%,
+        oklch(55% 0.15 240) 100%
+    );
+    background-size: 200% auto;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: gradient-wave 2s ease-in-out infinite;
+}
+
+/* Amber variant for queued/resolving states */
+.animate-gradient-text-amber {
+    background: linear-gradient(
+        90deg,
+        oklch(55% 0.14 70) 0%,
+        oklch(70% 0.11 70) 25%,
+        oklch(55% 0.14 70) 50%,
+        oklch(70% 0.11 70) 75%,
+        oklch(55% 0.14 70) 100%
+    );
+    background-size: 200% auto;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: gradient-wave 2s ease-in-out infinite;
+}
+
+/* Indigo variant for resolving state */
+.animate-gradient-text-indigo {
+    background: linear-gradient(
+        90deg,
+        oklch(50% 0.16 280) 0%,
+        oklch(65% 0.13 280) 25%,
+        oklch(50% 0.16 280) 50%,
+        oklch(65% 0.13 280) 75%,
+        oklch(50% 0.16 280) 100%
+    );
+    background-size: 200% auto;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: gradient-wave 2s ease-in-out infinite;
+}
+
+/* Sky/blue variant for downloading state */
+.animate-gradient-text-sky {
+    background: linear-gradient(
+        90deg,
+        oklch(50% 0.16 230) 0%,
+        oklch(68% 0.12 230) 25%,
+        oklch(50% 0.16 230) 50%,
+        oklch(68% 0.12 230) 75%,
+        oklch(50% 0.16 230) 100%
+    );
+    background-size: 200% auto;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: gradient-wave 2s ease-in-out infinite;
+}
