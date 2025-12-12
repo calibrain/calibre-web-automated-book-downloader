@@ -8,6 +8,7 @@ services:
       dockerfile: Dockerfile
       target: cwa-bd
     environment:
+      debug: true
     volumes:
       - /tmp/cwa-book-downloader:/tmp/cwa-book-downloader
       - /tmp/cwa-book-downloader-log:/var/log/cwa-book-downloader
