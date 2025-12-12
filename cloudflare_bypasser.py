@@ -21,7 +21,8 @@ from selenium.common.exceptions import TimeoutException
 import network
 from logger import setup_logger
 from env import MAX_RETRY, DEFAULT_SLEEP
-from config import PROXIES, CUSTOM_DNS, DOH_SERVER, VIRTUAL_SCREEN_SIZE, RECORDING_DIR
+import config
+from config import PROXIES, VIRTUAL_SCREEN_SIZE, RECORDING_DIR
 
 logger = setup_logger(__name__)
 
@@ -43,6 +44,67 @@ def _reset_pyautogui_display_state():
                 )
     except Exception as e:
         logger.warning(f"Error resetting pyautogui display state: {e}")
+
+def _detect_challenge_type(sb) -> str:
+    """Detect what type of challenge we're facing.
+    
+    Returns:
+        str: 'cloudflare', 'ddos_guard', or 'none' if no challenge detected
+    """
+    try:
+        try:
+            title = sb.get_title().lower()
+        except:
+            title = ""
+        try:
+            body = sb.get_text("body").lower()
+        except:
+            body = ""
+        try:
+            page_source = sb.page_source.lower()
+        except:
+            page_source = ""
+        try:
+            current_url = sb.get_current_url()
+        except:
+            current_url = ""
+        
+        # DDOS-Guard indicators
+        ddos_guard_indicators = [
+            "ddos-guard",
+            "ddos guard",
+            "checking your browser before accessing",
+            "complete the manual check to continue",
+            "could not verify your browser automatically"
+        ]
+        for indicator in ddos_guard_indicators:
+            if indicator in title or indicator in body or indicator in page_source:
+                logger.debug(f"DDOS-Guard indicator found: '{indicator}'")
+                return "ddos_guard"
+        
+        # Cloudflare indicators
+        cloudflare_indicators = [
+            "just a moment",
+            "verify you are human",
+            "verifying you are human",
+            "cloudflare.com/products/turnstile"
+        ]
+        for indicator in cloudflare_indicators:
+            if indicator in title or indicator in body:
+                logger.debug(f"Cloudflare indicator found: '{indicator}'")
+                return "cloudflare"
+        
+        # Check URL patterns
+        if "cf-" in body or "cloudflare" in current_url.lower():
+            return "cloudflare"
+        if "/cdn-cgi/" in current_url:
+            return "cloudflare"
+            
+        return "none"
+        
+    except Exception as e:
+        logger.warning(f"Error detecting challenge type: {e}")
+        return "none"
 
 def _is_bypassed(sb, escape_emojis : bool = True) -> bool:
     """Enhanced bypass detection with more comprehensive checks"""
@@ -88,6 +150,19 @@ def _is_bypassed(sb, escape_emojis : bool = True) -> bool:
         for text in verification_texts:
             if text in title or text in body:
                 logger.debug(f"Cloudflare indicator found: '{text}' in page")
+                return False
+        
+        # DDOS-Guard indicators - these mean we're NOT bypassed
+        ddos_guard_texts = [
+            "ddos-guard",
+            "ddos guard", 
+            "checking your browser before accessing",
+            "complete the manual check to continue",
+            "could not verify your browser automatically"
+        ]
+        for text in ddos_guard_texts:
+            if text in title or text in body:
+                logger.debug(f"DDOS-Guard indicator found: '{text}' in page")
                 return False
         
         # Additional checks for specific Cloudflare patterns
@@ -200,20 +275,218 @@ def _bypass_method_3(sb) -> bool:
         logger.debug(f"Method 3 failed: {e}")
         return False
 
+def _bypass_ddos_guard_method_1(sb) -> bool:
+    """DDOS-Guard bypass: Click the checkbox using iframe detection"""
+    try:
+        import random
+        logger.debug("Attempting DDOS-Guard bypass method 1: iframe checkbox click")
+        
+        # Wait for the page to fully load
+        time.sleep(random.uniform(2, 4))
+        
+        # DDOS-Guard typically uses an iframe for the checkbox
+        # Try to find and switch to the iframe
+        try:
+            # Look for common DDOS-Guard iframe patterns
+            iframes = sb.find_elements("iframe")
+            logger.debug(f"Found {len(iframes)} iframes on page")
+            
+            for i, iframe in enumerate(iframes):
+                try:
+                    # Get iframe attributes for debugging
+                    iframe_src = iframe.get_attribute("src") or ""
+                    iframe_id = iframe.get_attribute("id") or ""
+                    iframe_class = iframe.get_attribute("class") or ""
+                    logger.debug(f"Iframe {i}: src={iframe_src[:100]}, id={iframe_id}, class={iframe_class}")
+                    
+                    # Check if this looks like a DDOS-Guard captcha iframe
+                    if "ddos" in iframe_src.lower() or "captcha" in iframe_src.lower() or "check" in iframe_src.lower():
+                        sb.switch_to_frame(iframe)
+                        logger.debug(f"Switched to iframe {i}")
+                        
+                        # Try to find and click the checkbox
+                        time.sleep(random.uniform(1, 2))
+                        
+                        # Look for checkbox elements
+                        checkbox_selectors = [
+                            "input[type='checkbox']",
+                            ".checkbox",
+                            "#checkbox",
+                            "[role='checkbox']",
+                            ".cb-i",  # Common DDOS-Guard class
+                            "#ddos-guard-checkbox"
+                        ]
+                        
+                        for selector in checkbox_selectors:
+                            try:
+                                if sb.is_element_visible(selector):
+                                    logger.debug(f"Found checkbox with selector: {selector}")
+                                    sb.click(selector)
+                                    time.sleep(random.uniform(2, 4))
+                                    sb.switch_to_default_content()
+                                    time.sleep(3)
+                                    return _is_bypassed(sb)
+                            except:
+                                continue
+                        
+                        sb.switch_to_default_content()
+                except Exception as iframe_e:
+                    logger.debug(f"Error with iframe {i}: {iframe_e}")
+                    try:
+                        sb.switch_to_default_content()
+                    except:
+                        pass
+                    continue
+        except Exception as e:
+            logger.debug(f"Error finding iframes: {e}")
+        
+        return False
+    except Exception as e:
+        logger.debug(f"DDOS-Guard method 1 failed: {e}")
+        return False
+
+def _bypass_ddos_guard_method_2(sb) -> bool:
+    """DDOS-Guard bypass: Use pyautogui to click the checkbox directly"""
+    try:
+        import random
+        logger.debug("Attempting DDOS-Guard bypass method 2: pyautogui coordinate click")
+        
+        # Wait for the page to fully load
+        time.sleep(random.uniform(2, 4))
+        
+        try:
+            import pyautogui
+            
+            # Get the page dimensions
+            window_size = sb.get_window_size()
+            width = window_size.get("width", 1920)
+            height = window_size.get("height", 1080)
+            
+            logger.debug(f"Window size: {width}x{height}")
+            
+            # DDOS-Guard checkbox is typically in the center of the page
+            # The checkbox itself is usually slightly left of center
+            # Based on the screenshot, the checkbox appears to be around 40% from left, 55% from top
+            checkbox_x = int(width * 0.35)  # Slightly left of center where checkbox typically is
+            checkbox_y = int(height * 0.55)  # Slightly below center
+            
+            logger.debug(f"Clicking at coordinates: ({checkbox_x}, {checkbox_y})")
+            
+            # Move mouse smoothly to simulate human behavior
+            current_x, current_y = pyautogui.position()
+            
+            # Small random offset for human-like behavior
+            offset_x = random.randint(-5, 5)
+            offset_y = random.randint(-5, 5)
+            
+            # Move to checkbox location with human-like motion
+            pyautogui.moveTo(
+                checkbox_x + offset_x, 
+                checkbox_y + offset_y, 
+                duration=random.uniform(0.3, 0.7)
+            )
+            time.sleep(random.uniform(0.1, 0.3))
+            
+            # Click
+            pyautogui.click()
+            
+            # Wait for verification
+            time.sleep(random.uniform(3, 5))
+            
+            return _is_bypassed(sb)
+            
+        except ImportError:
+            logger.debug("pyautogui not available")
+            return False
+        except Exception as e:
+            logger.debug(f"pyautogui click failed: {e}")
+            return False
+            
+    except Exception as e:
+        logger.debug(f"DDOS-Guard method 2 failed: {e}")
+        return False
+
+def _bypass_ddos_guard_method_3(sb) -> bool:
+    """DDOS-Guard bypass: Use SeleniumBase's built-in captcha handling"""
+    try:
+        import random
+        logger.debug("Attempting DDOS-Guard bypass method 3: SeleniumBase uc_gui methods")
+        
+        # Wait for the page to load
+        time.sleep(random.uniform(2, 4))
+        
+        # Try different SeleniumBase UC methods
+        try:
+            # uc_gui_click_captcha sometimes works for DDOS-Guard too
+            sb.uc_gui_click_captcha()
+            time.sleep(random.uniform(3, 5))
+            if _is_bypassed(sb):
+                return True
+        except Exception as e:
+            logger.debug(f"uc_gui_click_captcha failed: {e}")
+        
+        # Try clicking on any visible checkbox-like element
+        try:
+            checkbox_patterns = [
+                "//input[@type='checkbox']",
+                "//*[contains(@class, 'checkbox')]",
+                "//*[contains(@class, 'cb-')]",
+                "//*[contains(text(), \"I'm not a robot\")]/..",
+                "//*[contains(text(), 'not a robot')]/.."
+            ]
+            
+            for pattern in checkbox_patterns:
+                try:
+                    elements = sb.find_elements(f"xpath:{pattern}")
+                    for elem in elements:
+                        if elem.is_displayed():
+                            logger.debug(f"Found clickable element with pattern: {pattern}")
+                            elem.click()
+                            time.sleep(random.uniform(3, 5))
+                            if _is_bypassed(sb):
+                                return True
+                except:
+                    continue
+        except Exception as e:
+            logger.debug(f"Checkbox pattern search failed: {e}")
+        
+        return False
+    except Exception as e:
+        logger.debug(f"DDOS-Guard method 3 failed: {e}")
+        return False
+
 def _bypass(sb, max_retries: int = MAX_RETRY) -> None:
-    """Enhanced bypass function with multiple strategies"""
+    """Enhanced bypass function with multiple strategies for different protection types"""
     try_count = 0
-    methods = [_bypass_method_1, _bypass_method_2, _bypass_method_3]
+    
+    # Cloudflare-specific methods
+    cloudflare_methods = [_bypass_method_1, _bypass_method_2, _bypass_method_3]
+    
+    # DDOS-Guard-specific methods
+    ddos_guard_methods = [_bypass_ddos_guard_method_1, _bypass_ddos_guard_method_2, _bypass_ddos_guard_method_3]
 
     while not _is_bypassed(sb):
         if try_count >= max_retries:
             logger.warning("Exceeded maximum retries. Bypass failed.")
             break
+        
+        # Detect challenge type on each iteration (it might change after attempts)
+        challenge_type = _detect_challenge_type(sb)
+        logger.info(f"Detected challenge type: {challenge_type}")
+        
+        # Select methods based on challenge type
+        if challenge_type == "ddos_guard":
+            methods = ddos_guard_methods
+        elif challenge_type == "cloudflare":
+            methods = cloudflare_methods
+        else:
+            # Unknown challenge, try all methods
+            methods = cloudflare_methods + ddos_guard_methods
             
         method_index = try_count % len(methods)
         method = methods[method_index]
         
-        logger.info(f"Bypass attempt {try_count + 1} / {max_retries} using {method.__name__}")
+        logger.info(f"Bypass attempt {try_count + 1} / {max_retries} using {method.__name__} (challenge: {challenge_type})")
         
         try_count += 1
 
@@ -233,7 +506,13 @@ def _bypass(sb, max_retries: int = MAX_RETRY) -> None:
         logger.info(f"Bypass method {method.__name__} failed.")
 
 def _get_chromium_args():
+    """Build Chrome arguments dynamically, pre-resolving hostnames via Python's DNS.
     
+    Instead of trying to configure Chrome's DNS (which is unreliable), we pre-resolve
+    AA hostnames using Python's patched socket (which uses DoH/custom DNS) and pass
+    the resolved IPs directly to Chrome via --host-resolver-rules. This bypasses
+    Chrome's DNS entirely for those hosts.
+    """
     arguments = [
         # Ignore certificate and SSL errors (similar to curl's --insecure)
         "--ignore-certificate-errors",
@@ -257,29 +536,43 @@ def _get_chromium_args():
         if proxy_url:
             arguments.append(f'--proxy-server={proxy_url}')
 
-    # --- Add Custom DNS settings ---
+    # --- Pre-resolve AA hostnames and map them directly in Chrome ---
+    # This bypasses Chrome's DNS entirely - we resolve via Python's patched socket.getaddrinfo
+    # (which uses DoH/Cloudflare when system DNS fails) and tell Chrome to use those IPs
+    host_rules = []
+    
     try:
-        if len(CUSTOM_DNS) > 0:
-            if DOH_SERVER:
-                logger.info(f"Configuring DNS over HTTPS (DoH) with server: {DOH_SERVER}")
-
-                # TODO: This is probably broken and a halucination,
-                # but it should still default to google DOH so its fine...
-                arguments.extend(['--enable-features=DnsOverHttps', '--dns-over-https-mode=secure', f'--dns-over-https-servers="{DOH_SERVER}"'])
-                doh_hostname = urlparse(DOH_SERVER).hostname
-                if doh_hostname:
-                    try:
-                        arguments.append(f'--host-resolver-rules=MAP {doh_hostname} {socket.gethostbyname(doh_hostname)}')
-                    except socket.gaierror:
-                        logger.warning(f"Could not resolve DoH hostname: {doh_hostname}")
-            elif CUSTOM_DNS:
-                arguments.append(f'--dns-server="{",".join(CUSTOM_DNS)}"')
-                arguments.append(f'--disable-features=DnsOverHttps')
+        aa_urls = network.get_available_aa_urls()
+        for url in aa_urls:
+            hostname = urlparse(url).hostname
+            if hostname:
+                try:
+                    # Use socket.getaddrinfo which IS patched by our network module
+                    # (DoH/Cloudflare if system DNS failed)
+                    # getaddrinfo returns: [(family, type, proto, canonname, sockaddr), ...]
+                    # sockaddr for IPv4 is (ip, port)
+                    results = socket.getaddrinfo(hostname, 443, socket.AF_INET)
+                    if results:
+                        ip = results[0][4][0]  # First result, sockaddr tuple, IP address
+                        host_rules.append(f"MAP {hostname} {ip}")
+                        logger.info(f"Chrome: Pre-resolved {hostname} -> {ip}")
+                    else:
+                        logger.warning(f"Chrome: No addresses returned for {hostname}")
+                except socket.gaierror as e:
+                    logger.warning(f"Chrome: Could not pre-resolve {hostname}: {e}")
+        
+        if host_rules:
+            # Join all rules with comma, e.g. "MAP host1 ip1, MAP host2 ip2"
+            rules_str = ", ".join(host_rules)
+            arguments.append(f'--host-resolver-rules={rules_str}')
+            logger.info(f"Chrome: Using host resolver rules for {len(host_rules)} hosts")
+        else:
+            logger.warning("Chrome: No hosts could be pre-resolved, Chrome will use its own DNS")
+            
     except Exception as e:
-        logger.error_trace(f"Error configuring DNS settings: {e}")
+        logger.error_trace(f"Error pre-resolving hostnames for Chrome: {e}")
+    
     return arguments
-
-CHROMIUM_ARGS = _get_chromium_args()
 
 def _get(url, retry : int = MAX_RETRY):
     try:
@@ -349,7 +642,10 @@ def _init_driver():
     global DRIVER
     if DRIVER:
         _reset_driver()
-    driver = Driver(uc=True, headless=False, size=f"{VIRTUAL_SCREEN_SIZE[0]},{VIRTUAL_SCREEN_SIZE[1]}", chromium_arg=CHROMIUM_ARGS)
+    # Build Chrome args dynamically to pick up current DNS settings from network module
+    chromium_args = _get_chromium_args()
+    logger.debug(f"Initializing Chrome driver with args: {chromium_args}")
+    driver = Driver(uc=True, headless=False, size=f"{VIRTUAL_SCREEN_SIZE[0]},{VIRTUAL_SCREEN_SIZE[1]}", chromium_arg=chromium_args)
     DRIVER = driver
     time.sleep(DEFAULT_SLEEP)
     return driver

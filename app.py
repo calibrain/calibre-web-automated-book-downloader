@@ -128,15 +128,45 @@ if DEBUG:
         }
     })
 
-# Custom log filter to exclude routine status endpoint polling
+# Custom log filter to exclude routine status endpoint polling and WebSocket noise
 class StatusEndpointFilter(logging.Filter):
-    """Filter out routine status endpoint requests to reduce log noise."""
+    """Filter out routine status endpoint requests and WebSocket upgrade errors to reduce log noise."""
     def filter(self, record):
-        # Exclude GET /api/status requests
         if hasattr(record, 'getMessage'):
             message = record.getMessage()
+            # Exclude GET /api/status requests (polling noise)
             if 'GET /api/status' in message:
                 return False
+            # Exclude WebSocket upgrade errors (benign - falls back to polling)
+            if 'write() before start_response' in message:
+                return False
+            # Exclude the Error on request line that precedes WebSocket errors
+            if 'Error on request:' in message and record.levelno == logging.ERROR:
+                return False
+        return True
+
+
+class WebSocketErrorFilter(logging.Filter):
+    """Filter out WebSocket upgrade errors that occur in Werkzeug dev server.
+    
+    These errors are benign - Flask-SocketIO automatically falls back to polling transport.
+    The error occurs because Werkzeug's built-in server doesn't fully support WebSocket upgrades.
+    """
+    def filter(self, record):
+        # Filter out the AssertionError traceback for WebSocket upgrades
+        if record.levelno == logging.ERROR:
+            message = record.getMessage() if hasattr(record, 'getMessage') else str(record.msg)
+            # Filter out the full traceback that includes the WebSocket assertion error
+            if 'write() before start_response' in message:
+                return False
+            # Also filter the "Error on request" header that precedes it
+            if hasattr(record, 'exc_info') and record.exc_info:
+                exc_type = record.exc_info[0]
+                if exc_type and exc_type.__name__ == 'AssertionError':
+                    # Check if it's the WebSocket-related assertion
+                    exc_value = record.exc_info[1]
+                    if exc_value and 'write() before start_response' in str(exc_value):
+                        return False
         return True
 
 # Flask logger
@@ -146,8 +176,9 @@ app.logger.setLevel(logger.level)
 werkzeug_logger = logging.getLogger('werkzeug')
 werkzeug_logger.handlers = logger.handlers
 werkzeug_logger.setLevel(logger.level)
-# Add filter to suppress routine status endpoint polling logs
+# Add filters to suppress routine status endpoint polling logs and WebSocket upgrade errors
 werkzeug_logger.addFilter(StatusEndpointFilter())
+werkzeug_logger.addFilter(WebSocketErrorFilter())
 
 # Set up authentication defaults
 # The secret key will reset every time we restart, which will
@@ -230,16 +261,17 @@ if DEBUG:
         STOP_GUI = lambda: None  # No-op for external bypasser
     else:
         from cloudflare_bypasser import _reset_driver as STOP_GUI
-    @app.route('/debug', methods=['GET'])
+    @app.route('/api/debug', methods=['GET'])
     @login_required
     def debug() -> Union[Response, Tuple[Response, int]]:
         """
-        This will run the /app/debug.sh script, which will generate a debug zip with all the logs
+        This will run the /app/genDebug.sh script, which will generate a debug zip with all the logs
         The file will be named /tmp/cwa-book-downloader-debug.zip
         And then return it to the user
         """
         try:
             # Run the debug script
+            logger.info("Debug endpoint called, stopping GUI and generating debug info...")
             STOP_GUI()
             time.sleep(1)
             result = subprocess.run(['/app/genDebug.sh'], capture_output=True, text=True, check=True)
@@ -248,9 +280,10 @@ if DEBUG:
             logger.info(f"Debug script executed: {result.stdout}")
             debug_file_path = result.stdout.strip().split('\n')[-1]
             if not os.path.exists(debug_file_path):
-                logger.error("Debug zip file not found after running debug script")
+                logger.error(f"Debug zip file not found at: {debug_file_path}")
                 return jsonify({"error": "Failed to generate debug information"}), 500
                 
+            logger.info(f"Sending debug file: {debug_file_path}")
             # Return the file to the user
             return send_file(
                 debug_file_path,

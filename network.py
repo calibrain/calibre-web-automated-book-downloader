@@ -231,7 +231,7 @@ class DoHResolver:
             # Extract IP addresses from the response    
             answers = [answer['data'] for answer in data['Answer'] 
                     if answer.get('type') == (28 if record_type == 'AAAA' else 1)]
-            logger.debug(f"Resolved {hostname} to {len(answers)} addresses using DoH: {answers}")
+            # Don't log here - the caller (custom_getaddrinfo) will log the final result
             return answers
             
         except Exception as e:
@@ -249,10 +249,9 @@ def resolve_with_custom_dns(resolver, hostname: str, record_type: str) -> List[s
     try:
         answers = resolver.resolve(hostname, record_type)
         return [str(answer) for answer in answers]
-    except Exception as e:
-        logger.debug(f"{record_type} resolution failed for {hostname}: {e}")
-        # Don't trigger DNS switch here - let the caller handle it
-        # This prevents spam from multiple concurrent resolution attempts
+    except Exception:
+        # Don't log here - let the caller handle it to prevent spam
+        # Don't trigger DNS switch here either - caller handles it
         return []
 
 def create_custom_getaddrinfo(
@@ -280,38 +279,44 @@ def create_custom_getaddrinfo(
     ) -> Sequence[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]]:
         host_str = _decode_host(host)
         port_int = _decode_port(port)
-        def _log_results(source: str, provider_label: str, res: Sequence[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]]) -> None:
-            """Emit a unified resolver log with the IPs returned."""
+        
+        def _log_results(source: str, provider_label: str, res: Sequence[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]], is_bypass: bool = False) -> None:
+            """Emit a unified resolver log with the IPs returned.
+            
+            Args:
+                source: Description of resolver source
+                provider_label: Label for the DNS provider
+                res: Resolution results
+                is_bypass: If True, log at DEBUG level (for local/IP addresses)
+            """
+            # Skip logging entirely for localhost to reduce noise
+            if host_str in ('localhost', '127.0.0.1', '::1'):
+                return
             try:
                 ips = [entry[4][0] for entry in res if len(entry) >= 5 and entry[4]]
-                logger.info(f"Resolved {host_str} via {source} [{provider_label}]: {ips}")
+                msg = f"Resolved {host_str} via {source} [{provider_label}]: {ips}"
+                if is_bypass:
+                    logger.debug(msg)
+                else:
+                    logger.info(msg)
             except Exception:
-                logger.info(f"Resolved {host_str} via {source} [{provider_label}]")
+                pass  # Silently ignore logging failures
         
         # Skip custom resolution for IP addresses, local addresses, or if skip check passes
         if _is_ip_address(host_str) or _is_local_address(host_str) or (skip_check and skip_check(host_str)):
             # Quietly bypass custom resolution for IP/local targets
             res = original_getaddrinfo(host, port, family, type, proto, flags)
-            _log_results("system resolver (bypass)", "system", res)
+            _log_results("system resolver (bypass)", "system", res, is_bypass=True)
             return res
-        
-        # Force IPv4-only resolution to avoid noisy IPv6/AAAA failures
-        prefer_ipv4_only = True
         
         results: list[Tuple[AddressFamily, SocketKind, int, str, Tuple[Any, ...]]] = []
         
         try:
-            if prefer_ipv4_only:
-                logger.debug(f"IPv6 resolution disabled; skipping AAAA lookup for {host_str}")
-            # Try IPv4
-            # Then try IPv4
+            # Try IPv4 (IPv6 disabled to avoid noisy AAAA failures)
             if family == 0 or family == socket.AF_INET:
-                logger.debug(f"Resolving IPv4 address for {host_str}")
                 ipv4_answers = resolve_ipv4(host_str)
                 for answer in ipv4_answers:
                     results.append((socket.AF_INET, cast(SocketKind, type), proto, '', (answer, port_int)))
-                if ipv4_answers:
-                    logger.debug(f"Found {len(ipv4_answers)} IPv4 addresses for {host_str}")
             
             if results:
                 _log_results("custom resolver", _current_dns_label(), results)
@@ -560,7 +565,7 @@ def init_dns_resolvers():
     if len(CUSTOM_DNS) > 0:
         init_custom_resolver()
         if DOH_SERVER:
-            init_doh_resolver()
+            init_doh_resolver(DOH_SERVER)
 
 def _initialize_dns_state() -> None:
     """Restore persisted DNS choice or start fresh."""

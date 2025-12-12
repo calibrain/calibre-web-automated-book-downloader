@@ -169,6 +169,24 @@ export const DownloadsSidebar = ({
         className="relative rounded-lg border hover:shadow-md transition-shadow overflow-hidden"
         style={{ borderColor: 'var(--border-muted)', background: 'var(--bg-soft)' }}
       >
+        {/* Cancel Button - top right corner with safe area */}
+        {isInProgress && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCancel(book.id);
+            }}
+            className="absolute top-1 right-1 z-10 flex items-center justify-center w-6 h-6 rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 text-gray-500 hover:text-red-600 transition-colors"
+            title="Cancel download"
+            aria-label="Cancel download"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+
         {/* Main content area */}
         <div className="flex gap-2">
           {/* Book Thumbnail - left side */}
@@ -187,8 +205,8 @@ export const DownloadsSidebar = ({
 
           {/* Book Info - right side */}
           <div className="flex-1 min-w-0 flex flex-col justify-between px-3 pt-2 pb-3">
-            {/* Title & Author */}
-            <div className="mb-1">
+            {/* Title & Author - with safe area for cancel button */}
+            <div className="mb-1" style={{ paddingRight: isInProgress ? '1.5rem' : '0' }}>
               <h3 className="font-semibold text-sm truncate" title={book.title}>
                 {isCompleted && book.download_path ? (
                   <a
@@ -208,26 +226,13 @@ export const DownloadsSidebar = ({
 
             {/* Details Row */}
             <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
                 {/* Format and Size */}
                 <div className="text-xs opacity-70">
                   {book.format && <span className="uppercase">{book.format}</span>}
                   {book.format && book.size && <span> • </span>}
                   {book.size && <span>{formatSize(book.size)}</span>}
                 </div>
-                
-                {/* Cancel Button for in-progress items */}
-                {isInProgress && (
-                  <button
-                    type="button"
-                    onClick={() => onCancel(book.id)}
-                    className="text-xs px-2 py-1 rounded border hover-action transition-colors"
-                    style={{ borderColor: 'var(--border-muted)' }}
-                    title="Cancel download"
-                  >
-                    ✕
-                  </button>
-                )}
               </div>
 
               {/* Error Message */}
@@ -239,7 +244,7 @@ export const DownloadsSidebar = ({
         </div>
 
         {/* Progress Bar - absolute positioned at bottom - always visible */}
-        <div className="absolute bottom-0 left-0 right-0">
+        <div className="absolute bottom-0 left-0 right-0 pointer-events-none">
           <div className="flex justify-end p-2">
             <span
               className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}

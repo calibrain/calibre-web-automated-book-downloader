@@ -53,7 +53,7 @@ function App() {
     content: '',
     formats: DEFAULT_FORMAT_SELECTION,
   });
-  const { toasts, showToast } = useToast();
+  const { toasts, showToast, removeToast } = useToast();
   const updateAdvancedFilters = useCallback((updates: Partial<AdvancedFilterState>) => {
     setAdvancedFilters(prev => ({ ...prev, ...updates }));
   }, []);
@@ -445,6 +445,8 @@ function App() {
         }}
         onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
         isLoading={isSearching}
+        onShowToast={showToast}
+        onRemoveToast={removeToast}
       />
       
       <AdvancedFilters

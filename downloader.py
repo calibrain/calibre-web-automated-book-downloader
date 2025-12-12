@@ -75,7 +75,7 @@ def html_get_page(
             is_connection_error = isinstance(e, (requests.exceptions.ConnectionError,
                                                  requests.exceptions.Timeout,
                                                  requests.exceptions.SSLError))
-            is_http_error = isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response
+            is_http_error = isinstance(e, requests.exceptions.HTTPError) and getattr(e, 'response', None) is not None
             status_code = e.response.status_code if is_http_error else None
 
             # 403 = Cloudflare wall. Use bypasser, don't retry.
@@ -122,17 +122,21 @@ def html_get_page(
     return ""
 
 
-def download_url(link: str, size: str = "", progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None, _selector: Optional[network.AAMirrorSelector] = None) -> Optional[BytesIO]:
-    """Download content from URL into a BytesIO buffer.
+def download_url(link: str, size: str = "", progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None, _selector: Optional[network.AAMirrorSelector] = None, _retry: int = 0) -> Optional[BytesIO]:
+    """Download content from URL into a BytesIO buffer with resume support.
     
     Args:
         link: URL to download from
+        _retry: Internal retry counter (don't set manually)
         
     Returns:
         BytesIO: Buffer containing downloaded content if successful
     """
     selector = _selector or network.AAMirrorSelector()
     link_to_use = selector.rewrite(link)
+    buffer = BytesIO()
+    bytes_downloaded = 0
+    
     try:
         logger.info(f"Downloading from: {link_to_use}")
         response = requests.get(link_to_use, stream=True, proxies=PROXIES, timeout=REQUEST_TIMEOUT)
@@ -145,14 +149,13 @@ def download_url(link: str, size: str = "", progress_callback: Optional[Callable
         except:
             total_size = float(response.headers.get('content-length', 0))
         
-        buffer = BytesIO()
-
         # Initialize the progress bar with your guess
         pbar = tqdm(total=total_size, unit='B', unit_scale=True, desc='Downloading')
         for chunk in response.iter_content(chunk_size=1000):
             buffer.write(chunk)
+            bytes_downloaded += len(chunk)
             pbar.update(len(chunk))
-            if progress_callback is not None:
+            if progress_callback is not None and total_size > 0:
                 progress_callback(pbar.n * 100.0 / total_size)
             if cancel_flag is not None and cancel_flag.is_set():
                 logger.info(f"Download cancelled: {link}")
@@ -170,32 +173,83 @@ def download_url(link: str, size: str = "", progress_callback: Optional[Callable
         is_connection_error = isinstance(e, (requests.exceptions.ConnectionError,
                                               requests.exceptions.Timeout,
                                               requests.exceptions.SSLError))
-        is_http_error = isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response
+        is_http_error = isinstance(e, requests.exceptions.HTTPError) and getattr(e, 'response', None) is not None
         status_code = e.response.status_code if is_http_error else None
 
         # For actual file downloads, 403 means the URL is bad or blocked - just fail
-        # The bypasser is for HTML pages, not binary downloads
         if status_code == 403:
             logger.warning(f"403 error downloading from: {link_to_use}")
             return None
 
-        # Connection/transport or 5xx: try mirror/DNS rotation
-        if link_to_use.startswith(current_aa_url):
-            if is_connection_error or (is_http_error and status_code in (429, 500, 502, 503, 504)):
-                new_base, action = selector.next_mirror_or_rotate_dns()
-                if action in ("mirror", "dns") and new_base:
-                    new_link = selector.rewrite(link)
-                    log_fn = logger.warning if action == "dns" else logger.info
-                    log_fn(f"[aa-download] action={action} url={new_link}")
-                    return download_url(new_link, size, progress_callback, cancel_flag, selector)
-        else:
-            # Non-AA target: rotate DNS on transport/5xx/429 failures
-            if is_connection_error or (is_http_error and status_code in (429, 500, 502, 503, 504)):
-                if network.rotate_dns_provider():
-                    logger.warning(f"[dns-rotate] target={link}")
-                    return download_url(link, size, progress_callback, cancel_flag, selector)
+        # If download had started (bytes received), retry once with resume before giving up
+        # Don't rotate DNS mid-download - it's likely a transient network issue
+        if bytes_downloaded > 0 and _retry < 1:
+            logger.info(f"Download interrupted at {bytes_downloaded} bytes, retrying with resume...")
+            time.sleep(1)
+            resumed = _download_with_resume(link_to_use, buffer, bytes_downloaded, size, progress_callback, cancel_flag)
+            if resumed is not None:
+                return resumed
+            # Resume failed, retry from scratch once
+            return download_url(link, size, progress_callback, cancel_flag, selector, _retry + 1)
+
+        # Only rotate DNS/mirrors if download hadn't started yet
+        if bytes_downloaded == 0:
+            if link_to_use.startswith(current_aa_url):
+                if is_connection_error or (is_http_error and status_code in (429, 500, 502, 503, 504)):
+                    new_base, action = selector.next_mirror_or_rotate_dns()
+                    if action in ("mirror", "dns") and new_base:
+                        new_link = selector.rewrite(link)
+                        log_fn = logger.warning if action == "dns" else logger.info
+                        log_fn(f"[aa-download] action={action} url={new_link}")
+                        return download_url(new_link, size, progress_callback, cancel_flag, selector)
+            else:
+                # Non-AA target: only rotate DNS if download hadn't started
+                if is_connection_error or (is_http_error and status_code in (429, 500, 502, 503, 504)):
+                    if network.rotate_dns_provider():
+                        logger.warning(f"[dns-rotate] target={link}")
+                        return download_url(link, size, progress_callback, cancel_flag, selector)
         
         logger.error_trace(f"Failed to download from {link_to_use}: {e}")
+        return None
+
+
+def _download_with_resume(link: str, buffer: BytesIO, start_byte: int, size: str, progress_callback: Optional[Callable[[float], None]], cancel_flag: Optional[Event]) -> Optional[BytesIO]:
+    """Attempt to resume a partial download using Range header."""
+    try:
+        headers = {'Range': f'bytes={start_byte}-'}
+        response = requests.get(link, stream=True, proxies=PROXIES, timeout=REQUEST_TIMEOUT, headers=headers)
+        
+        # 206 = Partial Content (resume supported), 200 = server ignores Range (restart)
+        if response.status_code == 416:  # Range not satisfiable - file complete or changed
+            return None
+        if response.status_code not in (200, 206):
+            response.raise_for_status()
+        
+        # If server returned 200 (not 206), it doesn't support resume - return None to retry fresh
+        if response.status_code == 200:
+            logger.debug("Server doesn't support resume, retrying from scratch")
+            return None
+        
+        total_size = start_byte + int(response.headers.get('content-length', 0))
+        if size:
+            try:
+                total_size = float(size.strip().replace(" ", "").replace(",", ".").upper()[:-2].strip()) * 1024 * 1024
+            except:
+                pass
+        
+        logger.info(f"Resuming download from byte {start_byte}")
+        pbar = tqdm(total=total_size, initial=start_byte, unit='B', unit_scale=True, desc='Resuming')
+        for chunk in response.iter_content(chunk_size=1000):
+            buffer.write(chunk)
+            pbar.update(len(chunk))
+            if progress_callback is not None and total_size > 0:
+                progress_callback(pbar.n * 100.0 / total_size)
+            if cancel_flag is not None and cancel_flag.is_set():
+                return None
+        pbar.close()
+        return buffer
+    except Exception as e:
+        logger.debug(f"Resume failed: {e}")
         return None
 
 
