@@ -205,7 +205,7 @@ export const DownloadsSidebar = ({
             </div>
 
             {/* Details Row */}
-            <div className="space-y-1">
+            <div className="space-y-1 pb-8">
               <div className="flex items-center gap-2">
                 {/* Format and Size */}
                 <div className="text-xs opacity-70">
@@ -215,9 +215,11 @@ export const DownloadsSidebar = ({
                 </div>
               </div>
 
-              {/* Error Message */}
+              {/* Error Message - show actual error reason if available */}
               {hasError && (
-                <p className="text-xs text-red-600">Download failed</p>
+                <p className="text-xs text-red-600 leading-snug">
+                  {book.status_message || 'Download failed'}
+                </p>
               )}
             </div>
           </div>
@@ -227,7 +229,7 @@ export const DownloadsSidebar = ({
         <div className="absolute bottom-0 left-0 right-0 pointer-events-none">
           <div className="flex justify-end p-2">
             <span
-              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}
+              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium max-w-[70%] text-right ${statusStyle.bg} ${statusStyle.text}`}
             >
               {progressText}
             </span>

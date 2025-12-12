@@ -468,6 +468,13 @@ def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
     }
 
 
+# After N consecutive failures of the same source type, skip remaining sources of that type
+SOURCE_FAILURE_THRESHOLD = 2
+
+# Minimum valid file size in bytes (10KB) - anything smaller is likely an error page
+MIN_VALID_FILE_SIZE = 10 * 1024
+
+
 def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str, Optional[str]], None]] = None) -> Optional[str]:
     """Download a book from available sources.
 
@@ -500,15 +507,32 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
 
     links_queue = download_links
     total_sources = len(links_queue)
+    
+    # Handle case where no download sources are available
+    if total_sources == 0:
+        logger.warning(f"No download sources available for: {book_info.title}")
+        if status_callback:
+            status_callback("error", "No download sources found")
+        return None
+    
     # Track whether we've already fetched welib as a fallback
     welib_fallback_loaded = PRIORITIZE_WELIB
+    # Track consecutive failures per source type to skip after threshold
+    source_failures: dict[str, int] = {}
     # Iterate with index so we can append welib links later
     idx = 0
     while idx < len(links_queue):
         link = links_queue[idx]
+        source_label = _label_source(link)
+        friendly_name = _friendly_source_name(link)
+        
+        # Skip source types that have failed too many times
+        if source_failures.get(source_label, 0) >= SOURCE_FAILURE_THRESHOLD:
+            logger.info("Skipping %s - source type '%s' failed %d times", link, source_label, SOURCE_FAILURE_THRESHOLD)
+            idx += 1
+            continue
+        
         try:
-            source_label = _label_source(link)
-            friendly_name = _friendly_source_name(link)
             current_pos = idx + 1
             # Update total if we added more sources
             total_sources = len(links_queue)
@@ -532,15 +556,23 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
 
             data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag, selector)
             if not data:
-                raise Exception("No data received")
+                raise Exception("No data received from download")
+            
+            # Validate file size - reject suspiciously small files
+            file_size = data.tell()
+            if file_size < MIN_VALID_FILE_SIZE:
+                logger.warning(f"Downloaded file too small ({file_size} bytes), likely an error page")
+                raise Exception(f"File too small ({file_size} bytes)")
 
-            logger.debug(f"Download finished. Writing to {book_path}")
+            logger.debug(f"Download finished ({file_size} bytes). Writing to {book_path}")
+            data.seek(0)  # Reset buffer position before writing
             with open(book_path, "wb") as f:
                 f.write(data.getbuffer())
             return download_url
 
         except Exception as e:
             logger.error_trace(f"Failed to download from {link} (source={source_label}): {e}")
+            source_failures[source_label] = source_failures.get(source_label, 0) + 1
             idx += 1
             # If we exhausted primary links and haven't loaded welib yet, fetch them lazily
             if (
@@ -560,6 +592,10 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
                         # continue loop to try newly added links
             continue
 
+    # All sources exhausted - report final error to UI
+    if status_callback:
+        status_callback("error", f"All {len(links_queue)} sources failed")
+    
     return None
 
 

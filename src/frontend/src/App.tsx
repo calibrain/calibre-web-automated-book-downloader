@@ -125,6 +125,7 @@ function App() {
 
     // Check for completed items
     const prevDownloadingIds = new Set(Object.keys(prevDownloading));
+    const prevResolvingIds = new Set(Object.keys(prev.resolving || {}));
     const prevQueuedIds = new Set(Object.keys(prevQueued));
     const currComplete = curr.complete || {};
 
@@ -132,6 +133,16 @@ function App() {
       if (prevDownloadingIds.has(bookId) || prevQueuedIds.has(bookId)) {
         const book = currComplete[bookId];
         showToast(`${book.title || 'Book'} completed`, 'success');
+      }
+    });
+
+    // Check for failed items
+    const currError = curr.error || {};
+    Object.keys(currError).forEach(bookId => {
+      if (prevDownloadingIds.has(bookId) || prevResolvingIds.has(bookId) || prevQueuedIds.has(bookId)) {
+        const book = currError[bookId];
+        const errorMsg = book.status_message || 'Download failed';
+        showToast(`${book.title || 'Book'}: ${errorMsg}`, 'error');
       }
     });
   }, [showToast]);

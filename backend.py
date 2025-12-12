@@ -229,6 +229,16 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
         intermediate_path = final_dir / f"{book_id}.crdownload"
         final_path = final_dir / book_name
         
+        # Handle file already exists - add suffix to avoid overwrite
+        if final_path.exists():
+            base = final_path.stem
+            ext = final_path.suffix
+            counter = 1
+            while final_path.exists():
+                final_path = final_dir / f"{base}_{counter}{ext}"
+                counter += 1
+            logger.info(f"File already exists, saving as: {final_path.name}")
+        
         if os.path.exists(book_path):
             logger.info(f"Moving book to ingest directory: {book_path} -> {final_path}")
             try:
@@ -428,6 +438,9 @@ def _process_single_download(book_id: str, cancel_flag: Event) -> None:
         if not cancel_flag.is_set():
             logger.error_trace(f"Error in download processing: {e}")
             book_queue.update_status(book_id, QueueStatus.ERROR)
+            # Set error message if not already set by download_book()
+            if book_id in book_queue._book_data and not book_queue._book_data[book_id].status_message:
+                book_queue.update_status_message(book_id, f"Download failed: {type(e).__name__}")
         else:
             logger.info(f"Download cancelled: {book_id}")
             book_queue.update_status(book_id, QueueStatus.CANCELLED)

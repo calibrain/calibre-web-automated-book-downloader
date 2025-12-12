@@ -45,7 +45,7 @@ if _custom_dns == "auto":
     _custom_dns_list = None  # No custom DNS in auto mode
 elif _custom_dns == "google":
     CUSTOM_DNS = ["8.8.8.8", "8.8.4.4", "2001:4860:4860:0000:0000:0000:0000:8888", "2001:4860:4860:0000:0000:0000:0000:8844"]
-    _doh_server = "https://dns.google/dns-query"
+    _doh_server = "https://dns.google/resolve"
 elif _custom_dns == "quad9":
     CUSTOM_DNS = ["9.9.9.9", "149.112.112.112", "2620:00fe:0000:0000:0000:0000:0000:00fe", "2620:00fe:0000:0000:0000:0000:0000:0009"]
     _doh_server = "https://dns.quad9.net/dns-query"

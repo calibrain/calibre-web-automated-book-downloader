@@ -78,9 +78,10 @@ def _ensure_initialized() -> None:
             init()
 
 # DNS provider definitions: (name, servers, doh_url)
+# Note: Google uses /resolve endpoint for JSON API, others use /dns-query
 DNS_PROVIDERS = [
     ("cloudflare", ["1.1.1.1", "1.0.0.1"], "https://cloudflare-dns.com/dns-query"),
-    ("google", ["8.8.8.8", "8.8.4.4"], "https://dns.google/dns-query"),
+    ("google", ["8.8.8.8", "8.8.4.4"], "https://dns.google/resolve"),
     ("quad9", ["9.9.9.9", "149.112.112.112"], "https://dns.quad9.net/dns-query"),
     ("opendns", ["208.67.222.222", "208.67.220.220"], "https://doh.opendns.com/dns-query"),
 ]
