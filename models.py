@@ -288,6 +288,27 @@ class BookQueue:
         """Get list of currently active download book IDs."""
         with self._lock:
             return list(self._active_downloads.keys())
+    
+    def has_pending_work(self) -> bool:
+        """Check if there are any active downloads or queued items.
+        
+        This is useful for determining if the bypasser should stay active
+        even when the UI is closed.
+        
+        Returns:
+            bool: True if there are active downloads or queued items
+        """
+        with self._lock:
+            # Check for active downloads
+            if self._active_downloads:
+                return True
+            
+            # Check for queued items (excluding cancelled ones)
+            for book_id, status in self._status.items():
+                if status == QueueStatus.QUEUED:
+                    return True
+            
+            return False
             
     def clear_completed(self) -> int:
         """Remove all completed, errored, or cancelled books from tracking.

@@ -70,6 +70,7 @@ DOCKERMODE = string_to_bool(os.getenv("DOCKERMODE", "false"))
 _CUSTOM_DNS = os.getenv("CUSTOM_DNS", "auto").strip()
 USE_DOH = string_to_bool(os.getenv("USE_DOH", "false"))
 BYPASS_RELEASE_INACTIVE_MIN = int(os.getenv("BYPASS_RELEASE_INACTIVE_MIN", "5"))
+BYPASS_WARMUP_ON_CONNECT = string_to_bool(os.getenv("BYPASS_WARMUP_ON_CONNECT", "true"))
 
 # Logging settings
 LOG_FILE = LOG_DIR / "cwa-book-downloader.log"

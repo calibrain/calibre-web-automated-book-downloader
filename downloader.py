@@ -97,7 +97,10 @@ def html_get_page(
             
             if use_bypasser_now and USE_CF_BYPASS:
                 logger.info(f"GET (bypasser): {current_url}")
-                return get_bypassed_page(current_url, selector)
+                result = get_bypassed_page(current_url, selector)
+                # Bypasser failures are already logged; return empty string for consistency
+                # (no retry - if bypasser failed, it's unlikely to succeed immediately)
+                return result or ""
 
             logger.info(f"GET: {current_url}")
             response = requests.get(current_url, proxies=PROXIES, timeout=REQUEST_TIMEOUT)

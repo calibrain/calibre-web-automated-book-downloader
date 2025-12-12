@@ -14,7 +14,7 @@ from seleniumbase import Driver
 import env
 import network
 from config import PROXIES, RECORDING_DIR, VIRTUAL_SCREEN_SIZE
-from env import DEBUG, DEFAULT_SLEEP, LOG_DIR, MAX_RETRY
+from env import AA_DONATOR_KEY, BYPASS_WARMUP_ON_CONNECT, DEBUG, DEFAULT_SLEEP, LOG_DIR, MAX_RETRY
 from logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -590,6 +590,122 @@ def _init_cleanup_thread():
     cleanup_thread = threading.Thread(target=_cleanup_loop)
     cleanup_thread.daemon = True
     cleanup_thread.start()
+
+def warmup():
+    """Pre-initialize the virtual display to reduce cold start time.
+    
+    This function can be called when a user connects to the web UI to
+    warm up the bypasser environment before it's actually needed.
+    The Chrome driver itself is still lazy-loaded on first use.
+    
+    Warmup is skipped in the following scenarios:
+    - BYPASS_WARMUP_ON_CONNECT is false (explicit disable)
+    - Not running in Docker mode
+    - USE_CF_BYPASS is disabled
+    - AA_DONATOR_KEY is set (user has fast downloads, bypass rarely needed)
+    
+    Note: Even when warmup is skipped, the bypasser can still start on-demand
+    when actually needed for a download.
+    """
+    global DISPLAY, LOCKED
+    
+    if not BYPASS_WARMUP_ON_CONNECT:
+        logger.debug("Bypasser warmup disabled via BYPASS_WARMUP_ON_CONNECT")
+        return
+    
+    if not env.DOCKERMODE:
+        logger.debug("Bypasser warmup skipped - not in Docker mode")
+        return
+    
+    if not env.USE_CF_BYPASS:
+        logger.debug("Bypasser warmup skipped - CF bypass disabled")
+        return
+    
+    if AA_DONATOR_KEY:
+        logger.debug("Bypasser warmup skipped - AA donator key set (fast downloads available)")
+        return
+    
+    with LOCKED:
+        # Check if display is already initialized
+        if DISPLAY["xvfb"] is not None:
+            logger.debug("Bypasser already warmed up - display exists")
+            return
+        
+        logger.info("Warming up Cloudflare bypasser (pre-initializing virtual display)...")
+        
+        try:
+            from pyvirtualdisplay import Display
+            display = Display(visible=False, size=VIRTUAL_SCREEN_SIZE)
+            display.start()
+            DISPLAY["xvfb"] = display
+            logger.info("Virtual display started successfully (warmup complete)")
+            
+            time.sleep(DEFAULT_SLEEP)
+            _reset_pyautogui_display_state()
+            
+            # Optionally start ffmpeg recording in debug mode
+            if env.DEBUG:
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%y%m%d-%H%M%S")
+                output_file = RECORDING_DIR / f"screen_recording_{timestamp}.mp4"
+                
+                ffmpeg_cmd = [
+                    "ffmpeg",
+                    "-y",
+                    "-f", "x11grab",
+                    "-video_size", f"{VIRTUAL_SCREEN_SIZE[0]}x{VIRTUAL_SCREEN_SIZE[1]}",
+                    "-i", f":{display.display}",
+                    "-c:v", "libx264",
+                    "-preset", "ultrafast",
+                    "-maxrate", "700k",
+                    "-bufsize", "1400k",
+                    "-crf", "36",
+                    "-pix_fmt", "yuv420p",
+                    "-tune", "animation",
+                    "-x264-params", "bframes=0:deblock=-1,-1",
+                    "-r", "15",
+                    "-an",
+                    output_file.as_posix(),
+                    "-nostats", "-loglevel", "0"
+                ]
+                logger.info("Starting FFmpeg recording for warmup to %s", output_file)
+                logger.debug_trace(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
+                DISPLAY["ffmpeg"] = subprocess.Popen(ffmpeg_cmd)
+                
+        except Exception as e:
+            logger.warning(f"Failed to warm up bypasser: {e}")
+
+def is_warmed_up() -> bool:
+    """Check if the bypasser is already warmed up (display initialized)."""
+    return DISPLAY["xvfb"] is not None
+
+def shutdown_if_idle():
+    """Shut down the bypasser if there's no pending work.
+    
+    This is called when all WebSocket clients disconnect. It checks if there
+    are any active downloads or queued items before shutting down.
+    
+    If there IS pending work, the bypasser stays active and will be cleaned up
+    by the regular inactivity timer after downloads complete.
+    """
+    global LOCKED
+    
+    # Import here to avoid circular imports
+    from models import book_queue
+    
+    with LOCKED:
+        if book_queue.has_pending_work():
+            logger.info("Bypasser shutdown deferred - downloads still pending")
+            return
+        
+        # No pending work, check if we have an active display/driver
+        if DISPLAY["xvfb"] is None and DRIVER is None:
+            logger.debug("Bypasser already shut down")
+            return
+        
+        logger.info("No pending downloads, shutting down bypasser...")
+        _reset_driver()
+        logger.info("Bypasser shut down successfully")
 
 def wait_for_result(func, timeout : int = 10, condition : any = True):
     start_time = time.time()

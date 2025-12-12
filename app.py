@@ -257,6 +257,14 @@ def favicon(_: Any = None) -> Response:
     return send_from_directory(os.path.join(app.root_path, 'frontend-dist'),
         'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
+# Register bypasser warmup callback for when first WebSocket client connects
+# and shutdown callback for when all clients disconnect
+if not USING_EXTERNAL_BYPASSER:
+    from cloudflare_bypasser import warmup as bypasser_warmup, shutdown_if_idle as bypasser_shutdown
+    ws_manager.register_on_first_connect(bypasser_warmup)
+    ws_manager.register_on_all_disconnect(bypasser_shutdown)
+    logger.info("Registered Cloudflare bypasser warmup/shutdown on WebSocket connect/disconnect")
+
 if DEBUG:
     import subprocess
     if USING_EXTERNAL_BYPASSER:
@@ -829,6 +837,10 @@ def catch_all(path: str) -> Response:
 def handle_connect():
     """Handle client connection."""
     logger.info("WebSocket client connected")
+    
+    # Track the connection (triggers warmup callbacks on first connect)
+    ws_manager.client_connected()
+    
     # Send initial status to the newly connected client
     try:
         status = backend.queue_status()
@@ -840,6 +852,9 @@ def handle_connect():
 def handle_disconnect():
     """Handle client disconnection."""  
     logger.info("WebSocket client disconnected")
+    
+    # Track the disconnection
+    ws_manager.client_disconnected()
 
 @socketio.on('request_status')
 def handle_status_request():
