@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { StatusData, Book } from '../types';
 
 interface DownloadsSidebarProps {
@@ -12,6 +12,14 @@ interface DownloadsSidebarProps {
   calibreWebUrl?: string;
   onShowToast?: (message: string, type: 'success' | 'error' | 'info') => void;
 }
+
+// Track when books were completed for "moved to library" logic
+interface CompletionTimestamp {
+  [bookId: string]: number;
+}
+
+// Time after which we consider the book "moved to library" (15 seconds)
+const LIBRARY_TRANSITION_MS = 15000;
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
   queued: { bg: 'bg-amber-500/10', text: 'text-amber-600', label: 'Queued' },
