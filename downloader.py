@@ -1,17 +1,20 @@
 """Network operations manager for the book downloader application."""
 
-import requests
+import random
 import time
 from io import BytesIO
-from typing import Optional
-from urllib.parse import urlparse
-from tqdm import tqdm
-from typing import Callable
 from threading import Event
-from logger import setup_logger
-from config import PROXIES
-from env import MAX_RETRY, DEFAULT_SLEEP, USE_CF_BYPASS, USING_EXTERNAL_BYPASSER
+from typing import Callable, Optional
+from urllib.parse import urlparse
+
+import requests
+from tqdm import tqdm
+
 import network
+from config import PROXIES
+from env import DEFAULT_SLEEP, MAX_RETRY, USE_CF_BYPASS, USING_EXTERNAL_BYPASSER
+from logger import setup_logger
+
 if USE_CF_BYPASS:
     if USING_EXTERNAL_BYPASSER:
         from cloudflare_bypasser_external import get_bypassed_page
@@ -20,48 +23,60 @@ if USE_CF_BYPASS:
 
 logger = setup_logger(__name__)
 
-# Network timeouts and retry settings
+# Network settings
 REQUEST_TIMEOUT = (5, 15)
 MAX_DOWNLOAD_RETRIES = 3
 MAX_RESUME_ATTEMPTS = 3
-
-# Retryable HTTP status codes
 RETRYABLE_CODES = (429, 500, 502, 503, 504)
+CONNECTION_ERRORS = (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                     requests.exceptions.SSLError, requests.exceptions.ChunkedEncodingError)
 
 
 def parse_size_string(size: str) -> Optional[float]:
-    """Parse a human-readable size string (e.g., '10.5 MB') into bytes.
-    
-    Args:
-        size: Size string like '10.5 MB', '1,5 GB', etc.
-        
-    Returns:
-        Size in bytes, or None if parsing fails.
-    """
+    """Parse a human-readable size string (e.g., '10.5 MB') into bytes."""
     if not size:
         return None
     try:
-        # Normalize: remove spaces, replace comma with dot, uppercase
         normalized = size.strip().replace(" ", "").replace(",", ".").upper()
-        
-        # Extract numeric part and unit
-        if normalized.endswith("GB"):
-            return float(normalized[:-2].strip()) * 1024 * 1024 * 1024
-        elif normalized.endswith("MB"):
-            return float(normalized[:-2].strip()) * 1024 * 1024
-        elif normalized.endswith("KB"):
-            return float(normalized[:-2].strip()) * 1024
-        else:
-            # Assume bytes or try to parse as-is
-            return float(normalized)
+        multipliers = {"GB": 1024**3, "MB": 1024**2, "KB": 1024}
+        for suffix, mult in multipliers.items():
+            if normalized.endswith(suffix):
+                return float(normalized[:-2]) * mult
+        return float(normalized)
     except (ValueError, IndexError):
         return None
 
 def _backoff_delay(attempt: int, base: float = 0.25, cap: float = 3.0) -> float:
-    """Exponential backoff with jitter; attempt starts at 1."""
-    import random
-    delay = min(cap, base * (2 ** (attempt - 1)))
-    return delay + random.random() * base
+    """Exponential backoff with jitter."""
+    return min(cap, base * (2 ** (attempt - 1))) + random.random() * base
+
+
+def _get_status_code(e: Exception) -> Optional[int]:
+    """Extract HTTP status code from an exception, or None if not applicable."""
+    if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
+        return e.response.status_code
+    return None
+
+def _is_retryable_error(e: Exception) -> bool:
+    """Check if error is retryable (connection error or retryable HTTP status)."""
+    if isinstance(e, CONNECTION_ERRORS):
+        return True
+    status = _get_status_code(e)
+    return status in RETRYABLE_CODES if status else False
+
+
+def _try_rotation(original_url: str, current_url: str, selector: network.AAMirrorSelector) -> Optional[str]:
+    """Try mirror/DNS rotation. Returns new URL or None."""
+    if current_url.startswith(network.get_aa_base_url()):
+        new_base, action = selector.next_mirror_or_rotate_dns()
+        if action in ("mirror", "dns") and new_base:
+            new_url = selector.rewrite(original_url)
+            logger.info(f"[{action}] switching to: {new_url}")
+            return new_url
+    elif network.rotate_dns_provider():
+        logger.info(f"[dns-rotate] retrying: {original_url}")
+        return original_url
+    return None
 
 
 def html_get_page(
@@ -70,97 +85,58 @@ def html_get_page(
     use_bypasser: bool = False,
     selector: Optional[network.AAMirrorSelector] = None,
 ) -> str:
-    """Fetch HTML content from a URL with retry mechanism.
-    
-    Retry logic:
-    - 403 (Cloudflare): Switch to bypasser immediately. If still fails, give up. No retries.
-    - 404: Give up immediately.
-    - Connection/timeout/5xx: Retry with backoff, try mirror/DNS rotation.
-    """
+    """Fetch HTML content from a URL with retry mechanism."""
     selector = selector or network.AAMirrorSelector()
     original_url = url
     current_url = selector.rewrite(original_url)
-    
-    attempt = 0
-    max_attempts = retry
     use_bypasser_now = use_bypasser
 
-    while attempt < max_attempts:
-        attempt += 1
-        
+    for attempt in range(1, retry + 1):
         try:
-            logger.debug(f"html_get_page: {current_url}, attempt: {attempt}/{max_attempts}, use_bypasser: {use_bypasser_now}")
+            logger.debug(f"html_get_page: {current_url}, attempt: {attempt}/{retry}, bypasser: {use_bypasser_now}")
             
             if use_bypasser_now and USE_CF_BYPASS:
-                logger.info(f"GET Using Cloudflare Bypasser for: {current_url}")
+                logger.info(f"GET (bypasser): {current_url}")
                 return get_bypassed_page(current_url, selector)
 
             logger.info(f"GET: {current_url}")
             response = requests.get(current_url, proxies=PROXIES, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
-            logger.debug(f"Success getting: {current_url}")
             time.sleep(1)
-            return str(response.text)
+            return response.text
 
         except Exception as e:
-            is_connection_error = isinstance(e, (requests.exceptions.ConnectionError,
-                                                 requests.exceptions.Timeout,
-                                                 requests.exceptions.SSLError))
-            is_http_error = isinstance(e, requests.exceptions.HTTPError) and getattr(e, 'response', None) is not None
-            status_code = e.response.status_code if is_http_error else None
+            status = _get_status_code(e)
 
-            # 403 = Cloudflare wall. Use bypasser, don't retry.
-            if status_code == 403:
+            # 403 = Cloudflare - switch to bypasser once
+            if status == 403:
                 if USE_CF_BYPASS and not use_bypasser_now:
-                    logger.info(f"403 detected; switching to bypasser for: {current_url}")
+                    logger.info(f"403 detected; switching to bypasser: {current_url}")
                     use_bypasser_now = True
-                    attempt -= 1  # Don't count this as a retry attempt
                     continue
-                # Already using bypasser or bypasser not available - give up
-                logger.warning(f"403 error for: {current_url}; giving up")
+                logger.warning(f"403 error, giving up: {current_url}")
                 return ""
 
-            # 404 = Not found, give up immediately
-            if status_code == 404:
-                logger.warning(f"404 error for: {current_url}")
+            # 404 = Not found
+            if status == 404:
+                logger.warning(f"404 error: {current_url}")
                 return ""
 
-            # Connection/transport errors or 5xx: try mirror/DNS rotation for AA URLs
-            current_aa_url = network.get_aa_base_url()
-            if current_url.startswith(current_aa_url):
-                if is_connection_error or (is_http_error and status_code in (429, 500, 502, 503, 504)):
-                    new_base, action = selector.next_mirror_or_rotate_dns()
-                    if action in ("mirror", "dns") and new_base:
-                        current_url = selector.rewrite(original_url)
-                        log_fn = logger.warning if action == "dns" else logger.info
-                        log_fn(f"[aa-retry] action={action} url={current_url}")
-                        continue
-            else:
-                # Non-AA target: rotate DNS on transport/5xx/429 failures
-                if is_connection_error or (is_http_error and status_code in (429, 500, 502, 503, 504)):
-                    if network.rotate_dns_provider():
-                        current_url = original_url
-                        logger.warning(f"[dns-rotate] target={current_url}")
-                        continue
+            # Try mirror/DNS rotation on retryable errors
+            if _is_retryable_error(e):
+                new_url = _try_rotation(original_url, current_url, selector)
+                if new_url:
+                    current_url = new_url
+                    continue
 
-            # Transient error - retry with backoff if attempts remain
-            if attempt < max_attempts:
-                logger.warning(f"Retrying GET {current_url} (attempt {attempt}/{max_attempts}) due to {type(e).__name__}: {e}")
+            # Retry with backoff
+            if attempt < retry:
+                logger.warning(f"Retry {attempt}/{retry} for {current_url}: {type(e).__name__}: {e}")
                 time.sleep(_backoff_delay(attempt))
             else:
-                logger.error(f"Giving up fetching {current_url} after {max_attempts} attempts; last error: {type(e).__name__}: {e}")
+                logger.error(f"Giving up after {retry} attempts: {current_url}")
 
     return ""
-
-
-def _is_retryable(e: Exception) -> tuple[bool, Optional[int]]:
-    """Check if error is retryable. Returns (is_retryable, status_code)."""
-    if isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
-                      requests.exceptions.SSLError, requests.exceptions.ChunkedEncodingError)):
-        return True, None
-    if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
-        return e.response.status_code in RETRYABLE_CODES, e.response.status_code
-    return False, None
 
 
 def download_url(
@@ -208,18 +184,19 @@ def download_url(
                     logger.warning(f"Received HTML instead of file: {current_url}")
                     return None
             
-            logger.info(f"Download completed: {bytes_downloaded} bytes")
+            logger.debug(f"Download completed: {bytes_downloaded} bytes")
             return buffer
             
         except requests.exceptions.RequestException as e:
-            retryable, status = _is_retryable(e)
+            status = _get_status_code(e)
+            retryable = _is_retryable_error(e)
             
-            # Non-retryable errors - give up immediately
+            # Non-retryable errors
             if status in (403, 404):
                 logger.warning(f"Download failed ({status}): {current_url}")
                 return None
             
-            # If we got some data, try to resume
+            # Try to resume if we got some data
             if bytes_downloaded > 0 and retryable:
                 resumed = _try_resume(current_url, buffer, bytes_downloaded, total_size, progress_callback, cancel_flag)
                 if resumed:
@@ -292,35 +269,13 @@ def _try_resume(
     return None
 
 
-def _try_rotation(original_url: str, current_url: str, selector: network.AAMirrorSelector) -> Optional[str]:
-    """Try mirror/DNS rotation. Returns new URL or None."""
-    if current_url.startswith(network.get_aa_base_url()):
-        new_base, action = selector.next_mirror_or_rotate_dns()
-        if action in ("mirror", "dns") and new_base:
-            new_url = selector.rewrite(original_url)
-            logger.info(f"[{action}] switching to: {new_url}")
-            return new_url
-    elif network.rotate_dns_provider():
-        logger.info(f"[dns-rotate] retrying: {original_url}")
-        return original_url
-    return None
-
-
 def get_absolute_url(base_url: str, url: str) -> str:
-    """Get absolute URL from relative URL and base URL.
-    
-    Args:
-        base_url: Base URL
-        url: Relative URL
-    """
-    if url.strip() == "":
-        return ""
-    if url.strip("#") == "":
-        return ""
-    if url.startswith("http"):
-        return url
-    parsed_url = urlparse(url)
-    parsed_base = urlparse(base_url)
-    if parsed_url.netloc == "" or parsed_url.scheme == "":
-        parsed_url = parsed_url._replace(netloc=parsed_base.netloc, scheme=parsed_base.scheme)
-    return parsed_url.geturl()
+    """Convert a relative URL to absolute using the base URL."""
+    url = url.strip()
+    if not url or url == "#" or url.startswith("http"):
+        return url if url.startswith("http") else ""
+    parsed = urlparse(url)
+    base = urlparse(base_url)
+    if not parsed.netloc or not parsed.scheme:
+        parsed = parsed._replace(netloc=base.netloc, scheme=base.scheme)
+    return parsed.geturl()

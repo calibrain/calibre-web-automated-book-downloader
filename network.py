@@ -168,13 +168,19 @@ def _is_aa_hostname(host_str: str) -> bool:
 original_getaddrinfo = socket.getaddrinfo
 
 class DoHResolver:
-    """DNS over HTTPS resolver implementation."""
+    """DNS over HTTPS resolver implementation with caching."""
+    
+    # Cache TTL in seconds (5 minutes)
+    CACHE_TTL = 300
+    
     def __init__(self, provider_url: str, hostname: str, ip: str):
         """Initialize DoH resolver with specified provider."""
         self.base_url = provider_url.lower().strip()
         self.hostname = hostname  # Store the hostname for hostname-based skipping
         self.ip = ip              # Store IP for direct connections
         self.session = requests.Session()
+        # DNS cache: {(hostname, record_type): (ip_list, timestamp)}
+        self._cache: dict[tuple[str, str], tuple[List[str], datetime]] = {}
         
         # Different headers based on provider
         if 'google' in self.base_url:
@@ -185,6 +191,24 @@ class DoHResolver:
             self.session.headers.update({
                 'Accept': 'application/dns-json',
             })
+    
+    def _get_cached(self, hostname: str, record_type: str) -> Optional[List[str]]:
+        """Get cached DNS result if still valid."""
+        key = (hostname, record_type)
+        if key in self._cache:
+            ips, timestamp = self._cache[key]
+            if datetime.now() - timestamp < timedelta(seconds=self.CACHE_TTL):
+                logger.debug(f"DoH cache hit for {hostname}: {ips}")
+                return ips
+            else:
+                # Cache expired, remove it
+                del self._cache[key]
+        return None
+    
+    def _set_cached(self, hostname: str, record_type: str, ips: List[str]) -> None:
+        """Cache DNS result."""
+        if ips:  # Only cache non-empty results
+            self._cache[(hostname, record_type)] = (ips, datetime.now())
     
     def resolve(self, hostname: str, record_type: str) -> List[str]:
         """Resolve a hostname using DoH.
@@ -210,6 +234,11 @@ class DoHResolver:
         if hostname == self.hostname:
             logger.debug(f"Skipping DoH resolution for DoH server itself: {hostname}")
             return [self.ip]
+        
+        # Check cache first
+        cached = self._get_cached(hostname, record_type)
+        if cached is not None:
+            return cached
             
         try:
             params = {
@@ -221,7 +250,7 @@ class DoHResolver:
                 self.base_url,
                 params=params,
                 proxies=PROXIES,
-                timeout=5
+                timeout=10  # Increased from 5s to handle slow network conditions
             )
             response.raise_for_status()
             
@@ -233,6 +262,10 @@ class DoHResolver:
             # Extract IP addresses from the response    
             answers = [answer['data'] for answer in data['Answer'] 
                     if answer.get('type') == (28 if record_type == 'AAAA' else 1)]
+            
+            # Cache the result
+            self._set_cached(hostname, record_type, answers)
+            
             # Don't log here - the caller (custom_getaddrinfo) will log the final result
             return answers
             

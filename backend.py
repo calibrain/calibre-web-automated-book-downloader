@@ -1,29 +1,31 @@
 """Backend logic for the book download application."""
 
-import threading, time
-import shutil
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
-import subprocess
 import os
-from concurrent.futures import ThreadPoolExecutor, Future
+import shutil
+import subprocess
+import threading
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path
 from threading import Event, Lock
+from typing import Any, Dict, List, Optional, Tuple
 
-from logger import setup_logger
-from config import CUSTOM_SCRIPT
-from env import (INGEST_DIR, DOWNLOAD_PATHS, TMP_DIR, MAIN_LOOP_SLEEP_TIME, USE_BOOK_TITLE,
-                 MAX_CONCURRENT_DOWNLOADS, DOWNLOAD_PROGRESS_UPDATE_INTERVAL)
-from models import book_queue, BookInfo, QueueStatus, SearchFilters
 import book_manager
 from book_manager import SearchUnavailable
+from config import CUSTOM_SCRIPT
+from env import (
+    DOWNLOAD_PATHS, DOWNLOAD_PROGRESS_UPDATE_INTERVAL, INGEST_DIR,
+    MAIN_LOOP_SLEEP_TIME, MAX_CONCURRENT_DOWNLOADS, TMP_DIR, USE_BOOK_TITLE,
+)
+from logger import setup_logger
+from models import BookInfo, QueueStatus, SearchFilters, book_queue
 
 logger = setup_logger(__name__)
 
-# Import WebSocket manager (will be initialized by app.py)
+# WebSocket manager (initialized by app.py)
 try:
     from websocket_manager import ws_manager
 except ImportError:
-    logger.warning("WebSocket manager not available")
     ws_manager = None
 
 # Progress update throttling - track last broadcast time per book
@@ -87,7 +89,7 @@ def queue_book(book_id: str, priority: int = 0) -> bool:
         logger.info(f"Book queued with priority {priority}: {book_info.title}")
         
         # Broadcast status update via WebSocket
-        if ws_manager and ws_manager.is_enabled():
+        if ws_manager:
             ws_manager.broadcast_status_update(queue_status())
         
         return True
@@ -213,7 +215,7 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
                 book_path.unlink()
             return None
 
-        logger.info(f"Post-processing download: {book_info.title}")
+        logger.debug(f"Post-processing download: {book_info.title}")
 
         if CUSTOM_SCRIPT:
             logger.info(f"Running custom script: {CUSTOM_SCRIPT}")
@@ -270,7 +272,7 @@ def update_download_progress(book_id: str, progress: float) -> None:
     book_queue.update_progress(book_id, progress)
     
     # Broadcast progress via WebSocket with throttling
-    if ws_manager and ws_manager.is_enabled():
+    if ws_manager:
         current_time = time.time()
         should_broadcast = False
         
@@ -328,7 +330,7 @@ def update_download_status(book_id: str, status: str, message: Optional[str] = N
             book_queue.update_status_message(book_id, message)
         
         # Broadcast status update via WebSocket
-        if ws_manager and ws_manager.is_enabled():
+        if ws_manager:
             ws_manager.broadcast_status_update(queue_status())
 
 def cancel_download(book_id: str) -> bool:
@@ -402,7 +404,7 @@ def _process_single_download(book_id: str, cancel_flag: Event) -> None:
         if cancel_flag.is_set():
             book_queue.update_status(book_id, QueueStatus.CANCELLED)
             # Broadcast cancellation
-            if ws_manager and ws_manager.is_enabled():
+            if ws_manager:
                 ws_manager.broadcast_status_update(queue_status())
             return
             
@@ -415,12 +417,9 @@ def _process_single_download(book_id: str, cancel_flag: Event) -> None:
         book_queue.update_status(book_id, new_status)
         
         # Broadcast final status (completed or error)
-        if ws_manager and ws_manager.is_enabled():
+        if ws_manager:
             ws_manager.broadcast_status_update(queue_status())
         
-        logger.info(
-            f"Book {book_id} download {'successful' if download_path else 'failed'}"
-        )
         
     except Exception as e:
         # Clean up progress tracking even on error
@@ -434,7 +433,7 @@ def _process_single_download(book_id: str, cancel_flag: Event) -> None:
             book_queue.update_status(book_id, QueueStatus.CANCELLED)
         
         # Broadcast error/cancelled status
-        if ws_manager and ws_manager.is_enabled():
+        if ws_manager:
             ws_manager.broadcast_status_update(queue_status())
 
 def concurrent_download_loop() -> None:

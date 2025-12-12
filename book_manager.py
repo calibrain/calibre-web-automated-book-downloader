@@ -1,24 +1,28 @@
 """Book download manager handling search and retrieval operations."""
 
-import time, json, os, re
+import json
+import re
+import time
 from pathlib import Path
-from urllib.parse import quote
-from typing import List, Optional, Dict, Union, Callable
 from threading import Event
-from bs4 import BeautifulSoup, Tag, NavigableString, ResultSet
+from typing import Callable, Dict, List, Optional
+from urllib.parse import quote
+
+from bs4 import BeautifulSoup, NavigableString, Tag
+
+import downloader
+import network
+from config import BOOK_LANGUAGE, SUPPORTED_FORMATS
+from env import AA_DONATOR_KEY, ALLOW_USE_WELIB, DOWNLOAD_PATHS, PRIORITIZE_WELIB, USE_CF_BYPASS
+from logger import setup_logger
+from models import BookInfo, SearchFilters
+
+logger = setup_logger(__name__)
 
 
 class SearchUnavailable(Exception):
     """Raised when Anna's Archive cannot be reached via any mirror/DNS."""
     pass
-
-import downloader
-from logger import setup_logger
-from config import SUPPORTED_FORMATS, BOOK_LANGUAGE
-from env import AA_DONATOR_KEY, USE_CF_BYPASS, PRIORITIZE_WELIB, ALLOW_USE_WELIB, DOWNLOAD_PATHS
-from models import BookInfo, SearchFilters
-import network
-logger = setup_logger(__name__)
 
 
 
@@ -184,45 +188,36 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     data = soup.find_all("div", {"class": "main-inner"})[0].find_next("div")
     divs = list(data.children)
 
-    every_url = soup.find_all("a")
-    slow_urls_no_waitlist = []  # Use lists to preserve page order
-    slow_urls_with_waitlist = []
-    external_urls_libgen = []
-    external_urls_z_lib = []
+    # Collect download URLs by source type (lists preserve page order, dedup inline)
+    slow_urls_no_waitlist: list[str] = []
+    slow_urls_with_waitlist: list[str] = []
+    external_urls_libgen: list[str] = []
+    external_urls_z_lib: list[str] = []
     external_urls_welib: list[str] = []
 
-    for url in every_url:
-        try:
-            if url.text.strip().lower().startswith("slow partner server"):
-                if (
-                    url.next is not None
-                    and url.next.next is not None
-                    and "waitlist" in url.next.next.strip().lower()
-                ):
-                    internal_text = url.next.next.strip().lower()
-                    href = url["href"]
-                    if "no waitlist" in internal_text:
-                        if href not in slow_urls_no_waitlist:
-                            slow_urls_no_waitlist.append(href)
-                    else:
-                        if href not in slow_urls_with_waitlist:
-                            slow_urls_with_waitlist.append(href)
-            elif (
-                url.next is not None
-                and url.next.next is not None
-                and "click “GET” at the top" in url.next.next.text.strip()
-            ):
-                libgen_url = url["href"]
-                # TODO : Temporary fix ? Maybe get URLs from https://open-slum.org/ ?
-                libgen_url = re.sub(r'libgen\.(lc|is|bz|st)', 'libgen.gl', url["href"])
+    def _append_unique(lst: list[str], href: str) -> None:
+        if href and href not in lst:
+            lst.append(href)
 
-                if libgen_url not in external_urls_libgen:
-                    external_urls_libgen.append(libgen_url)
-            elif url.text.strip().lower().startswith("z-lib"):
-                if ".onion/" not in url["href"]:
-                    href = url["href"]
-                    if href not in external_urls_z_lib:
-                        external_urls_z_lib.append(href)
+    for anchor in soup.find_all("a"):
+        try:
+            text = anchor.text.strip().lower()
+            href = anchor.get("href", "")
+            next_text = ""
+            if anchor.next and anchor.next.next:
+                next_text = getattr(anchor.next.next, 'text', str(anchor.next.next)).strip().lower()
+
+            if text.startswith("slow partner server") and "waitlist" in next_text:
+                if "no waitlist" in next_text:
+                    _append_unique(slow_urls_no_waitlist, href)
+                else:
+                    _append_unique(slow_urls_with_waitlist, href)
+            elif 'click "get" at the top' in next_text:
+                # Normalize libgen domains
+                libgen_url = re.sub(r'libgen\.(lc|is|bz|st)', 'libgen.gl', href)
+                _append_unique(external_urls_libgen, libgen_url)
+            elif text.startswith("z-lib") and ".onion/" not in href:
+                _append_unique(external_urls_z_lib, href)
         except:
             pass
 
@@ -297,8 +292,8 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         preview=preview,
         title=book_title,
         content=content,
-        publisher=_find_in_divs(divs, "icon-[mdi--company]", isClass=True)[0],
-        author=_find_in_divs(divs, "icon-[mdi--user-edit]", isClass=True)[0],
+        publisher=_find_in_divs(divs, "icon-[mdi--company]", is_class=True)[0],
+        author=_find_in_divs(divs, "icon-[mdi--user-edit]", is_class=True)[0],
         format=format,
         size=size,
         description=description,
@@ -321,16 +316,16 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     return book_info
 
-def _find_in_divs(divs: List[str], text: str, isClass: bool = False) -> List[str]:
-    divs_found = []
+def _find_in_divs(divs: List, text: str, is_class: bool = False) -> List[str]:
+    """Find divs containing text or having a specific class."""
+    results = []
     for div in divs:
-        if isClass:
-            if div.find(class_ = text):
-                divs_found.append(div.text.strip())
-        else:
-            if text in div.text.strip():
-                divs_found.append(div.text.strip())
-    return divs_found
+        if is_class:
+            if div.find(class_=text):
+                results.append(div.text.strip())
+        elif text in div.text.strip():
+            results.append(div.text.strip())
+    return results
 
 # Download source definitions: (log_label, friendly_name, url_patterns)
 _DOWNLOAD_SOURCES = [
@@ -367,33 +362,27 @@ def _friendly_source_name(link: str) -> str:
     return _get_source_info(link)[1]
 
 def _get_download_urls_from_welib(book_id: str, selector: Optional[network.AAMirrorSelector] = None) -> list[str]:
-    """Get download urls from welib.org."""
-    if ALLOW_USE_WELIB == False:
+    """Get download URLs from welib.org (bypasser required)."""
+    if not ALLOW_USE_WELIB:
         return []
     url = f"https://welib.org/md5/{book_id}"
-    logger.info(f"Getting download urls from welib.org for {book_id}. While this uses the bypasser, it will not start downloading them yet.")
-    sel = selector or network.AAMirrorSelector()
+    logger.info(f"Fetching welib.org download URLs for {book_id}")
     try:
-        html = downloader.html_get_page(url, use_bypasser=True, selector=sel)
+        html = downloader.html_get_page(url, use_bypasser=True, selector=selector or network.AAMirrorSelector())
     except Exception as exc:
         logger.error_trace(f"Welib fetch failed for {book_id}: {exc}")
         return []
     if not html:
-        logger.warning("Welib page empty for %s; skipping fallback URLs", book_id)
+        logger.warning(f"Welib page empty for {book_id}")
         return []
+    
     soup = BeautifulSoup(html, "html.parser")
-    download_links = soup.find_all("a", href=True)
-    download_links = [link["href"] for link in download_links]
-    download_links = [link for link in download_links if "/slow_download/" in link]
-    download_links = [downloader.get_absolute_url(url, link) for link in download_links]
-    # Deduplicate while preserving order
-    seen = set()
-    unique_links = []
-    for link in download_links:
-        if link not in seen:
-            seen.add(link)
-            unique_links.append(link)
-    return unique_links
+    links = [
+        downloader.get_absolute_url(url, a["href"])
+        for a in soup.find_all("a", href=True)
+        if "/slow_download/" in a["href"]
+    ]
+    return list(dict.fromkeys(links))  # Dedupe while preserving order
 
 def _get_next_value_div(label_div: Tag) -> Optional[Tag]:
     """Find the next sibling div that holds the value for a metadata label."""
@@ -545,10 +534,9 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
             if not data:
                 raise Exception("No data received")
 
-            logger.info(f"Download finished. Writing to {book_path}")
+            logger.debug(f"Download finished. Writing to {book_path}")
             with open(book_path, "wb") as f:
                 f.write(data.getbuffer())
-            logger.info(f"Writing `{book_info.title}` successfully")
             return download_url
 
         except Exception as e:
@@ -577,80 +565,72 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
 
 def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str, Optional[str]], None]] = None, selector: Optional[network.AAMirrorSelector] = None) -> str:
     """Extract actual download URL from various source pages."""
-
-    url = ""
     sel = selector or network.AAMirrorSelector()
-    friendly_name = _friendly_source_name(link)
 
+    # AA fast download API (JSON response)
     if link.startswith(f"{network.get_aa_base_url()}/dyn/api/fast_download.json"):
         page = downloader.html_get_page(link, selector=sel)
-        url = json.loads(page).get("download_url")
+        return downloader.get_absolute_url(link, json.loads(page).get("download_url", ""))
+
+    html = downloader.html_get_page(link, selector=sel)
+    if not html:
+        return ""
+
+    soup = BeautifulSoup(html, "html.parser")
+    url = ""
+
+    # Z-Library
+    if link.startswith("https://z-lib."):
+        dl = soup.find("a", href=True, class_="addDownloadedBook")
+        url = dl["href"] if dl else ""
+
+    # AA slow download / partner servers
+    elif "/slow_download/" in link:
+        url = _extract_slow_download_url(soup, link, title, cancel_flag, status_callback, sel)
+
+    # Libgen (GET button)
     else:
-        html = downloader.html_get_page(link, selector=sel)
-
-        if html == "":
-            return ""
-
-        soup = BeautifulSoup(html, "html.parser")
-
-        if link.startswith("https://z-lib."):
-            download_link = soup.find_all("a", href=True, class_="addDownloadedBook")
-            if download_link:
-                url = download_link[0]["href"]
-        elif "/slow_download/" in link:
-            # Strategy 1: Look for "📚 Download now" button (exact match)
-            download_links = soup.find_all("a", href=True, string="📚 Download now")
-            
-            # Strategy 2: Flexible match for download button (contains "Download now")
-            if not download_links:
-                download_links = soup.find_all("a", href=True, string=lambda s: s and "Download now" in s)
-            
-            # Strategy 3: Look for "copy this URL" text pattern with URL below
-            # The page may say: "To download, copy this URL and then paste it in your browser's URL bar:"
-            # followed by a code/text element containing the actual download URL
-            if not download_links:
-                copy_url_text = soup.find(string=lambda s: s and "copy this URL" in s.lower())
-                if copy_url_text:
-                    # The download URL is typically in the next sibling or nearby element
-                    parent = copy_url_text.parent
-                    if parent:
-                        # Look for a link or code element after the instruction text
-                        next_link = parent.find_next("a", href=True)
-                        if next_link and next_link.get("href"):
-                            url = next_link["href"]
-                        else:
-                            # Sometimes the URL is in a <code> or text element
-                            code_elem = parent.find_next("code")
-                            if code_elem:
-                                url = code_elem.get_text(strip=True)
-                            else:
-                                # Try finding URL in nearby text that looks like a URL
-                                for sibling in parent.find_next_siblings():
-                                    text = sibling.get_text(strip=True) if hasattr(sibling, 'get_text') else str(sibling).strip()
-                                    if text.startswith("http"):
-                                        url = text
-                                        break
-            
-            # If we found a download link from strategies 1 or 2
-            if download_links and not url:
-                url = download_links[0]["href"]
-            
-            # Strategy 4: Check for countdown timer (waitlist servers)
-            if not url:
-                countdown = soup.find_all("span", class_="js-partner-countdown")
-                if countdown:
-                    sleep_time = int(countdown[0].text)
-                    logger.info(f"Waiting {sleep_time}s for {title}")
-                    if cancel_flag is not None and cancel_flag.wait(timeout=sleep_time):
-                        logger.info(f"Cancelled wait for {title}")
-                        return ""
-                    url = _get_download_url(link, title, cancel_flag, status_callback, sel)
-                else:
-                    # Debug: log what we found to help diagnose future issues
-                    all_links = soup.find_all("a", href=True)
-                    link_texts = [a.get_text(strip=True)[:50] for a in all_links[:10]]
-                    logger.warning(f"No download URL found on page. First 10 link texts: {link_texts}")
-        else:
-            url = soup.find_all("a", string="GET")[0]["href"]
+        get_btn = soup.find("a", string="GET")
+        url = get_btn["href"] if get_btn else ""
 
     return downloader.get_absolute_url(link, url)
+
+
+def _extract_slow_download_url(soup: BeautifulSoup, link: str, title: str, cancel_flag: Optional[Event], status_callback, selector) -> str:
+    """Extract download URL from AA slow download pages."""
+    # Try "Download now" button variations
+    dl_link = soup.find("a", href=True, string="📚 Download now")
+    if not dl_link:
+        dl_link = soup.find("a", href=True, string=lambda s: s and "Download now" in s)
+    if dl_link:
+        return dl_link["href"]
+
+    # Try "copy this URL" pattern
+    copy_text = soup.find(string=lambda s: s and "copy this url" in s.lower())
+    if copy_text and copy_text.parent:
+        parent = copy_text.parent
+        next_link = parent.find_next("a", href=True)
+        if next_link and next_link.get("href"):
+            return next_link["href"]
+        code_elem = parent.find_next("code")
+        if code_elem:
+            return code_elem.get_text(strip=True)
+        for sibling in parent.find_next_siblings():
+            text = sibling.get_text(strip=True) if hasattr(sibling, 'get_text') else str(sibling).strip()
+            if text.startswith("http"):
+                return text
+
+    # Check for countdown timer (waitlist)
+    countdown = soup.find("span", class_="js-partner-countdown")
+    if countdown:
+        sleep_time = int(countdown.text)
+        logger.info(f"Waiting {sleep_time}s for {title}")
+        if cancel_flag and cancel_flag.wait(timeout=sleep_time):
+            logger.info(f"Cancelled wait for {title}")
+            return ""
+        return _get_download_url(link, title, cancel_flag, status_callback, selector)
+
+    # Debug fallback
+    link_texts = [a.get_text(strip=True)[:50] for a in soup.find_all("a", href=True)[:10]]
+    logger.warning(f"No download URL found. First 10 links: {link_texts}")
+    return ""

@@ -215,6 +215,14 @@ function App() {
       try {
         const cfg = await getConfig();
         setConfig(cfg);
+        // Update format selection to match supported formats from config
+        // This ensures PDF is auto-selected when added to SUPPORTED_FORMATS env var
+        if (cfg?.supported_formats) {
+          setAdvancedFilters(prev => ({
+            ...prev,
+            formats: cfg.supported_formats,
+          }));
+        }
       } catch (error) {
         console.error('Failed to load config:', error);
         // Use defaults if config fails to load
@@ -324,6 +332,8 @@ function App() {
     setSearchInput('');
     setShowAdvanced(false);
     setLastSearchQuery('');
+    // Use config's supported formats if available, otherwise fall back to default
+    const resetFormats = config?.supported_formats || DEFAULT_FORMAT_SELECTION;
     setAdvancedFilters({
       isbn: '',
       author: '',
@@ -331,7 +341,7 @@ function App() {
       lang: [LANGUAGE_OPTION_DEFAULT],
       sort: '',
       content: '',
-      formats: DEFAULT_FORMAT_SELECTION,
+      formats: resetFormats,
     });
   };
 

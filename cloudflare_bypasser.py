@@ -1,28 +1,21 @@
-import time
 import os
-import socket
-from urllib.parse import urlparse
-import threading
-import env
-from env import LOG_DIR, DEBUG
 import signal
-from datetime import datetime
+import socket
 import subprocess
-import requests
+import threading
+import time
+from datetime import datetime
 from typing import Optional
+from urllib.parse import urlparse
 
-# --- SeleniumBase Import ---
+import requests
 from seleniumbase import Driver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
 
+import env
 import network
+from config import PROXIES, RECORDING_DIR, VIRTUAL_SCREEN_SIZE
+from env import DEBUG, DEFAULT_SLEEP, LOG_DIR, MAX_RETRY
 from logger import setup_logger
-from env import MAX_RETRY, DEFAULT_SLEEP
-import config
-from config import PROXIES, VIRTUAL_SCREEN_SIZE, RECORDING_DIR
 
 logger = setup_logger(__name__)
 
@@ -55,11 +48,32 @@ def _reset_pyautogui_display_state():
     try:
         import pyautogui
         import Xlib.display
-        pyautogui._pyautogui_x11._display = (
-                    Xlib.display.Display(os.environ['DISPLAY'])
-                )
+        pyautogui._pyautogui_x11._display = Xlib.display.Display(os.environ['DISPLAY'])
     except Exception as e:
         logger.warning(f"Error resetting pyautogui display state: {e}")
+
+def _get_page_info(sb) -> tuple[str, str, str]:
+    """Extract page title, body text, and current URL safely."""
+    try:
+        title = sb.get_title().lower()
+    except:
+        title = ""
+    try:
+        body = sb.get_text("body").lower()
+    except:
+        body = ""
+    try:
+        current_url = sb.get_current_url()
+    except:
+        current_url = ""
+    return title, body, current_url
+
+def _check_indicators(title: str, body: str, indicators: list[str]) -> Optional[str]:
+    """Check if any indicator is present in title or body. Returns the found indicator or None."""
+    for indicator in indicators:
+        if indicator in title or indicator in body:
+            return indicator
+    return None
 
 def _detect_challenge_type(sb) -> str:
     """Detect what type of challenge we're facing.
@@ -68,112 +82,65 @@ def _detect_challenge_type(sb) -> str:
         str: 'cloudflare', 'ddos_guard', or 'none' if no challenge detected
     """
     try:
-        try:
-            title = sb.get_title().lower()
-        except:
-            title = ""
-        try:
-            body = sb.get_text("body").lower()
-        except:
-            body = ""
-        try:
-            page_source = sb.page_source.lower()
-        except:
-            page_source = ""
-        try:
-            current_url = sb.get_current_url()
-        except:
-            current_url = ""
+        title, body, current_url = _get_page_info(sb)
         
         # DDOS-Guard indicators
-        for indicator in DDOS_GUARD_INDICATORS:
-            if indicator in title or indicator in body or indicator in page_source:
-                logger.debug(f"DDOS-Guard indicator found: '{indicator}'")
-                return "ddos_guard"
+        if found := _check_indicators(title, body, DDOS_GUARD_INDICATORS):
+            logger.debug(f"DDOS-Guard indicator found: '{found}'")
+            return "ddos_guard"
         
         # Cloudflare indicators
-        for indicator in CLOUDFLARE_INDICATORS:
-            if indicator in title or indicator in body:
-                logger.debug(f"Cloudflare indicator found: '{indicator}'")
-                return "cloudflare"
+        if found := _check_indicators(title, body, CLOUDFLARE_INDICATORS):
+            logger.debug(f"Cloudflare indicator found: '{found}'")
+            return "cloudflare"
         
         # Check URL patterns
-        if "cf-" in body or "cloudflare" in current_url.lower():
-            return "cloudflare"
-        if "/cdn-cgi/" in current_url:
+        if "cf-" in body or "cloudflare" in current_url.lower() or "/cdn-cgi/" in current_url:
             return "cloudflare"
             
         return "none"
-        
     except Exception as e:
         logger.warning(f"Error detecting challenge type: {e}")
         return "none"
 
-def _is_bypassed(sb, escape_emojis : bool = True) -> bool:
-    """Enhanced bypass detection with more comprehensive checks"""
+def _is_bypassed(sb, escape_emojis: bool = True) -> bool:
+    """Check if the protection has been bypassed."""
     try:
-        # Get page information with error handling
-        try:
-            title = sb.get_title().lower()
-        except:
-            title = ""
-            
-        try:
-            body = sb.get_text("body").lower()
-        except:
-            body = ""
-            
-        try:
-            current_url = sb.get_current_url()
-        except:
-            current_url = ""
+        title, body, current_url = _get_page_info(sb)
+        body_len = len(body.strip())
         
-        # Check if page is too long, if so we are probably bypassed
-        if len(body.strip()) > 100000:
-            logger.debug(f"Page content too long, we are probably bypassed len: {len(body.strip())}")
+        # Long page content = probably bypassed
+        if body_len > 100000:
+            logger.debug(f"Page content too long, probably bypassed (len: {body_len})")
             return True
         
-        # Detect if there is an emoji in the page, any utf8 emoji, if so we are probably bypassed
+        # Multiple emojis = probably real content
         if escape_emojis:
             import emoji
-            emoji_list = emoji.emoji_list(body)
-            if len(emoji_list) >= 3:
-                logger.debug(f"Detected emoji in page, we are probably bypassed len: {len(emoji_list)}")
+            if len(emoji.emoji_list(body)) >= 3:
+                logger.debug("Detected emojis in page, probably bypassed")
                 return True
 
-        # Check for Cloudflare indicators
-        for text in CLOUDFLARE_INDICATORS:
-            if text in title or text in body:
-                logger.debug(f"Cloudflare indicator found: '{text}' in page")
-                return False
+        # Check for protection indicators (means NOT bypassed)
+        if found := _check_indicators(title, body, CLOUDFLARE_INDICATORS + DDOS_GUARD_INDICATORS):
+            logger.debug(f"Protection indicator found: '{found}'")
+            return False
         
-        # DDOS-Guard indicators - these mean we're NOT bypassed
-        for text in DDOS_GUARD_INDICATORS:
-            if text in title or text in body:
-                logger.debug(f"DDOS-Guard indicator found: '{text}' in page")
-                return False
-        
-        # Additional checks for specific Cloudflare patterns
-        if "cf-" in body or "cloudflare" in current_url.lower():
+        # Cloudflare URL patterns
+        if "cf-" in body or "cloudflare" in current_url.lower() or "/cdn-cgi/" in current_url:
             logger.debug("Cloudflare patterns detected in page")
             return False
             
-        # Check if we're still on a challenge page (common Cloudflare pattern)
-        if "/cdn-cgi/" in current_url:
-            logger.debug("Still on Cloudflare CDN challenge page")
-            return False
-            
-        # If page is mostly empty, it might still be loading
-        if len(body.strip()) < 50:
+        # Page too short = still loading
+        if body_len < 50:
             logger.debug("Page content too short, might still be loading")
             return False
             
-        logger.debug(f"Bypass check passed - Title: '{title[:100]}', Body length: {len(body)}")
+        logger.debug(f"Bypass check passed - Title: '{title[:100]}', Body length: {body_len}")
         return True
         
     except Exception as e:
         logger.warning(f"Error checking bypass status: {e}")
-        # If we can't check, assume we're not bypassed
         return False
 
 def _bypass_method_1(sb) -> bool:
@@ -264,148 +231,14 @@ def _bypass_method_3(sb) -> bool:
         return False
 
 def _bypass_ddos_guard_method_1(sb) -> bool:
-    """DDOS-Guard bypass: Click the checkbox using iframe detection"""
+    """DDOS-Guard bypass: Use SeleniumBase's captcha handling (most reliable)"""
+    import random
     try:
-        import random
-        logger.debug("Attempting DDOS-Guard bypass method 1: iframe checkbox click")
-        
-        # Wait for the page to fully load
+        logger.debug("Attempting DDOS-Guard bypass: SeleniumBase uc_gui methods")
         time.sleep(random.uniform(2, 4))
         
-        # DDOS-Guard typically uses an iframe for the checkbox
-        # Try to find and switch to the iframe
+        # SeleniumBase's uc_gui_click_captcha often works for DDOS-Guard too
         try:
-            # Look for common DDOS-Guard iframe patterns
-            iframes = sb.find_elements("iframe")
-            logger.debug(f"Found {len(iframes)} iframes on page")
-            
-            for i, iframe in enumerate(iframes):
-                try:
-                    # Get iframe attributes for debugging
-                    iframe_src = iframe.get_attribute("src") or ""
-                    iframe_id = iframe.get_attribute("id") or ""
-                    iframe_class = iframe.get_attribute("class") or ""
-                    logger.debug(f"Iframe {i}: src={iframe_src[:100]}, id={iframe_id}, class={iframe_class}")
-                    
-                    # Check if this looks like a DDOS-Guard captcha iframe
-                    if "ddos" in iframe_src.lower() or "captcha" in iframe_src.lower() or "check" in iframe_src.lower():
-                        sb.switch_to_frame(iframe)
-                        logger.debug(f"Switched to iframe {i}")
-                        
-                        # Try to find and click the checkbox
-                        time.sleep(random.uniform(1, 2))
-                        
-                        # Look for checkbox elements
-                        checkbox_selectors = [
-                            "input[type='checkbox']",
-                            ".checkbox",
-                            "#checkbox",
-                            "[role='checkbox']",
-                            ".cb-i",  # Common DDOS-Guard class
-                            "#ddos-guard-checkbox"
-                        ]
-                        
-                        for selector in checkbox_selectors:
-                            try:
-                                if sb.is_element_visible(selector):
-                                    logger.debug(f"Found checkbox with selector: {selector}")
-                                    sb.click(selector)
-                                    time.sleep(random.uniform(2, 4))
-                                    sb.switch_to_default_content()
-                                    time.sleep(3)
-                                    return _is_bypassed(sb)
-                            except:
-                                continue
-                        
-                        sb.switch_to_default_content()
-                except Exception as iframe_e:
-                    logger.debug(f"Error with iframe {i}: {iframe_e}")
-                    try:
-                        sb.switch_to_default_content()
-                    except:
-                        pass
-                    continue
-        except Exception as e:
-            logger.debug(f"Error finding iframes: {e}")
-        
-        return False
-    except Exception as e:
-        logger.debug(f"DDOS-Guard method 1 failed: {e}")
-        return False
-
-def _bypass_ddos_guard_method_2(sb) -> bool:
-    """DDOS-Guard bypass: Use pyautogui to click the checkbox directly"""
-    try:
-        import random
-        logger.debug("Attempting DDOS-Guard bypass method 2: pyautogui coordinate click")
-        
-        # Wait for the page to fully load
-        time.sleep(random.uniform(2, 4))
-        
-        try:
-            import pyautogui
-            
-            # Get the page dimensions
-            window_size = sb.get_window_size()
-            width = window_size.get("width", 1920)
-            height = window_size.get("height", 1080)
-            
-            logger.debug(f"Window size: {width}x{height}")
-            
-            # DDOS-Guard checkbox is typically in the center of the page
-            # The checkbox itself is usually slightly left of center
-            # Based on the screenshot, the checkbox appears to be around 40% from left, 55% from top
-            checkbox_x = int(width * 0.35)  # Slightly left of center where checkbox typically is
-            checkbox_y = int(height * 0.55)  # Slightly below center
-            
-            logger.debug(f"Clicking at coordinates: ({checkbox_x}, {checkbox_y})")
-            
-            # Move mouse smoothly to simulate human behavior
-            current_x, current_y = pyautogui.position()
-            
-            # Small random offset for human-like behavior
-            offset_x = random.randint(-5, 5)
-            offset_y = random.randint(-5, 5)
-            
-            # Move to checkbox location with human-like motion
-            pyautogui.moveTo(
-                checkbox_x + offset_x, 
-                checkbox_y + offset_y, 
-                duration=random.uniform(0.3, 0.7)
-            )
-            time.sleep(random.uniform(0.1, 0.3))
-            
-            # Click
-            pyautogui.click()
-            
-            # Wait for verification
-            time.sleep(random.uniform(3, 5))
-            
-            return _is_bypassed(sb)
-            
-        except ImportError:
-            logger.debug("pyautogui not available")
-            return False
-        except Exception as e:
-            logger.debug(f"pyautogui click failed: {e}")
-            return False
-            
-    except Exception as e:
-        logger.debug(f"DDOS-Guard method 2 failed: {e}")
-        return False
-
-def _bypass_ddos_guard_method_3(sb) -> bool:
-    """DDOS-Guard bypass: Use SeleniumBase's built-in captcha handling"""
-    try:
-        import random
-        logger.debug("Attempting DDOS-Guard bypass method 3: SeleniumBase uc_gui methods")
-        
-        # Wait for the page to load
-        time.sleep(random.uniform(2, 4))
-        
-        # Try different SeleniumBase UC methods
-        try:
-            # uc_gui_click_captcha sometimes works for DDOS-Guard too
             sb.uc_gui_click_captcha()
             time.sleep(random.uniform(3, 5))
             if _is_bypassed(sb):
@@ -413,73 +246,84 @@ def _bypass_ddos_guard_method_3(sb) -> bool:
         except Exception as e:
             logger.debug(f"uc_gui_click_captcha failed: {e}")
         
-        # Try clicking on any visible checkbox-like element
-        try:
-            checkbox_patterns = [
-                "//input[@type='checkbox']",
-                "//*[contains(@class, 'checkbox')]",
-                "//*[contains(@class, 'cb-')]",
-                "//*[contains(text(), \"I'm not a robot\")]/..",
-                "//*[contains(text(), 'not a robot')]/.."
-            ]
-            
-            for pattern in checkbox_patterns:
-                try:
-                    elements = sb.find_elements(f"xpath:{pattern}")
-                    for elem in elements:
-                        if elem.is_displayed():
-                            logger.debug(f"Found clickable element with pattern: {pattern}")
-                            elem.click()
-                            time.sleep(random.uniform(3, 5))
-                            if _is_bypassed(sb):
-                                return True
-                except:
-                    continue
-        except Exception as e:
-            logger.debug(f"Checkbox pattern search failed: {e}")
+        # Fallback: Try clicking visible checkbox-like elements
+        checkbox_patterns = [
+            "//input[@type='checkbox']",
+            "//*[contains(@class, 'checkbox')]",
+            "//*[contains(@class, 'cb-')]",
+        ]
+        for pattern in checkbox_patterns:
+            try:
+                elements = sb.find_elements(f"xpath:{pattern}")
+                for elem in elements:
+                    if elem.is_displayed():
+                        logger.debug(f"Clicking element with pattern: {pattern}")
+                        elem.click()
+                        time.sleep(random.uniform(3, 5))
+                        if _is_bypassed(sb):
+                            return True
+            except:
+                continue
         
         return False
     except Exception as e:
-        logger.debug(f"DDOS-Guard method 3 failed: {e}")
+        logger.debug(f"DDOS-Guard method 1 failed: {e}")
+        return False
+
+def _bypass_ddos_guard_method_2(sb) -> bool:
+    """DDOS-Guard bypass: Use pyautogui to click estimated checkbox location"""
+    import random
+    try:
+        logger.debug("Attempting DDOS-Guard bypass: pyautogui coordinate click")
+        time.sleep(random.uniform(2, 4))
+        
+        import pyautogui
+        window_size = sb.get_window_size()
+        width = window_size.get("width", 1920)
+        height = window_size.get("height", 1080)
+        
+        # DDOS-Guard checkbox is typically around 35% from left, 55% from top
+        checkbox_x = int(width * 0.35) + random.randint(-5, 5)
+        checkbox_y = int(height * 0.55) + random.randint(-5, 5)
+        
+        logger.debug(f"Clicking at coordinates: ({checkbox_x}, {checkbox_y})")
+        pyautogui.moveTo(checkbox_x, checkbox_y, duration=random.uniform(0.3, 0.7))
+        time.sleep(random.uniform(0.1, 0.3))
+        pyautogui.click()
+        time.sleep(random.uniform(3, 5))
+        
+        return _is_bypassed(sb)
+    except ImportError:
+        logger.debug("pyautogui not available")
+        return False
+    except Exception as e:
+        logger.debug(f"DDOS-Guard method 2 failed: {e}")
         return False
 
 def _bypass(sb, max_retries: int = MAX_RETRY) -> None:
-    """Enhanced bypass function with multiple strategies for different protection types"""
-    try_count = 0
-    
-    # Cloudflare-specific methods
+    """Bypass function with strategies for Cloudflare and DDOS-Guard protection."""
     cloudflare_methods = [_bypass_method_1, _bypass_method_2, _bypass_method_3]
-    
-    # DDOS-Guard-specific methods
-    ddos_guard_methods = [_bypass_ddos_guard_method_1, _bypass_ddos_guard_method_2, _bypass_ddos_guard_method_3]
+    ddos_guard_methods = [_bypass_ddos_guard_method_1, _bypass_ddos_guard_method_2]
 
-    while not _is_bypassed(sb):
-        if try_count >= max_retries:
-            logger.warning("Exceeded maximum retries. Bypass failed.")
-            break
+    for try_count in range(max_retries):
+        if _is_bypassed(sb):
+            return
         
-        # Detect challenge type on each iteration (it might change after attempts)
         challenge_type = _detect_challenge_type(sb)
         logger.info(f"Detected challenge type: {challenge_type}")
         
-        # Select methods based on challenge type
         if challenge_type == "ddos_guard":
             methods = ddos_guard_methods
         elif challenge_type == "cloudflare":
             methods = cloudflare_methods
         else:
-            # Unknown challenge, try all methods
             methods = cloudflare_methods + ddos_guard_methods
             
-        method_index = try_count % len(methods)
-        method = methods[method_index]
-        
-        logger.info(f"Bypass attempt {try_count + 1} / {max_retries} using {method.__name__} (challenge: {challenge_type})")
-        
-        try_count += 1
+        method = methods[try_count % len(methods)]
+        logger.info(f"Bypass attempt {try_count + 1}/{max_retries} using {method.__name__}")
 
-        # Progressive backoff: wait longer between retries
-        wait_time = min(DEFAULT_SLEEP * (try_count - 1), 15)
+        # Progressive backoff
+        wait_time = min(DEFAULT_SLEEP * try_count, 15)
         if wait_time > 0:
             logger.info(f"Waiting {wait_time}s before trying...")
             time.sleep(wait_time)
@@ -492,6 +336,8 @@ def _bypass(sb, max_retries: int = MAX_RETRY) -> None:
             logger.warning(f"Exception in {method.__name__}: {e}")
 
         logger.info(f"Bypass method {method.__name__} failed.")
+    
+    logger.warning("Exceeded maximum retries. Bypass failed.")
 
 def _get_chromium_args():
     """Build Chrome arguments dynamically, pre-resolving hostnames via Python's DNS.
@@ -543,7 +389,7 @@ def _get_chromium_args():
                     if results:
                         ip = results[0][4][0]  # First result, sockaddr tuple, IP address
                         host_rules.append(f"MAP {hostname} {ip}")
-                        logger.info(f"Chrome: Pre-resolved {hostname} -> {ip}")
+                        logger.debug(f"Chrome: Pre-resolved {hostname} -> {ip}")
                     else:
                         logger.warning(f"Chrome: No addresses returned for {hostname}")
                 except socket.gaierror as e:
@@ -684,44 +530,43 @@ def _get_driver():
     return DRIVER
 
 def _reset_driver():
+    """Reset the browser driver and cleanup all associated processes."""
     logger.log_resource_usage()
     logger.info("Resetting driver...")
     global DRIVER, DISPLAY
+    
+    # Quit driver
     if DRIVER:
         try:
             DRIVER.quit()
-            DRIVER = None
         except Exception as e:
             logger.warning(f"Error quitting driver: {e}")
-        time.sleep(0.5)
+        DRIVER = None
+    
+    # Stop virtual display
     if DISPLAY["xvfb"]:
         try:
             DISPLAY["xvfb"].stop()
-            DISPLAY["xvfb"] = None
         except Exception as e:
             logger.warning(f"Error stopping display: {e}")
-        time.sleep(0.5)
-    try:
-        os.system("pkill -f Xvfb")
-    except Exception as e:
-        logger.debug(f"Error killing Xvfb: {e}")
-    time.sleep(0.5)
+        DISPLAY["xvfb"] = None
+    
+    # Stop ffmpeg recording
     if DISPLAY["ffmpeg"]:
         try:
             DISPLAY["ffmpeg"].send_signal(signal.SIGINT)
-            DISPLAY["ffmpeg"] = None
         except Exception as e:
             logger.debug(f"Error stopping ffmpeg: {e}")
-        time.sleep(0.5)
-    try:
-        os.system("pkill -f ffmpeg")
-    except Exception as e:
-        logger.debug(f"Error killing ffmpeg: {e}")
+        DISPLAY["ffmpeg"] = None
+    
+    # Kill any lingering processes
     time.sleep(0.5)
-    try:
-        os.system("pkill -f chrom")
-    except Exception as e:
-        logger.debug(f"Error killing chrom: {e}")
+    for process in ["Xvfb", "ffmpeg", "chrom"]:
+        try:
+            os.system(f"pkill -f {process}")
+        except Exception as e:
+            logger.debug(f"Error killing {process}: {e}")
+    
     time.sleep(0.5)
     logger.info("Driver reset.")
     logger.log_resource_usage()

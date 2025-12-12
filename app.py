@@ -1,27 +1,32 @@
 """Flask web application for book download service with URL rewrite support."""
 
+import io
 import logging
-import io, re, os
+import os
+import re
 import sqlite3
 import time
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, request, jsonify, send_file, send_from_directory, session
+from typing import Any, Dict, Tuple, Union
+
+from flask import Flask, jsonify, request, send_file, send_from_directory, session
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 from werkzeug.wrappers import Response
-import typing
 
-from logger import setup_logger
-from config import _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE, SUPPORTED_FORMATS
-from env import FLASK_HOST, FLASK_PORT, CWA_DB_PATH, DEBUG, USING_EXTERNAL_BYPASSER, BUILD_VERSION, RELEASE_VERSION, CALIBRE_WEB_URL
 import backend
-
+from book_manager import SearchUnavailable
+from config import BOOK_LANGUAGE, SUPPORTED_FORMATS, _SUPPORTED_BOOK_LANGUAGE
+from env import (
+    BUILD_VERSION, CALIBRE_WEB_URL, CWA_DB_PATH, DEBUG, FLASK_HOST, FLASK_PORT,
+    RELEASE_VERSION, USING_EXTERNAL_BYPASSER,
+)
+from logger import setup_logger
 from models import SearchFilters
 from websocket_manager import ws_manager
-from book_manager import SearchUnavailable
 
 logger = setup_logger(__name__)
 app = Flask(__name__)
@@ -62,7 +67,7 @@ logger.info(f"Flask-SocketIO initialized with async_mode='{async_mode}'")
 
 # Rate limiting for login attempts
 # Structure: {username: {'count': int, 'lockout_until': datetime}}
-failed_login_attempts: typing.Dict[str, typing.Dict[str, typing.Any]] = {}
+failed_login_attempts: Dict[str, Dict[str, Any]] = {}
 MAX_LOGIN_ATTEMPTS = 10
 LOCKOUT_DURATION_MINUTES = 30
 
@@ -245,20 +250,17 @@ def logo() -> Response:
 
 @app.route('/favicon.ico')
 @app.route('/favico<path:_>')
-def favicon(_ : typing.Any = None) -> Response:
+def favicon(_: Any = None) -> Response:
     """
     Serve favicon from built frontend assets.
     """
     return send_from_directory(os.path.join(app.root_path, 'frontend-dist'),
         'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
-from typing import Union, Tuple
-
 if DEBUG:
     import subprocess
-    import time
     if USING_EXTERNAL_BYPASSER:
-        STOP_GUI = lambda: None  # No-op for external bypasser
+        STOP_GUI = lambda: None
     else:
         from cloudflare_bypasser import _reset_driver as STOP_GUI
     @app.route('/api/debug', methods=['GET'])
@@ -620,7 +622,7 @@ def api_clear_completed() -> Union[Response, Tuple[Response, int]]:
         removed_count = backend.clear_completed()
         
         # Broadcast status update after clearing
-        if ws_manager and ws_manager.is_enabled():
+        if ws_manager:
             ws_manager.broadcast_status_update(backend.queue_status())
         
         return jsonify({"status": "cleared", "removed_count": removed_count})
