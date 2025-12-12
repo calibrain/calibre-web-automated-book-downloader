@@ -186,7 +186,7 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
             return None
         
         progress_callback = lambda progress: update_download_progress(book_id, progress)
-        status_callback = lambda status: update_download_status(book_id, status)
+        status_callback = lambda status, message=None: update_download_status(book_id, status, message)
         
         # Set status to resolving immediately when processing starts
         update_download_status(book_id, "resolving")
@@ -213,20 +213,11 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
                 book_path.unlink()
             return None
 
-        # Update status to verifying
-        book_queue.update_status(book_id, QueueStatus.VERIFYING)
-        if ws_manager and ws_manager.is_enabled():
-            ws_manager.broadcast_status_update(queue_status())
-        logger.info(f"Verifying download: {book_info.title}")
+        logger.info(f"Post-processing download: {book_info.title}")
 
         if CUSTOM_SCRIPT:
             logger.info(f"Running custom script: {CUSTOM_SCRIPT}")
             subprocess.run([CUSTOM_SCRIPT, book_path])
-            
-        # Update status to ingesting
-        book_queue.update_status(book_id, QueueStatus.INGESTING)
-        if ws_manager and ws_manager.is_enabled():
-            ws_manager.broadcast_status_update(queue_status())
         
         if success_download_url and book_info.format == "":
             book_info.format = success_download_url.split(".")[-1]
@@ -305,8 +296,14 @@ def update_download_progress(book_id: str, progress: float) -> None:
         if should_broadcast:
             ws_manager.broadcast_download_progress(book_id, progress, 'downloading')
 
-def update_download_status(book_id: str, status: str) -> None:
-    """Update download status."""
+def update_download_status(book_id: str, status: str, message: Optional[str] = None) -> None:
+    """Update download status with optional detailed message.
+    
+    Args:
+        book_id: Book identifier
+        status: Status string (e.g., 'resolving', 'downloading')
+        message: Optional detailed status message for UI display
+    """
     # Map string status to QueueStatus enum
     status_map = {
         'queued': QueueStatus.QUEUED,
@@ -325,6 +322,10 @@ def update_download_status(book_id: str, status: str) -> None:
     queue_status_enum = status_map.get(status.lower())
     if queue_status_enum:
         book_queue.update_status(book_id, queue_status_enum)
+        
+        # Update status message if provided
+        if message:
+            book_queue.update_status_message(book_id, message)
         
         # Broadcast status update via WebSocket
         if ws_manager and ws_manager.is_enabled():
@@ -392,7 +393,7 @@ def _process_single_download(book_id: str, cancel_flag: Event) -> None:
     """Process a single download job."""
     try:
         # Status will be updated through callbacks during download process
-        # (resolving -> bypassing -> downloading -> verifying -> ingesting -> complete)
+        # (resolving -> downloading -> complete)
         download_path = _download_book_with_cancellation(book_id, cancel_flag)
         
         # Clean up progress tracking

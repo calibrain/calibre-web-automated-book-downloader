@@ -518,25 +518,6 @@ def rotate_dns_and_reset_aa() -> bool:
         _save_state(aa_url=AA_BASE_URL)
     return True
 
-def switch_aa_url():
-    """Switch to next AA URL (only if current URL is in available list).
-    
-    Note: This function can be called during initialization, so we must NOT call
-    _ensure_initialized() here to avoid recursive init loops.
-    """
-    global AA_BASE_URL, _current_aa_url_index
-    # Don't switch if current URL is not in available list (user-specified custom URL)
-    if AA_BASE_URL not in _aa_urls:
-        return False
-    if _current_aa_url_index + 1 >= len(_aa_urls):
-        return False
-    _current_aa_url_index += 1
-    AA_BASE_URL = _aa_urls[_current_aa_url_index]
-    config.AA_BASE_URL = AA_BASE_URL
-    logger.warning(f"Switched AA URL to: {AA_BASE_URL}")
-    _save_state(aa_url=AA_BASE_URL)
-    return True
-
 # Initialize DNS resolvers based on configuration
 def init_dns_resolvers():
     """Initialize DNS resolvers based on configuration."""

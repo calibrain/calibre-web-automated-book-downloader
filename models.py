@@ -56,6 +56,7 @@ class BookInfo:
     download_path: Optional[str] = None
     priority: int = 0
     progress: Optional[float] = None
+    status_message: Optional[str] = None  # Detailed status message for UI display
 
 class BookQueue:
     """Thread-safe book queue manager with priority support and cancellation."""
@@ -138,6 +139,12 @@ class BookQueue:
         with self._lock:
             if book_id in self._book_data:
                 self._book_data[book_id].progress = progress
+    
+    def update_status_message(self, book_id: str, message: str) -> None:
+        """Update detailed status message for a book."""
+        with self._lock:
+            if book_id in self._book_data:
+                self._book_data[book_id].status_message = message
             
     def get_status(self) -> Dict[QueueStatus, Dict[str, BookInfo]]:
         """Get current queue status."""

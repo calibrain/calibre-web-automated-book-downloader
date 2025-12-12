@@ -80,18 +80,12 @@ function App() {
     const ongoing = [
       currentStatus.queued,
       currentStatus.resolving,
-      currentStatus.bypassing,
       currentStatus.downloading,
-      currentStatus.verifying,
-      currentStatus.ingesting,
     ].reduce((sum, status) => sum + (status ? Object.keys(status).length : 0), 0);
 
-    const completed = [
-      currentStatus.completed,
-      currentStatus.complete,
-      currentStatus.available,
-      currentStatus.done,
-    ].reduce((sum, status) => sum + (status ? Object.keys(status).length : 0), 0);
+    const completed = currentStatus.complete
+      ? Object.keys(currentStatus.complete).length
+      : 0;
 
     const errored = currentStatus.error ? Object.keys(currentStatus.error).length : 0;
 
@@ -132,19 +126,11 @@ function App() {
     // Check for completed items
     const prevDownloadingIds = new Set(Object.keys(prevDownloading));
     const prevQueuedIds = new Set(Object.keys(prevQueued));
-    const currAvailable = curr.available || {};
-    const currDone = curr.done || {};
+    const currComplete = curr.complete || {};
 
-    Object.keys(currAvailable).forEach(bookId => {
+    Object.keys(currComplete).forEach(bookId => {
       if (prevDownloadingIds.has(bookId) || prevQueuedIds.has(bookId)) {
-        const book = currAvailable[bookId];
-        showToast(`${book.title || 'Book'} completed`, 'success');
-      }
-    });
-
-    Object.keys(currDone).forEach(bookId => {
-      if (prevDownloadingIds.has(bookId) || prevQueuedIds.has(bookId)) {
-        const book = currDone[bookId];
+        const book = currComplete[bookId];
         showToast(`${book.title || 'Book'} completed`, 'success');
       }
     });
@@ -371,26 +357,11 @@ function App() {
     if (currentStatus.error && currentStatus.error[bookId]) {
       return { text: 'Failed', state: 'error' };
     }
-    // Check completed states
-    if (currentStatus.completed && currentStatus.completed[bookId]) {
-      return { text: 'Downloaded', state: 'completed' };
-    }
+    // Check completed
     if (currentStatus.complete && currentStatus.complete[bookId]) {
-      return { text: 'Downloaded', state: 'completed' };
+      return { text: 'Downloaded', state: 'complete' };
     }
-    if (currentStatus.available && currentStatus.available[bookId]) {
-      return { text: 'Downloaded', state: 'completed' };
-    }
-    if (currentStatus.done && currentStatus.done[bookId]) {
-      return { text: 'Downloaded', state: 'completed' };
-    }
-    // Check in-progress states with detailed status
-    if (currentStatus.ingesting && currentStatus.ingesting[bookId]) {
-      return { text: 'Ingesting', state: 'ingesting' };
-    }
-    if (currentStatus.verifying && currentStatus.verifying[bookId]) {
-      return { text: 'Verifying', state: 'verifying' };
-    }
+    // Check in-progress states
     if (currentStatus.downloading && currentStatus.downloading[bookId]) {
       const book = currentStatus.downloading[bookId];
       return {
@@ -398,9 +369,6 @@ function App() {
         state: 'downloading',
         progress: book.progress
       };
-    }
-    if (currentStatus.bypassing && currentStatus.bypassing[bookId]) {
-      return { text: 'Bypassing Cloudflare...', state: 'bypassing' };
     }
     if (currentStatus.resolving && currentStatus.resolving[bookId]) {
       return { text: 'Resolving', state: 'resolving' };

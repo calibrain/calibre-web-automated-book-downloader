@@ -13,20 +13,15 @@ export interface Book {
   description?: string;
   download_path?: string;
   progress?: number;
+  status_message?: string;  // Detailed status message (e.g., "Trying Libgen (2/5)")
 }
 
 // Status response types
 export interface StatusData {
   queued?: Record<string, Book>;
   resolving?: Record<string, Book>;
-  bypassing?: Record<string, Book>;
   downloading?: Record<string, Book>;
-  verifying?: Record<string, Book>;
-  ingesting?: Record<string, Book>;
   complete?: Record<string, Book>;
-  available?: Record<string, Book>;
-  done?: Record<string, Book>;
-  completed?: Record<string, Book>;
   error?: Record<string, Book>;
   cancelled?: Record<string, Book>;
 }
@@ -36,7 +31,7 @@ export interface ActiveDownloadsResponse {
 }
 
 // Button states
-export type ButtonState = 'download' | 'queued' | 'resolving' | 'bypassing' | 'downloading' | 'verifying' | 'ingesting' | 'completed' | 'error';
+export type ButtonState = 'download' | 'queued' | 'resolving' | 'downloading' | 'complete' | 'error';
 
 export interface ButtonStateInfo {
   text: string;

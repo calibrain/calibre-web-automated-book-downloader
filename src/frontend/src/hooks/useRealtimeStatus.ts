@@ -200,13 +200,9 @@ export const useRealtimeStatus = ({
               },
             };
           }
-          // Also check other active states in case status update hasn't arrived yet
-          else if (newStatus.bypassing?.[data.book_id]) {
-            // Book is being bypassed but progress came through - might transition soon
-            // Keep the progress for when it moves to downloading
-          }
+          // Also check resolving state in case status update hasn't arrived yet
           else if (newStatus.resolving?.[data.book_id]) {
-            // Book is resolving - keep for later
+            // Book is resolving - progress will apply when it moves to downloading
           }
           
           return newStatus;

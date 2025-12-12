@@ -346,6 +346,18 @@ def _label_source(link: str) -> str:
         return "z-lib"
     return "unknown"
 
+def _friendly_source_name(link: str) -> str:
+    """Get a user-friendly name for a download source."""
+    if "welib.org" in link:
+        return "Welib"
+    if "/dyn/api/fast_download" in link or "/slow_download/" in link or "annas-" in link:
+        return "AA"
+    if "libgen" in link:
+        return "Libgen"
+    if "z-lib" in link or "zlibrary" in link:
+        return "Z-Library"
+    return "Mirror"
+
 def _get_download_urls_from_welib(book_id: str, selector: Optional[network.AAMirrorSelector] = None) -> list[str]:
     """Get download urls from welib.org."""
     if ALLOW_USE_WELIB == False:
@@ -459,7 +471,7 @@ def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
     }
 
 
-def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None) -> Optional[str]:
+def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str, Optional[str]], None]] = None) -> Optional[str]:
     """Download a book from available sources.
 
     Args:
@@ -467,7 +479,7 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
         title: Book title for logging
         progress_callback: Optional callback for download progress updates
         cancel_flag: Optional cancellation flag
-        status_callback: Optional callback for status updates
+        status_callback: Optional callback for status updates (status, message)
 
     Returns:
         str: Download URL if successful, None otherwise
@@ -490,6 +502,7 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
     download_links = list(dict.fromkeys(download_links))
 
     links_queue = download_links
+    total_sources = len(links_queue)
     # Track whether we've already fetched welib as a fallback
     welib_fallback_loaded = PRIORITIZE_WELIB
     # Iterate with index so we can append welib links later
@@ -498,19 +511,25 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
         link = links_queue[idx]
         try:
             source_label = _label_source(link)
-            logger.info("Trying download source [%s]: %s", source_label, link)
-            # Update status to resolving before attempting download URL fetch
+            friendly_name = _friendly_source_name(link)
+            current_pos = idx + 1
+            # Update total if we added more sources
+            total_sources = len(links_queue)
+            
+            logger.info("Trying download source [%s]: %s (%d/%d)", source_label, link, current_pos, total_sources)
+            
+            # Update status with simple message showing which source we're trying
             if status_callback:
-                status_callback("resolving")
+                status_callback("resolving", f"Trying {friendly_name} ({current_pos}/{total_sources})")
 
             download_url = _get_download_url(link, book_info.title, cancel_flag, status_callback, selector)
             if download_url == "":
                 raise Exception("No download URL resolved")
 
             logger.info("Resolved download URL [%s]: %s", source_label, download_url)
-            # Update status to downloading before starting actual download
+            # Update status to downloading
             if status_callback:
-                status_callback("downloading")
+                status_callback("downloading", None)
 
             logger.info(f"Downloading `{book_info.title}` from `{download_url}`")
 
@@ -548,17 +567,18 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
     return None
 
 
-def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None, selector: Optional[network.AAMirrorSelector] = None) -> str:
+def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str, Optional[str]], None]] = None, selector: Optional[network.AAMirrorSelector] = None) -> str:
     """Extract actual download URL from various source pages."""
 
     url = ""
     sel = selector or network.AAMirrorSelector()
+    friendly_name = _friendly_source_name(link)
 
     if link.startswith(f"{network.get_aa_base_url()}/dyn/api/fast_download.json"):
-        page = downloader.html_get_page(link, status_callback=status_callback, selector=sel)
+        page = downloader.html_get_page(link, selector=sel)
         url = json.loads(page).get("download_url")
     else:
-        html = downloader.html_get_page(link, status_callback=status_callback, selector=sel)
+        html = downloader.html_get_page(link, selector=sel)
 
         if html == "":
             return ""

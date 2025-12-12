@@ -14,14 +14,8 @@ interface DownloadsSidebarProps {
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
   queued: { bg: 'bg-amber-500/10', text: 'text-amber-600', label: 'Queued' },
   resolving: { bg: 'bg-indigo-500/10', text: 'text-indigo-600', label: 'Resolving' },
-  bypassing: { bg: 'bg-purple-500/10', text: 'text-purple-600', label: 'Bypassing Cloudflare...' },
   downloading: { bg: 'bg-blue-500/10', text: 'text-blue-600', label: 'Downloading' },
-  verifying: { bg: 'bg-cyan-500/10', text: 'text-cyan-600', label: 'Verifying' },
-  ingesting: { bg: 'bg-teal-500/10', text: 'text-teal-600', label: 'Ingesting' },
   complete: { bg: 'bg-green-500/10', text: 'text-green-600', label: 'Complete' },
-  completed: { bg: 'bg-green-500/10', text: 'text-green-600', label: 'Completed' },
-  available: { bg: 'bg-green-500/10', text: 'text-green-600', label: 'Available' },
-  done: { bg: 'bg-green-500/10', text: 'text-green-600', label: 'Done' },
   error: { bg: 'bg-red-500/10', text: 'text-red-600', label: 'Error' },
   cancelled: { bg: 'bg-gray-500/10', text: 'text-gray-600', label: 'Cancelled' },
 };
@@ -56,24 +50,14 @@ const getStatusProgress = (statusName: string, bookProgress?: number): number =>
     case 'queued':
       return 5;
     case 'resolving':
-      return 10;
-    case 'bypassing':
       return 15;
     case 'downloading':
-      // Map actual progress (0-100) to 20-90 range
+      // Map actual progress (0-100) to 20-100 range
       if (typeof bookProgress === 'number') {
-        return 20 + (bookProgress * 0.7);
+        return 20 + (bookProgress * 0.8);
       }
       return 20;
-    case 'verifying':
-      return 95;
-    case 'ingesting':
-      return 99;
-    case 'completed':
     case 'complete':
-    case 'available':
-    case 'done':
-      return 100;
     case 'error':
       return 100;
     default:
@@ -83,15 +67,11 @@ const getStatusProgress = (statusName: string, bookProgress?: number): number =>
 
 // Helper to get progress bar color based on status
 const getProgressBarColor = (statusName: string): string => {
-  const isCompleted = ['completed', 'complete', 'available', 'done'].includes(statusName);
-  if (isCompleted) return 'bg-green-600';
+  if (statusName === 'complete') return 'bg-green-600';
   if (statusName === 'error') return 'bg-red-600';
-  if (statusName === 'queued') return 'bg-gray-600';
-  if (statusName === 'resolving') return 'bg-purple-600';
-  if (statusName === 'bypassing') return 'bg-violet-600';
+  if (statusName === 'queued') return 'bg-amber-600';
+  if (statusName === 'resolving') return 'bg-indigo-600';
   if (statusName === 'downloading') return 'bg-sky-600';
-  if (statusName === 'verifying') return 'bg-cyan-600';
-  if (statusName === 'ingesting') return 'bg-teal-600';
   return 'bg-sky-600';
 };
 
@@ -122,7 +102,7 @@ export const DownloadsSidebar = ({
   const allDownloadItems: Array<{ book: Book; status: string; order: number }> = [];
   
   // Priority order for display
-  const statusOrder = ['downloading', 'bypassing', 'resolving', 'queued', 'verifying', 'ingesting', 'error', 'completed', 'complete', 'available', 'done', 'cancelled'];
+  const statusOrder = ['downloading', 'resolving', 'queued', 'error', 'complete', 'cancelled'];
   
   statusOrder.forEach((statusName, index) => {
     const items = (status as any)[statusName];
@@ -144,16 +124,16 @@ export const DownloadsSidebar = ({
       label: statusName.charAt(0).toUpperCase() + statusName.slice(1),
     };
 
-    const isInProgress = ['queued', 'resolving', 'bypassing', 'downloading', 'verifying', 'ingesting'].includes(statusName);
-    const isCompleted = ['completed', 'complete', 'available', 'done'].includes(statusName);
+    const isInProgress = ['queued', 'resolving', 'downloading'].includes(statusName);
+    const isCompleted = statusName === 'complete';
     const hasError = statusName === 'error';
     
     // Get progress information
     const progress = getStatusProgress(statusName, book.progress);
     const progressBarColor = getProgressBarColor(statusName);
     
-    // Format progress text
-    let progressText = statusStyle.label;
+    // Format progress text - use status_message if available, otherwise fall back to label
+    let progressText = book.status_message || statusStyle.label;
     if (statusName === 'downloading' && book.progress && book.size) {
       const downloadedMB = (book.progress / 100) * parseFloat(book.size.replace(/[^\d.]/g, ''));
       progressText = `${downloadedMB.toFixed(1)}mb / ${book.size}`;

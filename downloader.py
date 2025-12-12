@@ -34,7 +34,6 @@ def html_get_page(
     url: str,
     retry: int = MAX_RETRY,
     use_bypasser: bool = False,
-    status_callback: Optional[Callable[[str], None]] = None,
     selector: Optional[network.AAMirrorSelector] = None,
 ) -> str:
     """Fetch HTML content from a URL with retry mechanism.
@@ -59,8 +58,6 @@ def html_get_page(
             logger.debug(f"html_get_page: {current_url}, attempt: {attempt}/{max_attempts}, use_bypasser: {use_bypasser_now}")
             
             if use_bypasser_now and USE_CF_BYPASS:
-                if status_callback:
-                    status_callback("bypassing")
                 logger.info(f"GET Using Cloudflare Bypasser for: {current_url}")
                 return get_bypassed_page(current_url, selector)
 
