@@ -1,6 +1,9 @@
 from logger import setup_logger
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import requests
+
+if TYPE_CHECKING:
+    import network
 
 try:
     from env import EXT_BYPASSER_PATH, EXT_BYPASSER_TIMEOUT, EXT_BYPASSER_URL
@@ -10,11 +13,12 @@ except ImportError:
 logger = setup_logger(__name__)
 
 
-def get_bypassed_page(url: str) -> Optional[str]:
+def get_bypassed_page(url: str, selector: Optional["network.AAMirrorSelector"] = None) -> Optional[str]:
     """Fetch HTML content from a URL using an External Cloudflare Resolver.
 
     Args:
         url: Target URL
+        selector: Optional mirror selector (unused, for API compatibility with internal bypasser)
     Returns:
         str: HTML content if successful, None otherwise
     """

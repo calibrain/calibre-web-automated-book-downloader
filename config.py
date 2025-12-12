@@ -69,6 +69,15 @@ else:
     DOH_SERVER = ""
 logger.info(f"DOH_SERVER: {DOH_SERVER}")
 
+# Warn about external bypasser DNS limitations
+if env.USING_EXTERNAL_BYPASSER and env.USE_CF_BYPASS:
+    logger.warning(
+        "Using external bypasser (FlareSolverr). Note: FlareSolverr uses its own DNS resolution, "
+        "not this application's custom DNS settings. If you experience DNS-related blocks, "
+        "configure DNS at the Docker/system level for your FlareSolverr container, "
+        "or consider using the internal bypasser which integrates with the app's DNS system."
+    )
+
 # Proxy settings
 PROXIES = {}
 if env.HTTP_PROXY:
