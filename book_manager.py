@@ -193,7 +193,6 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     slow_urls_with_waitlist: list[str] = []
     external_urls_libgen: list[str] = []
     external_urls_z_lib: list[str] = []
-    external_urls_welib: list[str] = []
 
     def _append_unique(lst: list[str], href: str) -> None:
         if href and href not in lst:
@@ -221,15 +220,9 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         except:
             pass
 
-    # Only prefetch welib when explicitly prioritized; otherwise defer to fallback in download_book
-    welib_selector = network.AAMirrorSelector() if USE_CF_BYPASS and PRIORITIZE_WELIB else None
-    if USE_CF_BYPASS and PRIORITIZE_WELIB:
-        external_urls_welib = _get_download_urls_from_welib(book_id, selector=welib_selector)
-
     logger.debug(
-        "Source inventory for %s -> welib_prefetched=%d, aa_no_wait=%d, aa_wait=%d, libgen=%d, zlib=%d",
+        "Source inventory for %s -> aa_no_wait=%d, aa_wait=%d, libgen=%d, zlib=%d",
         book_id,
-        len(external_urls_welib),
         len(slow_urls_no_waitlist),
         len(slow_urls_with_waitlist),
         len(external_urls_libgen),
@@ -237,9 +230,6 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     )
 
     urls = []
-    # Optional: push welib to the front only when explicitly requested
-    if PRIORITIZE_WELIB:
-        urls += external_urls_welib
 
     # Prefer AA / partner and other mirrors first
     urls += slow_urls_no_waitlist if USE_CF_BYPASS else []
@@ -506,6 +496,18 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
     download_links = list(dict.fromkeys(download_links))
 
     links_queue = download_links
+    
+    # Fetch welib URLs upfront when prioritized
+    welib_fallback_loaded = False
+    if USE_CF_BYPASS and PRIORITIZE_WELIB and ALLOW_USE_WELIB:
+        logger.info("Fetching welib.org download URLs (PRIORITIZE_WELIB enabled)")
+        if status_callback:
+            status_callback("resolving", "Fetching welib sources...")
+        welib_links = _get_download_urls_from_welib(book_info.id, selector=selector)
+        if welib_links:
+            links_queue = welib_links + [l for l in links_queue if l not in welib_links]
+        welib_fallback_loaded = True
+    
     total_sources = len(links_queue)
     
     # Handle case where no download sources are available
@@ -515,8 +517,6 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
             status_callback("error", "No download sources found")
         return None
     
-    # Track whether we've already fetched welib as a fallback
-    welib_fallback_loaded = PRIORITIZE_WELIB
     # Track consecutive failures per source type to skip after threshold
     source_failures: dict[str, int] = {}
     # Iterate with index so we can append welib links later
