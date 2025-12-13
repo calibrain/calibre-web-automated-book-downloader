@@ -105,18 +105,11 @@ change_ownership /tmp/cwa-book-downloader
 # Test write to all folders
 make_writable /cwa-book-ingest
 
-# Set the command to run based on DEBUG setting
-# DEBUG=true uses Flask dev server, otherwise uses gunicorn for production
-is_debug=$(echo "$DEBUG" | tr '[:upper:]' '[:lower:]')
-if [ "$is_debug" = "true" ]; then
-    command="python3 app.py"
-else
-    # Use geventwebsocket worker for SocketIO + WebSocket compatibility
-    # This special worker class handles WebSocket upgrades properly
-    # --workers 1: SocketIO requires sticky sessions, use 1 worker or configure sticky sessions
-    # -t 300: 300 second timeout for long-running requests
-    command="gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --workers 1 -t 300 -b ${FLASK_HOST:-0.0.0.0}:${FLASK_PORT:-8084} app:app"
-fi
+# Always run Gunicorn (even when DEBUG=true) to ensure Socket.IO WebSocket
+# upgrades work reliably on customer machines.
+# Map app LOG_LEVEL (often DEBUG/INFO/...) to gunicorn's --log-level (lowercase).
+gunicorn_loglevel=$([ "$DEBUG" = "true" ] && echo debug || echo "${LOG_LEVEL:-info}" | tr '[:upper:]' '[:lower:]')
+command="gunicorn --log-level ${gunicorn_loglevel} --access-logfile - --error-logfile - --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --workers 1 -t 300 -b ${FLASK_HOST:-0.0.0.0}:${FLASK_PORT:-8084} app:app"
 
 # If DEBUG and not using an external bypass
 if [ "$DEBUG" = "true" ] && [ "$USING_EXTERNAL_BYPASSER" != "true" ]; then
