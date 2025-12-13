@@ -141,7 +141,7 @@ export const DownloadsSidebar = ({
     } else if (isCompleted) {
       progressText = 'Complete';
     } else if (hasError) {
-      progressText = 'Failed';
+      progressText = book.status_message || 'Failed';
     }
 
     return (
@@ -213,13 +213,6 @@ export const DownloadsSidebar = ({
                   {book.size && <span>{formatSize(book.size)}</span>}
                 </div>
               </div>
-
-              {/* Error Message - show actual error reason if available */}
-              {hasError && (
-                <p className="text-xs text-red-600 leading-snug">
-                  {book.status_message || 'Download failed'}
-                </p>
-              )}
             </div>
           </div>
         </div>
@@ -228,7 +221,7 @@ export const DownloadsSidebar = ({
         <div className="absolute bottom-0 left-0 right-0 pointer-events-none">
           <div className="flex justify-end p-2">
             <span
-              className={`relative inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium max-w-[70%] text-right overflow-hidden ${statusStyle.bg} ${statusStyle.text}`}
+              className={`relative inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}
             >
               {/* Wave animation overlay for in-progress states */}
               {isInProgress && statusStyle.waveColor && (

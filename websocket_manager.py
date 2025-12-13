@@ -18,6 +18,7 @@ class WebSocketManager:
         self._connection_lock = threading.Lock()
         self._on_first_connect_callbacks: List[Callable[[], None]] = []
         self._on_all_disconnect_callbacks: List[Callable[[], None]] = []
+        self._needs_rewarm = False  # Flag to trigger warmup callbacks on next connect
         
     def init_app(self, app, socketio: SocketIO):
         """Initialize the WebSocket manager with Flask-SocketIO instance."""
@@ -36,24 +37,41 @@ class WebSocketManager:
     
     def register_on_all_disconnect(self, callback: Callable[[], None]):
         """Register a callback to be called when all clients disconnect.
-        
+
         This can be used to trigger cleanup or resource release.
         """
         self._on_all_disconnect_callbacks.append(callback)
         logger.debug(f"Registered on_all_disconnect callback: {callback.__name__}")
+
+    def request_warmup_on_next_connect(self):
+        """Request that warmup callbacks be triggered on the next client connect.
+
+        This is used when resources (like the Cloudflare bypasser) shut down due to
+        inactivity while clients are still connected. The next connect event should
+        trigger warmup even though it's not technically the "first" connection.
+        """
+        with self._connection_lock:
+            self._needs_rewarm = True
+            logger.debug("Warmup requested for next client connect")
     
     def client_connected(self):
         """Track a new client connection. Call this from the connect event handler."""
         with self._connection_lock:
             was_zero = self._connection_count == 0
+            needs_rewarm = self._needs_rewarm
             self._connection_count += 1
             current_count = self._connection_count
-        
+            # Clear rewarm flag if we're going to trigger warmup
+            if was_zero or needs_rewarm:
+                self._needs_rewarm = False
+
         logger.debug(f"Client connected. Active connections: {current_count}")
-        
-        # If this is the first connection, trigger warmup callbacks
-        if was_zero:
-            logger.info("First client connected, triggering warmup callbacks...")
+
+        # Trigger warmup callbacks if this is the first connection OR if rewarm was requested
+        # (rewarm is requested when bypasser shuts down due to idle while clients are connected)
+        if was_zero or needs_rewarm:
+            reason = "First client connected" if was_zero else "Rewarm requested after idle shutdown"
+            logger.info(f"{reason}, triggering warmup callbacks...")
             for callback in self._on_first_connect_callbacks:
                 try:
                     # Run callbacks in a separate thread to not block the connection

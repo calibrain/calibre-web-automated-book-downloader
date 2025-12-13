@@ -588,30 +588,37 @@ def _reset_driver():
 
 def _cleanup_driver():
     """Reset driver after inactivity timeout.
-    
+
     Uses a longer timeout (4x) when UI clients are connected to avoid
     resetting while users are actively browsing. After all clients disconnect,
     the standard timeout applies as a grace period before shutdown.
     """
     global LAST_USED
-    
+
     # Check for active UI connections
     try:
         from websocket_manager import ws_manager
         has_active_clients = ws_manager.has_active_connections()
     except ImportError:
+        ws_manager = None
         has_active_clients = False
-    
+
     # Use longer timeout when UI is connected (user might be browsing)
     timeout_minutes = env.BYPASS_RELEASE_INACTIVE_MIN
     if has_active_clients:
         timeout_minutes *= 4  # 20 min default when UI open vs 5 min after disconnect
-    
+
     with LOCKED:
         if LAST_USED and time.time() - LAST_USED >= timeout_minutes * 60:
             logger.info(f"Cloudflare bypasser idle for {timeout_minutes} min - shutting down to free resources")
             _reset_driver()
             LAST_USED = None
+
+            # If clients are still connected, request warmup on next connect so the
+            # bypasser restarts when the user becomes active again
+            if has_active_clients and ws_manager:
+                ws_manager.request_warmup_on_next_connect()
+                logger.debug("Requested warmup on next client connect (clients still connected)")
 
 def _cleanup_loop():
     while True:

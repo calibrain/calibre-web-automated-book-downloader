@@ -36,11 +36,6 @@ _progress_lock = Lock()
 _last_activity: Dict[str, float] = {}
 STALL_TIMEOUT = 300  # 5 minutes without progress/status update = stalled
 
-def _sanitize_filename(filename: str) -> str:
-    """Sanitize a filename by replacing spaces with underscores and removing invalid characters."""
-    keepcharacters = (' ','.','_')
-    return "".join(c for c in filename if c.isalnum() or c in keepcharacters).rstrip()
-
 def search_books(query: str, filters: SearchFilters) -> List[Dict[str, Any]]:
     """Search for books matching the query.
     
@@ -176,16 +171,12 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
         book_info = book_queue._book_data[book_id]
         logger.info(f"Starting download: {book_info.title}")
 
-        if USE_BOOK_TITLE:
-            book_name = _sanitize_filename(book_info.title)
-        else:
-            book_name = book_id
-        # If format is not set, use the format of the first download URL
-        if book_info.format == "":
-            if not book_info.download_urls:
-                raise ValueError(f"No download URLs available for {book_id}")
-            book_info.format = book_info.download_urls[0].split(".")[-1]
-        book_name += f".{book_info.format}"
+        if not book_info.download_urls:
+            raise ValueError(f"No download URLs available for {book_id}")
+
+        # get_filename() resolves format as side effect
+        full_name = book_info.get_filename()
+        book_name = full_name if USE_BOOK_TITLE else f"{book_id}.{book_info.format or 'bin'}"
         book_path = TMP_DIR / book_name
 
         # Check cancellation before download
@@ -227,9 +218,9 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
             logger.info(f"Running custom script: {CUSTOM_SCRIPT}")
             subprocess.run([CUSTOM_SCRIPT, book_path])
         
-        if success_download_url and book_info.format == "":
-            book_info.format = success_download_url.split(".")[-1]
-            book_name += f".{book_info.format}"
+        # Regenerate filename with fallback to successful download URL for format
+        full_name = book_info.get_filename(success_download_url)
+        book_name = full_name if USE_BOOK_TITLE else f"{book_id}.{book_info.format or 'bin'}"
 
         final_dir = _prepare_download_folder(book_info)
         intermediate_path = final_dir / f"{book_id}.crdownload"

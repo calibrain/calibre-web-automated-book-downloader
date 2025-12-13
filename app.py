@@ -3,7 +3,6 @@
 import io
 import logging
 import os
-import re
 import sqlite3
 import time
 from datetime import datetime, timedelta
@@ -481,15 +480,12 @@ def api_local_download() -> Union[Response, Tuple[Response, int]]:
         if file_data is None:
             # Book data not found or not available
             return jsonify({"error": "File not found"}), 404
-        # Santize the file name
-        file_name = book_info.title
-        file_name = re.sub(r'[\\/:*?"<>|]', '_', file_name.strip())[:245]
-        file_extension = book_info.format
+        file_name = book_info.get_filename()
         # Prepare the file for sending to the client
         data = io.BytesIO(file_data)
         return send_file(
             data,
-            download_name=f"{file_name}.{file_extension}",
+            download_name=file_name,
             as_attachment=True
         )
 

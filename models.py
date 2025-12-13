@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from threading import Lock, Event
 from pathlib import Path
 import queue
+import re
 import time
 from env import INGEST_DIR, STATUS_TIMEOUT
 
@@ -55,6 +56,43 @@ class BookInfo:
     progress: Optional[float] = None
     status_message: Optional[str] = None  # Detailed status message for UI display
     added_time: Optional[float] = None  # Timestamp when added to queue
+
+    def get_filename(self, fallback_url: Optional[str] = None) -> str:
+        """Build sanitized filename: 'Author - Title (Year).format'
+
+        Resolves format from self.format, download_urls, or fallback_url.
+
+        Args:
+            fallback_url: URL to extract format from if not already known
+
+        Returns:
+            Sanitized filename safe for filesystem use
+        """
+        # Resolve format if needed
+        if not self.format:
+            for url in (self.download_urls[0] if self.download_urls else None, fallback_url):
+                if url:
+                    ext = url.split(".")[-1].lower()
+                    if ext and len(ext) <= 5 and ext.isalnum():
+                        self.format = ext
+                        break
+
+        # Build filename
+        parts = []
+        if self.author:
+            parts.append(self.author)
+            parts.append(" - ")
+        parts.append(self.title)
+        if self.year:
+            parts.append(f" ({self.year})")
+
+        filename = "".join(parts)
+        filename = re.sub(r'[\\/:*?"<>|]', '_', filename.strip())[:245]
+
+        if self.format:
+            filename = f"{filename}.{self.format}"
+
+        return filename
 
 class BookQueue:
     """Thread-safe book queue manager with priority support and cancellation."""
