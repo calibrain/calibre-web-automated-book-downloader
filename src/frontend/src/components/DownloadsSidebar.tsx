@@ -137,7 +137,13 @@ export const DownloadsSidebar = ({
     let progressText = book.status_message || statusStyle.label;
     if (statusName === 'downloading' && book.progress && book.size) {
       const downloadedMB = (book.progress / 100) * parseFloat(book.size.replace(/[^\d.]/g, ''));
-      progressText = `${downloadedMB.toFixed(1)}mb / ${book.size}`;
+      const sizeProgress = `${downloadedMB.toFixed(1)}MB / ${formatSize(book.size)}`;
+      // If there's attempt info in the status message, prepend it to the progress
+      if (book.status_message?.startsWith('Attempt')) {
+        progressText = `${book.status_message} - ${sizeProgress}`;
+      } else {
+        progressText = sizeProgress;
+      }
     } else if (isCompleted) {
       progressText = 'Complete';
     } else if (hasError) {

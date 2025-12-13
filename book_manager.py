@@ -1,5 +1,6 @@
 """Book download manager handling search and retrieval operations."""
 
+import itertools
 import json
 import re
 import time
@@ -18,6 +19,10 @@ from logger import setup_logger
 from models import BookInfo, SearchFilters
 
 logger = setup_logger(__name__)
+
+# Round-robin counter for AA slow download source rotation
+# Distributes concurrent downloads across different partner mirrors
+_aa_slow_rotation = itertools.count()
 
 if DEBUG_SKIP_SOURCES:
     logger.warning("DEBUG_SKIP_SOURCES active: skipping sources %s", DEBUG_SKIP_SOURCES)
@@ -525,6 +530,32 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
     # Preserve order but drop duplicates to avoid retrying the same host
     download_links = list(dict.fromkeys(download_links))
 
+    # Round-robin rotation for AA slow download URLs to distribute load across mirrors
+    # This prevents all concurrent downloads from hitting the same partner server first
+    # Rotate aa-slow-nowait and aa-slow-wait independently to preserve priority ordering
+    rotation_value = next(_aa_slow_rotation)
+
+    def _rotate_category_in_place(links: list, source_type: str) -> int:
+        """Rotate URLs of a specific source type within the list, preserving their positions."""
+        indices = [i for i, u in enumerate(links) if _url_source_types.get(u) == source_type]
+        if len(indices) <= 1:
+            return 0
+        rotation = rotation_value % len(indices)
+        if rotation == 0:
+            return 0
+        # Extract values, rotate, put back
+        values = [links[i] for i in indices]
+        rotated = values[rotation:] + values[:rotation]
+        for idx, val in zip(indices, rotated):
+            links[idx] = val
+        return rotation
+
+    nowait_rotation = _rotate_category_in_place(download_links, "aa-slow-nowait")
+    wait_rotation = _rotate_category_in_place(download_links, "aa-slow-wait")
+
+    if nowait_rotation or wait_rotation:
+        logger.info(f"AA source rotation: nowait={nowait_rotation}, wait={wait_rotation}")
+
     links_queue = download_links
     
     # Fetch welib URLs upfront when prioritized
@@ -576,7 +607,7 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
             logger.info("Trying download source [%s]: %s (%d/%d)", source_label, link, current_pos, total_sources)
             
             # Build source context for status messages (e.g., "Welib (1/12)")
-            source_context = f"{friendly_name} ({current_pos}/{total_sources})"
+            source_context = f"{friendly_name} (Server #{current_pos})"
             
             # Update status with simple message showing which source we're trying
             if status_callback:
@@ -587,11 +618,8 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
                 raise Exception("No download URL resolved")
 
             logger.info("Resolved download URL [%s]: %s", source_label, download_url)
-            # Update status to downloading (empty string clears the status message)
-            if status_callback:
-                status_callback("downloading", "")
 
-            data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag, selector)
+            data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag, selector, status_callback)
             if not data:
                 raise Exception("No data received from download")
             
@@ -687,7 +715,14 @@ def _extract_slow_download_url(soup: BeautifulSoup, link: str, title: str, cance
     if dl_link:
         return dl_link["href"]
 
-    # Try "copy this URL" pattern
+    # Try finding URL in gray background span (AA's copy URL format)
+    # The URL appears as plain text in <span class="bg-gray-200 ...">http://...</span>
+    for span in soup.find_all("span", class_=lambda c: c and "bg-gray-200" in c):
+        text = span.get_text(strip=True)
+        if text.startswith("http://") or text.startswith("https://"):
+            return text
+
+    # Try "copy this URL" pattern (legacy)
     copy_text = soup.find(string=lambda s: s and "copy this url" in s.lower())
     if copy_text and copy_text.parent:
         parent = copy_text.parent

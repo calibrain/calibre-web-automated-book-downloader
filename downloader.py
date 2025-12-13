@@ -25,8 +25,8 @@ if USE_CF_BYPASS:
 logger = setup_logger(__name__)
 
 # Network settings
-REQUEST_TIMEOUT = (5, 15)
-MAX_DOWNLOAD_RETRIES = 3
+REQUEST_TIMEOUT = (5, 10)  # (connect, read)
+MAX_DOWNLOAD_RETRIES = 2
 MAX_RESUME_ATTEMPTS = 3
 RETRYABLE_CODES = (429, 500, 502, 503, 504)
 CONNECTION_ERRORS = (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
@@ -151,6 +151,7 @@ def download_url(
     progress_callback: Optional[Callable[[float], None]] = None,
     cancel_flag: Optional[Event] = None,
     _selector: Optional[network.AAMirrorSelector] = None,
+    status_callback: Optional[Callable[[str, Optional[str]], None]] = None,
 ) -> Optional[BytesIO]:
     """Download content from URL with automatic retry and resume support."""
     selector = _selector or network.AAMirrorSelector()
@@ -165,9 +166,15 @@ def download_url(
         bytes_downloaded = 0
         
         try:
+            if attempt > 0 and status_callback:
+                status_callback("resolving", f"Connecting (Attempt {attempt + 1}/{MAX_DOWNLOAD_RETRIES})")
+            
             logger.info(f"Downloading: {current_url} (attempt {attempt + 1}/{MAX_DOWNLOAD_RETRIES})")
             response = requests.get(current_url, stream=True, proxies=PROXIES, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
+            
+            if status_callback:
+                status_callback("downloading", "")
             
             total_size = total_size or float(response.headers.get('content-length', 0))
             pbar = tqdm(total=total_size, unit='B', unit_scale=True, desc='Downloading')
@@ -200,6 +207,11 @@ def download_url(
             # Non-retryable errors
             if status in (403, 404):
                 logger.warning(f"Download failed ({status}): {current_url}")
+                return None
+            
+            # Timeout - don't retry, server likely overloaded
+            if isinstance(e, requests.exceptions.Timeout):
+                logger.warning(f"Timeout: {current_url} - skipping to next source")
                 return None
             
             # Try to resume if we got some data
