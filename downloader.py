@@ -15,6 +15,7 @@ from config import PROXIES
 from env import DEFAULT_SLEEP, MAX_RETRY, USE_CF_BYPASS, USING_EXTERNAL_BYPASSER
 from logger import setup_logger
 
+# Import bypasser if enabled
 if USE_CF_BYPASS:
     if USING_EXTERNAL_BYPASSER:
         from cloudflare_bypasser_external import get_bypassed_page
@@ -97,10 +98,12 @@ def html_get_page(
             
             if use_bypasser_now and USE_CF_BYPASS:
                 logger.info(f"GET (bypasser): {current_url}")
-                result = get_bypassed_page(current_url, selector)
-                # Bypasser failures are already logged; return empty string for consistency
-                # (no retry - if bypasser failed, it's unlikely to succeed immediately)
-                return result or ""
+                try:
+                    result = get_bypassed_page(current_url, selector)
+                    return result or ""
+                except Exception as e:
+                    logger.warning(f"Bypasser error: {type(e).__name__}: {e}")
+                    return ""
 
             logger.info(f"GET: {current_url}")
             response = requests.get(current_url, proxies=PROXIES, timeout=REQUEST_TIMEOUT)

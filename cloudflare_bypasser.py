@@ -1,9 +1,11 @@
 import os
+import random
 import signal
 import socket
 import subprocess
 import threading
 import time
+import traceback
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
@@ -19,7 +21,7 @@ from logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# Challenge detection indicators (shared between detection and bypass verification)
+# Challenge detection indicators
 CLOUDFLARE_INDICATORS = [
     "just a moment",
     "verify you are human",
@@ -42,7 +44,6 @@ DISPLAY = {
 }
 LAST_USED = None
 LOCKED = threading.Lock()
-TENTATIVE_CURRENT_URL = None
 
 def _reset_pyautogui_display_state():
     try:
@@ -68,12 +69,17 @@ def _get_page_info(sb) -> tuple[str, str, str]:
         current_url = ""
     return title, body, current_url
 
+
 def _check_indicators(title: str, body: str, indicators: list[str]) -> Optional[str]:
     """Check if any indicator is present in title or body. Returns the found indicator or None."""
     for indicator in indicators:
         if indicator in title or indicator in body:
             return indicator
     return None
+
+def _has_cloudflare_patterns(body: str, url: str) -> bool:
+    """Check for Cloudflare-specific patterns in body or URL."""
+    return "cf-" in body or "cloudflare" in url.lower() or "/cdn-cgi/" in url
 
 def _detect_challenge_type(sb) -> str:
     """Detect what type of challenge we're facing.
@@ -95,7 +101,7 @@ def _detect_challenge_type(sb) -> str:
             return "cloudflare"
         
         # Check URL patterns
-        if "cf-" in body or "cloudflare" in current_url.lower() or "/cdn-cgi/" in current_url:
+        if _has_cloudflare_patterns(body, current_url):
             return "cloudflare"
             
         return "none"
@@ -127,7 +133,7 @@ def _is_bypassed(sb, escape_emojis: bool = True) -> bool:
             return False
         
         # Cloudflare URL patterns
-        if "cf-" in body or "cloudflare" in current_url.lower() or "/cdn-cgi/" in current_url:
+        if _has_cloudflare_patterns(body, current_url):
             logger.debug("Cloudflare patterns detected in page")
             return False
             
@@ -201,7 +207,6 @@ def _bypass_method_3(sb) -> bool:
     try:
         logger.debug("Attempting bypass method 3: stealth approach")
         # Wait a random amount to appear more human
-        import random
         wait_time = random.uniform(8, 15)
         time.sleep(wait_time)
         
@@ -232,7 +237,6 @@ def _bypass_method_3(sb) -> bool:
 
 def _bypass_ddos_guard_method_1(sb) -> bool:
     """DDOS-Guard bypass: Use SeleniumBase's captcha handling (most reliable)"""
-    import random
     try:
         logger.debug("Attempting DDOS-Guard bypass: SeleniumBase uc_gui methods")
         time.sleep(random.uniform(2, 4))
@@ -272,7 +276,6 @@ def _bypass_ddos_guard_method_1(sb) -> bool:
 
 def _bypass_ddos_guard_method_2(sb) -> bool:
     """DDOS-Guard bypass: Use pyautogui to click estimated checkbox location"""
-    import random
     try:
         logger.debug("Attempting DDOS-Guard bypass: pyautogui coordinate click")
         time.sleep(random.uniform(2, 4))
@@ -443,8 +446,6 @@ def _get(url, retry : int = MAX_RETRY):
                 pass
             
     except Exception as e:
-        # Enhanced error logging with full stack trace
-        import traceback
         error_details = f"Exception type: {type(e).__name__}, Message: {str(e)}"
         stack_trace = traceback.format_exc()
         
@@ -459,15 +460,15 @@ def _get(url, retry : int = MAX_RETRY):
         
         # Reset driver on certain errors
         if "WebDriverException" in str(type(e)) or "SessionNotCreatedException" in str(type(e)):
-            logger.info("Resetting driver due to WebDriver error...")
+            logger.info("Restarting bypasser due to browser error...")
             _reset_driver()
             
     return _get(url, retry - 1)
 
 def get(url, retry : int = MAX_RETRY):
-    global LOCKED, TENTATIVE_CURRENT_URL, LAST_USED
+    """Fetch a URL with protection bypass."""
+    global LAST_USED
     with LOCKED:
-        TENTATIVE_CURRENT_URL = url
         ret = _get(url, retry)
         LAST_USED = time.time()
         return ret
@@ -484,21 +485,29 @@ def _init_driver():
     time.sleep(DEFAULT_SLEEP)
     return driver
 
+def _ensure_display_initialized():
+    """Initialize virtual display if needed. Must be called with LOCKED held."""
+    global DISPLAY
+    if DISPLAY["xvfb"] is not None:
+        return
+    if not (env.DOCKERMODE and env.USE_CF_BYPASS):
+        return
+    
+    from pyvirtualdisplay import Display
+    display = Display(visible=False, size=VIRTUAL_SCREEN_SIZE)
+    display.start()
+    DISPLAY["xvfb"] = display
+    logger.info("Virtual display started")
+    time.sleep(DEFAULT_SLEEP)
+    _reset_pyautogui_display_state()
+
+
 def _get_driver():
-    global DRIVER, DISPLAY
-    global LAST_USED
+    global DRIVER, DISPLAY, LAST_USED
     logger.info("Getting driver...")
     LAST_USED = time.time()
     
-    # Initialize display if not already done (e.g., warmup didn't run)
-    if env.DOCKERMODE and env.USE_CF_BYPASS and not DISPLAY["xvfb"]:
-        from pyvirtualdisplay import Display
-        display = Display(visible=False, size=VIRTUAL_SCREEN_SIZE)
-        display.start()
-        logger.info("Display started")
-        DISPLAY["xvfb"] = display
-        time.sleep(DEFAULT_SLEEP)
-        _reset_pyautogui_display_state()
+    _ensure_display_initialized()
     
     # Start FFmpeg recording on first actual bypass request (not during warmup)
     # This ensures we only record active bypass sessions, not idle time
@@ -538,7 +547,7 @@ def _get_driver():
 def _reset_driver():
     """Reset the browser driver and cleanup all associated processes."""
     logger.log_resource_usage()
-    logger.info("Resetting driver...")
+    logger.info("Shutting down Cloudflare bypasser...")
     global DRIVER, DISPLAY
     
     # Quit driver
@@ -574,18 +583,35 @@ def _reset_driver():
             logger.debug(f"Error killing {process}: {e}")
     
     time.sleep(0.5)
-    logger.info("Driver reset.")
+    logger.info("Cloudflare bypasser shut down (browser and display stopped)")
     logger.log_resource_usage()
 
 def _cleanup_driver():
-    global LOCKED
+    """Reset driver after inactivity timeout.
+    
+    Uses a longer timeout (4x) when UI clients are connected to avoid
+    resetting while users are actively browsing. After all clients disconnect,
+    the standard timeout applies as a grace period before shutdown.
+    """
     global LAST_USED
+    
+    # Check for active UI connections
+    try:
+        from websocket_manager import ws_manager
+        has_active_clients = ws_manager.has_active_connections()
+    except ImportError:
+        has_active_clients = False
+    
+    # Use longer timeout when UI is connected (user might be browsing)
+    timeout_minutes = env.BYPASS_RELEASE_INACTIVE_MIN
+    if has_active_clients:
+        timeout_minutes *= 4  # 20 min default when UI open vs 5 min after disconnect
+    
     with LOCKED:
-        if LAST_USED:
-            if time.time() - LAST_USED >= env.BYPASS_RELEASE_INACTIVE_MIN * 60:
-                _reset_driver()
-                LAST_USED = None
-                logger.info("Driver reset due to inactivity.")
+        if LAST_USED and time.time() - LAST_USED >= timeout_minutes * 60:
+            logger.info(f"Cloudflare bypasser idle for {timeout_minutes} min - shutting down to free resources")
+            _reset_driver()
+            LAST_USED = None
 
 def _cleanup_loop():
     while True:
@@ -614,7 +640,7 @@ def warmup():
     Note: Even when warmup is skipped, the bypasser can still start on-demand
     when actually needed for a download.
     """
-    global DISPLAY, DRIVER, LOCKED, LAST_USED
+    global DRIVER, LAST_USED
     
     if not BYPASS_WARMUP_ON_CONNECT:
         logger.debug("Bypasser warmup disabled via BYPASS_WARMUP_ON_CONNECT")
@@ -633,30 +659,17 @@ def warmup():
         return
     
     with LOCKED:
-        # Check if already fully warmed up
-        if DISPLAY["xvfb"] is not None and DRIVER is not None:
+        if is_warmed_up():
             logger.debug("Bypasser already fully warmed up")
             return
         
         logger.info("Warming up Cloudflare bypasser (pre-initializing display and browser)...")
         
         try:
-            # Step 1: Initialize virtual display
-            if DISPLAY["xvfb"] is None:
-                from pyvirtualdisplay import Display
-                display = Display(visible=False, size=VIRTUAL_SCREEN_SIZE)
-                display.start()
-                DISPLAY["xvfb"] = display
-                logger.info("Virtual display started")
-                
-                time.sleep(DEFAULT_SLEEP)
-                _reset_pyautogui_display_state()
-                
-                # Note: FFmpeg recording is NOT started during warmup.
-                # It will start in _get_driver() when an actual bypass request
-                # comes in, so we only record active bypass sessions.
+            # Initialize virtual display (FFmpeg recording starts later on first actual request)
+            _ensure_display_initialized()
             
-            # Step 2: Initialize Chrome driver
+            # Initialize Chrome driver
             if DRIVER is None:
                 logger.info("Pre-initializing Chrome browser...")
                 _init_driver()
@@ -674,41 +687,27 @@ def is_warmed_up() -> bool:
     return DISPLAY["xvfb"] is not None and DRIVER is not None
 
 def shutdown_if_idle():
-    """Shut down the bypasser if there's no pending work.
+    """Start the inactivity countdown when all WebSocket clients disconnect.
     
-    This is called when all WebSocket clients disconnect. It checks if there
-    are any active downloads or queued items before shutting down.
+    Instead of immediately shutting down, this sets LAST_USED to start the
+    inactivity timer. The cleanup loop will then shut down the bypasser after
+    BYPASS_RELEASE_INACTIVE_MIN minutes, giving users a grace period to return
+    (e.g., if they refresh the page or briefly navigate away).
     
-    If there IS pending work, the bypasser stays active and will be cleaned up
-    by the regular inactivity timer after downloads complete.
+    If there are active downloads, the timer naturally won't trigger until
+    they complete since LAST_USED gets updated on each bypass operation.
     """
-    global LOCKED
-    
-    # Import here to avoid circular imports
-    from models import book_queue
+    global LAST_USED
     
     with LOCKED:
-        if book_queue.has_pending_work():
-            logger.info("Bypasser shutdown deferred - downloads still pending")
-            return
-        
-        # No pending work, check if we have an active display/driver
-        if DISPLAY["xvfb"] is None and DRIVER is None:
+        if not is_warmed_up():
             logger.debug("Bypasser already shut down")
             return
         
-        logger.info("No pending downloads, shutting down bypasser...")
-        _reset_driver()
-        logger.info("Bypasser shut down successfully")
+        # Start the inactivity countdown
+        LAST_USED = time.time()
+        logger.info(f"All clients disconnected - bypasser will shut down after {env.BYPASS_RELEASE_INACTIVE_MIN} min of inactivity")
 
-def wait_for_result(func, timeout : int = 10, condition : any = True):
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        result = func()
-        if condition(result):
-            return result
-        time.sleep(0.5)
-    return None
 _init_cleanup_thread()
 
 
@@ -717,6 +716,8 @@ def get_bypassed_page(url: str, selector: Optional[network.AAMirrorSelector] = N
 
     Args:
         url: Target URL
+        selector: Optional mirror selector for AA URL rewriting
+        
     Returns:
         str: HTML content if successful, None otherwise
     """

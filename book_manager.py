@@ -552,8 +552,6 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
             if status_callback:
                 status_callback("downloading", None)
 
-            logger.info(f"Downloading `{book_info.title}` from `{download_url}`")
-
             data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag, selector)
             if not data:
                 raise Exception("No data received from download")
