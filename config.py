@@ -35,33 +35,34 @@ logger.info(f"CROSS_FILE_SYSTEM: {CROSS_FILE_SYSTEM}")
 # Network settings
 _custom_dns = env._CUSTOM_DNS.lower().strip()
 _doh_server = ""
-_custom_dns_list = None  # For auto mode
 
-if _custom_dns == "auto":
-    # Auto mode - will be handled by DNS auto manager in network.py
-    # Initialize with first provider (Cloudflare) for now
-    CUSTOM_DNS = ["1.1.1.1", "1.0.0.1", "2606:4700:4700:0000:0000:0000:0000:1111", "2606:4700:4700:0000:0000:0000:0000:1001"]
-    _doh_server = "https://cloudflare-dns.com/dns-query"
-    _custom_dns_list = None  # No custom DNS in auto mode
+if _custom_dns == "auto" or _custom_dns == "":
+    # Auto mode - DNS provider rotation handled by network.py
+    # Starts with system DNS, switches to providers from DNS_PROVIDERS on failure
+    CUSTOM_DNS = []
+    _doh_server = ""
+    logger.info("CUSTOM_DNS: auto (starts with system DNS, rotates on failure)")
 elif _custom_dns == "google":
     CUSTOM_DNS = ["8.8.8.8", "8.8.4.4", "2001:4860:4860:0000:0000:0000:0000:8888", "2001:4860:4860:0000:0000:0000:0000:8844"]
     _doh_server = "https://dns.google/resolve"
+    logger.info(f"CUSTOM_DNS: google {CUSTOM_DNS}")
 elif _custom_dns == "quad9":
     CUSTOM_DNS = ["9.9.9.9", "149.112.112.112", "2620:00fe:0000:0000:0000:0000:0000:00fe", "2620:00fe:0000:0000:0000:0000:0000:0009"]
     _doh_server = "https://dns.quad9.net/dns-query"
+    logger.info(f"CUSTOM_DNS: quad9 {CUSTOM_DNS}")
 elif _custom_dns == "cloudflare":
     CUSTOM_DNS = ["1.1.1.1", "1.0.0.1", "2606:4700:4700:0000:0000:0000:0000:1111", "2606:4700:4700:0000:0000:0000:0000:1001"]
     _doh_server = "https://cloudflare-dns.com/dns-query"
+    logger.info(f"CUSTOM_DNS: cloudflare {CUSTOM_DNS}")
 elif _custom_dns == "opendns":
     CUSTOM_DNS = ["208.67.222.222", "208.67.220.220", "2620:0119:0035:0000:0000:0000:0000:0035", "2620:0119:0053:0000:0000:0000:0000:0053"]
     _doh_server = "https://doh.opendns.com/dns-query"
+    logger.info(f"CUSTOM_DNS: opendns {CUSTOM_DNS}")
 else:
-    # Custom DNS IPs
+    # Custom DNS IPs provided by user
     _custom_dns_ip = _custom_dns.split(",")
     CUSTOM_DNS = [dns.strip() for dns in _custom_dns_ip if dns.replace(":", "").replace(".", "").strip().isdigit()]
-    _custom_dns_list = CUSTOM_DNS.copy()  # Store for auto mode if needed
-
-logger.info(f"CUSTOM_DNS: {CUSTOM_DNS}")
+    logger.info(f"CUSTOM_DNS: custom {CUSTOM_DNS}")
 DOH_SERVER = _doh_server
 if env.USE_DOH:
     DOH_SERVER = _doh_server

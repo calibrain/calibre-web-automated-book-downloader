@@ -539,11 +539,14 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
             
             logger.info("Trying download source [%s]: %s (%d/%d)", source_label, link, current_pos, total_sources)
             
+            # Build source context for status messages (e.g., "Welib (1/12)")
+            source_context = f"{friendly_name} ({current_pos}/{total_sources})"
+            
             # Update status with simple message showing which source we're trying
             if status_callback:
-                status_callback("resolving", f"Trying {friendly_name} ({current_pos}/{total_sources})")
+                status_callback("resolving", f"Trying {source_context}")
 
-            download_url = _get_download_url(link, book_info.title, cancel_flag, status_callback, selector)
+            download_url = _get_download_url(link, book_info.title, cancel_flag, status_callback, selector, source_context)
             if download_url == "":
                 raise Exception("No download URL resolved")
 
@@ -597,8 +600,17 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
     return None
 
 
-def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str, Optional[str]], None]] = None, selector: Optional[network.AAMirrorSelector] = None) -> str:
-    """Extract actual download URL from various source pages."""
+def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str, Optional[str]], None]] = None, selector: Optional[network.AAMirrorSelector] = None, source_context: Optional[str] = None) -> str:
+    """Extract actual download URL from various source pages.
+    
+    Args:
+        link: URL to extract download link from
+        title: Book title for logging
+        cancel_flag: Optional cancellation flag
+        status_callback: Optional callback for status updates
+        selector: Optional AA mirror selector
+        source_context: Optional context string like "Welib (1/12)" for status messages
+    """
     sel = selector or network.AAMirrorSelector()
 
     # AA fast download API (JSON response)
@@ -620,7 +632,7 @@ def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None
 
     # AA slow download / partner servers
     elif "/slow_download/" in link:
-        url = _extract_slow_download_url(soup, link, title, cancel_flag, status_callback, sel)
+        url = _extract_slow_download_url(soup, link, title, cancel_flag, status_callback, sel, source_context)
 
     # Libgen (GET button)
     else:
@@ -630,7 +642,7 @@ def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None
     return downloader.get_absolute_url(link, url)
 
 
-def _extract_slow_download_url(soup: BeautifulSoup, link: str, title: str, cancel_flag: Optional[Event], status_callback, selector) -> str:
+def _extract_slow_download_url(soup: BeautifulSoup, link: str, title: str, cancel_flag: Optional[Event], status_callback, selector, source_context: Optional[str] = None) -> str:
     """Extract download URL from AA slow download pages."""
     # Try "Download now" button variations
     dl_link = soup.find("a", href=True, string="📚 Download now")
@@ -659,10 +671,31 @@ def _extract_slow_download_url(soup: BeautifulSoup, link: str, title: str, cance
     if countdown:
         sleep_time = int(countdown.text)
         logger.info(f"Waiting {sleep_time}s for {title}")
-        if cancel_flag and cancel_flag.wait(timeout=sleep_time):
-            logger.info(f"Cancelled wait for {title}")
-            return ""
-        return _get_download_url(link, title, cancel_flag, status_callback, selector)
+        
+        # Live countdown with status updates
+        remaining = sleep_time
+        while remaining > 0:
+            # Format countdown message with source context
+            if source_context:
+                wait_msg = f"{source_context} - Waiting {remaining}s"
+            else:
+                wait_msg = f"Waiting {remaining}s"
+            
+            if status_callback:
+                status_callback("resolving", wait_msg)
+            
+            # Wait 1 second (or until cancelled)
+            if cancel_flag and cancel_flag.wait(timeout=1):
+                logger.info(f"Cancelled wait for {title}")
+                return ""
+            
+            remaining -= 1
+        
+        # After countdown, update status and re-fetch
+        if status_callback and source_context:
+            status_callback("resolving", f"{source_context} - Fetching...")
+        
+        return _get_download_url(link, title, cancel_flag, status_callback, selector, source_context)
 
     # Debug fallback
     link_texts = [a.get_text(strip=True)[:50] for a in soup.find_all("a", href=True)[:10]]
