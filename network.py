@@ -89,10 +89,6 @@ DNS_PROVIDERS = [
 # Domain patterns that should trigger DNS rotation on failure
 DNS_ROTATION_DOMAINS = [
     "annas-archive",
-    "libgen",
-    "z-lib",
-    "zlibrary",
-    "welib.org",
 ]
 
 

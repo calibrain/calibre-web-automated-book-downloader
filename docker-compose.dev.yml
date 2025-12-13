@@ -9,7 +9,6 @@ services:
       target: cwa-bd
     environment:
       debug: true
-      DEBUG_SKIP_SOURCES: aa-slow-nowait,aa-slow-wait,zlib,welib
     volumes:
       - /tmp/cwa-book-downloader:/tmp/cwa-book-downloader
       - /tmp/cwa-book-downloader-log:/var/log/cwa-book-downloader

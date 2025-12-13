@@ -221,13 +221,13 @@ export const DownloadsSidebar = ({
         <div className="absolute bottom-0 left-0 right-0 pointer-events-none">
           <div className="flex justify-end p-2">
             <span
-              className={`relative inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}
+              className={`relative inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium overflow-hidden ${statusStyle.bg} ${statusStyle.text}`}
             >
               {/* Wave animation overlay for in-progress states */}
               {isInProgress && statusStyle.waveColor && (
                 <span
                   key={statusName}
-                  className="absolute inset-0"
+                  className="absolute inset-0 rounded-full"
                   style={{
                     background: `linear-gradient(90deg, transparent 0%, ${statusStyle.waveColor} 50%, transparent 100%)`,
                     backgroundSize: '200% 100%',
