@@ -1,24 +1,29 @@
 """Flask web application for book download service with URL rewrite support."""
 
+import io
 import logging
-import io, re, os
+import os
 import sqlite3
 import time
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, request, jsonify, send_file, send_from_directory, session
+from typing import Any, Dict, Tuple, Union
+
+from flask import Flask, jsonify, request, send_file, send_from_directory, session
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash
 from werkzeug.wrappers import Response
-import typing
 
-from logger import setup_logger
-from config import _SUPPORTED_BOOK_LANGUAGE, BOOK_LANGUAGE, SUPPORTED_FORMATS
-from env import FLASK_HOST, FLASK_PORT, CWA_DB_PATH, DEBUG, USING_EXTERNAL_BYPASSER, BUILD_VERSION, RELEASE_VERSION, CALIBRE_WEB_URL
 import backend
-
+from book_manager import SearchUnavailable
+from config import BOOK_LANGUAGE, SUPPORTED_FORMATS, _SUPPORTED_BOOK_LANGUAGE
+from env import (
+    BUILD_VERSION, CALIBRE_WEB_URL, CWA_DB_PATH, DEBUG, FLASK_HOST, FLASK_PORT,
+    RELEASE_VERSION, USING_EXTERNAL_BYPASSER,
+)
+from logger import setup_logger
 from models import SearchFilters
 from websocket_manager import ws_manager
 
@@ -58,7 +63,7 @@ logger.info(f"Flask-SocketIO initialized with async_mode='{async_mode}'")
 
 # Rate limiting for login attempts
 # Structure: {username: {'count': int, 'lockout_until': datetime}}
-failed_login_attempts: typing.Dict[str, typing.Dict[str, typing.Any]] = {}
+failed_login_attempts: Dict[str, Dict[str, Any]] = {}
 MAX_LOGIN_ATTEMPTS = 10
 LOCKOUT_DURATION_MINUTES = 30
 
@@ -124,15 +129,45 @@ if DEBUG:
         }
     })
 
-# Custom log filter to exclude routine status endpoint polling
+# Custom log filter to exclude routine status endpoint polling and WebSocket noise
 class StatusEndpointFilter(logging.Filter):
-    """Filter out routine status endpoint requests to reduce log noise."""
+    """Filter out routine status endpoint requests and WebSocket upgrade errors to reduce log noise."""
     def filter(self, record):
-        # Exclude GET /api/status requests
         if hasattr(record, 'getMessage'):
             message = record.getMessage()
+            # Exclude GET /api/status requests (polling noise)
             if 'GET /api/status' in message:
                 return False
+            # Exclude WebSocket upgrade errors (benign - falls back to polling)
+            if 'write() before start_response' in message:
+                return False
+            # Exclude the Error on request line that precedes WebSocket errors
+            if 'Error on request:' in message and record.levelno == logging.ERROR:
+                return False
+        return True
+
+
+class WebSocketErrorFilter(logging.Filter):
+    """Filter out WebSocket upgrade errors that occur in Werkzeug dev server.
+    
+    These errors are benign - Flask-SocketIO automatically falls back to polling transport.
+    The error occurs because Werkzeug's built-in server doesn't fully support WebSocket upgrades.
+    """
+    def filter(self, record):
+        # Filter out the AssertionError traceback for WebSocket upgrades
+        if record.levelno == logging.ERROR:
+            message = record.getMessage() if hasattr(record, 'getMessage') else str(record.msg)
+            # Filter out the full traceback that includes the WebSocket assertion error
+            if 'write() before start_response' in message:
+                return False
+            # Also filter the "Error on request" header that precedes it
+            if hasattr(record, 'exc_info') and record.exc_info:
+                exc_type = record.exc_info[0]
+                if exc_type and exc_type.__name__ == 'AssertionError':
+                    # Check if it's the WebSocket-related assertion
+                    exc_value = record.exc_info[1]
+                    if exc_value and 'write() before start_response' in str(exc_value):
+                        return False
         return True
 
 # Flask logger
@@ -142,8 +177,9 @@ app.logger.setLevel(logger.level)
 werkzeug_logger = logging.getLogger('werkzeug')
 werkzeug_logger.handlers = logger.handlers
 werkzeug_logger.setLevel(logger.level)
-# Add filter to suppress routine status endpoint polling logs
+# Add filters to suppress routine status endpoint polling logs and WebSocket upgrade errors
 werkzeug_logger.addFilter(StatusEndpointFilter())
+werkzeug_logger.addFilter(WebSocketErrorFilter())
 
 # Set up authentication defaults
 # The secret key will reset every time we restart, which will
@@ -210,32 +246,38 @@ def logo() -> Response:
 
 @app.route('/favicon.ico')
 @app.route('/favico<path:_>')
-def favicon(_ : typing.Any = None) -> Response:
+def favicon(_: Any = None) -> Response:
     """
     Serve favicon from built frontend assets.
     """
     return send_from_directory(os.path.join(app.root_path, 'frontend-dist'),
         'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
-from typing import Union, Tuple
+# Register bypasser warmup callback for when first WebSocket client connects
+# and shutdown callback for when all clients disconnect
+if not USING_EXTERNAL_BYPASSER:
+    from cloudflare_bypasser import warmup as bypasser_warmup, shutdown_if_idle as bypasser_shutdown
+    ws_manager.register_on_first_connect(bypasser_warmup)
+    ws_manager.register_on_all_disconnect(bypasser_shutdown)
+    logger.info("Registered Cloudflare bypasser warmup/shutdown on WebSocket connect/disconnect")
 
 if DEBUG:
     import subprocess
-    import time
     if USING_EXTERNAL_BYPASSER:
-        STOP_GUI = lambda: None  # No-op for external bypasser
+        STOP_GUI = lambda: None
     else:
         from cloudflare_bypasser import _reset_driver as STOP_GUI
-    @app.route('/debug', methods=['GET'])
+    @app.route('/api/debug', methods=['GET'])
     @login_required
     def debug() -> Union[Response, Tuple[Response, int]]:
         """
-        This will run the /app/debug.sh script, which will generate a debug zip with all the logs
+        This will run the /app/genDebug.sh script, which will generate a debug zip with all the logs
         The file will be named /tmp/cwa-book-downloader-debug.zip
         And then return it to the user
         """
         try:
             # Run the debug script
+            logger.info("Debug endpoint called, stopping GUI and generating debug info...")
             STOP_GUI()
             time.sleep(1)
             result = subprocess.run(['/app/genDebug.sh'], capture_output=True, text=True, check=True)
@@ -244,9 +286,10 @@ if DEBUG:
             logger.info(f"Debug script executed: {result.stdout}")
             debug_file_path = result.stdout.strip().split('\n')[-1]
             if not os.path.exists(debug_file_path):
-                logger.error("Debug zip file not found after running debug script")
+                logger.error(f"Debug zip file not found at: {debug_file_path}")
                 return jsonify({"error": "Failed to generate debug information"}), 500
                 
+            logger.info(f"Sending debug file: {debug_file_path}")
             # Return the file to the user
             return send_file(
                 debug_file_path,
@@ -307,6 +350,9 @@ def api_search() -> Union[Response, Tuple[Response, int]]:
     try:
         books = backend.search_books(query, filters)
         return jsonify(books)
+    except SearchUnavailable as e:
+        logger.warning(f"Search unavailable: {e}")
+        return jsonify({"error": str(e)}), 503
     except Exception as e:
         logger.error_trace(f"Search error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -431,15 +477,12 @@ def api_local_download() -> Union[Response, Tuple[Response, int]]:
         if file_data is None:
             # Book data not found or not available
             return jsonify({"error": "File not found"}), 404
-        # Santize the file name
-        file_name = book_info.title
-        file_name = re.sub(r'[\\/:*?"<>|]', '_', file_name.strip())[:245]
-        file_extension = book_info.format
+        file_name = book_info.get_filename()
         # Prepare the file for sending to the client
         data = io.BytesIO(file_data)
         return send_file(
             data,
-            download_name=f"{file_name}.{file_extension}",
+            download_name=file_name,
             as_attachment=True
         )
 
@@ -580,7 +623,7 @@ def api_clear_completed() -> Union[Response, Tuple[Response, int]]:
         removed_count = backend.clear_completed()
         
         # Broadcast status update after clearing
-        if ws_manager and ws_manager.is_enabled():
+        if ws_manager:
             ws_manager.broadcast_status_update(backend.queue_status())
         
         return jsonify({"status": "cleared", "removed_count": removed_count})
@@ -787,6 +830,10 @@ def catch_all(path: str) -> Response:
 def handle_connect():
     """Handle client connection."""
     logger.info("WebSocket client connected")
+    
+    # Track the connection (triggers warmup callbacks on first connect)
+    ws_manager.client_connected()
+    
     # Send initial status to the newly connected client
     try:
         status = backend.queue_status()
@@ -798,6 +845,9 @@ def handle_connect():
 def handle_disconnect():
     """Handle client disconnection."""  
     logger.info("WebSocket client disconnected")
+    
+    # Track the disconnection
+    ws_manager.client_disconnected()
 
 @socketio.on('request_status')
 def handle_status_request():

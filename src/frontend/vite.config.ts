@@ -21,6 +21,7 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      // Proxy debug endpoint (uses /api/debug so it's automatically proxied above)
     },
   },
   build: {
