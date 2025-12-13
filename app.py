@@ -33,13 +33,10 @@ app.wsgi_app = ProxyFix(app.wsgi_app)  # type: ignore
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching
 app.config['APPLICATION_ROOT'] = '/'
 
-# Determine async mode based on DEBUG setting
-# In production (DEBUG=False) with Gunicorn + gevent worker, use 'gevent'
-# In development (DEBUG=True) with Flask dev server, use 'threading'
-if DEBUG:
-    async_mode = 'threading'
-else:
-    async_mode = 'gevent'
+# Socket.IO async mode.
+# We run this app under Gunicorn with a gevent websocket worker (even when DEBUG=true),
+# so Socket.IO should always use gevent here.
+async_mode = 'gevent'
 
 # Initialize Flask-SocketIO with reverse proxy support
 socketio = SocketIO(
