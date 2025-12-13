@@ -50,6 +50,10 @@ _CUSTOM_SCRIPT = os.getenv("CUSTOM_SCRIPT", "").strip()
 FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = int(os.getenv("FLASK_PORT", "8084"))
 DEBUG = string_to_bool(os.getenv("DEBUG", "false"))
+# Debug: skip specific download sources for testing fallback chains
+# Comma-separated values: aa-fast, aa-slow-nowait, aa-slow-wait, libgen, zlib, welib
+_DEBUG_SKIP_SOURCES_RAW = os.getenv("DEBUG_SKIP_SOURCES", "").strip().lower()
+DEBUG_SKIP_SOURCES = set(s.strip() for s in _DEBUG_SKIP_SOURCES_RAW.split(",") if s.strip())
 PRIORITIZE_WELIB = string_to_bool(os.getenv("PRIORITIZE_WELIB", "false"))
 ALLOW_USE_WELIB = string_to_bool(os.getenv("ALLOW_USE_WELIB", "true"))
 

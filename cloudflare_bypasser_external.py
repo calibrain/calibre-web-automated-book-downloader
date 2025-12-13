@@ -1,6 +1,8 @@
 from logger import setup_logger
 from typing import Optional, TYPE_CHECKING
 import requests
+import time
+import random
 
 if TYPE_CHECKING:
     import network
@@ -18,6 +20,10 @@ CONNECT_TIMEOUT = 10
 MAX_READ_TIMEOUT = 120
 # Buffer added to bypasser's configured timeout (seconds) - accounts for processing overhead
 READ_TIMEOUT_BUFFER = 15
+# Retry settings for bypasser failures
+MAX_RETRY = 5
+BACKOFF_BASE = 1.0
+BACKOFF_CAP = 10.0
 
 
 def _fetch_via_bypasser(target_url: str) -> Optional[str]:
@@ -88,35 +94,36 @@ def _fetch_via_bypasser(target_url: str) -> Optional[str]:
 
 def get_bypassed_page(url: str, selector: Optional["network.AAMirrorSelector"] = None) -> Optional[str]:
     """Fetch HTML content from a URL using an external Cloudflare bypasser service.
-    
-    Mirrors the behavior of the internal bypasser: on failure, attempts mirror/DNS 
-    rotation for AA URLs before giving up.
+
+    Retries with exponential backoff and mirror/DNS rotation on failure.
 
     Args:
         url: Target URL to fetch
         selector: Mirror selector for AA URL rewriting and rotation
-        
+
     Returns:
         HTML content if successful, None otherwise
     """
     import network
     sel = selector or network.AAMirrorSelector()
-    
-    # Rewrite URL to use current mirror (only affects AA URLs)
-    attempt_url = sel.rewrite(url)
-    
-    # First attempt
-    result = _fetch_via_bypasser(attempt_url)
-    if result:
-        return result
-    
-    # On failure, try mirror/DNS rotation (matches internal bypasser behavior)
-    new_base, action = sel.next_mirror_or_rotate_dns()
-    if action in ("mirror", "dns") and new_base:
+
+    for attempt in range(1, MAX_RETRY + 1):
         attempt_url = sel.rewrite(url)
-        logger.info(f"External bypasser retrying after {action} rotation: {attempt_url}")
         result = _fetch_via_bypasser(attempt_url)
         if result:
             return result
-    
+
+        if attempt == MAX_RETRY:
+            break
+
+        # Backoff with jitter before retry
+        delay = min(BACKOFF_CAP, BACKOFF_BASE * (2 ** (attempt - 1))) + random.random()
+        logger.info(f"External bypasser attempt {attempt}/{MAX_RETRY} failed, retrying in {delay:.1f}s")
+        time.sleep(delay)
+
+        # Rotate mirror/DNS for next attempt
+        new_base, action = sel.next_mirror_or_rotate_dns()
+        if action in ("mirror", "dns") and new_base:
+            logger.info(f"Rotated {action} for retry")
+
     return None

@@ -86,6 +86,22 @@ DNS_PROVIDERS = [
     ("opendns", ["208.67.222.222", "208.67.220.220"], "https://doh.opendns.com/dns-query"),
 ]
 
+# Domain patterns that should trigger DNS rotation on failure
+DNS_ROTATION_DOMAINS = [
+    "annas-archive",
+    "libgen",
+    "z-lib",
+    "zlibrary",
+    "welib.org",
+]
+
+
+def should_rotate_dns_for_url(url: str) -> bool:
+    """Check if a URL matches a known source domain for DNS rotation."""
+    url_lower = url.lower()
+    return any(domain in url_lower for domain in DNS_ROTATION_DOMAINS)
+
+
 # DNS state
 _current_dns_index = -1  # -1 = system DNS
 _dns_exhausted_logged = False

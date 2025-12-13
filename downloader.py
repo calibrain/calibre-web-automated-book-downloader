@@ -74,7 +74,7 @@ def _try_rotation(original_url: str, current_url: str, selector: network.AAMirro
             new_url = selector.rewrite(original_url)
             logger.info(f"[{action}] switching to: {new_url}")
             return new_url
-    elif network.rotate_dns_provider():
+    elif network.should_rotate_dns_for_url(current_url) and network.rotate_dns_provider():
         logger.info(f"[dns-rotate] retrying: {original_url}")
         return original_url
     return None

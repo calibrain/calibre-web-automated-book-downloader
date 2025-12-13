@@ -14,6 +14,7 @@ export interface Book {
   download_path?: string;
   progress?: number;
   status_message?: string;  // Detailed status message (e.g., "Trying Libgen (2/5)")
+  added_time?: number;  // Timestamp when added to queue
 }
 
 // Status response types
