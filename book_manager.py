@@ -243,11 +243,10 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     # 1. AA slow (no waitlist) - instant but can be slow
     # 2. Libgen - instant, external
     # 3. AA slow (waitlist) - has countdown timer but faster once started
-    # 4. Z-Library - last resort (hash lookup rarely finds results)
+    # Note: Z-Library disabled - download tokens are session-bound
     urls += slow_urls_no_waitlist if USE_CF_BYPASS else []
     urls += external_urls_libgen
     urls += slow_urls_with_waitlist if USE_CF_BYPASS else []
-    urls += external_urls_z_lib
 
     for i in range(len(urls)):
         urls[i] = downloader.get_absolute_url(network.get_aa_base_url(), urls[i])
@@ -281,7 +280,8 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
             if format == "" and f.strip().lower() in SUPPORTED_FORMATS:
                 format = f.strip().lower()
             if size == "" and any(u in f.strip().lower() for u in ["mb", "kb", "gb"]):
-                size = f.strip().lower()
+                # Preserve original case but uppercase the unit (e.g., "5.2 mb" -> "5.2 MB")
+                size = re.sub(r'(kb|mb|gb|tb)', lambda m: m.group(1).upper(), f.strip(), flags=re.IGNORECASE)
             if content == "":
                 for ct in DOWNLOAD_PATHS.keys():
                     if ct in f.strip().lower():
@@ -293,7 +293,8 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                 if format == "" and stripped and " " not in stripped:
                     format = stripped
                 if size == "" and "." in stripped:
-                    size = stripped
+                    # Uppercase any size units
+                    size = re.sub(r'(kb|mb|gb|tb)', lambda m: m.group(1).upper(), f.strip(), flags=re.IGNORECASE)
     
     book_title = _find_in_divs(divs, "🔍")[0].strip("🔍").strip()
 
@@ -619,7 +620,8 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
 
             logger.info("Resolved download URL [%s]: %s", source_label, download_url)
 
-            data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag, selector, status_callback)
+            # Pass source page as referer (required by some sites)
+            data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag, selector, status_callback, referer=link)
             if not data:
                 raise Exception("No data received from download")
             

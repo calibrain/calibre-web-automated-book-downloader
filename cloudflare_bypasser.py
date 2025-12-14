@@ -51,6 +51,110 @@ DISPLAY = {
 LAST_USED = None
 LOCKED = threading.Lock()
 
+# Flag to track if DNS rotated while a bypass was in progress
+# Chrome will be restarted after the current operation completes
+_dns_rotation_pending = False
+_dns_rotation_lock = threading.Lock()
+
+# Cookie storage - shared with requests library for Cloudflare bypass
+# Structure: {domain: {cookie_name: {value, expiry, ...}}}
+_cf_cookies: dict[str, dict] = {}
+_cf_cookies_lock = threading.Lock()
+
+# Protection cookie names we care about (Cloudflare and DDoS-Guard)
+CF_COOKIE_NAMES = {'cf_clearance', '__cf_bm', 'cf_chl_2', 'cf_chl_prog'}
+DDG_COOKIE_NAMES = {'__ddg1_', '__ddg2_', '__ddg5_', '__ddg8_', '__ddg9_', '__ddg10_', '__ddgid_', '__ddgmark_', 'ddg_last_challenge'}
+
+# Domains requiring full session cookies (not just protection cookies)
+FULL_COOKIE_DOMAINS = {'z-lib.fm', 'z-lib.gs', 'z-lib.id', 'z-library.sk', 'zlibrary-global.se'}
+
+
+def _extract_cookies_from_driver(driver, url: str) -> None:
+    """Extract cookies from Chrome after successful bypass."""
+    try:
+        parsed = urlparse(url)
+        domain = parsed.hostname or ""
+        if not domain:
+            return
+
+        # Get base domain for storage and full-cookie check
+        base_domain = '.'.join(domain.split('.')[-2:]) if '.' in domain else domain
+        extract_all = base_domain in FULL_COOKIE_DOMAINS
+
+        cookies = driver.get_cookies()
+        cookies_found = {}
+
+        for cookie in cookies:
+            name = cookie.get('name', '')
+
+            if extract_all:
+                should_extract = True
+            else:
+                is_cf = name in CF_COOKIE_NAMES or name.startswith('cf_')
+                is_ddg = name in DDG_COOKIE_NAMES or name.startswith('__ddg')
+                should_extract = is_cf or is_ddg
+
+            if should_extract:
+                cookies_found[name] = {
+                    'value': cookie.get('value', ''),
+                    'domain': cookie.get('domain', domain),
+                    'path': cookie.get('path', '/'),
+                    'expiry': cookie.get('expiry'),
+                    'secure': cookie.get('secure', True),
+                    'httpOnly': cookie.get('httpOnly', True),
+                }
+
+        if cookies_found:
+            with _cf_cookies_lock:
+                _cf_cookies[base_domain] = cookies_found
+            cookie_type = "all" if extract_all else "protection"
+            logger.debug(f"Extracted {len(cookies_found)} {cookie_type} cookies for {base_domain}")
+
+    except Exception as e:
+        logger.debug(f"Failed to extract cookies: {e}")
+
+
+def get_cf_cookies_for_domain(domain: str) -> dict[str, str]:
+    """Get stored cookies for a domain. Returns empty dict if none available."""
+    if not domain:
+        return {}
+
+    # Get base domain
+    base_domain = '.'.join(domain.split('.')[-2:]) if '.' in domain else domain
+
+    with _cf_cookies_lock:
+        cookies = _cf_cookies.get(base_domain, {})
+        if not cookies:
+            return {}
+
+        # Check if cf_clearance exists and hasn't expired
+        cf_clearance = cookies.get('cf_clearance', {})
+        if cf_clearance:
+            expiry = cf_clearance.get('expiry')
+            if expiry and time.time() > expiry:
+                logger.debug(f"CF cookies expired for {base_domain}")
+                _cf_cookies.pop(base_domain, None)
+                return {}
+
+        # Return simple name->value dict for requests
+        return {name: c['value'] for name, c in cookies.items()}
+
+
+def has_valid_cf_cookies(domain: str) -> bool:
+    """Check if we have valid Cloudflare cookies for a domain."""
+    return bool(get_cf_cookies_for_domain(domain))
+
+
+def clear_cf_cookies(domain: str = None) -> None:
+    """Clear stored Cloudflare cookies. If domain is None, clear all."""
+    with _cf_cookies_lock:
+        if domain:
+            base_domain = '.'.join(domain.split('.')[-2:]) if '.' in domain else domain
+            _cf_cookies.pop(base_domain, None)
+        else:
+            _cf_cookies.clear()
+
+
 def _reset_pyautogui_display_state():
     try:
         import pyautogui
@@ -309,8 +413,11 @@ def _bypass_ddos_guard_method_2(sb) -> bool:
         logger.debug(f"DDOS-Guard method 2 failed: {e}")
         return False
 
-def _bypass(sb, max_retries: int = MAX_RETRY, cancel_flag: Optional[Event] = None) -> None:
-    """Bypass function with strategies for Cloudflare and DDOS-Guard protection."""
+def _bypass(sb, max_retries: int = MAX_RETRY, cancel_flag: Optional[Event] = None) -> bool:
+    """Bypass function with strategies for Cloudflare and DDOS-Guard protection.
+
+    Returns True if bypass succeeded, False otherwise.
+    """
     cloudflare_methods = [_bypass_method_1, _bypass_method_2, _bypass_method_3]
     ddos_guard_methods = [_bypass_ddos_guard_method_1, _bypass_ddos_guard_method_2]
 
@@ -321,7 +428,7 @@ def _bypass(sb, max_retries: int = MAX_RETRY, cancel_flag: Optional[Event] = Non
             raise BypassCancelledException("Bypass cancelled")
 
         if _is_bypassed(sb):
-            return
+            return True
 
         challenge_type = _detect_challenge_type(sb)
         logger.info(f"Detected challenge type: {challenge_type}")
@@ -350,7 +457,7 @@ def _bypass(sb, max_retries: int = MAX_RETRY, cancel_flag: Optional[Event] = Non
         try:
             if method(sb):
                 logger.info(f"Bypass successful using {method.__name__}")
-                return
+                return True
         except BypassCancelledException:
             raise
         except Exception as e:
@@ -359,6 +466,7 @@ def _bypass(sb, max_retries: int = MAX_RETRY, cancel_flag: Optional[Event] = Non
         logger.info(f"Bypass method {method.__name__} failed.")
 
     logger.warning("Exceeded maximum retries. Bypass failed.")
+    return False
 
 def _get_chromium_args():
     """Build Chrome arguments dynamically, pre-resolving hostnames via Python's DNS.
@@ -459,10 +567,10 @@ def _get(url, retry: int = MAX_RETRY, cancel_flag: Optional[Event] = None):
 
         # Attempt bypass with cancellation support
         logger.debug("Starting bypass process...")
-        _bypass(sb, cancel_flag=cancel_flag)
-
-        if _is_bypassed(sb):
+        if _bypass(sb, cancel_flag=cancel_flag):
             logger.info("Bypass successful.")
+            # Extract cookies for sharing with requests library
+            _extract_cookies_from_driver(sb, url)
             return sb.page_source
         else:
             logger.warning("Bypass completed but page still shows Cloudflare protection")
@@ -489,7 +597,8 @@ def _get(url, retry: int = MAX_RETRY, cancel_flag: Optional[Event] = None):
         logger.debug(f"Stack trace: {stack_trace}")
 
         # Reset driver on certain errors
-        if "WebDriverException" in str(type(e)) or "SessionNotCreatedException" in str(type(e)):
+        error_type = type(e).__name__
+        if error_type in ("WebDriverException", "SessionNotCreatedException", "TimeoutException", "MaxRetryError"):
             logger.info("Restarting bypasser due to browser error...")
             _reset_driver()
 
@@ -504,6 +613,20 @@ def get(url, retry: int = MAX_RETRY, cancel_flag: Optional[Event] = None):
     """Fetch a URL with protection bypass."""
     global LAST_USED
     with LOCKED:
+        # Check for cookies AFTER acquiring lock - another request may have
+        # completed bypass while we were waiting, making Chrome unnecessary
+        parsed = urlparse(url)
+        cookies = get_cf_cookies_for_domain(parsed.hostname or "")
+        if cookies:
+            try:
+                response = requests.get(url, cookies=cookies, proxies=PROXIES, timeout=(5, 10))
+                if response.status_code == 200:
+                    logger.debug(f"Cookies available after lock wait - skipped Chrome")
+                    LAST_USED = time.time()
+                    return response.text
+            except Exception:
+                pass  # Fall through to Chrome bypass
+
         ret = _get(url, retry, cancel_flag)
         LAST_USED = time.time()
         return ret
@@ -516,6 +639,7 @@ def _init_driver():
     chromium_args = _get_chromium_args()
     logger.debug(f"Initializing Chrome driver with args: {chromium_args}")
     driver = Driver(uc=True, headless=False, size=f"{VIRTUAL_SCREEN_SIZE[0]},{VIRTUAL_SCREEN_SIZE[1]}", chromium_arg=chromium_args)
+    driver.set_page_load_timeout(60)
     DRIVER = driver
     time.sleep(DEFAULT_SLEEP)
     return driver
@@ -620,6 +744,75 @@ def _reset_driver():
     time.sleep(0.5)
     logger.info("Cloudflare bypasser shut down (browser and display stopped)")
     logger.log_resource_usage()
+
+def _restart_chrome_only():
+    """Restart just Chrome (not the display) to pick up new DNS settings.
+
+    Called when DNS provider rotates in auto mode. The display is kept running
+    to avoid the slower full restart. Chrome will be re-initialized with fresh
+    pre-resolved IPs from the new DNS provider.
+    """
+    global DRIVER, LAST_USED
+
+    logger.debug("Restarting Chrome to apply new DNS settings...")
+
+    # Quit existing driver
+    if DRIVER:
+        try:
+            DRIVER.quit()
+        except Exception as e:
+            logger.debug(f"Error quitting driver during DNS rotation restart: {e}")
+        DRIVER = None
+
+    # Kill any lingering Chrome processes (same pattern as _reset_driver)
+    try:
+        os.system("pkill -f chrom")
+    except Exception as e:
+        logger.debug(f"Error killing chrome processes: {e}")
+
+    time.sleep(0.5)
+
+    # Re-initialize driver with new DNS settings
+    # _get_chromium_args() will re-resolve hostnames using the new DNS
+    try:
+        _init_driver()
+        LAST_USED = time.time()
+        logger.debug("Chrome restarted with updated DNS settings")
+    except Exception as e:
+        logger.warning(f"Failed to restart Chrome after DNS rotation: {e}")
+        # Don't raise - the bypasser can try again on next request
+
+
+def _on_dns_rotation(provider_name: str, servers: list, doh_url: str) -> None:
+    """Callback invoked when network.py rotates DNS provider.
+
+    If Chrome is currently running, schedule a restart in the background.
+    This is async to avoid blocking the request that triggered DNS rotation.
+    """
+    global DRIVER, _dns_rotation_pending
+
+    if DRIVER is None:
+        return
+
+    # Always set pending flag - the restart will happen asynchronously
+    # This avoids blocking the current request (which triggered DNS rotation)
+    with _dns_rotation_lock:
+        if _dns_rotation_pending:
+            return  # Already scheduled
+        _dns_rotation_pending = True
+
+    def _async_restart():
+        global _dns_rotation_pending
+        logger.debug(f"DNS rotated to {provider_name} - restarting Chrome in background")
+        with LOCKED:
+            # Clear flag before restart (under lock to be safe)
+            with _dns_rotation_lock:
+                _dns_rotation_pending = False
+            _restart_chrome_only()
+
+    restart_thread = threading.Thread(target=_async_restart, daemon=True)
+    restart_thread.start()
+
 
 def _cleanup_driver():
     """Reset driver after inactivity timeout.
@@ -752,6 +945,11 @@ def shutdown_if_idle():
 
 _init_cleanup_thread()
 
+# Register for DNS rotation notifications so Chrome can restart with new DNS settings
+# Only register if using the internal Chrome bypasser (not external FlareSolverr)
+if env.USE_CF_BYPASS and not env.USING_EXTERNAL_BYPASSER:
+    network.register_dns_rotation_callback(_on_dns_rotation)
+
 
 def get_bypassed_page(url: str, selector: Optional[network.AAMirrorSelector] = None, cancel_flag: Optional[Event] = None) -> Optional[str]:
     """Fetch HTML content from a URL using the internal Cloudflare Bypasser.
@@ -769,6 +967,21 @@ def get_bypassed_page(url: str, selector: Optional[network.AAMirrorSelector] = N
     """
     sel = selector or network.AAMirrorSelector()
     attempt_url = sel.rewrite(url)
+
+    # Before using Chrome, check if cookies are available (from a previous bypass)
+    # This helps concurrent downloads avoid unnecessary Chrome usage
+    parsed = urlparse(attempt_url)
+    cookies = get_cf_cookies_for_domain(parsed.hostname or "")
+    if cookies:
+        try:
+            logger.debug(f"Trying request with cached cookies before Chrome: {attempt_url}")
+            response = requests.get(attempt_url, cookies=cookies, proxies=PROXIES, timeout=(5, 10))
+            if response.status_code == 200:
+                logger.debug(f"Cached cookies worked, skipped Chrome bypass")
+                return response.text
+        except Exception:
+            pass  # Fall through to Chrome bypass
+
     try:
         response_html = get(attempt_url, cancel_flag=cancel_flag)
     except BypassCancelledException:

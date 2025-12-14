@@ -23,16 +23,18 @@ class CustomLogger(logging.Logger):
         self.warning(msg, *args, exc_info=True, **kwargs)
     
     def info_trace(self, msg: Any, *args: Any, **kwargs: Any) -> None:
-        """Log an info message with full stack trace."""
-        self.log_resource_usage()
+        """Log an info message (stack trace only if exception active)."""
         kwargs.pop('exc_info', None)
-        self.info(msg, *args, exc_info=True, **kwargs)
-    
+        # Only include exc_info if there's actually an exception
+        has_exception = sys.exc_info()[0] is not None
+        self.info(msg, *args, exc_info=has_exception, **kwargs)
+
     def debug_trace(self, msg: Any, *args: Any, **kwargs: Any) -> None:
-        """Log a debug message with full stack trace."""
-        self.log_resource_usage()
+        """Log a debug message (stack trace only if exception active)."""
         kwargs.pop('exc_info', None)
-        self.debug(msg, *args, exc_info=True, **kwargs)
+        # Only include exc_info if there's actually an exception
+        has_exception = sys.exc_info()[0] is not None
+        self.debug(msg, *args, exc_info=has_exception, **kwargs)
     
     def log_resource_usage(self):
         import psutil

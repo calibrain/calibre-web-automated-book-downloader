@@ -1,6 +1,7 @@
 """Backend logic for the book download application."""
 
 import os
+import random
 import shutil
 import subprocess
 import threading
@@ -484,10 +485,16 @@ def concurrent_download_loop() -> None:
                 next_download = book_queue.get_next()
                 if not next_download:
                     break
-                    
+
+                # Stagger concurrent downloads to avoid rate limiting on shared download servers
+                # Only delay if other downloads are already active
+                if active_futures:
+                    stagger_delay = random.uniform(2, 5)
+                    logger.debug(f"Staggering download start by {stagger_delay:.1f}s")
+                    time.sleep(stagger_delay)
+
                 book_id, cancel_flag = next_download
-                logger.info(f"Starting concurrent download: {book_id}")
-                
+
                 # Submit download job to thread pool
                 future = executor.submit(_process_single_download, book_id, cancel_flag)
                 active_futures[future] = book_id

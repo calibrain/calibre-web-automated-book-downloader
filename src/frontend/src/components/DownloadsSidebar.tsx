@@ -20,19 +20,12 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; label: string; w
   cancelled: { bg: 'bg-gray-500/20', text: 'text-gray-700 dark:text-gray-300', label: 'Cancelled', waveColor: '' },
 };
 
-// Helper to format file size with uppercase units
-const formatSize = (sizeStr?: string): string => {
-  if (!sizeStr) return '';
-  // Convert lowercase units to uppercase (kb -> KB, mb -> MB, etc.)
-  return sizeStr.replace(/\b(kb|mb|gb|tb)\b/gi, (match) => match.toUpperCase());
-};
-
 // Add keyframe animation for wave effect
 const styleSheet = document.createElement('style');
 styleSheet.textContent = `
   @keyframes wave {
-    0% { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 `;
 if (!document.head.querySelector('style[data-wave-animation]')) {
@@ -136,8 +129,10 @@ export const DownloadsSidebar = ({
     // Format progress text - use status_message if available, otherwise fall back to label
     let progressText = book.status_message || statusStyle.label;
     if (statusName === 'downloading' && book.progress && book.size) {
-      const downloadedMB = (book.progress / 100) * parseFloat(book.size.replace(/[^\d.]/g, ''));
-      const sizeProgress = `${downloadedMB.toFixed(1)}MB / ${formatSize(book.size)}`;
+      const sizeValue = parseFloat(book.size.replace(/[^\d.]/g, ''));
+      const sizeUnit = book.size.replace(/[\d.\s]/g, ''); // Extract unit as-is from backend
+      const downloadedSize = (book.progress / 100) * sizeValue;
+      const sizeProgress = `${downloadedSize.toFixed(1)}${sizeUnit} / ${book.size}`;
       // If there's attempt info in the status message, prepend it to the progress
       if (book.status_message?.startsWith('Attempt')) {
         progressText = `${book.status_message} - ${sizeProgress}`;
@@ -216,7 +211,7 @@ export const DownloadsSidebar = ({
                 <div className="text-xs opacity-70">
                   {book.format && <span className="uppercase">{book.format}</span>}
                   {book.format && book.size && <span> • </span>}
-                  {book.size && <span>{formatSize(book.size)}</span>}
+                  {book.size && <span>{book.size}</span>}
                 </div>
               </div>
             </div>
@@ -225,15 +220,16 @@ export const DownloadsSidebar = ({
 
         {/* Progress Bar - absolute positioned at bottom - always visible */}
         <div className="absolute bottom-0 left-0 right-0 pointer-events-none">
-          <div className="flex justify-end p-2">
+          {/* ml-16 clears the 64px thumbnail, gap-2 adds spacing */}
+          <div className="flex justify-end p-2 ml-16 gap-2">
             <span
-              className={`relative inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium overflow-hidden ${statusStyle.bg} ${statusStyle.text}`}
+              className={`relative px-2 py-0.5 rounded-lg text-xs font-medium text-right ${statusStyle.bg} ${statusStyle.text}`}
             >
               {/* Wave animation overlay for in-progress states */}
               {isInProgress && statusStyle.waveColor && (
                 <span
                   key={statusName}
-                  className="absolute inset-0 rounded-full"
+                  className="absolute inset-0 rounded-lg"
                   style={{
                     background: `linear-gradient(90deg, transparent 0%, ${statusStyle.waveColor} 50%, transparent 100%)`,
                     backgroundSize: '200% 100%',

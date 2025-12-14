@@ -39,6 +39,44 @@ state: dict[str, Any] = {}
 _init_lock = _RLock()
 _dns_switch_lock = _RLock()
 
+# DNS rotation callbacks - called when DNS provider switches in auto mode
+# Callbacks receive (provider_name: str, servers: List[str], doh_url: str)
+_dns_rotation_callbacks: List[Callable[[str, List[str], str], None]] = []
+_dns_callback_lock = _RLock()
+
+
+def register_dns_rotation_callback(callback: Callable[[str, List[str], str], None]) -> None:
+    """Register a callback to be called when DNS provider rotates.
+
+    The callback receives (provider_name, servers, doh_url) as arguments.
+    Use this to restart components that cache DNS resolution (e.g., Chrome).
+    """
+    with _dns_callback_lock:
+        if callback not in _dns_rotation_callbacks:
+            _dns_rotation_callbacks.append(callback)
+            logger.debug(f"Registered DNS rotation callback: {callback.__name__}")
+
+
+def unregister_dns_rotation_callback(callback: Callable[[str, List[str], str], None]) -> None:
+    """Unregister a previously registered DNS rotation callback."""
+    with _dns_callback_lock:
+        if callback in _dns_rotation_callbacks:
+            _dns_rotation_callbacks.remove(callback)
+            logger.debug(f"Unregistered DNS rotation callback: {callback.__name__}")
+
+
+def _notify_dns_rotation(provider_name: str, servers: List[str], doh_url: str) -> None:
+    """Notify all registered callbacks about DNS rotation."""
+    with _dns_callback_lock:
+        callbacks = _dns_rotation_callbacks.copy()
+
+    for callback in callbacks:
+        try:
+            logger.debug(f"Calling DNS rotation callback: {callback.__name__}")
+            callback(provider_name, servers, doh_url)
+        except Exception as e:
+            logger.warning(f"DNS rotation callback {callback.__name__} failed: {e}")
+
 def _agent_debug_log(code: str, source: str, reason: str, meta: Optional[dict] = None) -> None:
     """Lightweight debug hook for automated runs; safe no-op on failure."""
     try:
@@ -522,27 +560,30 @@ def init_custom_resolver():
 def switch_dns_provider() -> bool:
     """Switch to next DNS provider (auto mode only)."""
     global CUSTOM_DNS, DOH_SERVER, _current_dns_index, _dns_exhausted_logged
-    
+
     if not _is_auto_dns_mode():
         return False
-    
+
     with _dns_switch_lock:
         if _current_dns_index + 1 >= len(DNS_PROVIDERS):
             if not _dns_exhausted_logged:
                 logger.warning("All DNS providers exhausted, staying with current")
                 _dns_exhausted_logged = True
             return False
-        
+
         _current_dns_index += 1
         name, servers, doh = DNS_PROVIDERS[_current_dns_index]
         CUSTOM_DNS = servers
         DOH_SERVER = doh
         config.CUSTOM_DNS = servers
         config.DOH_SERVER = doh
-        
+
         logger.warning(f"Switched DNS provider to: {name} (using DoH)")
         _save_state(dns_provider=name)
         init_dns_resolvers()
+
+        # Notify listeners (e.g., Chrome bypasser) to restart with new DNS
+        _notify_dns_rotation(name, servers, doh)
         return True
 
 
@@ -620,7 +661,6 @@ def _initialize_dns_state() -> None:
                     logger.info(f"Restored DNS provider from state: {name}")
                     return
         _current_dns_index = -1
-        logger.info("Starting with system DNS (auto mode)")
 
 def _initialize_aa_state() -> None:
     """Restore or probe AA URL state."""

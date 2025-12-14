@@ -314,6 +314,7 @@ function App() {
     } catch (error) {
       console.error('Download failed:', error);
       showToast('Failed to queue download', 'error');
+      throw error; // Re-throw so button components can reset their queuing state
     }
   };
 
