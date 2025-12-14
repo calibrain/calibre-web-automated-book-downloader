@@ -1,4 +1,5 @@
 from logger import setup_logger
+from threading import Event
 from typing import Optional, TYPE_CHECKING
 import requests
 import time
@@ -6,6 +7,11 @@ import random
 
 if TYPE_CHECKING:
     import network
+
+
+class BypassCancelledException(Exception):
+    """Raised when a bypass operation is cancelled."""
+    pass
 
 try:
     from env import EXT_BYPASSER_PATH, EXT_BYPASSER_TIMEOUT, EXT_BYPASSER_URL
@@ -92,7 +98,7 @@ def _fetch_via_bypasser(target_url: str) -> Optional[str]:
         return None
 
 
-def get_bypassed_page(url: str, selector: Optional["network.AAMirrorSelector"] = None) -> Optional[str]:
+def get_bypassed_page(url: str, selector: Optional["network.AAMirrorSelector"] = None, cancel_flag: Optional[Event] = None) -> Optional[str]:
     """Fetch HTML content from a URL using an external Cloudflare bypasser service.
 
     Retries with exponential backoff and mirror/DNS rotation on failure.
@@ -100,14 +106,23 @@ def get_bypassed_page(url: str, selector: Optional["network.AAMirrorSelector"] =
     Args:
         url: Target URL to fetch
         selector: Mirror selector for AA URL rewriting and rotation
+        cancel_flag: Optional threading Event to signal cancellation
 
     Returns:
         HTML content if successful, None otherwise
+
+    Raises:
+        BypassCancelledException: If cancel_flag is set during operation
     """
     import network
     sel = selector or network.AAMirrorSelector()
 
     for attempt in range(1, MAX_RETRY + 1):
+        # Check for cancellation before each attempt
+        if cancel_flag and cancel_flag.is_set():
+            logger.info("External bypasser cancelled by user")
+            raise BypassCancelledException("Bypass cancelled")
+
         attempt_url = sel.rewrite(url)
         result = _fetch_via_bypasser(attempt_url)
         if result:
@@ -116,10 +131,25 @@ def get_bypassed_page(url: str, selector: Optional["network.AAMirrorSelector"] =
         if attempt == MAX_RETRY:
             break
 
-        # Backoff with jitter before retry
+        # Check for cancellation before backoff wait
+        if cancel_flag and cancel_flag.is_set():
+            logger.info("External bypasser cancelled during retry")
+            raise BypassCancelledException("Bypass cancelled")
+
+        # Backoff with jitter before retry, checking cancellation during wait
         delay = min(BACKOFF_CAP, BACKOFF_BASE * (2 ** (attempt - 1))) + random.random()
         logger.info(f"External bypasser attempt {attempt}/{MAX_RETRY} failed, retrying in {delay:.1f}s")
-        time.sleep(delay)
+
+        # Check cancellation during delay (check every second)
+        for _ in range(int(delay)):
+            if cancel_flag and cancel_flag.is_set():
+                logger.info("External bypasser cancelled during backoff")
+                raise BypassCancelledException("Bypass cancelled")
+            time.sleep(1)
+        # Sleep remaining fraction
+        remaining = delay - int(delay)
+        if remaining > 0:
+            time.sleep(remaining)
 
         # Rotate mirror/DNS for next attempt
         new_base, action = sel.next_mirror_or_rotate_dns()

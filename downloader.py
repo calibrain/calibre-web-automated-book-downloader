@@ -85,6 +85,7 @@ def html_get_page(
     retry: int = MAX_RETRY,
     use_bypasser: bool = False,
     selector: Optional[network.AAMirrorSelector] = None,
+    cancel_flag: Optional[Event] = None,
 ) -> str:
     """Fetch HTML content from a URL with retry mechanism."""
     selector = selector or network.AAMirrorSelector()
@@ -93,13 +94,18 @@ def html_get_page(
     use_bypasser_now = use_bypasser
 
     for attempt in range(1, retry + 1):
+        # Check for cancellation before each attempt
+        if cancel_flag and cancel_flag.is_set():
+            logger.info(f"html_get_page cancelled before attempt {attempt}")
+            return ""
+
         try:
             logger.debug(f"html_get_page: {current_url}, attempt: {attempt}/{retry}, bypasser: {use_bypasser_now}")
-            
+
             if use_bypasser_now and USE_CF_BYPASS:
                 logger.info(f"GET (bypasser): {current_url}")
                 try:
-                    result = get_bypassed_page(current_url, selector)
+                    result = get_bypassed_page(current_url, selector, cancel_flag)
                     return result or ""
                 except Exception as e:
                     logger.warning(f"Bypasser error: {type(e).__name__}: {e}")

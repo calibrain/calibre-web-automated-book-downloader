@@ -386,14 +386,14 @@ def _friendly_source_name(link: str) -> str:
     """Get user-friendly name for a download source."""
     return _get_source_info(link)[1]
 
-def _get_download_urls_from_welib(book_id: str, selector: Optional[network.AAMirrorSelector] = None) -> list[str]:
+def _get_download_urls_from_welib(book_id: str, selector: Optional[network.AAMirrorSelector] = None, cancel_flag: Optional[Event] = None) -> list[str]:
     """Get download URLs from welib.org (bypasser required)."""
     if not ALLOW_USE_WELIB:
         return []
     url = f"https://welib.org/md5/{book_id}"
     logger.info(f"Fetching welib.org download URLs for {book_id}")
     try:
-        html = downloader.html_get_page(url, use_bypasser=True, selector=selector or network.AAMirrorSelector())
+        html = downloader.html_get_page(url, use_bypasser=True, selector=selector or network.AAMirrorSelector(), cancel_flag=cancel_flag)
     except Exception as exc:
         logger.error_trace(f"Welib fetch failed for {book_id}: {exc}")
         return []
@@ -564,7 +564,7 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
         logger.info("Fetching welib.org download URLs (PRIORITIZE_WELIB enabled)")
         if status_callback:
             status_callback("resolving", "Fetching welib sources...")
-        welib_links = _get_download_urls_from_welib(book_info.id, selector=selector)
+        welib_links = _get_download_urls_from_welib(book_info.id, selector=selector, cancel_flag=cancel_flag)
         if welib_links:
             links_queue = welib_links + [l for l in links_queue if l not in welib_links]
         welib_fallback_loaded = True
@@ -647,7 +647,7 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
                 and ALLOW_USE_WELIB
             ):
                 welib_selector = selector  # reuse AA mirror selector for consistency
-                welib_links = _get_download_urls_from_welib(book_info.id, selector=welib_selector)
+                welib_links = _get_download_urls_from_welib(book_info.id, selector=welib_selector, cancel_flag=cancel_flag)
                 welib_fallback_loaded = True
                 if welib_links:
                     new_links = [wl for wl in welib_links if wl not in links_queue]
@@ -679,10 +679,10 @@ def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None
 
     # AA fast download API (JSON response)
     if link.startswith(f"{network.get_aa_base_url()}/dyn/api/fast_download.json"):
-        page = downloader.html_get_page(link, selector=sel)
+        page = downloader.html_get_page(link, selector=sel, cancel_flag=cancel_flag)
         return downloader.get_absolute_url(link, json.loads(page).get("download_url", ""))
 
-    html = downloader.html_get_page(link, selector=sel)
+    html = downloader.html_get_page(link, selector=sel, cancel_flag=cancel_flag)
     if not html:
         return ""
 

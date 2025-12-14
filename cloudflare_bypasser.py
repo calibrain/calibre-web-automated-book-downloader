@@ -7,8 +7,14 @@ import threading
 import time
 import traceback
 from datetime import datetime
+from threading import Event
 from typing import Optional
 from urllib.parse import urlparse
+
+
+class BypassCancelledException(Exception):
+    """Raised when a bypass operation is cancelled."""
+    pass
 
 import requests
 from seleniumbase import Driver
@@ -303,43 +309,55 @@ def _bypass_ddos_guard_method_2(sb) -> bool:
         logger.debug(f"DDOS-Guard method 2 failed: {e}")
         return False
 
-def _bypass(sb, max_retries: int = MAX_RETRY) -> None:
+def _bypass(sb, max_retries: int = MAX_RETRY, cancel_flag: Optional[Event] = None) -> None:
     """Bypass function with strategies for Cloudflare and DDOS-Guard protection."""
     cloudflare_methods = [_bypass_method_1, _bypass_method_2, _bypass_method_3]
     ddos_guard_methods = [_bypass_ddos_guard_method_1, _bypass_ddos_guard_method_2]
 
     for try_count in range(max_retries):
+        # Check for cancellation before each attempt
+        if cancel_flag and cancel_flag.is_set():
+            logger.info("Bypass cancelled by user")
+            raise BypassCancelledException("Bypass cancelled")
+
         if _is_bypassed(sb):
             return
-        
+
         challenge_type = _detect_challenge_type(sb)
         logger.info(f"Detected challenge type: {challenge_type}")
-        
+
         if challenge_type == "ddos_guard":
             methods = ddos_guard_methods
         elif challenge_type == "cloudflare":
             methods = cloudflare_methods
         else:
             methods = cloudflare_methods + ddos_guard_methods
-            
+
         method = methods[try_count % len(methods)]
         logger.info(f"Bypass attempt {try_count + 1}/{max_retries} using {method.__name__}")
 
-        # Progressive backoff
+        # Progressive backoff with cancellation checks
         wait_time = min(DEFAULT_SLEEP * try_count, 15)
         if wait_time > 0:
             logger.info(f"Waiting {wait_time}s before trying...")
-            time.sleep(wait_time)
+            # Check cancellation during wait (check every second)
+            for _ in range(int(wait_time)):
+                if cancel_flag and cancel_flag.is_set():
+                    logger.info("Bypass cancelled during wait")
+                    raise BypassCancelledException("Bypass cancelled")
+                time.sleep(1)
 
         try:
             if method(sb):
                 logger.info(f"Bypass successful using {method.__name__}")
                 return
+        except BypassCancelledException:
+            raise
         except Exception as e:
             logger.warning(f"Exception in {method.__name__}: {e}")
 
         logger.info(f"Bypass method {method.__name__} failed.")
-    
+
     logger.warning("Exceeded maximum retries. Bypass failed.")
 
 def _get_chromium_args():
@@ -411,16 +429,26 @@ def _get_chromium_args():
     
     return arguments
 
-def _get(url, retry : int = MAX_RETRY):
+def _get(url, retry: int = MAX_RETRY, cancel_flag: Optional[Event] = None):
+    # Check for cancellation before starting
+    if cancel_flag and cancel_flag.is_set():
+        logger.info("Bypass cancelled before starting")
+        raise BypassCancelledException("Bypass cancelled")
+
     try:
         logger.info(f"SB_GET: {url}")
         sb = _get_driver()
-        
+
         # Enhanced page loading with better error handling
         logger.debug("Opening URL with SeleniumBase...")
         sb.uc_open_with_reconnect(url, DEFAULT_SLEEP)
         time.sleep(DEFAULT_SLEEP)
-        
+
+        # Check for cancellation after page load
+        if cancel_flag and cancel_flag.is_set():
+            logger.info("Bypass cancelled after page load")
+            raise BypassCancelledException("Bypass cancelled")
+
         # Log current page title and URL for debugging
         try:
             current_url = sb.get_current_url()
@@ -428,11 +456,11 @@ def _get(url, retry : int = MAX_RETRY):
             logger.debug(f"Page loaded - URL: {current_url}, Title: {current_title}")
         except Exception as debug_e:
             logger.debug(f"Could not get page info: {debug_e}")
-        
-        # Attempt bypass
+
+        # Attempt bypass with cancellation support
         logger.debug("Starting bypass process...")
-        _bypass(sb)
-        
+        _bypass(sb, cancel_flag=cancel_flag)
+
         if _is_bypassed(sb):
             logger.info("Bypass successful.")
             return sb.page_source
@@ -444,32 +472,39 @@ def _get(url, retry : int = MAX_RETRY):
                 logger.debug(f"Page content: {page_text}")
             except:
                 pass
-            
+
+    except BypassCancelledException:
+        raise
     except Exception as e:
         error_details = f"Exception type: {type(e).__name__}, Message: {str(e)}"
         stack_trace = traceback.format_exc()
-        
+
         if retry == 0:
             logger.error(f"Failed to initialize browser after all retries: {error_details}")
             logger.debug(f"Full stack trace: {stack_trace}")
             _reset_driver()
             raise e
-        
+
         logger.warning(f"Failed to bypass Cloudflare (retry {MAX_RETRY - retry + 1}/{MAX_RETRY}): {error_details}")
         logger.debug(f"Stack trace: {stack_trace}")
-        
+
         # Reset driver on certain errors
         if "WebDriverException" in str(type(e)) or "SessionNotCreatedException" in str(type(e)):
             logger.info("Restarting bypasser due to browser error...")
             _reset_driver()
-            
-    return _get(url, retry - 1)
 
-def get(url, retry : int = MAX_RETRY):
+    # Check for cancellation before retry
+    if cancel_flag and cancel_flag.is_set():
+        logger.info("Bypass cancelled before retry")
+        raise BypassCancelledException("Bypass cancelled")
+
+    return _get(url, retry - 1, cancel_flag)
+
+def get(url, retry: int = MAX_RETRY, cancel_flag: Optional[Event] = None):
     """Fetch a URL with protection bypass."""
     global LAST_USED
     with LOCKED:
-        ret = _get(url, retry)
+        ret = _get(url, retry, cancel_flag)
         LAST_USED = time.time()
         return ret
 
@@ -718,26 +753,35 @@ def shutdown_if_idle():
 _init_cleanup_thread()
 
 
-def get_bypassed_page(url: str, selector: Optional[network.AAMirrorSelector] = None) -> Optional[str]:
+def get_bypassed_page(url: str, selector: Optional[network.AAMirrorSelector] = None, cancel_flag: Optional[Event] = None) -> Optional[str]:
     """Fetch HTML content from a URL using the internal Cloudflare Bypasser.
 
     Args:
         url: Target URL
         selector: Optional mirror selector for AA URL rewriting
-        
+        cancel_flag: Optional threading Event to signal cancellation
+
     Returns:
         str: HTML content if successful, None otherwise
+
+    Raises:
+        BypassCancelledException: If cancel_flag is set during operation
     """
     sel = selector or network.AAMirrorSelector()
     attempt_url = sel.rewrite(url)
     try:
-        response_html = get(attempt_url)
+        response_html = get(attempt_url, cancel_flag=cancel_flag)
+    except BypassCancelledException:
+        raise
     except Exception:
+        # Check for cancellation before retry
+        if cancel_flag and cancel_flag.is_set():
+            raise BypassCancelledException("Bypass cancelled")
         # On failure, try mirror/DNS rotation for AA-like URLs
         new_base, action = sel.next_mirror_or_rotate_dns()
         if action in ("mirror", "dns") and new_base:
             attempt_url = sel.rewrite(url)
-            response_html = get(attempt_url)
+            response_html = get(attempt_url, cancel_flag=cancel_flag)
         else:
             raise
 
