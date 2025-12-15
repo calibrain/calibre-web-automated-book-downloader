@@ -1,6 +1,6 @@
 # 📚 Calibre-Web-Automated-Book-Downloader
 
-![Calibre-Web Automated Book Downloader](src/frontend/public/logo.png 'Calibre-Web Automated Book Downloader')
+<img src="src/frontend/public/logo.png" alt="Calibre-Web Automated Book Downloader" width="200">
 
 An intuitive web interface for searching and requesting book downloads, designed to work seamlessly with [Calibre-Web-Automated](https://github.com/crocodilestick/Calibre-Web-Automated). This project streamlines the process of downloading books and preparing them for integration into your Calibre library.
 
@@ -65,6 +65,7 @@ An intuitive web interface for searching and requesting book downloads, designed
 | `LOG_LEVEL`       | Log level to use        | `info`             |
 | `SESSION_COOKIE_SECURE` | Secure cookie enforcement - Use for HTTPS connections only | `false` |
 | `CALIBRE_WEB_URL` | Custom WebUI library link | None |
+| `BYPASS_WARMUP_ON_CONNECT` | Warm up Cloudflare bypasser when first client connects | `true` |
 
 If you wish to enable authentication, you must set `CWA_DB_PATH` to point to Calibre-Web's `app.db`, in order to match the username and password.
 
@@ -132,8 +133,10 @@ If disabling the cloudflare bypass, you will be using alternative download hosts
 | `AA_ADDITIONAL_URLS`   | Proxy URLs for AA (, separated) | ``                      |
 | `HTTP_PROXY`           | HTTP proxy URL                  | ``                      |
 | `HTTPS_PROXY`          | HTTPS proxy URL                 | ``                      |
-| `CUSTOM_DNS`           | Custom DNS IP                   | ``                      |
+| `CUSTOM_DNS`           | DNS configuration               | `auto`                  |
 | `USE_DOH`              | Use DNS over HTTPS              | `false`                 |
+
+**Proxy Configuration**
 
 For proxy configuration, you can specify URLs in the following format:
 ```bash
@@ -146,30 +149,43 @@ HTTP_PROXY=http://username:password@proxy.example.com:8080
 HTTPS_PROXY=http://username:password@proxy.example.com:8080
 ```
 
+**DNS Configuration**
 
-The `CUSTOM_DNS` setting supports two formats:
+The `CUSTOM_DNS` setting controls how DNS resolution works. By default, it is set to `auto` which provides automatic failover for reliable connectivity.
 
-1. **Custom DNS Servers**: A comma-separated list of DNS server IP addresses
+**Auto Mode (Default)**
+
+When `CUSTOM_DNS=auto`, the application starts with your system's default DNS. If DNS resolution fails, it automatically rotates through alternative providers using DNS over HTTPS (DoH):
+
+1. System DNS (initial)
+2. Cloudflare (1.1.1.1)
+3. Google (8.8.8.8)
+4. Quad9 (9.9.9.9)
+5. OpenDNS (208.67.222.222)
+
+This automatic rotation helps bypass ISP-level blocks and DNS issues without any manual configuration.
+
+**Manual DNS Configuration**
+
+If you prefer to use a specific DNS configuration, you can override the auto behavior:
+
+1. **Preset DNS Providers**: Use one of these predefined options:
+   - `google` - Google DNS (8.8.8.8, 8.8.4.4)
+   - `quad9` - Quad9 DNS (9.9.9.9, 149.112.112.112)
+   - `cloudflare` - Cloudflare DNS (1.1.1.1, 1.0.0.1)
+   - `opendns` - OpenDNS (208.67.222.222, 208.67.220.220)
+
+2. **Custom DNS Servers**: A comma-separated list of DNS server IP addresses
    - Example: `127.0.0.53,127.0.1.53` (useful for PiHole)
-   - Supports both IPv4 and IPv6 addresses in the same string
+   - Supports both IPv4 and IPv6 addresses
 
-2. **Preset DNS Providers**: Use one of these predefined options:
-   - `google` - Google DNS
-   - `quad9` - Quad9 DNS
-   - `cloudflare` - Cloudflare DNS
-   - `opendns` - OpenDNS
-
-For users experiencing ISP-level website blocks (such as Virgin Media in the UK), using alternative DNS providers like Cloudflare may help bypass these restrictions
-
-If a `CUSTOM_DNS` is specified from the preset providers, you can also set a `USE_DOH=true` to force using DNS over HTTPS,
-which might also help in certain network situations. Note that only `google`, `quad9`, `cloudflare` and `opendns` are 
-supported for now, and any other value in `CUSTOM_DNS` will make the `USE_DOH` flag ignored.
-
-Try something like this :
+When using preset providers, you can optionally enable DNS over HTTPS with `USE_DOH=true`:
 ```bash
 CUSTOM_DNS=cloudflare
 USE_DOH=true
 ```
+
+Note: When using custom IP addresses, the `USE_DOH` flag is ignored since DoH requires a known provider endpoint.
 
 #### Custom configuration
 
@@ -235,7 +251,6 @@ This variant allows the application to use an external service to bypass Cloudfl
 
 - When enabled, all requests that require Cloudflare bypass are sent to your external resolver service.
 - The application communicates with the resolver using its API.
-- This approach can improve reliability and performance, especially if your external resolver is optimized or shared across multiple applications.
 
 #### Configuration
 
@@ -263,11 +278,16 @@ This feature follows the same configuration of the built-in Cloudflare bypasser,
 #### Compatibility:
 This feature is designed to work with any resolver that implements the `FlareSolverr` API schema, including `ByParr` and similar projects.
 
-#### Benefits:
+#### Internal vs External Bypasser
 
-- Centralizes Cloudflare bypass logic for easier maintenance.
-- Can leverage more powerful or distributed resolver infrastructure.
-- Reduces load on the main application container.
+The **internal bypasser** (default) is custom-designed for this application's specific needs. It handles session management, cookie persistence, and retry logic optimized for book downloading workflows. For most users, this provides the most reliable experience out of the box.
+
+The **external bypasser** is better suited if you:
+- Already run FlareSolverr/ByParr for other services and want to consolidate
+- Need to share bypass infrastructure across multiple applications
+- Want to offload browser automation to a dedicated, more powerful container
+
+If you're unsure which to use, start with the default internal bypasser.
 
 ## 🏗️ Architecture
 
