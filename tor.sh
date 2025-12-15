@@ -55,6 +55,19 @@ AutomapHostsOnResolve 1
 TransPort 9040
 DNSPort 53
 Log notice file /var/log/tor/notices.log
+
+# Circuit management to prevent stale circuits after inactivity
+MaxCircuitDirtiness 600
+NewCircuitPeriod 30
+CircuitBuildTimeout 60
+LearnCircuitBuildTimeout 0
+
+# Keep circuits alive
+KeepalivePeriod 60
+CircuitStreamTimeout 60
+
+# Prevent connection timeouts
+SocksTimeout 120
 EOF
 
 echo "[*] Setting up DNS..."
@@ -92,9 +105,13 @@ iptables -t nat -A OUTPUT -p tcp --syn -j REDIRECT --to-ports 9040
 # For UDP DNS queries
 iptables -t nat -A OUTPUT -p udp --dport 53 ! -d 127.0.0.1 -j DNAT --to-destination 127.0.0.1:53
 
-
 # For TCP DNS queries (some DNS queries may use TCP)
 iptables -t nat -A OUTPUT -p tcp --dport 53 ! -d 127.0.0.1 -j DNAT --to-destination 127.0.0.1:53
+
+# Note: ICMP (ping) is NOT routed through Tor as Tor only supports TCP.
+# ICMP will use default routing. If you need to test connectivity, use:
+# curl -s https://check.torproject.org/api/ip
+# or: curl -s https://icanhazip.com
 
 echo "[✓] Transparent Tor routing enabled."
 
@@ -147,6 +164,46 @@ else
     ls -la /usr/share/zoneinfo/
     echo "[*] Falling back to container's default timezone: $TZ"
 fi
+
+# Start a background health check process to monitor Tor
+echo "[*] Starting Tor health check monitor..."
+(
+    check_count=0
+    while true; do
+        sleep 300  # Check every 5 minutes
+        check_count=$((check_count + 1))
+        echo "[*] Tor health check #$check_count at $(date)"
+        
+        # Check if Tor service is running
+        if ! service tor status > /dev/null 2>&1; then
+            echo "[!] $(date): Tor service not running, restarting..."
+            service tor restart
+            sleep 10
+        fi
+        
+        # Test DNS resolution through Tor
+        if ! timeout 10 nslookup google.com 127.0.0.1 > /dev/null 2>&1; then
+            echo "[!] $(date): DNS resolution failed, reloading Tor..."
+            service tor reload
+            sleep 5
+            # Verify DNS works after reload
+            if timeout 10 nslookup google.com 127.0.0.1 > /dev/null 2>&1; then
+                echo "[✓] $(date): DNS resolution restored"
+            else
+                echo "[✗] $(date): DNS still failing after reload, restarting Tor..."
+                service tor restart
+                sleep 10
+            fi
+        fi
+        
+        # Send SIGHUP to Tor to rotate circuits (helps with stale circuits)
+        echo "[*] $(date): Rotating Tor circuits..."
+        pkill -HUP tor || true
+    done
+) >> $LOG_FILE 2>&1 &
+
+TOR_MONITOR_PID=$!
+echo "[✓] Tor health check monitor started in background (PID: $TOR_MONITOR_PID)"
 
 # Run the entrypoint script
 echo "[*] End of tor script"
