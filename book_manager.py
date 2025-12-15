@@ -1,18 +1,36 @@
 """Book download manager handling search and retrieval operations."""
 
-import time, json, os, re
+import itertools
+import json
+import re
+import time
 from pathlib import Path
-from urllib.parse import quote
-from typing import List, Optional, Dict, Union, Callable
 from threading import Event
-from bs4 import BeautifulSoup, Tag, NavigableString, ResultSet
+from typing import Callable, Dict, List, Optional
+from urllib.parse import quote
+
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 import downloader
+import network
+from config import BOOK_LANGUAGE, SUPPORTED_FORMATS
+from env import AA_DONATOR_KEY, ALLOW_USE_WELIB, DEBUG_SKIP_SOURCES, DOWNLOAD_PATHS, PRIORITIZE_WELIB, USE_CF_BYPASS
 from logger import setup_logger
-from config import SUPPORTED_FORMATS, BOOK_LANGUAGE, AA_BASE_URL
-from env import AA_DONATOR_KEY, USE_CF_BYPASS, PRIORITIZE_WELIB, ALLOW_USE_WELIB, DOWNLOAD_PATHS
 from models import BookInfo, SearchFilters
+
 logger = setup_logger(__name__)
+
+# Round-robin counter for AA slow download source rotation
+# Distributes concurrent downloads across different partner mirrors
+_aa_slow_rotation = itertools.count()
+
+if DEBUG_SKIP_SOURCES:
+    logger.warning("DEBUG_SKIP_SOURCES active: skipping sources %s", DEBUG_SKIP_SOURCES)
+
+
+class SearchUnavailable(Exception):
+    """Raised when Anna's Archive cannot be reached via any mirror/DNS."""
+    pass
 
 
 
@@ -62,8 +80,10 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
                 )
                 index += 1
 
+    selector = network.AAMirrorSelector()
+
     url = (
-        f"{AA_BASE_URL}"
+        f"{network.get_aa_base_url()}"
         f"/search?index=&page=1&display=table"
         f"&acc=aa_download&acc=external_download"
         f"&ext={'&ext='.join(formats_to_use)}"
@@ -71,13 +91,14 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
         f"{filters_query}"
     )
 
-    html = downloader.html_get_page(url)
+    html = downloader.html_get_page(url, selector=selector)
     if not html:
-        raise Exception("Failed to fetch search results")
+        # Network/mirror exhaustion path bubbles up so API can notify clients
+        raise SearchUnavailable("Unable to reach Anna's Archive. Network restricted or mirrors are blocked.")
 
     if "No files found." in html:
         logger.info(f"No books found for query: {query}")
-        raise Exception("No books found. Please try another query.")
+        return []
 
     soup = BeautifulSoup(html, "html.parser")
     tbody: Tag | NavigableString | None = soup.find("table")
@@ -143,8 +164,9 @@ def get_book_info(book_id: str) -> BookInfo:
     Returns:
         BookInfo: Detailed book information
     """
-    url = f"{AA_BASE_URL}/md5/{book_id}"
-    html = downloader.html_get_page(url)
+    url = f"{network.get_aa_base_url()}/md5/{book_id}"
+    selector = network.AAMirrorSelector()
+    html = downloader.html_get_page(url, selector=selector)
 
     if not html:
         raise Exception(f"Failed to fetch book info for ID: {book_id}")
@@ -174,57 +196,74 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     data = soup.find_all("div", {"class": "main-inner"})[0].find_next("div")
     divs = list(data.children)
 
-    every_url = soup.find_all("a")
-    slow_urls_no_waitlist = set()
-    slow_urls_with_waitlist = set()
-    external_urls_libgen = set()
-    external_urls_z_lib = set()
-    external_urls_welib = set()
+    # Collect download URLs by source type (lists preserve page order, dedup inline)
+    slow_urls_no_waitlist: list[str] = []
+    slow_urls_with_waitlist: list[str] = []
+    external_urls_libgen: list[str] = []
+    external_urls_z_lib: list[str] = []
 
-    for url in every_url:
+    def _append_unique(lst: list[str], href: str) -> None:
+        if href and href not in lst:
+            lst.append(href)
+
+    for anchor in soup.find_all("a"):
         try:
-            if url.text.strip().lower().startswith("slow partner server"):
-                if (
-                    url.next is not None
-                    and url.next.next is not None
-                    and "waitlist" in url.next.next.strip().lower()
-                ):
-                    internal_text = url.next.next.strip().lower()
-                    if "no waitlist" in internal_text:
-                        slow_urls_no_waitlist.add(url["href"])
-                    else:
-                        slow_urls_with_waitlist.add(url["href"])
-            elif (
-                url.next is not None
-                and url.next.next is not None
-                and "click “GET” at the top" in url.next.next.text.strip()
-            ):
-                libgen_url = url["href"]
-                # TODO : Temporary fix ? Maybe get URLs from https://open-slum.org/ ?
-                libgen_url = re.sub(r'libgen\.(lc|is|bz|st)', 'libgen.gl', url["href"])
+            text = anchor.text.strip().lower()
+            href = anchor.get("href", "")
+            next_text = ""
+            if anchor.next and anchor.next.next:
+                next_text = getattr(anchor.next.next, 'text', str(anchor.next.next)).strip().lower()
 
-                external_urls_libgen.add(libgen_url)
-            elif url.text.strip().lower().startswith("z-lib"):
-                if ".onion/" not in url["href"]:
-                    external_urls_z_lib.add(url["href"])
+            if text.startswith("slow partner server") and "waitlist" in next_text:
+                if "no waitlist" in next_text:
+                    _append_unique(slow_urls_no_waitlist, href)
+                else:
+                    _append_unique(slow_urls_with_waitlist, href)
+            elif 'libgen.li' in href:
+                # Normalize libgen domains
+                libgen_url = re.sub(r'libgen\.(li|lc|is|bz|st)', 'libgen.gl', href)
+                _append_unique(external_urls_libgen, libgen_url)
+            elif text.startswith("z-lib") and ".onion/" not in href:
+                _append_unique(external_urls_z_lib, href)
         except:
             pass
 
-    external_urls_welib = _get_download_urls_from_welib(book_id) if USE_CF_BYPASS else set()
+    logger.debug(
+        "Source inventory for %s -> aa_no_wait=%d, aa_wait=%d, libgen=%d, zlib=%d",
+        book_id,
+        len(slow_urls_no_waitlist),
+        len(slow_urls_with_waitlist),
+        len(external_urls_libgen),
+        len(external_urls_z_lib),
+    )
 
     urls = []
-    urls += list(external_urls_welib) if PRIORITIZE_WELIB else []
-    urls += list(slow_urls_no_waitlist) if USE_CF_BYPASS else []
-    urls += list(external_urls_libgen)
-    urls += list(external_urls_welib) if not PRIORITIZE_WELIB else []
-    urls += list(slow_urls_with_waitlist)  if USE_CF_BYPASS else []
-    urls += list(external_urls_z_lib)
+
+    # Priority: reliable sources first, then external fallbacks
+    # 1. AA slow (no waitlist) - instant but can be slow
+    # 2. Libgen - instant, external
+    # 3. AA slow (waitlist) - has countdown timer but faster once started
+    # Note: Z-Library disabled - download tokens are session-bound
+    urls += slow_urls_no_waitlist if USE_CF_BYPASS else []
+    urls += external_urls_libgen
+    urls += slow_urls_with_waitlist if USE_CF_BYPASS else []
 
     for i in range(len(urls)):
-        urls[i] = downloader.get_absolute_url(AA_BASE_URL, urls[i])
+        urls[i] = downloader.get_absolute_url(network.get_aa_base_url(), urls[i])
 
     # Remove empty urls
     urls = [url for url in urls if url != ""]
+
+    # Tag AA slow URLs with detailed source type for skip/retry tracking
+    base_url = network.get_aa_base_url()
+    for rel_url in slow_urls_no_waitlist:
+        abs_url = downloader.get_absolute_url(base_url, rel_url)
+        if abs_url:
+            _url_source_types[abs_url] = "aa-slow-nowait"
+    for rel_url in slow_urls_with_waitlist:
+        abs_url = downloader.get_absolute_url(base_url, rel_url)
+        if abs_url:
+            _url_source_types[abs_url] = "aa-slow-wait"
 
     # Filter out divs that are not text
     original_divs = divs
@@ -241,7 +280,8 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
             if format == "" and f.strip().lower() in SUPPORTED_FORMATS:
                 format = f.strip().lower()
             if size == "" and any(u in f.strip().lower() for u in ["mb", "kb", "gb"]):
-                size = f.strip().lower()
+                # Preserve original case but uppercase the unit (e.g., "5.2 mb" -> "5.2 MB")
+                size = re.sub(r'(kb|mb|gb|tb)', lambda m: m.group(1).upper(), f.strip(), flags=re.IGNORECASE)
             if content == "":
                 for ct in DOWNLOAD_PATHS.keys():
                     if ct in f.strip().lower():
@@ -253,7 +293,8 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                 if format == "" and stripped and " " not in stripped:
                     format = stripped
                 if size == "" and "." in stripped:
-                    size = stripped
+                    # Uppercase any size units
+                    size = re.sub(r'(kb|mb|gb|tb)', lambda m: m.group(1).upper(), f.strip(), flags=re.IGNORECASE)
     
     book_title = _find_in_divs(divs, "🔍")[0].strip("🔍").strip()
 
@@ -265,8 +306,8 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         preview=preview,
         title=book_title,
         content=content,
-        publisher=_find_in_divs(divs, "icon-[mdi--company]", isClass=True)[0],
-        author=_find_in_divs(divs, "icon-[mdi--user-edit]", isClass=True)[0],
+        publisher=_find_in_divs(divs, "icon-[mdi--company]", is_class=True)[0],
+        author=_find_in_divs(divs, "icon-[mdi--user-edit]", is_class=True)[0],
         format=format,
         size=size,
         description=description,
@@ -289,32 +330,85 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     return book_info
 
-def _find_in_divs(divs: List[str], text: str, isClass: bool = False) -> List[str]:
-    divs_found = []
+def _find_in_divs(divs: List, text: str, is_class: bool = False) -> List[str]:
+    """Find divs containing text or having a specific class."""
+    results = []
     for div in divs:
-        if isClass:
-            if div.find(class_ = text):
-                divs_found.append(div.text.strip())
-        else:
-            if text in div.text.strip():
-                divs_found.append(div.text.strip())
-    return divs_found
+        if is_class:
+            if div.find(class_=text):
+                results.append(div.text.strip())
+        elif text in div.text.strip():
+            results.append(div.text.strip())
+    return results
 
-def _get_download_urls_from_welib(book_id: str) -> set[str]:
-    if ALLOW_USE_WELIB == False:
-        return set()
-    """Get download urls from welib.org."""
-    url = f"https://welib.org/md5/{book_id}"
-    logger.info(f"Getting download urls from welib.org for {book_id}. While this uses the bypasser, it will not start downloading them yet.")
-    html = downloader.html_get_page(url, use_bypasser=True)
-    if not html:
+# Download source definitions: (log_label, friendly_name, url_patterns)
+_DOWNLOAD_SOURCES = [
+    ("welib", "Welib", ["welib.org"]),
+    ("aa-fast", "Anna's Archive (Fast)", ["/dyn/api/fast_download"]),
+    ("aa-slow-wait", "Anna's Archive (Waitlist)", []),  # Matched via _url_source_types
+    ("aa-slow-nowait", "Anna's Archive", []),  # Matched via _url_source_types
+    ("aa-slow", "Anna's Archive", ["/slow_download/", "annas-"]),  # Fallback for untagged AA URLs
+    ("libgen", "Libgen", ["libgen"]),
+    ("zlib", "Z-Library", ["z-lib", "zlibrary"]),
+]
+
+# Track detailed source types for AA slow URLs (populated during get_book_info)
+_url_source_types: dict[str, str] = {}
+
+
+def _get_source_info(link: str) -> tuple[str, str]:
+    """Get source label and friendly name for a download link.
+
+    Args:
+        link: Download URL
+
+    Returns:
+        Tuple of (log_label, friendly_name)
+    """
+    # Check detailed source type mapping first (for AA slow distinction)
+    if link in _url_source_types:
+        detailed_label = _url_source_types[link]
+        for log_label, friendly_name, _ in _DOWNLOAD_SOURCES:
+            if log_label == detailed_label:
+                return log_label, friendly_name
+
+    for log_label, friendly_name, patterns in _DOWNLOAD_SOURCES:
+        if patterns and any(pattern in link for pattern in patterns):
+            return log_label, friendly_name
+    return "unknown", "Mirror"
+
+
+def _label_source(link: str) -> str:
+    """Get lightweight source tag for logging/metrics."""
+    return _get_source_info(link)[0]
+
+
+def _friendly_source_name(link: str) -> str:
+    """Get user-friendly name for a download source."""
+    return _get_source_info(link)[1]
+
+def _get_download_urls_from_welib(book_id: str, selector: Optional[network.AAMirrorSelector] = None, cancel_flag: Optional[Event] = None) -> list[str]:
+    """Get download URLs from welib.org (bypasser required)."""
+    if not ALLOW_USE_WELIB:
         return []
+    url = f"https://welib.org/md5/{book_id}"
+    logger.info(f"Fetching welib.org download URLs for {book_id}")
+    try:
+        html = downloader.html_get_page(url, use_bypasser=True, selector=selector or network.AAMirrorSelector(), cancel_flag=cancel_flag)
+    except Exception as exc:
+        logger.error_trace(f"Welib fetch failed for {book_id}: {exc}")
+        return []
+    if not html:
+        logger.warning(f"Welib page empty for {book_id}")
+        return []
+    
     soup = BeautifulSoup(html, "html.parser")
-    download_links = soup.find_all("a", href=True)
-    download_links = [link["href"] for link in download_links]
-    download_links = [link for link in download_links if "/slow_download/" in link]
-    download_links = [downloader.get_absolute_url(url, link) for link in download_links]
-    return set(download_links)
+    links = [
+        downloader.get_absolute_url(url, a["href"])
+        for a in soup.find_all("a", href=True)
+        if "/slow_download/" in a["href"]
+    ]
+    return list(dict.fromkeys(links))  # Dedupe while preserving order
 
 def _get_next_value_div(label_div: Tag) -> Optional[Tag]:
     """Find the next sibling div that holds the value for a metadata label."""
@@ -400,7 +494,14 @@ def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
     }
 
 
-def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None) -> Optional[str]:
+# After N consecutive failures of the same source type, skip remaining sources of that type
+SOURCE_FAILURE_THRESHOLD = 4
+
+# Minimum valid file size in bytes (10KB) - anything smaller is likely an error page
+MIN_VALID_FILE_SIZE = 10 * 1024
+
+
+def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optional[Callable[[float], None]] = None, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str, Optional[str]], None]] = None) -> Optional[str]:
     """Download a book from available sources.
 
     Args:
@@ -408,88 +509,277 @@ def download_book(book_info: BookInfo, book_path: Path, progress_callback: Optio
         title: Book title for logging
         progress_callback: Optional callback for download progress updates
         cancel_flag: Optional cancellation flag
-        status_callback: Optional callback for status updates
+        status_callback: Optional callback for status updates (status, message)
 
     Returns:
         str: Download URL if successful, None otherwise
     """
 
+    selector = network.AAMirrorSelector()
+
     if len(book_info.download_urls) == 0:
         book_info = get_book_info(book_info.id)
-    download_links = book_info.download_urls
+    download_links = list(book_info.download_urls)
 
     # If AA_DONATOR_KEY is set, use the fast download URL. Else try other sources.
     if AA_DONATOR_KEY != "":
         download_links.insert(
             0,
-            f"{AA_BASE_URL}/dyn/api/fast_download.json?md5={book_info.id}&key={AA_DONATOR_KEY}",
+            f"{network.get_aa_base_url()}/dyn/api/fast_download.json?md5={book_info.id}&key={AA_DONATOR_KEY}",
         )
 
-    for link in download_links:
-        try:
-            # Update status to resolving before attempting download URL fetch
-            if status_callback:
-                status_callback("resolving")
+    # Preserve order but drop duplicates to avoid retrying the same host
+    download_links = list(dict.fromkeys(download_links))
 
-            download_url = _get_download_url(link, book_info.title, cancel_flag, status_callback)
-            if download_url != "":
-                # Update status to downloading before starting actual download
-                if status_callback:
-                    status_callback("downloading")
+    # Round-robin rotation for AA slow download URLs to distribute load across mirrors
+    # This prevents all concurrent downloads from hitting the same partner server first
+    # Rotate aa-slow-nowait and aa-slow-wait independently to preserve priority ordering
+    rotation_value = next(_aa_slow_rotation)
 
-                logger.info(f"Downloading `{book_info.title}` from `{download_url}`")
+    def _rotate_category_in_place(links: list, source_type: str) -> int:
+        """Rotate URLs of a specific source type within the list, preserving their positions."""
+        indices = [i for i, u in enumerate(links) if _url_source_types.get(u) == source_type]
+        if len(indices) <= 1:
+            return 0
+        rotation = rotation_value % len(indices)
+        if rotation == 0:
+            return 0
+        # Extract values, rotate, put back
+        values = [links[i] for i in indices]
+        rotated = values[rotation:] + values[:rotation]
+        for idx, val in zip(indices, rotated):
+            links[idx] = val
+        return rotation
 
-                data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag)
-                if not data:
-                    raise Exception("No data received")
+    nowait_rotation = _rotate_category_in_place(download_links, "aa-slow-nowait")
+    wait_rotation = _rotate_category_in_place(download_links, "aa-slow-wait")
 
-                logger.info(f"Download finished. Writing to {book_path}")
-                with open(book_path, "wb") as f:
-                    f.write(data.getbuffer())
-                logger.info(f"Writing `{book_info.title}` successfully")
-                return download_url
+    if nowait_rotation or wait_rotation:
+        logger.info(f"AA source rotation: nowait={nowait_rotation}, wait={wait_rotation}")
 
-        except Exception as e:
-            logger.error_trace(f"Failed to download from {link}: {e}")
+    links_queue = download_links
+    
+    # Fetch welib URLs upfront when prioritized
+    welib_fallback_loaded = "welib" in DEBUG_SKIP_SOURCES  # Skip welib entirely if in debug skip list
+    if USE_CF_BYPASS and PRIORITIZE_WELIB and ALLOW_USE_WELIB and not welib_fallback_loaded:
+        logger.info("Fetching welib.org download URLs (PRIORITIZE_WELIB enabled)")
+        if status_callback:
+            status_callback("resolving", "Fetching welib sources...")
+        welib_links = _get_download_urls_from_welib(book_info.id, selector=selector, cancel_flag=cancel_flag)
+        if welib_links:
+            links_queue = welib_links + [l for l in links_queue if l not in welib_links]
+        welib_fallback_loaded = True
+    
+    total_sources = len(links_queue)
+    
+    # Handle case where no download sources are available
+    if total_sources == 0:
+        logger.warning(f"No download sources available for: {book_info.title}")
+        if status_callback:
+            status_callback("error", "No download sources found")
+        return None
+    
+    # Track consecutive failures per source type to skip after threshold
+    source_failures: dict[str, int] = {}
+    # Iterate with index so we can append welib links later
+    idx = 0
+    while idx < len(links_queue):
+        link = links_queue[idx]
+        source_label = _label_source(link)
+        friendly_name = _friendly_source_name(link)
+
+        # Debug: skip sources for testing fallback chains
+        if source_label in DEBUG_SKIP_SOURCES:
+            logger.info("DEBUG_SKIP_SOURCES: skipping %s (%s)", source_label, link)
+            idx += 1
             continue
 
+        # Skip source types that have failed too many times
+        if source_failures.get(source_label, 0) >= SOURCE_FAILURE_THRESHOLD:
+            logger.info("Skipping %s - source type '%s' failed %d times", link, source_label, SOURCE_FAILURE_THRESHOLD)
+            idx += 1
+            continue
+        
+        try:
+            current_pos = idx + 1
+            # Update total if we added more sources
+            total_sources = len(links_queue)
+            
+            logger.info("Trying download source [%s]: %s (%d/%d)", source_label, link, current_pos, total_sources)
+            
+            # Build source context for status messages (e.g., "Welib (1/12)")
+            source_context = f"{friendly_name} (Server #{current_pos})"
+            
+            # Update status with simple message showing which source we're trying
+            if status_callback:
+                status_callback("resolving", f"Trying {source_context}")
+
+            download_url = _get_download_url(link, book_info.title, cancel_flag, status_callback, selector, source_context)
+            if download_url == "":
+                raise Exception("No download URL resolved")
+
+            logger.info("Resolved download URL [%s]: %s", source_label, download_url)
+
+            # Pass source page as referer (required by some sites)
+            data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag, selector, status_callback, referer=link)
+            if not data:
+                raise Exception("No data received from download")
+            
+            # Validate file size - reject suspiciously small files
+            file_size = data.tell()
+            if file_size < MIN_VALID_FILE_SIZE:
+                logger.warning(f"Downloaded file too small ({file_size} bytes), likely an error page")
+                raise Exception(f"File too small ({file_size} bytes)")
+
+            logger.debug(f"Download finished ({file_size} bytes). Writing to {book_path}")
+            data.seek(0)  # Reset buffer position before writing
+            with open(book_path, "wb") as f:
+                f.write(data.getbuffer())
+            return download_url
+
+        except Exception as e:
+            logger.warning(f"Failed to download from {link} (source={source_label}): {e}")
+            source_failures[source_label] = source_failures.get(source_label, 0) + 1
+            idx += 1
+            # If we exhausted primary links and haven't loaded welib yet, fetch them lazily
+            if (
+                idx >= len(links_queue)
+                and not welib_fallback_loaded
+                and USE_CF_BYPASS
+                and ALLOW_USE_WELIB
+            ):
+                welib_selector = selector  # reuse AA mirror selector for consistency
+                welib_links = _get_download_urls_from_welib(book_info.id, selector=welib_selector, cancel_flag=cancel_flag)
+                welib_fallback_loaded = True
+                if welib_links:
+                    new_links = [wl for wl in welib_links if wl not in links_queue]
+                    if new_links:
+                        logger.info("Adding welib fallback links (%d)", len(new_links))
+                        links_queue.extend(new_links)
+                        # continue loop to try newly added links
+            continue
+
+    # All sources exhausted - report final error to UI
+    if status_callback:
+        status_callback("error", f"All {len(links_queue)} sources failed")
+    
     return None
 
 
-def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str], None]] = None) -> str:
-    """Extract actual download URL from various source pages."""
+def _get_download_url(link: str, title: str, cancel_flag: Optional[Event] = None, status_callback: Optional[Callable[[str, Optional[str]], None]] = None, selector: Optional[network.AAMirrorSelector] = None, source_context: Optional[str] = None) -> str:
+    """Extract actual download URL from various source pages.
+    
+    Args:
+        link: URL to extract download link from
+        title: Book title for logging
+        cancel_flag: Optional cancellation flag
+        status_callback: Optional callback for status updates
+        selector: Optional AA mirror selector
+        source_context: Optional context string like "Welib (1/12)" for status messages
+    """
+    sel = selector or network.AAMirrorSelector()
 
+    # AA fast download API (JSON response)
+    if link.startswith(f"{network.get_aa_base_url()}/dyn/api/fast_download.json"):
+        page = downloader.html_get_page(link, selector=sel, cancel_flag=cancel_flag)
+        return downloader.get_absolute_url(link, json.loads(page).get("download_url", ""))
+
+    html = downloader.html_get_page(link, selector=sel, cancel_flag=cancel_flag)
+    if not html:
+        return ""
+
+    soup = BeautifulSoup(html, "html.parser")
     url = ""
 
-    if link.startswith(f"{AA_BASE_URL}/dyn/api/fast_download.json"):
-        page = downloader.html_get_page(link, status_callback=status_callback)
-        url = json.loads(page).get("download_url")
+    # Z-Library
+    if link.startswith("https://z-lib."):
+        dl = soup.find("a", href=True, class_="addDownloadedBook")
+        url = dl["href"] if dl else ""
+
+    # AA slow download / partner servers
+    elif "/slow_download/" in link:
+        url = _extract_slow_download_url(soup, link, title, cancel_flag, status_callback, sel, source_context)
+
+    # Libgen (GET button)
     else:
-        html = downloader.html_get_page(link, status_callback=status_callback)
-
-        if html == "":
-            return ""
-
-        soup = BeautifulSoup(html, "html.parser")
-
-        if link.startswith("https://z-lib."):
-            download_link = soup.find_all("a", href=True, class_="addDownloadedBook")
-            if download_link:
-                url = download_link[0]["href"]
-        elif "/slow_download/" in link:
-            download_links = soup.find_all("a", href=True, string="📚 Download now")
-            if not download_links:
-                countdown = soup.find_all("span", class_="js-partner-countdown")
-                if countdown:
-                    sleep_time = int(countdown[0].text)
-                    logger.info(f"Waiting {sleep_time}s for {title}")
-                    if cancel_flag is not None and cancel_flag.wait(timeout=sleep_time):
-                        logger.info(f"Cancelled wait for {title}")
-                        return ""
-                    url = _get_download_url(link, title, cancel_flag, status_callback)
-            else:
-                url = download_links[0]["href"]
-        else:
-            url = soup.find_all("a", string="GET")[0]["href"]
+        get_btn = soup.find("a", string="GET")
+        url = get_btn["href"] if get_btn else ""
 
     return downloader.get_absolute_url(link, url)
+
+
+def _extract_slow_download_url(soup: BeautifulSoup, link: str, title: str, cancel_flag: Optional[Event], status_callback, selector, source_context: Optional[str] = None) -> str:
+    """Extract download URL from AA slow download pages."""
+    # Try "Download now" button variations
+    dl_link = soup.find("a", href=True, string="📚 Download now")
+    if not dl_link:
+        dl_link = soup.find("a", href=True, string=lambda s: s and "Download now" in s)
+    if dl_link:
+        return dl_link["href"]
+
+    # Try finding URL in gray background span (AA's copy URL format)
+    # The URL appears as plain text in <span class="bg-gray-200 ...">http://...</span>
+    for span in soup.find_all("span", class_=lambda c: c and "bg-gray-200" in c):
+        text = span.get_text(strip=True)
+        if text.startswith("http://") or text.startswith("https://"):
+            return text
+
+    # Try "copy this URL" pattern (legacy)
+    copy_text = soup.find(string=lambda s: s and "copy this url" in s.lower())
+    if copy_text and copy_text.parent:
+        parent = copy_text.parent
+        next_link = parent.find_next("a", href=True)
+        if next_link and next_link.get("href"):
+            return next_link["href"]
+        code_elem = parent.find_next("code")
+        if code_elem:
+            return code_elem.get_text(strip=True)
+        for sibling in parent.find_next_siblings():
+            text = sibling.get_text(strip=True) if hasattr(sibling, 'get_text') else str(sibling).strip()
+            if text.startswith("http"):
+                return text
+
+    # Check for countdown timer (waitlist)
+    countdown = soup.find("span", class_="js-partner-countdown")
+    if countdown:
+        # Cap countdown at 10 minutes to prevent malformed HTML from blocking indefinitely
+        MAX_COUNTDOWN_SECONDS = 600
+        try:
+            raw_countdown = int(countdown.text)
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid countdown value '{countdown.text}', skipping wait")
+            raw_countdown = 0
+        sleep_time = min(raw_countdown, MAX_COUNTDOWN_SECONDS)
+        if raw_countdown > MAX_COUNTDOWN_SECONDS:
+            logger.warning(f"Countdown {raw_countdown}s exceeds max, capping at {MAX_COUNTDOWN_SECONDS}s")
+        logger.info(f"Waiting {sleep_time}s for {title}")
+        
+        # Live countdown with status updates
+        remaining = sleep_time
+        while remaining > 0:
+            # Format countdown message with source context
+            if source_context:
+                wait_msg = f"{source_context} - Waiting {remaining}s"
+            else:
+                wait_msg = f"Waiting {remaining}s"
+            
+            if status_callback:
+                status_callback("resolving", wait_msg)
+            
+            # Wait 1 second (or until cancelled)
+            if cancel_flag and cancel_flag.wait(timeout=1):
+                logger.info(f"Cancelled wait for {title}")
+                return ""
+            
+            remaining -= 1
+        
+        # After countdown, update status and re-fetch
+        if status_callback and source_context:
+            status_callback("resolving", f"{source_context} - Fetching...")
+        
+        return _get_download_url(link, title, cancel_flag, status_callback, selector, source_context)
+
+    # Debug fallback
+    link_texts = [a.get_text(strip=True)[:50] for a in soup.find_all("a", href=True)[:10]]
+    logger.warning(f"No download URL found. First 10 links: {link_texts}")
+    return ""

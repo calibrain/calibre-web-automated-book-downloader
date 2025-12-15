@@ -11,33 +11,21 @@ interface DownloadsSidebarProps {
   activeCount: number;
 }
 
-const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  queued: { bg: 'bg-amber-500/10', text: 'text-amber-600', label: 'Queued' },
-  resolving: { bg: 'bg-indigo-500/10', text: 'text-indigo-600', label: 'Resolving' },
-  bypassing: { bg: 'bg-purple-500/10', text: 'text-purple-600', label: 'Bypassing Cloudflare...' },
-  downloading: { bg: 'bg-blue-500/10', text: 'text-blue-600', label: 'Downloading' },
-  verifying: { bg: 'bg-cyan-500/10', text: 'text-cyan-600', label: 'Verifying' },
-  ingesting: { bg: 'bg-teal-500/10', text: 'text-teal-600', label: 'Ingesting' },
-  complete: { bg: 'bg-green-500/10', text: 'text-green-600', label: 'Complete' },
-  completed: { bg: 'bg-green-500/10', text: 'text-green-600', label: 'Completed' },
-  available: { bg: 'bg-green-500/10', text: 'text-green-600', label: 'Available' },
-  done: { bg: 'bg-green-500/10', text: 'text-green-600', label: 'Done' },
-  error: { bg: 'bg-red-500/10', text: 'text-red-600', label: 'Error' },
-  cancelled: { bg: 'bg-gray-500/10', text: 'text-gray-600', label: 'Cancelled' },
-};
-
-// Helper to format file size
-const formatSize = (sizeStr?: string): string => {
-  if (!sizeStr) return '';
-  return sizeStr;
+const STATUS_STYLES: Record<string, { bg: string; text: string; label: string; waveColor: string }> = {
+  queued: { bg: 'bg-amber-500/20', text: 'text-amber-700 dark:text-amber-300', label: 'Queued', waveColor: 'rgba(217, 119, 6, 0.3)' },
+  resolving: { bg: 'bg-indigo-500/20', text: 'text-indigo-700 dark:text-indigo-300', label: 'Resolving', waveColor: 'rgba(79, 70, 229, 0.3)' },
+  downloading: { bg: 'bg-sky-500/20', text: 'text-sky-700 dark:text-sky-300', label: 'Downloading', waveColor: 'rgba(2, 132, 199, 0.3)' },
+  complete: { bg: 'bg-green-500/20', text: 'text-green-700 dark:text-green-300', label: 'Complete', waveColor: '' },
+  error: { bg: 'bg-red-500/20', text: 'text-red-700 dark:text-red-300', label: 'Error', waveColor: '' },
+  cancelled: { bg: 'bg-gray-500/20', text: 'text-gray-700 dark:text-gray-300', label: 'Cancelled', waveColor: '' },
 };
 
 // Add keyframe animation for wave effect
 const styleSheet = document.createElement('style');
 styleSheet.textContent = `
   @keyframes wave {
-    0% { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 `;
 if (!document.head.querySelector('style[data-wave-animation]')) {
@@ -56,24 +44,14 @@ const getStatusProgress = (statusName: string, bookProgress?: number): number =>
     case 'queued':
       return 5;
     case 'resolving':
-      return 10;
-    case 'bypassing':
       return 15;
     case 'downloading':
-      // Map actual progress (0-100) to 20-90 range
+      // Map actual progress (0-100) to 20-100 range
       if (typeof bookProgress === 'number') {
-        return 20 + (bookProgress * 0.7);
+        return 20 + (bookProgress * 0.8);
       }
       return 20;
-    case 'verifying':
-      return 95;
-    case 'ingesting':
-      return 99;
-    case 'completed':
     case 'complete':
-    case 'available':
-    case 'done':
-      return 100;
     case 'error':
       return 100;
     default:
@@ -83,17 +61,14 @@ const getStatusProgress = (statusName: string, bookProgress?: number): number =>
 
 // Helper to get progress bar color based on status
 const getProgressBarColor = (statusName: string): string => {
-  const isCompleted = ['completed', 'complete', 'available', 'done'].includes(statusName);
-  if (isCompleted) return 'bg-green-600';
+  if (statusName === 'complete') return 'bg-green-600';
   if (statusName === 'error') return 'bg-red-600';
-  if (statusName === 'queued') return 'bg-gray-600';
-  if (statusName === 'resolving') return 'bg-purple-600';
-  if (statusName === 'bypassing') return 'bg-violet-600';
+  if (statusName === 'queued') return 'bg-amber-600';
+  if (statusName === 'resolving') return 'bg-indigo-600';
   if (statusName === 'downloading') return 'bg-sky-600';
-  if (statusName === 'verifying') return 'bg-cyan-600';
-  if (statusName === 'ingesting') return 'bg-teal-600';
   return 'bg-sky-600';
 };
+
 
 export const DownloadsSidebar = ({
   isOpen,
@@ -119,22 +94,21 @@ export const DownloadsSidebar = ({
   }, [isOpen, onClose]);
 
   // Collect all download items from different status sections
-  const allDownloadItems: Array<{ book: Book; status: string; order: number }> = [];
-  
-  // Priority order for display
-  const statusOrder = ['downloading', 'bypassing', 'resolving', 'queued', 'verifying', 'ingesting', 'error', 'completed', 'complete', 'available', 'done', 'cancelled'];
-  
-  statusOrder.forEach((statusName, index) => {
+  const allDownloadItems: Array<{ book: Book; status: string }> = [];
+
+  const statusTypes = ['downloading', 'resolving', 'queued', 'error', 'complete', 'cancelled'];
+
+  statusTypes.forEach((statusName) => {
     const items = (status as any)[statusName];
     if (items && Object.keys(items).length > 0) {
       Object.values(items).forEach((book: any) => {
-        allDownloadItems.push({ book, status: statusName, order: index });
+        allDownloadItems.push({ book, status: statusName });
       });
     }
   });
 
-  // Sort by status priority
-  allDownloadItems.sort((a, b) => a.order - b.order);
+  // Sort by added_time descending (newest first)
+  allDownloadItems.sort((a, b) => (b.book.added_time || 0) - (a.book.added_time || 0));
 
   const renderDownloadItem = (item: { book: Book; status: string }) => {
     const { book, status: statusName } = item;
@@ -144,23 +118,31 @@ export const DownloadsSidebar = ({
       label: statusName.charAt(0).toUpperCase() + statusName.slice(1),
     };
 
-    const isInProgress = ['queued', 'resolving', 'bypassing', 'downloading', 'verifying', 'ingesting'].includes(statusName);
-    const isCompleted = ['completed', 'complete', 'available', 'done'].includes(statusName);
+    const isInProgress = ['queued', 'resolving', 'downloading'].includes(statusName);
+    const isCompleted = statusName === 'complete';
     const hasError = statusName === 'error';
     
     // Get progress information
     const progress = getStatusProgress(statusName, book.progress);
     const progressBarColor = getProgressBarColor(statusName);
     
-    // Format progress text
-    let progressText = statusStyle.label;
+    // Format progress text - use status_message if available, otherwise fall back to label
+    let progressText = book.status_message || statusStyle.label;
     if (statusName === 'downloading' && book.progress && book.size) {
-      const downloadedMB = (book.progress / 100) * parseFloat(book.size.replace(/[^\d.]/g, ''));
-      progressText = `${downloadedMB.toFixed(1)}mb / ${book.size}`;
+      const sizeValue = parseFloat(book.size.replace(/[^\d.]/g, ''));
+      const sizeUnit = book.size.replace(/[\d.\s]/g, ''); // Extract unit as-is from backend
+      const downloadedSize = (book.progress / 100) * sizeValue;
+      const sizeProgress = `${downloadedSize.toFixed(1)}${sizeUnit} / ${book.size}`;
+      // If there's attempt info in the status message, prepend it to the progress
+      if (book.status_message?.startsWith('Attempt')) {
+        progressText = `${book.status_message} - ${sizeProgress}`;
+      } else {
+        progressText = sizeProgress;
+      }
     } else if (isCompleted) {
       progressText = 'Complete';
     } else if (hasError) {
-      progressText = 'Failed';
+      progressText = book.status_message || 'Failed';
     }
 
     return (
@@ -169,6 +151,22 @@ export const DownloadsSidebar = ({
         className="relative rounded-lg border hover:shadow-md transition-shadow overflow-hidden"
         style={{ borderColor: 'var(--border-muted)', background: 'var(--bg-soft)' }}
       >
+        {/* Cancel/Clear Button - top right corner */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onCancel(book.id);
+          }}
+          className="absolute top-1 right-1 z-10 flex items-center justify-center w-6 h-6 rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 text-gray-500 hover:text-red-600 transition-colors"
+          title={isInProgress ? "Cancel download" : "Clear from list"}
+          aria-label={isInProgress ? "Cancel download" : "Clear from list"}
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
         {/* Main content area */}
         <div className="flex gap-2">
           {/* Book Thumbnail - left side */}
@@ -187,8 +185,8 @@ export const DownloadsSidebar = ({
 
           {/* Book Info - right side */}
           <div className="flex-1 min-w-0 flex flex-col justify-between px-3 pt-2 pb-3">
-            {/* Title & Author */}
-            <div className="mb-1">
+            {/* Title & Author - with safe area for cancel/clear button */}
+            <div className="mb-1 pr-6">
               <h3 className="font-semibold text-sm truncate" title={book.title}>
                 {isCompleted && book.download_path ? (
                   <a
@@ -206,47 +204,42 @@ export const DownloadsSidebar = ({
               </p>
             </div>
 
-            {/* Status Badge and Details Row */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <span
-                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}
-                >
-                  {statusStyle.label}
-                </span>
-                
-                {/* Cancel Button for in-progress items */}
-                {isInProgress && (
-                  <button
-                    type="button"
-                    onClick={() => onCancel(book.id)}
-                    className="text-xs px-2 py-1 rounded border hover-action transition-colors"
-                    style={{ borderColor: 'var(--border-muted)' }}
-                    title="Cancel download"
-                  >
-                    ✕
-                  </button>
-                )}
+            {/* Details Row */}
+            <div className="space-y-1 pb-8">
+              <div className="flex items-center gap-2">
+                {/* Format and Size */}
+                <div className="text-xs opacity-70">
+                  {book.format && <span className="uppercase">{book.format}</span>}
+                  {book.format && book.size && <span> • </span>}
+                  {book.size && <span>{book.size}</span>}
+                </div>
               </div>
-
-              {/* Format and Size */}
-              <div className="text-xs opacity-70">
-                {book.format && <span className="uppercase">{book.format}</span>}
-                {book.format && book.size && <span> • </span>}
-                {book.size && <span>{formatSize(book.size)}</span>}
-              </div>
-
-              {/* Error Message */}
-              {hasError && (
-                <p className="text-xs text-red-600">Download failed</p>
-              )}
             </div>
           </div>
         </div>
 
         {/* Progress Bar - absolute positioned at bottom - always visible */}
-        <div className="absolute bottom-0 left-0 right-0">
-          <p className="text-xs opacity-70 mt-0.5 text-right p-2">{progressText}</p>
+        <div className="absolute bottom-0 left-0 right-0 pointer-events-none">
+          {/* ml-16 clears the 64px thumbnail, gap-2 adds spacing */}
+          <div className="flex justify-end p-2 ml-16 gap-2">
+            <span
+              className={`relative px-2 py-0.5 rounded-lg text-xs font-medium text-right ${statusStyle.bg} ${statusStyle.text}`}
+            >
+              {/* Wave animation overlay for in-progress states */}
+              {isInProgress && statusStyle.waveColor && (
+                <span
+                  key={statusName}
+                  className="absolute inset-0 rounded-lg"
+                  style={{
+                    background: `linear-gradient(90deg, transparent 0%, ${statusStyle.waveColor} 50%, transparent 100%)`,
+                    backgroundSize: '200% 100%',
+                    animation: 'wave 2s linear infinite',
+                  }}
+                />
+              )}
+              <span className="relative">{progressText}</span>
+            </span>
+          </div>
           <div className="h-1.5 bg-gray-200 dark:bg-gray-700 overflow-hidden relative">
             <div
               className={`h-full ${progressBarColor} transition-all duration-300 relative overflow-hidden`}

@@ -1,6 +1,17 @@
 from logger import setup_logger
-from typing import Optional
+from threading import Event
+from typing import Optional, TYPE_CHECKING
 import requests
+import time
+import random
+
+if TYPE_CHECKING:
+    import network
+
+
+class BypassCancelledException(Exception):
+    """Raised when a bypass operation is cancelled."""
+    pass
 
 try:
     from env import EXT_BYPASSER_PATH, EXT_BYPASSER_TIMEOUT, EXT_BYPASSER_URL
@@ -9,26 +20,140 @@ except ImportError:
 
 logger = setup_logger(__name__)
 
+# Connection timeout (seconds) - how long to wait for external bypasser to accept connection
+CONNECT_TIMEOUT = 10
+# Maximum read timeout cap (seconds) - hard limit regardless of EXT_BYPASSER_TIMEOUT
+MAX_READ_TIMEOUT = 120
+# Buffer added to bypasser's configured timeout (seconds) - accounts for processing overhead
+READ_TIMEOUT_BUFFER = 15
+# Retry settings for bypasser failures
+MAX_RETRY = 5
+BACKOFF_BASE = 1.0
+BACKOFF_CAP = 10.0
 
-def get_bypassed_page(url: str) -> Optional[str]:
-    """Fetch HTML content from a URL using an External Cloudflare Resolver.
 
+def _fetch_via_bypasser(target_url: str) -> Optional[str]:
+    """Make a single request to the external bypasser service.
+    
     Args:
-        url: Target URL
+        target_url: The URL to fetch through the bypasser
+        
     Returns:
-        str: HTML content if successful, None otherwise
+        HTML content if successful, None otherwise
     """
     if not EXT_BYPASSER_URL or not EXT_BYPASSER_PATH:
-        logger.error("Wrong External Bypass configuration. Please check your environment configuration.")
+        logger.error("External bypasser not configured. Check EXT_BYPASSER_URL and EXT_BYPASSER_PATH.")
         return None
-    ext_url = f"{EXT_BYPASSER_URL}{EXT_BYPASSER_PATH}"
+    
+    bypasser_endpoint = f"{EXT_BYPASSER_URL}{EXT_BYPASSER_PATH}"
     headers = {"Content-Type": "application/json"}
-    data = {
+    payload = {
         "cmd": "request.get",
-        "url": url,
+        "url": target_url,
         "maxTimeout": EXT_BYPASSER_TIMEOUT
     }
-    response = requests.post(ext_url, headers=headers, json=data)
-    response.raise_for_status()
-    logger.debug(f"External Bypass response for '{url}': {response.json()['status']} - {response.json()['message']}")
-    return response.json()['solution']['response']
+    
+    # Calculate read timeout: bypasser timeout (ms → s) + buffer, capped at max
+    read_timeout = min((EXT_BYPASSER_TIMEOUT / 1000) + READ_TIMEOUT_BUFFER, MAX_READ_TIMEOUT)
+    
+    try:
+        response = requests.post(
+            bypasser_endpoint, 
+            headers=headers, 
+            json=payload, 
+            timeout=(CONNECT_TIMEOUT, read_timeout)
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        status = result.get('status', 'unknown')
+        message = result.get('message', '')
+        logger.debug(f"External bypasser response for '{target_url}': {status} - {message}")
+        
+        # Check for error status (bypasser returns status="error" with solution=null on failure)
+        if status != 'ok':
+            logger.warning(f"External bypasser failed for '{target_url}': {status} - {message}")
+            return None
+        
+        solution = result.get('solution')
+        if not solution:
+            logger.warning(f"External bypasser returned empty solution for '{target_url}'")
+            return None
+        
+        html = solution.get('response', '')
+        if not html:
+            logger.warning(f"External bypasser returned empty response for '{target_url}'")
+            return None
+        
+        return html
+        
+    except requests.exceptions.Timeout:
+        logger.warning(f"External bypasser timed out for '{target_url}' (connect: {CONNECT_TIMEOUT}s, read: {read_timeout:.0f}s)")
+        return None
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"External bypasser request failed for '{target_url}': {e}")
+        return None
+    except (KeyError, TypeError, ValueError) as e:
+        logger.warning(f"External bypasser returned malformed response for '{target_url}': {e}")
+        return None
+
+
+def get_bypassed_page(url: str, selector: Optional["network.AAMirrorSelector"] = None, cancel_flag: Optional[Event] = None) -> Optional[str]:
+    """Fetch HTML content from a URL using an external Cloudflare bypasser service.
+
+    Retries with exponential backoff and mirror/DNS rotation on failure.
+
+    Args:
+        url: Target URL to fetch
+        selector: Mirror selector for AA URL rewriting and rotation
+        cancel_flag: Optional threading Event to signal cancellation
+
+    Returns:
+        HTML content if successful, None otherwise
+
+    Raises:
+        BypassCancelledException: If cancel_flag is set during operation
+    """
+    import network
+    sel = selector or network.AAMirrorSelector()
+
+    for attempt in range(1, MAX_RETRY + 1):
+        # Check for cancellation before each attempt
+        if cancel_flag and cancel_flag.is_set():
+            logger.info("External bypasser cancelled by user")
+            raise BypassCancelledException("Bypass cancelled")
+
+        attempt_url = sel.rewrite(url)
+        result = _fetch_via_bypasser(attempt_url)
+        if result:
+            return result
+
+        if attempt == MAX_RETRY:
+            break
+
+        # Check for cancellation before backoff wait
+        if cancel_flag and cancel_flag.is_set():
+            logger.info("External bypasser cancelled during retry")
+            raise BypassCancelledException("Bypass cancelled")
+
+        # Backoff with jitter before retry, checking cancellation during wait
+        delay = min(BACKOFF_CAP, BACKOFF_BASE * (2 ** (attempt - 1))) + random.random()
+        logger.info(f"External bypasser attempt {attempt}/{MAX_RETRY} failed, retrying in {delay:.1f}s")
+
+        # Check cancellation during delay (check every second)
+        for _ in range(int(delay)):
+            if cancel_flag and cancel_flag.is_set():
+                logger.info("External bypasser cancelled during backoff")
+                raise BypassCancelledException("Bypass cancelled")
+            time.sleep(1)
+        # Sleep remaining fraction
+        remaining = delay - int(delay)
+        if remaining > 0:
+            time.sleep(remaining)
+
+        # Rotate mirror/DNS for next attempt
+        new_base, action = sel.next_mirror_or_rotate_dns()
+        if action in ("mirror", "dns") and new_base:
+            logger.info(f"Rotated {action} for retry")
+
+    return None

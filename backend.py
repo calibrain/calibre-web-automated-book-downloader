@@ -1,34 +1,41 @@
 """Backend logic for the book download application."""
 
-import threading, time
-import shutil
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
-import subprocess
 import os
-from concurrent.futures import ThreadPoolExecutor, Future
-from threading import Event
+import random
+import shutil
+import subprocess
+import threading
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path
+from threading import Event, Lock
+from typing import Any, Dict, List, Optional, Tuple
 
-from logger import setup_logger
-from config import CUSTOM_SCRIPT
-from env import (INGEST_DIR, DOWNLOAD_PATHS, TMP_DIR, MAIN_LOOP_SLEEP_TIME, USE_BOOK_TITLE,
-                 MAX_CONCURRENT_DOWNLOADS, DOWNLOAD_PROGRESS_UPDATE_INTERVAL)
-from models import book_queue, BookInfo, QueueStatus, SearchFilters
 import book_manager
+from book_manager import SearchUnavailable
+from config import CUSTOM_SCRIPT
+from env import (
+    DOWNLOAD_PATHS, DOWNLOAD_PROGRESS_UPDATE_INTERVAL, INGEST_DIR,
+    MAIN_LOOP_SLEEP_TIME, MAX_CONCURRENT_DOWNLOADS, TMP_DIR, USE_BOOK_TITLE,
+)
+from logger import setup_logger
+from models import BookInfo, QueueStatus, SearchFilters, book_queue
 
 logger = setup_logger(__name__)
 
-# Import WebSocket manager (will be initialized by app.py)
+# WebSocket manager (initialized by app.py)
 try:
     from websocket_manager import ws_manager
 except ImportError:
-    logger.warning("WebSocket manager not available")
     ws_manager = None
 
-def _sanitize_filename(filename: str) -> str:
-    """Sanitize a filename by replacing spaces with underscores and removing invalid characters."""
-    keepcharacters = (' ','.','_')
-    return "".join(c for c in filename if c.isalnum() or c in keepcharacters).rstrip()
+# Progress update throttling - track last broadcast time per book
+_progress_last_broadcast: Dict[str, float] = {}
+_progress_lock = Lock()
+
+# Stall detection - track last activity time per download
+_last_activity: Dict[str, float] = {}
+STALL_TIMEOUT = 300  # 5 minutes without progress/status update = stalled
 
 def search_books(query: str, filters: SearchFilters) -> List[Dict[str, Any]]:
     """Search for books matching the query.
@@ -43,6 +50,9 @@ def search_books(query: str, filters: SearchFilters) -> List[Dict[str, Any]]:
     try:
         books = book_manager.search_books(query, filters)
         return [_book_info_to_dict(book) for book in books]
+    except SearchUnavailable as e:
+        logger.warning(f"Search unavailable: {e}")
+        raise
     except Exception as e:
         logger.error_trace(f"Error searching books: {e}")
         return []
@@ -79,7 +89,7 @@ def queue_book(book_id: str, priority: int = 0) -> bool:
         logger.info(f"Book queued with priority {priority}: {book_info.title}")
         
         # Broadcast status update via WebSocket
-        if ws_manager and ws_manager.is_enabled():
+        if ws_manager:
             ws_manager.broadcast_status_update(queue_status())
         
         return True
@@ -162,14 +172,12 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
         book_info = book_queue._book_data[book_id]
         logger.info(f"Starting download: {book_info.title}")
 
-        if USE_BOOK_TITLE:
-            book_name = _sanitize_filename(book_info.title)
-        else:
-            book_name = book_id
-        # If format is not set, use the format of the first download URL
-        if book_info.format == "":
-            book_info.format = book_info.download_urls[0].split(".")[-1]
-        book_name += f".{book_info.format}"
+        if not book_info.download_urls:
+            raise ValueError(f"No download URLs available for {book_id}")
+
+        # get_filename() resolves format as side effect
+        full_name = book_info.get_filename()
+        book_name = full_name if USE_BOOK_TITLE else f"{book_id}.{book_info.format or 'bin'}"
         book_path = TMP_DIR / book_name
 
         # Check cancellation before download
@@ -178,7 +186,11 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
             return None
         
         progress_callback = lambda progress: update_download_progress(book_id, progress)
-        status_callback = lambda status: update_download_status(book_id, status)
+        status_callback = lambda status, message=None: update_download_status(book_id, status, message)
+        
+        # Set status to resolving immediately when processing starts
+        update_download_status(book_id, "resolving")
+        
         success_download_url = book_manager.download_book(book_info, book_path, progress_callback, cancel_flag, status_callback)
         
         # Stop progress updates
@@ -201,28 +213,29 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
                 book_path.unlink()
             return None
 
-        # Update status to verifying
-        book_queue.update_status(book_id, QueueStatus.VERIFYING)
-        if ws_manager and ws_manager.is_enabled():
-            ws_manager.broadcast_status_update(queue_status())
-        logger.info(f"Verifying download: {book_info.title}")
+        logger.debug(f"Post-processing download: {book_info.title}")
 
         if CUSTOM_SCRIPT:
             logger.info(f"Running custom script: {CUSTOM_SCRIPT}")
             subprocess.run([CUSTOM_SCRIPT, book_path])
-            
-        # Update status to ingesting
-        book_queue.update_status(book_id, QueueStatus.INGESTING)
-        if ws_manager and ws_manager.is_enabled():
-            ws_manager.broadcast_status_update(queue_status())
         
-        if success_download_url and book_info.format == "":
-            book_info.format = success_download_url.split(".")[-1]
-            book_name += f".{book_info.format}"
+        # Regenerate filename with fallback to successful download URL for format
+        full_name = book_info.get_filename(success_download_url)
+        book_name = full_name if USE_BOOK_TITLE else f"{book_id}.{book_info.format or 'bin'}"
 
         final_dir = _prepare_download_folder(book_info)
         intermediate_path = final_dir / f"{book_id}.crdownload"
         final_path = final_dir / book_name
+        
+        # Handle file already exists - add suffix to avoid overwrite
+        if final_path.exists():
+            base = final_path.stem
+            ext = final_path.suffix
+            counter = 1
+            while final_path.exists():
+                final_path = final_dir / f"{base}_{counter}{ext}"
+                counter += 1
+            logger.info(f"File already exists, saving as: {final_path.name}")
         
         if os.path.exists(book_path):
             logger.info(f"Moving book to ingest directory: {book_path} -> {final_path}")
@@ -256,23 +269,60 @@ def _download_book_with_cancellation(book_id: str, cancel_flag: Event) -> Option
         return None
 
 def update_download_progress(book_id: str, progress: float) -> None:
-    """Update download progress."""
-    book_queue.update_progress(book_id, progress)
-    
-    # Broadcast progress via WebSocket
-    if ws_manager and ws_manager.is_enabled():
-        ws_manager.broadcast_download_progress(book_id, progress, 'downloading')
+    """Update download progress with throttled WebSocket broadcasts.
 
-def update_download_status(book_id: str, status: str) -> None:
-    """Update download status."""
+    Progress is always stored in the queue, but WebSocket broadcasts are
+    throttled to avoid flooding clients with updates. Broadcasts occur:
+    - At most once per DOWNLOAD_PROGRESS_UPDATE_INTERVAL seconds
+    - Always at 0% (start) and 100% (complete)
+    - On significant progress jumps (>10%)
+    """
+    book_queue.update_progress(book_id, progress)
+
+    # Track activity for stall detection
+    with _progress_lock:
+        _last_activity[book_id] = time.time()
+    
+    # Broadcast progress via WebSocket with throttling
+    if ws_manager:
+        current_time = time.time()
+        should_broadcast = False
+        
+        with _progress_lock:
+            last_broadcast = _progress_last_broadcast.get(book_id, 0)
+            last_progress = _progress_last_broadcast.get(f"{book_id}_progress", 0)
+            time_elapsed = current_time - last_broadcast
+            
+            # Always broadcast at start (0%) or completion (>=99%)
+            if progress <= 1 or progress >= 99:
+                should_broadcast = True
+            # Broadcast if enough time has passed (convert interval from seconds)
+            elif time_elapsed >= DOWNLOAD_PROGRESS_UPDATE_INTERVAL:
+                should_broadcast = True
+            # Broadcast on significant progress jumps (>10%)
+            elif progress - last_progress >= 10:
+                should_broadcast = True
+            
+            if should_broadcast:
+                _progress_last_broadcast[book_id] = current_time
+                _progress_last_broadcast[f"{book_id}_progress"] = progress
+        
+        if should_broadcast:
+            ws_manager.broadcast_download_progress(book_id, progress, 'downloading')
+
+def update_download_status(book_id: str, status: str, message: Optional[str] = None) -> None:
+    """Update download status with optional detailed message.
+    
+    Args:
+        book_id: Book identifier
+        status: Status string (e.g., 'resolving', 'downloading')
+        message: Optional detailed status message for UI display
+    """
     # Map string status to QueueStatus enum
     status_map = {
         'queued': QueueStatus.QUEUED,
         'resolving': QueueStatus.RESOLVING,
-        'bypassing': QueueStatus.BYPASSING,
         'downloading': QueueStatus.DOWNLOADING,
-        'verifying': QueueStatus.VERIFYING,
-        'ingesting': QueueStatus.INGESTING,
         'complete': QueueStatus.COMPLETE,
         'available': QueueStatus.AVAILABLE,
         'error': QueueStatus.ERROR,
@@ -283,9 +333,17 @@ def update_download_status(book_id: str, status: str) -> None:
     queue_status_enum = status_map.get(status.lower())
     if queue_status_enum:
         book_queue.update_status(book_id, queue_status_enum)
-        
+
+        # Track activity for stall detection
+        with _progress_lock:
+            _last_activity[book_id] = time.time()
+
+        # Update status message if provided (empty string clears the message)
+        if message is not None:
+            book_queue.update_status_message(book_id, message)
+
         # Broadcast status update via WebSocket
-        if ws_manager and ws_manager.is_enabled():
+        if ws_manager:
             ws_manager.broadcast_status_update(queue_status())
 
 def cancel_download(book_id: str) -> bool:
@@ -340,17 +398,27 @@ def clear_completed() -> int:
     """Clear all completed downloads from tracking."""
     return book_queue.clear_completed()
 
+def _cleanup_progress_tracking(book_id: str) -> None:
+    """Clean up progress tracking data for a completed/cancelled download."""
+    with _progress_lock:
+        _progress_last_broadcast.pop(book_id, None)
+        _progress_last_broadcast.pop(f"{book_id}_progress", None)
+        _last_activity.pop(book_id, None)
+
 def _process_single_download(book_id: str, cancel_flag: Event) -> None:
     """Process a single download job."""
     try:
         # Status will be updated through callbacks during download process
-        # (resolving -> bypassing -> downloading -> verifying -> ingesting -> complete)
+        # (resolving -> downloading -> complete)
         download_path = _download_book_with_cancellation(book_id, cancel_flag)
+        
+        # Clean up progress tracking
+        _cleanup_progress_tracking(book_id)
         
         if cancel_flag.is_set():
             book_queue.update_status(book_id, QueueStatus.CANCELLED)
             # Broadcast cancellation
-            if ws_manager and ws_manager.is_enabled():
+            if ws_manager:
                 ws_manager.broadcast_status_update(queue_status())
             return
             
@@ -363,23 +431,26 @@ def _process_single_download(book_id: str, cancel_flag: Event) -> None:
         book_queue.update_status(book_id, new_status)
         
         # Broadcast final status (completed or error)
-        if ws_manager and ws_manager.is_enabled():
+        if ws_manager:
             ws_manager.broadcast_status_update(queue_status())
         
-        logger.info(
-            f"Book {book_id} download {'successful' if download_path else 'failed'}"
-        )
         
     except Exception as e:
+        # Clean up progress tracking even on error
+        _cleanup_progress_tracking(book_id)
+        
         if not cancel_flag.is_set():
             logger.error_trace(f"Error in download processing: {e}")
             book_queue.update_status(book_id, QueueStatus.ERROR)
+            # Set error message if not already set by download_book()
+            if book_id in book_queue._book_data and not book_queue._book_data[book_id].status_message:
+                book_queue.update_status_message(book_id, f"Download failed: {type(e).__name__}: {str(e)}")
         else:
             logger.info(f"Download cancelled: {book_id}")
             book_queue.update_status(book_id, QueueStatus.CANCELLED)
         
         # Broadcast error/cancelled status
-        if ws_manager and ws_manager.is_enabled():
+        if ws_manager:
             ws_manager.broadcast_status_update(queue_status())
 
 def concurrent_download_loop() -> None:
@@ -398,16 +469,32 @@ def concurrent_download_loop() -> None:
                     future.result()  # This will raise any exceptions from the worker
                 except Exception as e:
                     logger.error_trace(f"Future exception for {book_id}: {e}")
-            
+
+            # Check for stalled downloads (no activity in STALL_TIMEOUT seconds)
+            current_time = time.time()
+            with _progress_lock:
+                for future, book_id in list(active_futures.items()):
+                    last_active = _last_activity.get(book_id, current_time)
+                    if current_time - last_active > STALL_TIMEOUT:
+                        logger.warning(f"Download stalled for {book_id}, cancelling")
+                        book_queue.cancel_download(book_id)
+                        book_queue.update_status_message(book_id, f"Download stalled (no activity for {STALL_TIMEOUT}s)")
+
             # Start new downloads if we have capacity
             while len(active_futures) < MAX_CONCURRENT_DOWNLOADS:
                 next_download = book_queue.get_next()
                 if not next_download:
                     break
-                    
+
+                # Stagger concurrent downloads to avoid rate limiting on shared download servers
+                # Only delay if other downloads are already active
+                if active_futures:
+                    stagger_delay = random.uniform(2, 5)
+                    logger.debug(f"Staggering download start by {stagger_delay:.1f}s")
+                    time.sleep(stagger_delay)
+
                 book_id, cancel_flag = next_download
-                logger.info(f"Starting concurrent download: {book_id}")
-                
+
                 # Submit download job to thread pool
                 future = executor.submit(_process_single_download, book_id, cancel_flag)
                 active_futures[future] = book_id

@@ -53,7 +53,7 @@ function App() {
     content: '',
     formats: DEFAULT_FORMAT_SELECTION,
   });
-  const { toasts, showToast } = useToast();
+  const { toasts, showToast, removeToast } = useToast();
   const updateAdvancedFilters = useCallback((updates: Partial<AdvancedFilterState>) => {
     setAdvancedFilters(prev => ({ ...prev, ...updates }));
   }, []);
@@ -80,18 +80,12 @@ function App() {
     const ongoing = [
       currentStatus.queued,
       currentStatus.resolving,
-      currentStatus.bypassing,
       currentStatus.downloading,
-      currentStatus.verifying,
-      currentStatus.ingesting,
     ].reduce((sum, status) => sum + (status ? Object.keys(status).length : 0), 0);
 
-    const completed = [
-      currentStatus.completed,
-      currentStatus.complete,
-      currentStatus.available,
-      currentStatus.done,
-    ].reduce((sum, status) => sum + (status ? Object.keys(status).length : 0), 0);
+    const completed = currentStatus.complete
+      ? Object.keys(currentStatus.complete).length
+      : 0;
 
     const errored = currentStatus.error ? Object.keys(currentStatus.error).length : 0;
 
@@ -131,21 +125,24 @@ function App() {
 
     // Check for completed items
     const prevDownloadingIds = new Set(Object.keys(prevDownloading));
+    const prevResolvingIds = new Set(Object.keys(prev.resolving || {}));
     const prevQueuedIds = new Set(Object.keys(prevQueued));
-    const currAvailable = curr.available || {};
-    const currDone = curr.done || {};
+    const currComplete = curr.complete || {};
 
-    Object.keys(currAvailable).forEach(bookId => {
+    Object.keys(currComplete).forEach(bookId => {
       if (prevDownloadingIds.has(bookId) || prevQueuedIds.has(bookId)) {
-        const book = currAvailable[bookId];
+        const book = currComplete[bookId];
         showToast(`${book.title || 'Book'} completed`, 'success');
       }
     });
 
-    Object.keys(currDone).forEach(bookId => {
-      if (prevDownloadingIds.has(bookId) || prevQueuedIds.has(bookId)) {
-        const book = currDone[bookId];
-        showToast(`${book.title || 'Book'} completed`, 'success');
+    // Check for failed items
+    const currError = curr.error || {};
+    Object.keys(currError).forEach(bookId => {
+      if (prevDownloadingIds.has(bookId) || prevResolvingIds.has(bookId) || prevQueuedIds.has(bookId)) {
+        const book = currError[bookId];
+        const errorMsg = book.status_message || 'Download failed';
+        showToast(`${book.title || 'Book'}: ${errorMsg}`, 'error');
       }
     });
   }, [showToast]);
@@ -229,6 +226,14 @@ function App() {
       try {
         const cfg = await getConfig();
         setConfig(cfg);
+        // Update format selection to match supported formats from config
+        // This ensures PDF is auto-selected when added to SUPPORTED_FORMATS env var
+        if (cfg?.supported_formats) {
+          setAdvancedFilters(prev => ({
+            ...prev,
+            formats: cfg.supported_formats,
+          }));
+        }
       } catch (error) {
         console.error('Failed to load config:', error);
         // Use defaults if config fails to load
@@ -278,6 +283,11 @@ function App() {
       } else {
         console.error('Search failed:', error);
         setBooks([]);
+        const message = error instanceof Error ? error.message : 'Search failed';
+        const friendly = message.includes("Anna's Archive") || message.includes('Network restricted')
+          ? message
+          : "Unable to reach Anna's Archive. Network may be restricted or mirrors blocked.";
+        showToast(friendly, 'error');
       }
     } finally {
       setIsSearching(false);
@@ -304,6 +314,7 @@ function App() {
     } catch (error) {
       console.error('Download failed:', error);
       showToast('Failed to queue download', 'error');
+      throw error; // Re-throw so button components can reset their queuing state
     }
   };
 
@@ -333,6 +344,8 @@ function App() {
     setSearchInput('');
     setShowAdvanced(false);
     setLastSearchQuery('');
+    // Use config's supported formats if available, otherwise fall back to default
+    const resetFormats = config?.supported_formats || DEFAULT_FORMAT_SELECTION;
     setAdvancedFilters({
       isbn: '',
       author: '',
@@ -340,7 +353,7 @@ function App() {
       lang: [LANGUAGE_OPTION_DEFAULT],
       sort: '',
       content: '',
-      formats: DEFAULT_FORMAT_SELECTION,
+      formats: resetFormats,
     });
   };
 
@@ -366,26 +379,11 @@ function App() {
     if (currentStatus.error && currentStatus.error[bookId]) {
       return { text: 'Failed', state: 'error' };
     }
-    // Check completed states
-    if (currentStatus.completed && currentStatus.completed[bookId]) {
-      return { text: 'Downloaded', state: 'completed' };
-    }
+    // Check completed
     if (currentStatus.complete && currentStatus.complete[bookId]) {
-      return { text: 'Downloaded', state: 'completed' };
+      return { text: 'Downloaded', state: 'complete' };
     }
-    if (currentStatus.available && currentStatus.available[bookId]) {
-      return { text: 'Downloaded', state: 'completed' };
-    }
-    if (currentStatus.done && currentStatus.done[bookId]) {
-      return { text: 'Downloaded', state: 'completed' };
-    }
-    // Check in-progress states with detailed status
-    if (currentStatus.ingesting && currentStatus.ingesting[bookId]) {
-      return { text: 'Ingesting', state: 'ingesting' };
-    }
-    if (currentStatus.verifying && currentStatus.verifying[bookId]) {
-      return { text: 'Verifying', state: 'verifying' };
-    }
+    // Check in-progress states
     if (currentStatus.downloading && currentStatus.downloading[bookId]) {
       const book = currentStatus.downloading[bookId];
       return {
@@ -393,9 +391,6 @@ function App() {
         state: 'downloading',
         progress: book.progress
       };
-    }
-    if (currentStatus.bypassing && currentStatus.bypassing[bookId]) {
-      return { text: 'Bypassing Cloudflare...', state: 'bypassing' };
     }
     if (currentStatus.resolving && currentStatus.resolving[bookId]) {
       return { text: 'Resolving', state: 'resolving' };
@@ -440,6 +435,8 @@ function App() {
         }}
         onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
         isLoading={isSearching}
+        onShowToast={showToast}
+        onRemoveToast={removeToast}
       />
       
       <AdvancedFilters

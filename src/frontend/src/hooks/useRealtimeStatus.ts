@@ -26,7 +26,7 @@ interface UseRealtimeStatusReturn {
  */
 export const useRealtimeStatus = ({
   wsUrl,
-  pollInterval = 5000,
+  pollInterval = 2000, // Reduced from 5s for better UX when WebSocket unavailable
   reconnectAttempts = 3,
 }: UseRealtimeStatusOptions): UseRealtimeStatusReturn => {
   const [status, setStatus] = useState<StatusData>({});
@@ -130,7 +130,7 @@ export const useRealtimeStatus = ({
       socketRef.current = socket;
 
       socket.on('connect', () => {
-        console.log('WebSocket connected successfully');
+        console.log('✅ WebSocket connected successfully via', socket.io.engine.transport.name);
         setConnected(true);
         setIsUsingWebSocket(true);
         setError(null);
@@ -139,6 +139,9 @@ export const useRealtimeStatus = ({
         
         // Stop polling when WebSocket connects
         stopPolling();
+        
+        // Request initial status via WebSocket
+        socket.emit('request_status');
       });
 
       socket.on('disconnect', (reason: string) => {
@@ -174,22 +177,34 @@ export const useRealtimeStatus = ({
         attemptReconnect();
       });
 
-      // Listen for status updates
+      // Listen for status updates (full status refresh)
       socket.on('status_update', (data: StatusData) => {
+        console.debug('[WS] status_update received', Object.keys(data));
         setStatus(data);
         setError(null);
       });
 
-      // Listen for real-time progress updates
+      // Listen for real-time progress updates (incremental)
       socket.on('download_progress', (data: { book_id: string; progress: number; status: string }) => {
+        console.debug('[WS] download_progress:', data.book_id, `${data.progress.toFixed(1)}%`);
         setStatus(prev => {
           const newStatus = { ...prev };
+          
+          // Update progress in downloading state
           if (newStatus.downloading?.[data.book_id]) {
-            newStatus.downloading[data.book_id] = {
-              ...newStatus.downloading[data.book_id],
-              progress: data.progress,
+            newStatus.downloading = {
+              ...newStatus.downloading,
+              [data.book_id]: {
+                ...newStatus.downloading[data.book_id],
+                progress: data.progress,
+              },
             };
           }
+          // Also check resolving state in case status update hasn't arrived yet
+          else if (newStatus.resolving?.[data.book_id]) {
+            // Book is resolving - progress will apply when it moves to downloading
+          }
+          
           return newStatus;
         });
       });

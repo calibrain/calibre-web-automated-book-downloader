@@ -124,15 +124,15 @@ fi
 # Add environment variables (redacting sensitive info)
 env | grep -v -E "(AA_DONATOR_KEY)" | sort > "$LOG_DIR/environment.txt"
 
-echo "--- HTTPBin ---" > $LOG_DIR/network_info.txt
+echo "--- HTTPBin ---" >> $LOG_DIR/network_info.txt
 curl -s https://httpbin.org/get >> $LOG_DIR/network_info.txt
-ehco ""
+echo "" >> $LOG_DIR/network_info.txt
 echo "--- HowsMySSL ---" >> $LOG_DIR/network_info.txt
 curl -s https://www.howsmyssl.com/a/check >> $LOG_DIR/network_info.txt
-ehco ""
+echo "" >> $LOG_DIR/network_info.txt
 echo "--- IPInfo ---" >> $LOG_DIR/network_info.txt
 curl -s https://ipinfo.io >> $LOG_DIR/network_info.txt
-ehco ""
+echo "" >> $LOG_DIR/network_info.txt
 echo "--- Cloudflare Trace ---" >> $LOG_DIR/network_info.txt
 curl -s https://1.1.1.1/cdn-cgi/trace >> $LOG_DIR/network_info.txt
 

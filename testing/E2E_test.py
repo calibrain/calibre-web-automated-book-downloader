@@ -6,7 +6,7 @@ import hashlib
 # Thee server is already running, so let's grab some of the env vars:
 # Use absolute import since the script is run from the root directory
 import env as SERVER_ENV
-from backend import _sanitize_filename # Moved import to top level
+from models import BookInfo
 
 # Now let's test the server:
 port = SERVER_ENV.FLASK_PORT
@@ -109,12 +109,17 @@ print(f"Book {book_id} download confirmed as available.")
 
 # Step 5 : Verify the file exists locally (optional but good)
 print(f"Step 5: Verifying downloaded file exists...")
-# Depend if env.USE_TITLE is true or false, the filename will be different
+# Depend if env.USE_BOOK_TITLE is true or false, the filename will be different
 if SERVER_ENV.USE_BOOK_TITLE:
-    # Ensure book_details is available; might need adjustment if Step 2 failed
-    # Assuming book_details was successfully fetched in Step 2
-    title_to_sanitize = book_details.get('title', book_title) # Use fetched title if available
-    expected_filename = _sanitize_filename(title_to_sanitize) + ".epub" # Add extension
+    # Build expected filename using BookInfo
+    book_info = BookInfo(
+        id=book_id,
+        title=book_details.get('title', ''),
+        author=book_details.get('author'),
+        year=book_details.get('year'),
+        format='epub'
+    )
+    expected_filename = book_info.get_filename()
 else:
     expected_filename = f"{book_id}.epub"
 
