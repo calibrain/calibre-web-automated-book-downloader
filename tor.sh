@@ -72,11 +72,91 @@ EOF
 
 echo "[*] Setting up DNS..."
 cat <<EOF > /etc/resolv.conf
-127.0.0.1
+nameserver 127.0.0.1
 EOF
 
 echo "[*] Starting Tor..."
-service tor start
+echo "[*] Configuring Supervisor..."
+mkdir -p /var/log/supervisor
+cat <<EOF > /etc/supervisor/supervisord.conf
+[supervisord]
+nodaemon=false
+logfile=/var/log/supervisor/supervisord.log
+pidfile=/var/run/supervisord.pid
+user=root
+
+[unix_http_server]
+file=/var/run/supervisor.sock   ; (the path to the socket file)
+
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+
+[supervisorctl]
+serverurl=unix:///var/run/supervisor.sock ; use a unix:// URL  for a unix socket
+
+[program:tor]
+command=/usr/bin/tor -f /etc/tor/torrc
+autostart=true
+autorestart=true
+startretries=100
+stdout_logfile=/var/log/supervisor/tor.log
+stderr_logfile=/var/log/supervisor/tor.err.log
+
+[program:tor-healthcheck]
+command=/app/tor_healthcheck.sh
+autostart=true
+autorestart=true
+stdout_logfile=/var/log/supervisor/healthcheck.log
+stderr_logfile=/var/log/supervisor/healthcheck.err.log
+EOF
+
+# Create healthcheck script
+cat <<'HC' > /app/tor_healthcheck.sh
+#!/bin/bash
+
+# Function to dynamically wait for Tor bootstrap
+wait_for_tor() {
+    echo "$(date): Waiting for Tor to finish bootstrapping..."
+    sleep 30
+    # Reuse the timeout logic from the main script
+    timeout 300 bash -c '
+      while ! grep -q "Bootstrapped 100%" <(tail -n 20 -F /var/log/tor/notices.log 2>/dev/null); do
+        sleep 1
+      done
+    '
+    echo "$(date): Tor seems ready (log message found)."
+}
+
+# Wait for Tor to bootstrap initially
+
+FAIL_COUNT=0
+while true; do
+    # Try to resolve/connect to google.com (timeout 10s)
+    if curl -s --head --max-time 10 https://google.com > /dev/null; then
+        # Success
+        FAIL_COUNT=0
+    else
+        FAIL_COUNT=$((FAIL_COUNT+1))
+        echo "$(date): Healthcheck failed (Count: $FAIL_COUNT)"
+    fi
+
+    # If failed 3 times in a row, restart Tor
+    if [ "$FAIL_COUNT" -ge 3 ]; then
+        echo "$(date): restart trigger - Restarting Tor..."
+        supervisorctl restart tor
+        FAIL_COUNT=0
+        
+        # Wait for it to come back using the dynamic check
+        wait_for_tor
+    fi
+
+    sleep 30
+done
+HC
+chmod +x /app/tor_healthcheck.sh
+
+echo "[*] Starting Tor via Supervisor..."
+/usr/bin/supervisord -c /etc/supervisor/supervisord.conf
 
 # Wait a bit to ensure Tor has bootstrapped
 echo "[*] Waiting for Tor to finish bootstrapping... (up to 5 minutes)"
@@ -105,13 +185,9 @@ iptables -t nat -A OUTPUT -p tcp --syn -j REDIRECT --to-ports 9040
 # For UDP DNS queries
 iptables -t nat -A OUTPUT -p udp --dport 53 ! -d 127.0.0.1 -j DNAT --to-destination 127.0.0.1:53
 
+
 # For TCP DNS queries (some DNS queries may use TCP)
 iptables -t nat -A OUTPUT -p tcp --dport 53 ! -d 127.0.0.1 -j DNAT --to-destination 127.0.0.1:53
-
-# Note: ICMP (ping) is NOT routed through Tor as Tor only supports TCP.
-# ICMP will use default routing. If you need to test connectivity, use:
-# curl -s https://check.torproject.org/api/ip
-# or: curl -s https://icanhazip.com
 
 echo "[✓] Transparent Tor routing enabled."
 
@@ -164,46 +240,6 @@ else
     ls -la /usr/share/zoneinfo/
     echo "[*] Falling back to container's default timezone: $TZ"
 fi
-
-# Start a background health check process to monitor Tor
-echo "[*] Starting Tor health check monitor..."
-(
-    check_count=0
-    while true; do
-        sleep 300  # Check every 5 minutes
-        check_count=$((check_count + 1))
-        echo "[*] Tor health check #$check_count at $(date)"
-        
-        # Check if Tor service is running
-        if ! service tor status > /dev/null 2>&1; then
-            echo "[!] $(date): Tor service not running, restarting..."
-            service tor restart
-            sleep 10
-        fi
-        
-        # Test DNS resolution through Tor
-        if ! timeout 10 nslookup google.com 127.0.0.1 > /dev/null 2>&1; then
-            echo "[!] $(date): DNS resolution failed, reloading Tor..."
-            service tor reload
-            sleep 5
-            # Verify DNS works after reload
-            if timeout 10 nslookup google.com 127.0.0.1 > /dev/null 2>&1; then
-                echo "[✓] $(date): DNS resolution restored"
-            else
-                echo "[✗] $(date): DNS still failing after reload, restarting Tor..."
-                service tor restart
-                sleep 10
-            fi
-        fi
-        
-        # Send SIGHUP to Tor to rotate circuits (helps with stale circuits)
-        echo "[*] $(date): Rotating Tor circuits..."
-        pkill -HUP tor || true
-    done
-) >> $LOG_FILE 2>&1 &
-
-TOR_MONITOR_PID=$!
-echo "[✓] Tor health check monitor started in background (PID: $TOR_MONITOR_PID)"
 
 # Run the entrypoint script
 echo "[*] End of tor script"
