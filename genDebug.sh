@@ -18,17 +18,17 @@ echo "" >> "$LOG_DIR/system_info.txt"
 
 # Add disk usage
 echo "=== Disk Usage ===" >> "$LOG_DIR/system_info.txt"
-df -h >> "$LOG_DIR/system_info.txt"
+df -h >> "$LOG_DIR/system_info.txt" 2>&1
 echo "" >> "$LOG_DIR/system_info.txt"
 
 # Add memory info
 echo "=== Memory Info ===" >> "$LOG_DIR/system_info.txt"
-free -h >> "$LOG_DIR/system_info.txt"
+free -h >> "$LOG_DIR/system_info.txt" 2>&1
 echo "" >> "$LOG_DIR/system_info.txt"
 
 # Add running processes
 echo "=== Running Processes ===" >> "$LOG_DIR/system_info.txt"
-ps aux >> "$LOG_DIR/system_info.txt"
+ps aux >> "$LOG_DIR/system_info.txt" 2>&1
 echo "" >> "$LOG_DIR/system_info.txt"
 
 # Add network information using basic commands
@@ -37,17 +37,17 @@ echo "=== Network Information ===" > "$LOG_DIR/network_info.txt"
 # Try to get basic connectivity information
 echo "=== Basic Connectivity ===" >> "$LOG_DIR/network_info.txt"
 echo "Hostname resolution:" >> "$LOG_DIR/network_info.txt"
-cat /etc/hosts 2>/dev/null >> "$LOG_DIR/network_info.txt" || echo "Unable to read /etc/hosts" >> "$LOG_DIR/network_info.txt"
+cat /etc/hosts >> "$LOG_DIR/network_info.txt" 2>&1 || echo "Unable to read /etc/hosts" >> "$LOG_DIR/network_info.txt"
 echo "" >> "$LOG_DIR/network_info.txt"
 
 echo "DNS configuration:" >> "$LOG_DIR/network_info.txt"
-cat /etc/resolv.conf 2>/dev/null >> "$LOG_DIR/network_info.txt" || echo "Unable to read /etc/resolv.conf" >> "$LOG_DIR/network_info.txt"
+cat /etc/resolv.conf >> "$LOG_DIR/network_info.txt" 2>&1 || echo "Unable to read /etc/resolv.conf" >> "$LOG_DIR/network_info.txt"
 echo "" >> "$LOG_DIR/network_info.txt"
 
 # Try to get interface information from /proc
 echo "=== Network Interfaces (/proc) ===" >> "$LOG_DIR/network_info.txt"
 if [ -f "/proc/net/dev" ]; then
-  cat /proc/net/dev >> "$LOG_DIR/network_info.txt"
+  cat /proc/net/dev >> "$LOG_DIR/network_info.txt" 2>&1
 else
   echo "Not available: /proc/net/dev not found" >> "$LOG_DIR/network_info.txt"
 fi
@@ -55,9 +55,9 @@ echo "" >> "$LOG_DIR/network_info.txt"
 
 # Try connectivity tests
 echo "=== Internet Connectivity ===" >> "$LOG_DIR/network_info.txt"
-ping -c 3 1.1.1.1 2>/dev/null >> "$LOG_DIR/network_info.txt" || echo "Ping command failed or not available" >> "$LOG_DIR/network_info.txt"
+ping -c 3 1.1.1.1 >> "$LOG_DIR/network_info.txt" 2>&1 || echo "Ping command failed or not available" >> "$LOG_DIR/network_info.txt"
 echo "" >> "$LOG_DIR/network_info.txt"
-ping -c 3 one.one.one.one 2>/dev/null >> "$LOG_DIR/network_info.txt" || echo "DNS resolution test failed" >> "$LOG_DIR/network_info.txt"
+ping -c 3 one.one.one.one >> "$LOG_DIR/network_info.txt" 2>&1 || echo "DNS resolution test failed" >> "$LOG_DIR/network_info.txt"
 echo "" >> "$LOG_DIR/network_info.txt"
 
 # Test IPv6 connectivity
@@ -77,7 +77,7 @@ echo "" >> "$LOG_DIR/network_info.txt"
 
 # Try IPv6 connectivity test using Cloudflare's IPv6 DNS
 echo "Testing IPv6 connectivity to Cloudflare DNS:" >> "$LOG_DIR/network_info.txt"
-ping6 -c 3 2606:4700:4700::1111 2>/dev/null >> "$LOG_DIR/network_info.txt" || echo "IPv6 ping failed or not available" >> "$LOG_DIR/network_info.txt"
+ping6 -c 3 2606:4700:4700::1111 >> "$LOG_DIR/network_info.txt" 2>&1 || echo "IPv6 ping failed or not available" >> "$LOG_DIR/network_info.txt"
 echo "" >> "$LOG_DIR/network_info.txt"
 
 # Test SSL connectivity
@@ -92,23 +92,35 @@ echo "" >> "$LOG_DIR/network_info.txt"
 
 # Add installed packages
 echo "=== Installed Python Packages ===" > "$LOG_DIR/packages.txt"
-pip list 2>/dev/null >> "$LOG_DIR/packages.txt" || echo "pip not found" >> "$LOG_DIR/packages.txt"
+pip list >> "$LOG_DIR/packages.txt" 2>&1 || echo "pip not found" >> "$LOG_DIR/packages.txt"
 echo "" >> "$LOG_DIR/packages.txt"
 
 # Check Permissions
 echo "=== Permissions ===" > "$LOG_DIR/permissions.txt"
 echo "ls -all /app" >> "$LOG_DIR/permissions.txt"
-ls -all /app >> "$LOG_DIR/permissions.txt"
+ls -all /app >> "$LOG_DIR/permissions.txt" 2>&1
 echo "" >> "$LOG_DIR/permissions.txt"
 echo "ls -all /cwa-book-ingest" >> "$LOG_DIR/permissions.txt"
-ls -all /cwa-book-ingest >> "$LOG_DIR/permissions.txt"
+ls -all /cwa-book-ingest >> "$LOG_DIR/permissions.txt" 2>&1
 echo "" >> "$LOG_DIR/permissions.txt"
 echo "ls -all /var/log/cwa-book-downloader" >> "$LOG_DIR/permissions.txt"
-ls -all /var/log/cwa-book-downloader >> "$LOG_DIR/permissions.txt"
+ls -all /var/log/cwa-book-downloader >> "$LOG_DIR/permissions.txt" 2>&1
 echo "" >> "$LOG_DIR/permissions.txt"
 echo "ls -all /tmp/cwa-book-downloader" >> "$LOG_DIR/permissions.txt"
-ls -all /tmp/cwa-book-downloader >> "$LOG_DIR/permissions.txt"
+ls -all /tmp/cwa-book-downloader >> "$LOG_DIR/permissions.txt" 2>&1
 echo "" >> "$LOG_DIR/permissions.txt"
+
+# Check Iptables (NAT)
+echo "=== IPtables NAT Rules ===" > "$LOG_DIR/iptables_nat.txt"
+iptables -t nat -L -v -n >> "$LOG_DIR/iptables_nat.txt" 2>&1
+
+# Check DNS Resolution details
+echo "=== DNS Resolution Test ===" > "$LOG_DIR/dns_test.txt"
+echo "Resolving google.com:" >> "$LOG_DIR/dns_test.txt"
+nslookup google.com >> "$LOG_DIR/dns_test.txt" 2>&1
+echo "" >> "$LOG_DIR/dns_test.txt"
+echo "Resolving check.torproject.org:" >> "$LOG_DIR/dns_test.txt"
+nslookup check.torproject.org >> "$LOG_DIR/dns_test.txt" 2>&1
 
 
 # Check if running in Docker
@@ -125,16 +137,26 @@ fi
 env | grep -v -E "(AA_DONATOR_KEY)" | sort > "$LOG_DIR/environment.txt"
 
 echo "--- HTTPBin ---" >> $LOG_DIR/network_info.txt
-curl -s https://httpbin.org/get >> $LOG_DIR/network_info.txt
+curl -s https://httpbin.org/get >> $LOG_DIR/network_info.txt 2>&1
 echo "" >> $LOG_DIR/network_info.txt
 echo "--- HowsMySSL ---" >> $LOG_DIR/network_info.txt
-curl -s https://www.howsmyssl.com/a/check >> $LOG_DIR/network_info.txt
+curl -s https://www.howsmyssl.com/a/check >> $LOG_DIR/network_info.txt 2>&1
 echo "" >> $LOG_DIR/network_info.txt
 echo "--- IPInfo ---" >> $LOG_DIR/network_info.txt
-curl -s https://ipinfo.io >> $LOG_DIR/network_info.txt
+curl -s https://ipinfo.io >> $LOG_DIR/network_info.txt 2>&1
 echo "" >> $LOG_DIR/network_info.txt
 echo "--- Cloudflare Trace ---" >> $LOG_DIR/network_info.txt
-curl -s https://1.1.1.1/cdn-cgi/trace >> $LOG_DIR/network_info.txt
+curl -s https://1.1.1.1/cdn-cgi/trace >> $LOG_DIR/network_info.txt 2>&1
+
+# Copy Tor logs if they exist
+if [ -f "/var/log/tor/notices.log" ]; then
+  cp "/var/log/tor/notices.log" "$LOG_DIR/tor_notices.log"
+fi
+
+# Copy Supervisor logs if they exist
+if [ -d "/var/log/supervisor" ]; then
+  cp -rf "/var/log/supervisor/" "$LOG_DIR/supervisor/"
+fi
 
 # Create the zip file directly from LOG_DIR
 ln -s "$LOG_DIR" /tmp/$OUTPUT_FILE_NAME
