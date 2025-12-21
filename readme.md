@@ -1,6 +1,7 @@
-# 📚 Calibre-Web Automated Book Downloader
+# 📚 Book Downloader
+*calibre-web-automated-book-downloader*
 
-<img src="src/frontend/public/logo.png" alt="Calibre-Web Automated Book Downloader" width="200">
+<img src="src/frontend/public/logo.png" alt="Book Downloader" width="200">
 
 A unified web interface for searching and downloading books from multiple sources — all in one place. Works out of the box with popular web sources, no configuration required. Add metadata providers, additional release sources, and download clients to create a single hub for building your digital library.
 
@@ -50,24 +51,21 @@ A unified web interface for searching and downloading books from multiple source
    docker compose up -d
    ```
 
-3. Open `http://localhost:8084` and configure your settings via the Settings button
+3. Open `http://localhost:8084`
 
-That's it! Most configuration is done through the web interface.
+That's it! Configure settings through the web interface as needed.
 
 ### Volume Setup
 
 ```yaml
 volumes:
-  - /your/config/path:/config             # Settings database
-  - /your/download/path:/cwa-book-ingest  # Where downloaded books go
+  - /your/config/path:/config             # Config, database, and artwork cache directory
+  - /your/download/path:/cwa-book-ingest  # Downloaded books
 ```
 
-- `/config` stores the settings database - mount this to persist settings across container restarts
-- `/cwa-book-ingest` is where downloaded books go - mount this to wherever you want books saved on your host system
+> **Tip**: Point the download volume to your CWA or Booklore ingest folder for automatic import.
 
-> **Tip**: If using Calibre-Web-Automated, point this to your CWA ingest folder for automatic import.
-
-> **Note**: If your volume is on a CIFS share, add `nobrl` to your mount options to avoid "database locked" errors.
+> **Note**: CIFS shares require `nobrl` mount option to avoid database lock errors.
 
 ## ⚙️ Configuration
 
@@ -83,29 +81,11 @@ volumes:
 - Aggregates releases from multiple configured sources
 - Requires manual setup (API keys, additional sources)
 
-Set the mode via the Settings UI or `SEARCH_MODE` environment variable.
-
-### Settings UI
-
-All settings are configurable through the web interface. Click the Settings button in the header to access:
-
-| Tab | What You Can Configure |
-|-----|------------------------|
-| **General** | Ingest directory, supported formats, language preferences, filename format |
-| **Direct Download** | Source URL, donator key, download preferences |
-| **Cloudflare** | Bypass mode (internal/external), external resolver URL |
-| **Network** | DNS settings, proxy configuration |
-| **Advanced** | Retry settings, custom scripts, content-type folders |
-| **Hardcover** | API key for Hardcover metadata provider |
-| **Open Library** | Settings for Open Library metadata provider |
-
-Settings are persisted and take effect immediately.
+Set the mode via Settings or `SEARCH_MODE` environment variable.
 
 ### Environment Variables
 
-Environment variables are supported for initial setup and Docker deployments. They serve as defaults that can be overridden in the Settings UI.
-
-**Essential variables:**
+Environment variables work for initial setup and Docker deployments. They serve as defaults that can be overridden in the web interface.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -115,7 +95,13 @@ Environment variables are supported for initial setup and Docker deployments. Th
 | `UID` / `GID` | Runtime user/group ID | `1000` / `100` |
 | `SEARCH_MODE` | `direct` or `universal` | `direct` |
 
-All other settings can be configured through the Settings UI.
+Some of the additional options available in Settings:
+- **AA Donator Key** - Use your paid account to skip Cloudflare challenges entirely and use faster, direct downloads
+- **Library Link** - Add a link to your Calibre-Web or Booklore instance in the UI header
+- **Content Folders** - Route fiction, non-fiction, comics, etc. to separate directories
+- **Network Resilience** - Auto DNS rotation and mirror fallback when sources are unreachable
+- **Format & Language** - Filter downloads by preferred formats and languages
+- **Metadata Providers** - Configure API keys for Hardcover, Open Library, etc.
 
 ## 🐳 Docker Variants
 
@@ -143,7 +129,7 @@ curl -O https://raw.githubusercontent.com/calibrain/calibre-web-automated-book-d
 docker compose -f docker-compose.extbp.yml up -d
 ```
 
-Configure the resolver URL in the Settings UI under the Cloudflare tab.
+Configure the resolver URL in Settings under the Cloudflare tab.
 
 **When to use external vs internal bypasser:**
 - **External** is useful if you already run FlareSolverr for other services (saves resources) or if you rarely need bypassing
@@ -151,7 +137,7 @@ Configure the resolver URL in the Settings UI under the Cloudflare tab.
 
 ## 🔐 Authentication
 
-Authentication is optional but recommended for shared or exposed instances. Enable it in the Settings UI under the General tab, then create users with username and password.
+Authentication is optional but recommended for shared or exposed instances. Enable in Settings.
 
 **Alternative**: If you're running Calibre-Web, you can reuse its user database by mounting it:
 
@@ -178,7 +164,7 @@ Logs are available via:
 - `docker logs <container-name>`
 - `/var/log/cwa-book-downloader/` inside the container (when `ENABLE_LOGGING=true`)
 
-Log level is configurable via the Settings UI or `LOG_LEVEL` environment variable.
+Log level is configurable via Settings or `LOG_LEVEL` environment variable.
 
 ## Development
 
