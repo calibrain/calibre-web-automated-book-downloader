@@ -1,19 +1,30 @@
 import { useState, useEffect } from 'react';
-import { Book, ButtonStateInfo } from '../types';
+import { Book, ButtonStateInfo, SortOption } from '../types';
+import { useSearchMode } from '../contexts/SearchModeContext';
 import { CardView } from './resultsViews/CardView';
 import { CompactView } from './resultsViews/CompactView';
 import { ListView } from './resultsViews/ListView';
 import { Dropdown } from './Dropdown';
 import { SORT_OPTIONS } from '../data/filterOptions';
 
+// Grid layout classes by view mode
+const GRID_CLASSES = {
+  mobile: 'grid-cols-1 items-start',
+  card: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 items-stretch',
+  compact: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 items-start',
+} as const;
+
 interface ResultsSectionProps {
   books: Book[];
   visible: boolean;
   onDetails: (id: string) => Promise<void>;
   onDownload: (book: Book) => Promise<void>;
+  onGetReleases: (book: Book) => Promise<void>;
   getButtonState: (bookId: string) => ButtonStateInfo;
+  getUniversalButtonState: (bookId: string) => ButtonStateInfo;
   sortValue: string;
   onSortChange: (value: string) => void;
+  metadataSortOptions?: SortOption[];
 }
 
 export const ResultsSection = ({
@@ -21,10 +32,14 @@ export const ResultsSection = ({
   visible,
   onDetails,
   onDownload,
+  onGetReleases,
   getButtonState,
+  getUniversalButtonState,
   sortValue,
   onSortChange,
+  metadataSortOptions,
 }: ResultsSectionProps) => {
+  const { searchMode } = useSearchMode();
   const [viewMode, setViewMode] = useState<'card' | 'compact' | 'list'>(() => {
     const saved = localStorage.getItem('bookViewMode');
     return saved === 'card' || saved === 'compact' || saved === 'list' ? saved : 'compact';
@@ -36,14 +51,25 @@ export const ResultsSection = ({
   }, [viewMode]);
 
   // Track whether we're in desktop layout (sm breakpoint and above)
+  // Debounced to avoid excessive state updates during resize
   useEffect(() => {
+    let timeoutId: number;
+
     const checkDesktop = () => {
-      setIsDesktop(window.innerWidth >= 640); // sm breakpoint
+      clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        setIsDesktop(window.innerWidth >= 640); // sm breakpoint
+      }, 100);
     };
-    
-    checkDesktop();
+
+    // Initial check without debounce
+    setIsDesktop(window.innerWidth >= 640);
+
     window.addEventListener('resize', checkDesktop);
-    return () => window.removeEventListener('resize', checkDesktop);
+    return () => {
+      clearTimeout(timeoutId);
+      window.removeEventListener('resize', checkDesktop);
+    };
   }, []);
 
   if (!visible) return null;
@@ -51,7 +77,7 @@ export const ResultsSection = ({
   return (
     <section id="results-section" className="mb-4 sm:mb-8 w-full">
       <div className="flex items-center justify-between mb-2 sm:mb-3 relative z-10">
-        <SortControl value={sortValue} onChange={onSortChange} />
+        <SortControl value={sortValue} onChange={onSortChange} metadataSortOptions={metadataSortOptions} />
         
         {/* View toggle buttons - Desktop: show all 3, Mobile: show Compact and List only */}
         <div className="flex items-center gap-2">
@@ -60,7 +86,9 @@ export const ResultsSection = ({
               onClick={() => setViewMode('card')}
               className={`p-2 rounded-full transition-all duration-200 ${
                 viewMode === 'card'
-                  ? 'text-white bg-sky-700 hover:bg-sky-800'
+                  ? searchMode === 'universal'
+                    ? 'text-white bg-emerald-600 hover:bg-emerald-700'
+                    : 'text-white bg-sky-700 hover:bg-sky-800'
                   : 'hover-action text-gray-900 dark:text-gray-100'
               }`}
               title="Card view"
@@ -86,7 +114,9 @@ export const ResultsSection = ({
             onClick={() => setViewMode('compact')}
             className={`p-2 rounded-full transition-all duration-200 ${
               viewMode === 'compact'
-                ? 'text-white bg-sky-700 hover:bg-sky-800'
+                ? searchMode === 'universal'
+                  ? 'text-white bg-emerald-600 hover:bg-emerald-700'
+                  : 'text-white bg-sky-700 hover:bg-sky-800'
                 : 'hover-action text-gray-900 dark:text-gray-100'
             }`}
             title="Compact view"
@@ -110,7 +140,9 @@ export const ResultsSection = ({
             onClick={() => setViewMode('list')}
             className={`p-2 rounded-full transition-all duration-200 ${
               viewMode === 'list'
-                ? 'text-white bg-sky-700 hover:bg-sky-800'
+                ? searchMode === 'universal'
+                  ? 'text-white bg-emerald-600 hover:bg-emerald-700'
+                  : 'text-white bg-sky-700 hover:bg-sky-800'
                 : 'hover-action text-gray-900 dark:text-gray-100'
             }`}
             title="List view"
@@ -134,22 +166,19 @@ export const ResultsSection = ({
         </div>
       </div>
       {viewMode === 'list' ? (
-        <ListView books={books} onDetails={onDetails} onDownload={onDownload} getButtonState={getButtonState} />
+        <ListView books={books} onDetails={onDetails} onDownload={onDownload} onGetReleases={onGetReleases} getButtonState={getButtonState} getUniversalButtonState={getUniversalButtonState} />
       ) : (
         <div
           id="results-grid"
-          className={`grid gap-8 ${
-            !isDesktop
-              ? 'grid-cols-1 items-start'
-              : viewMode === 'card'
-              ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 items-stretch'
-              : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 items-start'
-          }`}
+          className={`grid gap-8 ${!isDesktop ? GRID_CLASSES.mobile : GRID_CLASSES[viewMode]}`}
         >
           {books.map((book, index) => {
             const shouldUseCardLayout = isDesktop && viewMode === 'card';
-
             const animationDelay = index * 50;
+            // Use appropriate button state function based on search mode
+            const buttonState = searchMode === 'universal'
+              ? getUniversalButtonState(book.id)
+              : getButtonState(book.id);
 
             return shouldUseCardLayout ? (
               <CardView
@@ -157,7 +186,8 @@ export const ResultsSection = ({
                 book={book}
                 onDetails={onDetails}
                 onDownload={onDownload}
-                buttonState={getButtonState(book.id)}
+                onGetReleases={onGetReleases}
+                buttonState={buttonState}
                 animationDelay={animationDelay}
               />
             ) : (
@@ -166,7 +196,8 @@ export const ResultsSection = ({
                 book={book}
                 onDetails={onDetails}
                 onDownload={onDownload}
-                buttonState={getButtonState(book.id)}
+                onGetReleases={onGetReleases}
+                buttonState={buttonState}
                 showDetailsButton={!isDesktop}
                 animationDelay={animationDelay}
               />
@@ -184,10 +215,22 @@ export const ResultsSection = ({
 interface SortControlProps {
   value: string;
   onChange: (value: string) => void;
+  metadataSortOptions?: SortOption[];
 }
 
-const SortControl = ({ value, onChange }: SortControlProps) => {
-  const selected = SORT_OPTIONS.find(option => option.value === value) ?? SORT_OPTIONS[0];
+// Default universal mode sort options (fallback if not provided by API)
+const DEFAULT_UNIVERSAL_SORT_OPTIONS: SortOption[] = [
+  { value: 'relevance', label: 'Most relevant' },
+];
+
+const SortControl = ({ value, onChange, metadataSortOptions }: SortControlProps) => {
+  const { searchMode } = useSearchMode();
+  // Use different sort options based on search mode
+  // For universal mode, use dynamic options from API (with fallback)
+  const sortOptions = searchMode === 'universal'
+    ? (metadataSortOptions && metadataSortOptions.length > 0 ? metadataSortOptions : DEFAULT_UNIVERSAL_SORT_OPTIONS)
+    : SORT_OPTIONS;
+  const selected = sortOptions.find(option => option.value === value) ?? sortOptions[0];
 
   return (
     <Dropdown
@@ -224,14 +267,18 @@ const SortControl = ({ value, onChange }: SortControlProps) => {
     >
       {({ close }) => (
         <div role="listbox" aria-label="Sort results">
-          {SORT_OPTIONS.map(option => {
+          {sortOptions.map(option => {
             const isSelected = option.value === selected.value;
             return (
               <button
                 type="button"
                 key={option.value || 'default'}
                 className={`w-full px-3 py-2 text-left text-base flex items-center justify-between gap-2 hover-surface ${
-                  isSelected ? 'text-sky-600 dark:text-sky-300 font-medium' : ''
+                  isSelected
+                    ? searchMode === 'universal'
+                      ? 'text-emerald-600 dark:text-emerald-400 font-medium'
+                      : 'text-sky-600 dark:text-sky-300 font-medium'
+                    : ''
                 }`}
                 onClick={() => {
                   onChange(option.value);

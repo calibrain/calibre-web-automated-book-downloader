@@ -3,6 +3,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Custom utilities */
+@layer utilities {
+    .scrollbar-hide {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+    .scrollbar-hide::-webkit-scrollbar {
+        display: none;
+    }
+}
+
 /* Disable transitions on initial load to prevent flash */
 html.preload *,
 html.preload *::before,
@@ -247,7 +258,27 @@ footer {
 }
 
 /* Responsive Design */
-@media (max-width: 768px) {
+@media (max-width: 639px) {
+    .modal-overlay {
+        padding: 0;
+        align-items: stretch;
+        /* Extend background into iOS safe areas */
+        background: var(--bg-soft);
+    }
+
+    .details-container {
+        max-width: none;
+        max-height: none;
+        height: 100%;
+        /* Add safe area padding for iOS notch/home indicator */
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+    }
+}
+
+@media (min-width: 640px) and (max-width: 768px) {
     .modal-overlay {
         padding: 1rem;
     }
@@ -544,4 +575,53 @@ button:disabled {
 .animate-pulse {
     background-size: 200% 100%;
     animation: shimmer 2s ease-in-out infinite;
+}
+
+/* Settings Modal Animations */
+@keyframes settings-modal-enter {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes settings-modal-exit {
+    from {
+        opacity: 1;
+        transform: scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+}
+
+@keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes fade-out {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+.settings-modal-enter {
+    animation: settings-modal-enter 0.2s ease-out;
+}
+
+.settings-modal-exit {
+    animation: settings-modal-exit 0.15s ease-in;
+}
+
+.animate-fade-in {
+    animation: fade-in 0.2s ease-out;
+}
+
+.animate-fade-out {
+    animation: fade-out 0.15s ease-in;
 }

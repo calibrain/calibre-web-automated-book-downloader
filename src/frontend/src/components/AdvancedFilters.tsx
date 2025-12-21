@@ -1,9 +1,11 @@
-import { ReactNode } from 'react';
-import { AdvancedFilterState, Language } from '../types';
+import { ReactNode, KeyboardEvent } from 'react';
+import { AdvancedFilterState, Language, MetadataSearchField } from '../types';
 import { normalizeLanguageSelection } from '../utils/languageFilters';
+import { useSearchMode } from '../contexts/SearchModeContext';
 import { LanguageMultiSelect } from './LanguageMultiSelect';
 import { DropdownList } from './DropdownList';
 import { CONTENT_OPTIONS } from '../data/filterOptions';
+import { SearchFieldRenderer } from './shared';
 
 const FORMAT_TYPES = ['pdf', 'epub', 'mobi', 'azw3', 'fb2', 'djvu', 'cbz', 'cbr'] as const;
 
@@ -16,6 +18,12 @@ interface AdvancedFiltersProps {
   onFiltersChange: (updates: Partial<AdvancedFilterState>) => void;
   formClassName?: string;
   renderWrapper?: (form: ReactNode) => ReactNode;
+  // Universal mode props
+  metadataSearchFields?: MetadataSearchField[];
+  searchFieldValues?: Record<string, string | number | boolean>;
+  onSearchFieldChange?: (key: string, value: string | number | boolean) => void;
+  // Submit handler for Enter key
+  onSubmit?: () => void;
 }
 
 export const AdvancedFilters = ({
@@ -27,8 +35,20 @@ export const AdvancedFilters = ({
   onFiltersChange,
   formClassName,
   renderWrapper,
+  metadataSearchFields = [],
+  searchFieldValues = {},
+  onSearchFieldChange,
+  onSubmit,
 }: AdvancedFiltersProps) => {
+  const { searchMode } = useSearchMode();
   const { isbn, author, title, lang, content, formats } = filters;
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && onSubmit) {
+      e.preventDefault();
+      onSubmit();
+    }
+  };
 
   const handleLangChange = (next: string[]) => {
     const normalized = normalizeLanguageSelection(next);
@@ -53,6 +73,52 @@ export const AdvancedFilters = ({
 
   if (!visible) return null;
 
+  // Universal search mode: render dynamic provider fields
+  if (searchMode === 'universal') {
+    // If no fields defined for this provider, don't show the section
+    if (metadataSearchFields.length === 0) return null;
+
+    const universalForm = (
+      <form
+        id="search-filters"
+        className={
+          formClassName ??
+          'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 px-2 lg:ml-[calc(3rem+1rem)] lg:w-[50vw]'
+        }
+      >
+        {metadataSearchFields.map((field) => (
+          <div key={field.key}>
+            {field.type !== 'CheckboxSearchField' && (
+              <label htmlFor={`${field.key}-input`} className="block text-sm mb-1 opacity-80">
+                {field.label}
+              </label>
+            )}
+            <SearchFieldRenderer
+              field={field}
+              value={searchFieldValues[field.key] ?? (field.type === 'CheckboxSearchField' ? false : '')}
+              onChange={(value) => onSearchFieldChange?.(field.key, value)}
+              onSubmit={onSubmit}
+            />
+            {field.description && (
+              <p className="text-xs mt-1 opacity-60">{field.description}</p>
+            )}
+          </div>
+        ))}
+      </form>
+    );
+
+    const wrappedUniversalForm = renderWrapper ? (
+      renderWrapper(universalForm)
+    ) : (
+      <div className="w-full border-b pt-6 pb-4 mb-4" style={{ borderColor: 'var(--border-muted)' }}>
+        <div className="w-full px-4 sm:px-6 lg:px-8">{universalForm}</div>
+      </div>
+    );
+
+    return wrappedUniversalForm;
+  }
+
+  // Direct download mode: render existing hardcoded filters
   const form = (
     <form
       id="search-filters"
@@ -70,6 +136,7 @@ export const AdvancedFilters = ({
               type="text"
               placeholder="ISBN"
               autoComplete="off"
+              enterKeyHint="search"
               className="w-full px-3 py-2 rounded-md border"
               style={{
                 background: 'var(--bg-soft)',
@@ -80,6 +147,7 @@ export const AdvancedFilters = ({
               onChange={e => {
                 onFiltersChange({ isbn: e.target.value });
               }}
+              onKeyDown={handleKeyDown}
             />
           </div>
           <div>
@@ -91,6 +159,7 @@ export const AdvancedFilters = ({
               type="text"
               placeholder="Author"
               autoComplete="off"
+              enterKeyHint="search"
               className="w-full px-3 py-2 rounded-md border"
               style={{
                 background: 'var(--bg-soft)',
@@ -101,6 +170,7 @@ export const AdvancedFilters = ({
               onChange={e => {
                 onFiltersChange({ author: e.target.value });
               }}
+              onKeyDown={handleKeyDown}
             />
           </div>
           <div>
@@ -112,6 +182,7 @@ export const AdvancedFilters = ({
               type="text"
               placeholder="Title"
               autoComplete="off"
+              enterKeyHint="search"
               className="w-full px-3 py-2 rounded-md border"
               style={{
                 background: 'var(--bg-soft)',
@@ -122,6 +193,7 @@ export const AdvancedFilters = ({
               onChange={e => {
                 onFiltersChange({ title: e.target.value });
               }}
+              onKeyDown={handleKeyDown}
             />
           </div>
           <LanguageMultiSelect

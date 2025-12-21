@@ -49,7 +49,14 @@ export const DropdownList = ({
     }
 
     if (selectedOptions.length === 0) {
-      return <span className="opacity-60 text-base">{placeholder}</span>;
+      // For single select with empty string value, find and show the empty value option label
+      if (!multiple) {
+        const emptyOption = options.find(opt => opt.value === '');
+        if (emptyOption) {
+          return emptyOption.label;
+        }
+      }
+      return <span className="opacity-60">{placeholder}</span>;
     }
 
     if (!multiple) {
@@ -102,7 +109,7 @@ export const DropdownList = ({
             <button
               type="button"
               key={option.value}
-              className={`w-full px-3 py-2 text-left text-base flex items-center gap-2 hover-surface ${
+              className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover-surface ${
                 option.disabled ? 'opacity-50 cursor-not-allowed' : ''
               }`}
               onClick={() => handleOptionClick(option, close)}
@@ -118,7 +125,7 @@ export const DropdownList = ({
               )}
               {option.icon}
               <div className="flex flex-col">
-                <span className="text-base">{option.label}</span>
+                <span>{option.label}</span>
                 {option.description && (
                   <span className="text-xs opacity-70">{option.description}</span>
                 )}

@@ -100,14 +100,14 @@ export const Dropdown = ({
           type="button"
           onClick={toggleOpen}
           disabled={disabled}
-          className={`w-full px-3 py-2 rounded-md border flex items-center justify-between text-left text-base focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 ${buttonClassName}`}
+          className={`w-full px-3 py-2 rounded-md border flex items-center justify-between text-left focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 ${buttonClassName}`}
           style={{
             background: 'var(--bg-soft)',
             color: 'var(--text)',
             borderColor: 'var(--border-muted)',
           }}
         >
-          <span className="truncate text-base">
+          <span className="truncate">
             {summary ?? <span className="opacity-60">Select an option</span>}
           </span>
           <svg

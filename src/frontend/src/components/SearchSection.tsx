@@ -1,5 +1,6 @@
-import { AdvancedFilterState, Language } from '../types';
+import { AdvancedFilterState, Language, MetadataSearchField } from '../types';
 import { buildSearchQuery } from '../utils/buildSearchQuery';
+import { useSearchMode } from '../contexts/SearchModeContext';
 import { AdvancedFilters } from './AdvancedFilters';
 import { SearchBar } from './SearchBar';
 
@@ -17,6 +18,10 @@ interface SearchSectionProps {
   onAdvancedToggle: () => void;
   advancedFilters: AdvancedFilterState;
   onAdvancedFiltersChange: (updates: Partial<AdvancedFilterState>) => void;
+  // Universal mode props
+  metadataSearchFields?: MetadataSearchField[];
+  searchFieldValues?: Record<string, string | number | boolean>;
+  onSearchFieldChange?: (key: string, value: string | number | boolean) => void;
 }
 
 export const SearchSection = ({
@@ -33,7 +38,12 @@ export const SearchSection = ({
   onAdvancedToggle,
   advancedFilters,
   onAdvancedFiltersChange,
+  metadataSearchFields,
+  searchFieldValues,
+  onSearchFieldChange,
 }: SearchSectionProps) => {
+  const { searchMode } = useSearchMode();
+
   const handleSearch = () => {
     const query = buildSearchQuery({
       searchInput,
@@ -41,6 +51,7 @@ export const SearchSection = ({
       advancedFilters,
       bookLanguages,
       defaultLanguage,
+      searchMode,
     });
     onSearch(query);
   };
@@ -79,6 +90,10 @@ export const SearchSection = ({
           onFiltersChange={onAdvancedFiltersChange}
           formClassName="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 px-2"
           renderWrapper={form => form}
+          metadataSearchFields={metadataSearchFields}
+          searchFieldValues={searchFieldValues}
+          onSearchFieldChange={onSearchFieldChange}
+          onSubmit={handleSearch}
         />
       </div>
     </section>

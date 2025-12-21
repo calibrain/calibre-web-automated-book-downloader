@@ -131,8 +131,8 @@ RUN apt-get update && \
     python3-tk
 
 # install additional dependencies
-COPY requirements-cwa-bd.txt .
-RUN pip install --no-cache-dir -r requirements-cwa-bd.txt && \
+COPY requirements-cwa-bd.txt requirements-test.txt ./
+RUN pip install --no-cache-dir -r requirements-cwa-bd.txt -r requirements-test.txt && \
     # Clean root's pip cache
     rm -rf /root/.cache
 

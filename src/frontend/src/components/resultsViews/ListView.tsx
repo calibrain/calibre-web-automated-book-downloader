@@ -1,12 +1,17 @@
 import { useState } from 'react';
 import { Book, ButtonStateInfo } from '../../types';
-import { BookDownloadButton } from '../BookDownloadButton';
+import { useSearchMode } from '../../contexts/SearchModeContext';
+import { BookActionButton } from '../BookActionButton';
+import { DisplayFieldIcon, DisplayFieldBadge } from '../shared';
+import { getFormatColor, getLanguageColor } from '../../utils/colorMaps';
 
 interface ListViewProps {
   books: Book[];
   onDetails: (id: string) => Promise<void>;
   onDownload: (book: Book) => Promise<void>;
+  onGetReleases: (book: Book) => Promise<void>;
   getButtonState: (bookId: string) => ButtonStateInfo;
+  getUniversalButtonState: (bookId: string) => ButtonStateInfo;
 }
 
 const ListViewThumbnail = ({ preview, title }: { preview?: string; title?: string }) => {
@@ -42,51 +47,10 @@ const ListViewThumbnail = ({ preview, title }: { preview?: string; title?: strin
   );
 };
 
-const getLanguageColor = (language?: string): string => {
-  if (!language || language === '-') return 'bg-gray-400 dark:bg-gray-600';
-  const lang = language.toLowerCase();
-  const colorMap: Record<string, string> = {
-    en: 'bg-blue-500 dark:bg-blue-600',
-    english: 'bg-blue-500 dark:bg-blue-600',
-    es: 'bg-orange-500 dark:bg-orange-600',
-    spanish: 'bg-orange-500 dark:bg-orange-600',
-    fr: 'bg-purple-500 dark:bg-purple-600',
-    french: 'bg-purple-500 dark:bg-purple-600',
-    de: 'bg-yellow-500 dark:bg-yellow-600',
-    german: 'bg-yellow-500 dark:bg-yellow-600',
-    it: 'bg-green-500 dark:bg-green-600',
-    italian: 'bg-green-500 dark:bg-green-600',
-    pt: 'bg-teal-500 dark:bg-teal-600',
-    portuguese: 'bg-teal-500 dark:bg-teal-600',
-    ru: 'bg-red-500 dark:bg-red-600',
-    russian: 'bg-red-500 dark:bg-red-600',
-    ja: 'bg-pink-500 dark:bg-pink-600',
-    japanese: 'bg-pink-500 dark:bg-pink-600',
-    zh: 'bg-rose-500 dark:bg-rose-600',
-    chinese: 'bg-rose-500 dark:bg-rose-600',
-  };
-  return colorMap[lang] || 'bg-indigo-500 dark:bg-indigo-600';
-};
-
-const getFormatColor = (format?: string): string => {
-  if (!format || format === '-') return 'bg-gray-400 dark:bg-gray-600';
-  const fmt = format.toLowerCase();
-  const colorMap: Record<string, string> = {
-    pdf: 'bg-red-500 dark:bg-red-600',
-    epub: 'bg-green-500 dark:bg-green-600',
-    mobi: 'bg-blue-500 dark:bg-blue-600',
-    azw3: 'bg-purple-500 dark:bg-purple-600',
-    txt: 'bg-gray-500 dark:bg-gray-600',
-    djvu: 'bg-orange-500 dark:bg-orange-600',
-    fb2: 'bg-teal-500 dark:bg-teal-600',
-    cbr: 'bg-yellow-500 dark:bg-yellow-600',
-    cbz: 'bg-amber-500 dark:bg-amber-600',
-  };
-  return colorMap[fmt] || 'bg-cyan-500 dark:bg-cyan-600';
-};
-
-export const ListView = ({ books, onDetails, onDownload, getButtonState }: ListViewProps) => {
+export const ListView = ({ books, onDetails, onDownload, onGetReleases, getButtonState, getUniversalButtonState }: ListViewProps) => {
+  const { searchMode } = useSearchMode();
   const [detailsLoadingId, setDetailsLoadingId] = useState<string | null>(null);
+  const [releasesLoadingId, setReleasesLoadingId] = useState<string | null>(null);
 
   if (books.length === 0) {
     return null;
@@ -98,6 +62,15 @@ export const ListView = ({ books, onDetails, onDownload, getButtonState }: ListV
       await onDetails(bookId);
     } finally {
       setDetailsLoadingId((current) => (current === bookId ? null : current));
+    }
+  };
+
+  const handleGetReleases = async (book: Book) => {
+    setReleasesLoadingId(book.id);
+    try {
+      await onGetReleases(book);
+    } finally {
+      setReleasesLoadingId((current) => (current === book.id ? null : current));
     }
   };
 
@@ -113,7 +86,10 @@ export const ListView = ({ books, onDetails, onDownload, getButtonState }: ListV
     >
       <div className="divide-y divide-gray-200/60 dark:divide-gray-800/60 w-full">
         {books.map((book, index) => {
-          const buttonState = getButtonState(book.id);
+          // Use appropriate button state function based on search mode
+          const buttonState = searchMode === 'universal'
+            ? getUniversalButtonState(book.id)
+            : getButtonState(book.id);
           const isLoadingDetails = detailsLoadingId === book.id;
 
           return (
@@ -127,7 +103,12 @@ export const ListView = ({ books, onDetails, onDownload, getButtonState }: ListV
               role="article"
             >
               {/* Mobile and Desktop: Single row layout */}
-              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:grid-cols-[auto_minmax(0,2fr)_minmax(50px,0.25fr)_minmax(60px,0.3fr)_minmax(60px,0.3fr)_minmax(60px,0.3fr)_auto] items-center gap-2 sm:gap-y-1 sm:gap-x-0.5 w-full">
+              {/* Universal mode uses separate columns for each display field, direct mode uses language/format/size */}
+              <div className={`grid items-center gap-2 sm:gap-y-1 sm:gap-x-0.5 w-full ${
+                searchMode === 'universal'
+                  ? 'grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:grid-cols-[auto_minmax(0,2fr)_minmax(50px,0.25fr)_minmax(80px,0.4fr)_minmax(80px,0.4fr)_auto]'
+                  : 'grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:grid-cols-[auto_minmax(0,2fr)_minmax(50px,0.25fr)_minmax(60px,0.3fr)_minmax(60px,0.3fr)_minmax(60px,0.3fr)_auto]'
+              }`}>
                 {/* Thumbnail */}
                 <div className="flex items-center pl-1 sm:pl-3">
                   <ListViewThumbnail preview={book.preview} title={book.title} />
@@ -144,10 +125,21 @@ export const ListView = ({ books, onDetails, onDownload, getButtonState }: ListV
                   </p>
                 </div>
 
-                {/* Format and Size - Mobile only */}
+                {/* Mobile universal mode info */}
                 <div className="flex sm:hidden flex-col items-end text-[10px] opacity-70 leading-tight">
-                  <span>{book.format || '-'}</span>
-                  {book.size && <span>{book.size}</span>}
+                  {searchMode === 'universal' && book.display_fields && book.display_fields.length > 0 ? (
+                    book.display_fields.slice(0, 2).map((field, idx) => (
+                      <span key={idx} className="flex items-center gap-0.5" title={field.label}>
+                        <DisplayFieldIcon icon={field.icon} />
+                        <span>{field.value}</span>
+                      </span>
+                    ))
+                  ) : (
+                    <>
+                      <span>{book.format || '-'}</span>
+                      {book.size && <span>{book.size}</span>}
+                    </>
+                  )}
                 </div>
 
                 {/* Year - Desktop only */}
@@ -155,33 +147,61 @@ export const ListView = ({ books, onDetails, onDownload, getButtonState }: ListV
                   {book.year || '-'}
                 </div>
 
-                {/* Language Badge - Desktop only */}
-                <div className="hidden sm:flex justify-center">
-                  <span
-                    className={`${getLanguageColor(book.language)} text-white text-[11px] font-semibold px-2 py-0.5 rounded uppercase tracking-wide`}
-                    title={book.language || 'Unknown'}
-                  >
-                    {book.language || '-'}
-                  </span>
-                </div>
+                {/* Universal mode: Display fields as separate columns - Desktop only */}
+                {searchMode === 'universal' && (
+                  <>
+                    {/* First display field column */}
+                    <div className="hidden sm:flex justify-center">
+                      {book.display_fields && book.display_fields[0] ? (
+                        <DisplayFieldBadge field={book.display_fields[0]} />
+                      ) : (
+                        <span className="text-xs text-gray-500">-</span>
+                      )}
+                    </div>
+                    {/* Second display field column */}
+                    <div className="hidden sm:flex justify-center">
+                      {book.display_fields && book.display_fields[1] ? (
+                        <DisplayFieldBadge field={book.display_fields[1]} />
+                      ) : (
+                        <span className="text-xs text-gray-500">-</span>
+                      )}
+                    </div>
+                  </>
+                )}
 
-                {/* Format Badge - Desktop only */}
-                <div className="hidden sm:flex justify-center">
-                  <span
-                    className={`${getFormatColor(book.format)} text-white text-[11px] font-semibold px-2 py-0.5 rounded uppercase tracking-wide`}
-                    title={book.format || 'Unknown'}
-                  >
-                    {book.format || '-'}
-                  </span>
-                </div>
+                {/* Direct mode: Language Badge - Desktop only */}
+                {searchMode !== 'universal' && (
+                  <div className="hidden sm:flex justify-center">
+                    <span
+                      className={`${getLanguageColor(book.language)} text-white text-[11px] font-semibold px-2 py-0.5 rounded uppercase tracking-wide`}
+                      title={book.language || 'Unknown'}
+                    >
+                      {book.language || '-'}
+                    </span>
+                  </div>
+                )}
 
-                {/* Size - Desktop only */}
-                <div className="hidden sm:flex text-xs text-gray-700 dark:text-gray-200 justify-center">
-                  {book.size || '-'}
-                </div>
+                {/* Direct mode: Format Badge - Desktop only */}
+                {searchMode !== 'universal' && (
+                  <div className="hidden sm:flex justify-center">
+                    <span
+                      className={`${getFormatColor(book.format)} text-white text-[11px] font-semibold px-2 py-0.5 rounded uppercase tracking-wide`}
+                      title={book.format || 'Unknown'}
+                    >
+                      {book.format || '-'}
+                    </span>
+                  </div>
+                )}
+
+                {/* Direct mode: Size - Desktop only */}
+                {searchMode !== 'universal' && (
+                  <div className="hidden sm:flex text-xs text-gray-700 dark:text-gray-200 justify-center">
+                    {book.size || '-'}
+                  </div>
+                )}
 
                 {/* Action Buttons */}
-                <div className="flex flex-row justify-end gap-0.5 sm:gap-1">
+                <div className="flex flex-row justify-end gap-0.5 sm:gap-1 sm:pr-3">
                   <button
                     className="flex items-center justify-center p-1.5 sm:p-2 rounded-full text-gray-600 dark:text-gray-200 hover-action transition-all duration-200"
                     onClick={() => handleDetails(book.id)}
@@ -196,12 +216,14 @@ export const ListView = ({ books, onDetails, onDownload, getButtonState }: ListV
                       </svg>
                     )}
                   </button>
-                  <BookDownloadButton
+                  <BookActionButton
+                    book={book}
                     buttonState={buttonState}
-                    onDownload={() => onDownload(book)}
+                    onDownload={onDownload}
+                    onGetReleases={handleGetReleases}
+                    isLoadingReleases={releasesLoadingId === book.id}
                     variant="icon"
                     size="md"
-                    ariaLabel={buttonState.text}
                   />
                 </div>
               </div>

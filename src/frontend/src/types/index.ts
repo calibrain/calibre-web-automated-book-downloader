@@ -1,3 +1,18 @@
+// Search mode constants and type
+export const SEARCH_MODE = {
+  DIRECT: 'direct',
+  UNIVERSAL: 'universal',
+} as const;
+
+export type SearchMode = typeof SEARCH_MODE[keyof typeof SEARCH_MODE];
+
+// Display field for metadata cards (provider-specific info like ratings, pages, etc.)
+export interface DisplayField {
+  label: string;      // e.g., "Rating", "Pages", "Readers"
+  value: string;      // e.g., "4.5", "496", "8,041"
+  icon?: string;      // Icon name: "star", "book", "users", "editions"
+}
+
 // Book data types
 export interface Book {
   id: string;
@@ -15,6 +30,17 @@ export interface Book {
   progress?: number;
   status_message?: string;  // Detailed status message (e.g., "Trying Libgen (2/5)")
   added_time?: number;  // Timestamp when added to queue
+  source?: string;  // Release source handler (e.g., "direct_download", "prowlarr")
+  source_display_name?: string;  // Human-readable source name (e.g., "Direct Download")
+  // Metadata provider fields (used in universal search mode)
+  provider?: string;           // e.g., 'hardcover', 'openlibrary'
+  provider_display_name?: string;  // e.g., 'Hardcover', 'Open Library'
+  provider_id?: string;        // ID in provider's system
+  isbn_10?: string;
+  isbn_13?: string;
+  genres?: string[];
+  source_url?: string;         // Link to book on provider's site
+  display_fields?: DisplayField[];  // Provider-specific display data
 }
 
 // Status response types
@@ -63,6 +89,54 @@ export interface Toast {
   type: 'success' | 'error' | 'info';
 }
 
+// Sort option for dropdowns
+export interface SortOption {
+  value: string;
+  label: string;
+}
+
+// Search field types (mirror backend search field types)
+export type SearchFieldType =
+  | 'TextSearchField'
+  | 'NumberSearchField'
+  | 'SelectSearchField'
+  | 'CheckboxSearchField';
+
+interface SearchFieldBase {
+  key: string;
+  label: string;
+  type: SearchFieldType;
+  placeholder?: string;
+  description?: string;
+}
+
+export interface TextSearchField extends SearchFieldBase {
+  type: 'TextSearchField';
+}
+
+export interface NumberSearchField extends SearchFieldBase {
+  type: 'NumberSearchField';
+  min?: number;
+  max?: number;
+  step?: number;
+}
+
+export interface SelectSearchField extends SearchFieldBase {
+  type: 'SelectSearchField';
+  options: SortOption[];
+}
+
+export interface CheckboxSearchField extends SearchFieldBase {
+  type: 'CheckboxSearchField';
+  default?: boolean;
+}
+
+export type MetadataSearchField =
+  | TextSearchField
+  | NumberSearchField
+  | SelectSearchField
+  | CheckboxSearchField;
+
 // App configuration
 export interface AppConfig {
   calibre_web_url: string;
@@ -72,6 +146,11 @@ export interface AppConfig {
   book_languages: Language[];
   default_language: string[];
   supported_formats: string[];
+  search_mode: SearchMode;
+  metadata_sort_options: SortOption[];
+  metadata_search_fields: MetadataSearchField[];
+  default_release_source?: string;  // Default tab in ReleaseModal (e.g., 'direct_download')
+  settings_enabled: boolean;  // Whether config directory is mounted and writable
 }
 
 // Authentication types
@@ -86,4 +165,93 @@ export interface AuthResponse {
   authenticated?: boolean;
   auth_required?: boolean;
   error?: string;
+}
+
+// Type guard to check if a book is from a metadata provider
+// Returns true and narrows type to include required provider fields
+export const isMetadataBook = (book: Book): book is Book & {
+  provider: string;
+  provider_id: string;
+} => {
+  return !!book.provider && !!book.provider_id;
+};
+
+// Release source types (from plugin system)
+export interface ReleaseSource {
+  name: string;           // e.g., 'direct_download', 'prowlarr'
+  display_name: string;   // e.g., 'Direct Download', 'Prowlarr'
+}
+
+// Column schema types for plugin-driven release list UI
+export type ColumnRenderType = 'text' | 'badge' | 'size' | 'number' | 'peers';
+export type ColumnAlign = 'left' | 'center' | 'right';
+
+export interface ColumnColorHint {
+  type: 'map' | 'static';  // 'map' uses colorMaps.ts, 'static' is a fixed Tailwind class
+  value: string;           // Map name ('format', 'language') or Tailwind class
+}
+
+export interface ColumnSchema {
+  key: string;             // Data path (e.g., 'format', 'extra.language')
+  label: string;           // Accessibility label
+  render_type: ColumnRenderType;
+  align: ColumnAlign;
+  width: string;           // CSS width (e.g., '80px')
+  hide_mobile: boolean;    // Hide on small screens
+  color_hint?: ColumnColorHint | null;
+  fallback: string;        // Value when data is missing
+  uppercase: boolean;      // Force uppercase display
+}
+
+// Leading cell config - what to show in the left-most position of each row
+export type LeadingCellType = 'thumbnail' | 'badge' | 'none';
+
+export interface LeadingCellConfig {
+  type: LeadingCellType;
+  key?: string;                      // Field path for data (e.g., 'extra.preview' or 'extra.download_type')
+  color_hint?: ColumnColorHint;      // For badge type - maps values to colors
+  uppercase?: boolean;               // Force uppercase for badge text
+}
+
+export interface ReleaseColumnConfig {
+  columns: ColumnSchema[];
+  grid_template: string;             // CSS grid-template-columns for dynamic section
+  leading_cell?: LeadingCellConfig;  // Defaults to thumbnail from extra.preview
+}
+
+// A downloadable release from any source
+export interface Release {
+  source: string;              // Source plugin name
+  source_id: string;           // ID within that source
+  title: string;
+  format?: string;             // epub, pdf, mobi, etc.
+  language?: string;           // ISO 639-1 code (e.g., "en", "de", "fr")
+  size?: string;               // Human-readable size
+  size_bytes?: number;         // Size in bytes for sorting
+  download_url?: string;
+  info_url?: string;           // Link to release info page (e.g., tracker page) - makes title clickable
+  protocol?: 'http' | 'torrent' | 'nzb' | 'dcc';
+  indexer?: string;            // Display name for the source/indexer
+  seeders?: number;            // For torrents
+  peers?: string;              // For torrents: "seeders/leechers" display string
+  extra?: Record<string, unknown>; // Source-specific metadata
+}
+
+// Response from /api/releases endpoint
+export interface ReleasesResponse {
+  releases: Release[];
+  book: {
+    provider: string;
+    provider_id: string;
+    title: string;
+    authors?: string[];
+    isbn_10?: string;
+    isbn_13?: string;
+    cover_url?: string;
+    publish_year?: number;
+    language?: string;
+  };
+  sources_searched: string[];
+  errors?: string[];
+  column_config?: ReleaseColumnConfig | null;  // Plugin-driven column configuration
 }

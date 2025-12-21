@@ -7,6 +7,7 @@ interface BuildSearchQueryOptions {
   advancedFilters: AdvancedFilterState;
   bookLanguages: Language[];
   defaultLanguage: string[];
+  searchMode?: 'direct' | 'universal';
 }
 
 export const buildSearchQuery = ({
@@ -15,6 +16,7 @@ export const buildSearchQuery = ({
   advancedFilters,
   bookLanguages,
   defaultLanguage,
+  searchMode = 'direct',
 }: BuildSearchQueryOptions): string => {
   const queryParts: string[] = [];
 
@@ -23,6 +25,16 @@ export const buildSearchQuery = ({
     queryParts.push(`query=${encodeURIComponent(basic)}`);
   }
 
+  // In universal mode, only include query and sort
+  // Provider-specific fields are handled separately via searchFieldValues
+  if (searchMode === 'universal') {
+    if (advancedFilters.sort) {
+      queryParts.push(`sort=${encodeURIComponent(advancedFilters.sort)}`);
+    }
+    return queryParts.join('&');
+  }
+
+  // Direct mode: include all Anna's Archive filters
   if (showAdvanced) {
     const { isbn, author, title, content, formats, lang } = advancedFilters;
 

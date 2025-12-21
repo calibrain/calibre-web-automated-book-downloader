@@ -1,0 +1,1212 @@
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { Book, Release, ReleaseSource, ReleasesResponse, Language, StatusData, ButtonStateInfo, ColumnSchema, ReleaseColumnConfig, LeadingCellConfig, ColumnColorHint } from '../types';
+import { getReleases, getReleaseSources } from '../services/api';
+import { Dropdown } from './Dropdown';
+import { BookDownloadButton } from './BookDownloadButton';
+import { ReleaseCell } from './ReleaseCell';
+import { getFormatColor, getLanguageColor, getDownloadTypeColor, ColorStyle } from '../utils/colorMaps';
+
+// Module-level cache for release search results
+// Key format: `${provider}:${provider_id}:${source}`
+// This persists across modal open/close cycles
+const releaseCache = new Map<string, ReleasesResponse>();
+
+const getCacheKey = (provider: string, providerId: string, source: string): string =>
+  `${provider}:${providerId}:${source}`;
+
+// Optional: Clear cache entries older than 5 minutes to prevent stale data
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const cacheTimestamps = new Map<string, number>();
+
+const getCachedReleases = (provider: string, providerId: string, source: string): ReleasesResponse | null => {
+  const key = getCacheKey(provider, providerId, source);
+  const timestamp = cacheTimestamps.get(key);
+
+  // Check if cache entry exists and is not expired
+  if (timestamp && Date.now() - timestamp < CACHE_TTL_MS) {
+    return releaseCache.get(key) || null;
+  }
+
+  // Clear expired entry
+  if (timestamp) {
+    releaseCache.delete(key);
+    cacheTimestamps.delete(key);
+  }
+
+  return null;
+};
+
+const setCachedReleases = (provider: string, providerId: string, source: string, data: ReleasesResponse): void => {
+  const key = getCacheKey(provider, providerId, source);
+  releaseCache.set(key, data);
+  cacheTimestamps.set(key, Date.now());
+};
+
+// Default column configuration (fallback when backend doesn't provide one)
+const DEFAULT_COLUMN_CONFIG: ReleaseColumnConfig = {
+  columns: [
+    {
+      key: 'extra.language',
+      label: 'Language',
+      render_type: 'badge',
+      align: 'center',
+      width: '60px',
+      hide_mobile: false,  // Language shown on mobile
+      color_hint: { type: 'map', value: 'language' },
+      fallback: '-',
+      uppercase: true,
+    },
+    {
+      key: 'format',
+      label: 'Format',
+      render_type: 'badge',
+      align: 'center',
+      width: '80px',
+      hide_mobile: false,  // Format shown on mobile
+      color_hint: { type: 'map', value: 'format' },
+      fallback: '-',
+      uppercase: true,
+    },
+    {
+      key: 'size',
+      label: 'Size',
+      render_type: 'size',
+      align: 'center',
+      width: '80px',
+      hide_mobile: false,  // Size shown on mobile
+      fallback: '-',
+      uppercase: false,
+    },
+  ],
+  grid_template: 'minmax(0,2fr) 60px 80px 80px',
+};
+
+interface ReleaseModalProps {
+  book: Book | null;
+  onClose: () => void;
+  onDownload: (book: Book, release: Release) => Promise<void>;
+  supportedFormats: string[];
+  defaultLanguages: string[];
+  bookLanguages: Language[];
+  currentStatus: StatusData;
+  defaultReleaseSource?: string;  // Default tab to show (e.g., 'direct_download')
+}
+
+// Color map lookup for dynamic color hints
+const COLOR_MAP_HANDLERS: Record<string, (value: string) => ColorStyle> = {
+  format: getFormatColor,
+  language: getLanguageColor,
+  download_type: getDownloadTypeColor,
+};
+
+const DEFAULT_COLOR_STYLE: ColorStyle = { bg: 'bg-gray-500/20', text: 'text-gray-700 dark:text-gray-300' };
+
+// Helper to get color style based on color hint
+function getLeadingCellColor(value: string, colorHint?: ColumnColorHint): ColorStyle {
+  if (!colorHint) return DEFAULT_COLOR_STYLE;
+
+  if (colorHint.type === 'map') {
+    const handler = COLOR_MAP_HANDLERS[colorHint.value];
+    return handler ? handler(value) : DEFAULT_COLOR_STYLE;
+  }
+
+  // Static color hint - assume it's a bg class
+  return { bg: colorHint.value, text: 'text-gray-700 dark:text-gray-300' };
+}
+
+// Helper to get nested value from object using dot notation path
+function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
+  return path.split('.').reduce((current, key) => {
+    if (current && typeof current === 'object') {
+      return (current as Record<string, unknown>)[key];
+    }
+    return undefined;
+  }, obj as unknown);
+}
+
+// Thumbnail component for release rows
+const ReleaseThumbnail = ({ preview, title }: { preview?: string; title?: string }) => {
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
+
+  if (!preview || imageError) {
+    return (
+      <div
+        className="w-7 h-10 sm:w-8 sm:h-12 rounded bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-[7px] sm:text-[8px] font-medium text-gray-500 dark:text-gray-400 flex-shrink-0"
+        aria-label="No cover available"
+      >
+        No Cover
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative w-7 h-10 sm:w-8 sm:h-12 rounded overflow-hidden bg-gray-100 dark:bg-gray-800 border border-white/40 dark:border-gray-700/70 flex-shrink-0">
+      {!imageLoaded && (
+        <div className="absolute inset-0 bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 dark:from-gray-700 dark:via-gray-600 dark:to-gray-700 animate-pulse" />
+      )}
+      <img
+        src={preview}
+        alt={title || 'Book cover'}
+        className="w-full h-full object-cover object-top"
+        loading="lazy"
+        onLoad={() => setImageLoaded(true)}
+        onError={() => setImageError(true)}
+        style={{ opacity: imageLoaded ? 1 : 0, transition: 'opacity 0.2s ease-in-out' }}
+      />
+    </div>
+  );
+};
+
+// Leading cell component - shows thumbnail, badge, or nothing based on config
+const LeadingCell = ({
+  config,
+  release
+}: {
+  config?: LeadingCellConfig;
+  release: Release;
+}) => {
+  // Default to thumbnail mode if no config
+  const cellType = config?.type || 'thumbnail';
+
+  if (cellType === 'none') {
+    return null;
+  }
+
+  if (cellType === 'thumbnail') {
+    const key = config?.key || 'extra.preview';
+    const preview = getNestedValue(release as unknown as Record<string, unknown>, key) as string | undefined;
+    return <ReleaseThumbnail preview={preview} title={release.title} />;
+  }
+
+  // Badge type
+  if (cellType === 'badge' && config?.key) {
+    const value = getNestedValue(release as unknown as Record<string, unknown>, config.key);
+    const displayValue = value ? String(value) : '';
+    const colorStyle = getLeadingCellColor(displayValue, config.color_hint);
+    const text = config.uppercase ? displayValue.toUpperCase() : displayValue;
+
+    return (
+      <div
+        className={`w-7 h-10 sm:w-8 sm:h-12 rounded-lg ${colorStyle.bg} flex items-center justify-center flex-shrink-0`}
+      >
+        <span className={`text-[8px] sm:text-[9px] font-bold ${colorStyle.text} text-center leading-tight px-0.5`}>
+          {text}
+        </span>
+      </div>
+    );
+  }
+
+  // Fallback
+  return <ReleaseThumbnail preview={undefined} title={release.title} />;
+};
+
+// Release row component with dynamic columns
+const ReleaseRow = ({
+  release,
+  index,
+  onDownload,
+  buttonState,
+  columns,
+  gridTemplate,
+  leadingCell,
+}: {
+  release: Release;
+  index: number;
+  onDownload: () => Promise<void>;
+  buttonState: ButtonStateInfo;
+  columns: ColumnSchema[];
+  gridTemplate: string;
+  leadingCell?: LeadingCellConfig;
+}) => {
+  const author = release.extra?.author as string | undefined;
+
+  // Filter columns visible on mobile
+  const mobileColumns = columns.filter((c) => !c.hide_mobile);
+
+  // Determine if leading cell should be shown
+  // Default to showing thumbnail if no config provided, hide only if explicitly set to 'none'
+  const showLeadingCell = leadingCell?.type !== 'none';
+
+  // Build grid template based on whether leading cell is shown
+  const desktopGridTemplate = showLeadingCell
+    ? `auto ${gridTemplate} auto`
+    : `${gridTemplate} auto`;
+
+  const mobileGridTemplate = showLeadingCell
+    ? 'auto 1fr auto'
+    : '1fr auto';
+
+  return (
+    <div
+      className="pl-5 pr-2 sm:pr-5 py-2 transition-colors duration-200 hover-row animate-slide-up will-change-transform"
+      style={{
+        animationDelay: `${index * 30}ms`,
+        animationFillMode: 'both',
+      }}
+    >
+      {/* Desktop layout with dynamic grid */}
+      <div
+        className="hidden sm:grid items-center gap-3"
+        style={{ gridTemplateColumns: desktopGridTemplate }}
+      >
+        {/* Leading cell: Thumbnail, Badge, or nothing */}
+        {showLeadingCell && <LeadingCell config={leadingCell} release={release} />}
+
+        {/* Fixed: Title and author */}
+        <div className="min-w-0">
+          <p className="text-sm font-medium line-clamp-2" title={release.title}>
+            {release.info_url ? (
+              <a
+                href={release.info_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {release.title}
+              </a>
+            ) : (
+              release.title
+            )}
+          </p>
+          {author && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+              {author}
+            </p>
+          )}
+        </div>
+
+        {/* Dynamic columns from schema */}
+        {columns.map((col) => (
+          <ReleaseCell key={col.key} column={col} release={release} />
+        ))}
+
+        {/* Fixed: Action button */}
+        <BookDownloadButton
+          buttonState={buttonState}
+          onDownload={onDownload}
+          variant="icon"
+          size="sm"
+          ariaLabel={`Download ${release.title}`}
+        />
+      </div>
+
+      {/* Mobile layout - author inline with title, info line below */}
+      <div
+        className="grid sm:hidden items-center gap-2"
+        style={{ gridTemplateColumns: mobileGridTemplate }}
+      >
+        {/* Leading cell: Thumbnail, Badge, or nothing */}
+        {showLeadingCell && <LeadingCell config={leadingCell} release={release} />}
+
+        <div className="min-w-0">
+          {/* Title and author on same line */}
+          <p className="text-sm leading-tight line-clamp-2" title={release.title}>
+            {release.info_url ? (
+              <a
+                href={release.info_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {release.title}
+              </a>
+            ) : (
+              <span className="font-medium">{release.title}</span>
+            )}
+            {author && (
+              <span className="text-gray-500 dark:text-gray-400 font-normal"> — {author}</span>
+            )}
+          </p>
+          {/* Plugin-provided info line (format, size, indexer, seeders, etc.) */}
+          {mobileColumns.length > 0 && (
+            <div className="flex items-center gap-1.5 mt-1 text-[10px] text-gray-500 dark:text-gray-400">
+              {mobileColumns.map((col, idx) => (
+                <span key={col.key} className="flex items-center gap-1.5">
+                  {idx > 0 && <span className="text-gray-300 dark:text-gray-600">·</span>}
+                  <ReleaseCell column={col} release={release} compact />
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <BookDownloadButton
+          buttonState={buttonState}
+          onDownload={onDownload}
+          variant="icon"
+          size="sm"
+          ariaLabel={`Download ${release.title}`}
+        />
+      </div>
+    </div>
+  );
+};
+
+// Shimmer block with wave animation - same as DownloadsSidebar
+const ShimmerBlock = ({ className }: { className: string }) => (
+  <div
+    className={`rounded bg-gray-200 dark:bg-gray-800 relative overflow-hidden ${className}`}
+  >
+    <div
+      className="absolute inset-0 dark:opacity-50"
+      style={{
+        background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.4) 50%, transparent 100%)',
+        backgroundSize: '200% 100%',
+        animation: 'wave 2s ease-in-out infinite',
+      }}
+    />
+  </div>
+);
+
+// Loading skeleton for releases - matches ReleaseRow layout
+const ReleaseSkeleton = () => (
+  <div className="divide-y divide-gray-200/60 dark:divide-gray-800/60">
+    {[1, 2, 3, 4, 5].map((i) => (
+      <div
+        key={i}
+        className="px-5 py-2"
+        style={{
+          opacity: 1 - (i - 1) * 0.15, // Fade out lower rows
+        }}
+      >
+        <div className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_minmax(0,2fr)_60px_80px_80px_auto] items-center gap-2 sm:gap-3">
+          {/* Thumbnail skeleton */}
+          <ShimmerBlock className="w-7 h-10 sm:w-10 sm:h-14" />
+
+          {/* Title and author skeleton */}
+          <div className="min-w-0 space-y-1.5">
+            <ShimmerBlock className="h-4 w-3/4" />
+            <ShimmerBlock className="h-3 w-1/2" />
+          </div>
+
+          {/* Language badge skeleton - desktop */}
+          <div className="hidden sm:flex justify-center">
+            <ShimmerBlock className="w-8 h-5" />
+          </div>
+
+          {/* Format badge skeleton - desktop */}
+          <div className="hidden sm:flex justify-center">
+            <ShimmerBlock className="w-12 h-5" />
+          </div>
+
+          {/* Size skeleton - desktop */}
+          <div className="hidden sm:flex justify-center">
+            <ShimmerBlock className="w-14 h-4" />
+          </div>
+
+          {/* Mobile info + action skeleton */}
+          <div className="flex items-center gap-2">
+            {/* Mobile: format + size inline */}
+            <div className="flex sm:hidden flex-col items-end gap-1">
+              <ShimmerBlock className="w-10 h-3" />
+              <ShimmerBlock className="w-14 h-3" />
+            </div>
+
+            {/* Action button skeleton */}
+            <ShimmerBlock className="w-8 h-8 !rounded-full" />
+          </div>
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
+// Empty state component
+const EmptyState = ({ message }: { message: string }) => (
+  <div className="text-center py-12 px-4">
+    <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-gray-100 dark:bg-gray-800 mb-4">
+      <svg
+        className="w-7 h-7 text-gray-400"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        strokeWidth={1.5}
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+        />
+      </svg>
+    </div>
+    <p className="text-sm text-gray-500 dark:text-gray-400">{message}</p>
+  </div>
+);
+
+// Configure source CTA
+const ConfigureSourceCTA = ({ sourceName }: { sourceName: string }) => (
+  <div className="text-center py-12 px-4">
+    <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-amber-100 dark:bg-amber-900/30 mb-4">
+      <svg
+        className="w-7 h-7 text-amber-600 dark:text-amber-400"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        strokeWidth={1.5}
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
+        />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+      </svg>
+    </div>
+    <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">
+      {sourceName} Not Configured
+    </h4>
+    <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs mx-auto">
+      Configure {sourceName} in Settings to enable searching this source.
+    </p>
+  </div>
+);
+
+// Coming soon state component
+const ComingSoonState = ({ sourceName }: { sourceName: string }) => (
+  <div className="text-center py-12 px-4">
+    <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-blue-100 dark:bg-blue-900/30 mb-4">
+      <svg
+        className="w-7 h-7 text-blue-600 dark:text-blue-400"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        strokeWidth={1.5}
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+        />
+      </svg>
+    </div>
+    <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">
+      {sourceName} Coming Soon
+    </h4>
+    <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs mx-auto">
+      Support for {sourceName} is currently in development and will be available in a future update.
+    </p>
+  </div>
+);
+
+// Error state component
+const ErrorState = ({ message }: { message: string }) => (
+  <div className="text-center py-12 px-4">
+    <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/30 mb-4">
+      <svg
+        className="w-7 h-7 text-red-600 dark:text-red-400"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+        strokeWidth={1.5}
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+        />
+      </svg>
+    </div>
+    <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">
+      Error Loading Releases
+    </h4>
+    <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs mx-auto">{message}</p>
+  </div>
+);
+
+// Sources that are coming soon (show "Coming Soon" message)
+const COMING_SOON_SOURCES: Record<string, string> = {
+  prowlarr: 'Prowlarr',
+};
+
+// Known sources that require configuration (show "Configure" CTA)
+const CONFIGURABLE_SOURCES: Record<string, string> = {
+  // Add sources here that are implemented but need configuration
+};
+
+export const ReleaseModal = ({
+  book,
+  onClose,
+  onDownload,
+  supportedFormats,
+  defaultLanguages,
+  bookLanguages,
+  currentStatus,
+  defaultReleaseSource,
+}: ReleaseModalProps) => {
+  const [isClosing, setIsClosing] = useState(false);
+
+  // Available sources from plugin registry
+  const [availableSources, setAvailableSources] = useState<ReleaseSource[]>([]);
+  const [sourcesLoading, setSourcesLoading] = useState(true);
+
+  // Active tab (source name)
+  const [activeTab, setActiveTab] = useState<string>('');
+
+  // Track if book summary has scrolled out of view
+  const [showHeaderThumb, setShowHeaderThumb] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const bookSummaryRef = useRef<HTMLDivElement>(null);
+
+  // Releases data per source
+  const [releasesBySource, setReleasesBySource] = useState<Record<string, ReleasesResponse | null>>({});
+  const [loadingBySource, setLoadingBySource] = useState<Record<string, boolean>>({});
+  const [errorBySource, setErrorBySource] = useState<Record<string, string | null>>({});
+
+  // Filters - initialized from config settings
+  // Empty string means "show all supported formats" (filtered by supportedFormats)
+  // A specific value means "show only that format"
+  const [formatFilter, setFormatFilter] = useState<string>('');
+  const [languageFilter, setLanguageFilter] = useState<string>('');
+
+  // Description expansion
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+
+  // Close handler with animation
+  const handleClose = useCallback(() => {
+    setIsClosing(true);
+    setTimeout(() => {
+      onClose();
+      setIsClosing(false);
+    }, 150);
+  }, [onClose]);
+
+  // Handle ESC key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClose();
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [handleClose]);
+
+  // Body scroll lock
+  useEffect(() => {
+    if (book) {
+      const previousOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = previousOverflow;
+      };
+    }
+  }, [book]);
+
+  // Reset modal state when book changes to prevent stale data
+  useEffect(() => {
+    setDescriptionExpanded(false);
+    setReleasesBySource({});
+    setLoadingBySource({});
+    setErrorBySource({});
+    setFormatFilter('');
+    setLanguageFilter('');
+  }, [book?.id]);
+
+  // Track scroll to show/hide header thumbnail
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    const bookSummary = bookSummaryRef.current;
+    if (!scrollContainer || !bookSummary) return;
+
+    const handleScroll = () => {
+      const summaryRect = bookSummary.getBoundingClientRect();
+      const containerRect = scrollContainer.getBoundingClientRect();
+      // Show header thumb when the book summary section has scrolled past the top
+      setShowHeaderThumb(summaryRect.bottom < containerRect.top + 20);
+    };
+
+    scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
+    return () => scrollContainer.removeEventListener('scroll', handleScroll);
+  }, [book]);
+
+  // Fetch available sources on mount
+  useEffect(() => {
+    if (!book) return;
+
+    const fetchSources = async () => {
+      try {
+        setSourcesLoading(true);
+        const sources = await getReleaseSources();
+        setAvailableSources(sources);
+        // Set active tab: use defaultReleaseSource if available, otherwise first source
+        if (sources.length > 0) {
+          const defaultSource = defaultReleaseSource && sources.some(s => s.name === defaultReleaseSource)
+            ? defaultReleaseSource
+            : sources[0].name;
+          setActiveTab(defaultSource);
+        }
+      } catch (err) {
+        console.error('Failed to fetch release sources:', err);
+        // Fallback: assume direct_download is available
+        setAvailableSources([{ name: 'direct_download', display_name: "Anna's Archive" }]);
+        setActiveTab('direct_download');
+      } finally {
+        setSourcesLoading(false);
+      }
+    };
+
+    fetchSources();
+  }, [book, defaultReleaseSource]);
+
+  // Fetch releases when active tab changes (with caching)
+  useEffect(() => {
+    if (!book || !activeTab || !book.provider || !book.provider_id) return;
+
+    // Extract to local variables for TypeScript narrowing
+    const provider = book.provider;
+    const bookId = book.provider_id;
+
+    // Skip if already loaded in component state or currently loading
+    if (releasesBySource[activeTab] !== undefined || loadingBySource[activeTab]) return;
+
+    // Check module-level cache first
+    const cached = getCachedReleases(provider, bookId, activeTab);
+    if (cached) {
+      setReleasesBySource((prev) => ({ ...prev, [activeTab]: cached }));
+      return;
+    }
+
+    const fetchReleases = async () => {
+      setLoadingBySource((prev) => ({ ...prev, [activeTab]: true }));
+      setErrorBySource((prev) => ({ ...prev, [activeTab]: null }));
+
+      try {
+        const response = await getReleases(provider, bookId, activeTab, book.title, book.author);
+        // Store in module-level cache
+        setCachedReleases(provider, bookId, activeTab, response);
+        setReleasesBySource((prev) => ({ ...prev, [activeTab]: response }));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to fetch releases';
+        setErrorBySource((prev) => ({ ...prev, [activeTab]: message }));
+      } finally {
+        setLoadingBySource((prev) => ({ ...prev, [activeTab]: false }));
+      }
+    };
+
+    fetchReleases();
+  }, [book, activeTab, releasesBySource, loadingBySource]);
+
+  // Build list of tabs to show
+  // Status: 'available' = working, 'coming_soon' = in development, 'not_configured' = needs setup
+  // Order: 1) Default source, 2) Other configured sources, 3) Unconfigured sources, 4) Coming soon
+  const allTabs = useMemo(() => {
+    type TabInfo = { name: string; displayName: string; status: 'available' | 'coming_soon' | 'not_configured' };
+
+    const configuredTabs: TabInfo[] = [];
+    const unconfiguredTabs: TabInfo[] = [];
+    const comingSoonTabs: TabInfo[] = [];
+
+    // Add available/configured sources
+    availableSources.forEach((src) => {
+      configuredTabs.push({ name: src.name, displayName: src.display_name, status: 'available' });
+    });
+
+    // Add configurable but not configured sources
+    Object.entries(CONFIGURABLE_SOURCES).forEach(([name, displayName]) => {
+      if (!availableSources.find((s) => s.name === name)) {
+        unconfiguredTabs.push({ name, displayName, status: 'not_configured' });
+      }
+    });
+
+    // Add coming soon sources
+    Object.entries(COMING_SOON_SOURCES).forEach(([name, displayName]) => {
+      if (!availableSources.find((s) => s.name === name)) {
+        comingSoonTabs.push({ name, displayName, status: 'coming_soon' });
+      }
+    });
+
+    // Sort configured tabs so default source appears first
+    if (defaultReleaseSource) {
+      configuredTabs.sort((a, b) => {
+        if (a.name === defaultReleaseSource) return -1;
+        if (b.name === defaultReleaseSource) return 1;
+        return 0;
+      });
+    }
+
+    // Combine in order: configured (with default first), unconfigured, coming soon
+    return [...configuredTabs, ...unconfiguredTabs, ...comingSoonTabs];
+  }, [availableSources, defaultReleaseSource]);
+
+  // Get unique formats from current releases for filter dropdown
+  // Only show formats that are in the supported list
+  const availableFormats = useMemo(() => {
+    const releases = releasesBySource[activeTab]?.releases || [];
+    const formats = new Set<string>();
+    const supportedLower = supportedFormats.map((f) => f.toLowerCase());
+
+    releases.forEach((r) => {
+      if (r.format) {
+        const fmt = r.format.toLowerCase();
+        // Only include formats that are in the supported list
+        if (supportedLower.includes(fmt)) {
+          formats.add(fmt);
+        }
+      }
+    });
+    return Array.from(formats).sort();
+  }, [releasesBySource, activeTab, supportedFormats]);
+
+  // Get unique languages from current releases for filter dropdown
+  const availableLanguages = useMemo(() => {
+    const releases = releasesBySource[activeTab]?.releases || [];
+    const languages = new Set<string>();
+
+    releases.forEach((r) => {
+      // Check for language in release extra data or other fields
+      const lang = r.extra?.language as string | undefined;
+      if (lang) languages.add(lang.toLowerCase());
+    });
+    return Array.from(languages).sort();
+  }, [releasesBySource, activeTab]);
+
+  // Build select options for format filter
+  const formatOptions = useMemo(() => {
+    const options = [{ value: '', label: 'All Formats' }];
+    availableFormats.forEach((fmt) => {
+      options.push({ value: fmt, label: fmt.toUpperCase() });
+    });
+    return options;
+  }, [availableFormats]);
+
+  // Build select options for language filter
+  const languageOptions = useMemo(() => {
+    const defaultLabel = defaultLanguages.length > 0 ? 'Default Lang' : 'All Lang';
+    const options = [{ value: '', label: defaultLabel }];
+    availableLanguages.forEach((lang) => {
+      const langInfo = bookLanguages.find(
+        (l) => l.code.toLowerCase() === lang.toLowerCase()
+      );
+      options.push({ value: lang, label: langInfo?.language || lang.toUpperCase() });
+    });
+    return options;
+  }, [availableLanguages, bookLanguages, defaultLanguages.length]);
+
+  // Filter releases based on settings and user selection
+  const filteredReleases = useMemo(() => {
+    const releases = releasesBySource[activeTab]?.releases || [];
+    const supportedLower = supportedFormats.map((f) => f.toLowerCase());
+    const defaultLangLower = defaultLanguages.map((l) => l.toLowerCase());
+
+    return releases.filter((r) => {
+      // Format filtering: always filter by supported formats
+      if (r.format) {
+        const fmt = r.format.toLowerCase();
+        // If user selected a specific format, filter to that
+        if (formatFilter) {
+          if (fmt !== formatFilter.toLowerCase()) return false;
+        } else {
+          // Otherwise, only show supported formats
+          if (!supportedLower.includes(fmt)) return false;
+        }
+      }
+
+      // Language filtering (if release has language info)
+      const releaseLang = r.extra?.language as string | undefined;
+      if (releaseLang && languageFilter) {
+        if (releaseLang.toLowerCase() !== languageFilter.toLowerCase()) {
+          return false;
+        }
+      } else if (releaseLang && !languageFilter && defaultLangLower.length > 0) {
+        // If no user filter but we have default languages, filter to those
+        // Skip this filter if defaultLanguages is empty or contains special "any" value
+        const hasAnyLanguage = defaultLangLower.some((l) => l === '' || l === 'any');
+        if (!hasAnyLanguage && !defaultLangLower.includes(releaseLang.toLowerCase())) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [releasesBySource, activeTab, formatFilter, languageFilter, supportedFormats, defaultLanguages]);
+
+  // Get column config from response or use default
+  const columnConfig = useMemo((): ReleaseColumnConfig => {
+    const response = releasesBySource[activeTab];
+    if (response?.column_config) {
+      return response.column_config;
+    }
+    return DEFAULT_COLUMN_CONFIG;
+  }, [releasesBySource, activeTab]);
+
+  // Get button state for a release based on its source_id
+  const getButtonState = useCallback(
+    (releaseId: string): ButtonStateInfo => {
+      // Check error first
+      if (currentStatus.error && currentStatus.error[releaseId]) {
+        return { text: 'Failed', state: 'error' };
+      }
+      // Check completed
+      if (currentStatus.complete && currentStatus.complete[releaseId]) {
+        return { text: 'Downloaded', state: 'complete' };
+      }
+      // Check in-progress states
+      if (currentStatus.downloading && currentStatus.downloading[releaseId]) {
+        const book = currentStatus.downloading[releaseId];
+        return {
+          text: 'Downloading',
+          state: 'downloading',
+          progress: book.progress,
+        };
+      }
+      if (currentStatus.resolving && currentStatus.resolving[releaseId]) {
+        return { text: 'Resolving', state: 'resolving' };
+      }
+      if (currentStatus.queued && currentStatus.queued[releaseId]) {
+        return { text: 'Queued', state: 'queued' };
+      }
+      return { text: 'Download', state: 'download' };
+    },
+    [currentStatus]
+  );
+
+  // Handle download - close modal once download is successfully queued
+  const handleDownload = useCallback(
+    async (release: Release): Promise<void> => {
+      if (book) {
+        try {
+          await onDownload(book, release);
+          // Close modal after successful queue
+          handleClose();
+        } catch {
+          // Keep modal open on error so user can try again
+        }
+      }
+    },
+    [book, onDownload, handleClose]
+  );
+
+  if (!book && !isClosing) return null;
+  if (!book) return null;
+
+  const titleId = `release-modal-title-${book.id}`;
+  const providerDisplay =
+    book.provider_display_name ||
+    (book.provider ? book.provider.charAt(0).toUpperCase() + book.provider.slice(1) : 'Unknown');
+
+  const currentTabLoading = loadingBySource[activeTab] ?? false;
+  const currentTabError = errorBySource[activeTab] ?? null;
+  const currentTabStatus = allTabs.find((t) => t.name === activeTab)?.status ?? 'not_configured';
+
+  return (
+    <div
+      className="modal-overlay active sm:px-6 sm:py-6"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) handleClose();
+      }}
+    >
+      <div
+        className={`details-container w-full max-w-3xl h-full sm:h-auto ${isClosing ? 'settings-modal-exit' : 'settings-modal-enter'}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
+        <div className="flex h-full sm:h-[90vh] sm:max-h-[90vh] flex-col overflow-hidden rounded-none sm:rounded-2xl border-0 sm:border border-[var(--border-muted)] bg-[var(--bg)] sm:bg-[var(--bg-soft)] text-[var(--text)] shadow-none sm:shadow-2xl">
+          {/* Header */}
+          <header className="flex items-start gap-3 border-b border-[var(--border-muted)] px-5 py-4">
+            {/* Animated thumbnail that appears when scrolling */}
+            <div
+              className="flex-shrink-0 overflow-hidden transition-[width,margin] duration-300 ease-out"
+              style={{
+                width: showHeaderThumb ? 46 : 0,
+                marginRight: showHeaderThumb ? 0 : -12,
+              }}
+            >
+              <div
+                className="transition-opacity duration-300 ease-out"
+                style={{ opacity: showHeaderThumb ? 1 : 0 }}
+              >
+                {book.preview ? (
+                  <img
+                    src={book.preview}
+                    alt=""
+                    width={46}
+                    height={68}
+                    className="rounded shadow-md object-cover object-top"
+                    style={{ width: 46, height: 68, minWidth: 46 }}
+                  />
+                ) : (
+                  <div
+                    className="rounded border border-dashed border-[var(--border-muted)] bg-[var(--bg)]/60 flex items-center justify-center text-[7px] text-gray-500"
+                    style={{ width: 46, height: 68, minWidth: 46 }}
+                  >
+                    No cover
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex-1 space-y-1 min-w-0">
+              <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Find Releases
+              </p>
+              <h3 id={titleId} className="text-lg font-semibold leading-snug truncate">
+                {book.title || 'Untitled'}
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-300 truncate">
+                {book.author || 'Unknown author'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="rounded-full p-2 text-gray-500 transition-colors hover-action hover:text-gray-900 dark:hover:text-gray-100 flex-shrink-0"
+              aria-label="Close"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </header>
+
+          {/* Scrollable content */}
+          <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto">
+            {/* Book summary - scrolls with content */}
+            <div ref={bookSummaryRef} className="flex gap-4 px-5 py-4 border-b border-[var(--border-muted)]">
+              {book.preview ? (
+                <img
+                  src={book.preview}
+                  alt="Book cover"
+                  className="w-20 h-[120px] rounded-lg shadow-md object-cover object-top flex-shrink-0"
+                />
+              ) : (
+                <div className="w-20 h-[120px] rounded-lg border border-dashed border-[var(--border-muted)] bg-[var(--bg)]/60 flex items-center justify-center text-[10px] text-gray-500 flex-shrink-0">
+                  No cover
+                </div>
+              )}
+              <div className="flex-1 min-w-0 space-y-2">
+                {/* Metadata row */}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
+                  {book.year && <span>{book.year}</span>}
+                  {book.display_fields?.find(f => f.icon === 'star') && (
+                    <span className="flex items-center gap-1">
+                      <svg className="h-3.5 w-3.5 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                      </svg>
+                      {book.display_fields.find(f => f.icon === 'star')?.value}
+                    </span>
+                  )}
+                  {book.display_fields?.find(f => f.icon === 'users') && (
+                    <span className="flex items-center gap-1">
+                      <svg className="h-3.5 w-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" />
+                      </svg>
+                      {book.display_fields.find(f => f.icon === 'users')?.value}
+                    </span>
+                  )}
+                  {book.display_fields?.find(f => f.icon === 'book') && (
+                    <span>{book.display_fields.find(f => f.icon === 'book')?.value} pages</span>
+                  )}
+                </div>
+
+                {/* Description */}
+                {book.description && (
+                  <div className="text-sm text-gray-600 dark:text-gray-400 relative">
+                    <p className={descriptionExpanded ? '' : 'line-clamp-3'}>
+                      {book.description}
+                      {descriptionExpanded && (
+                        <>
+                          {' '}
+                          <button
+                            type="button"
+                            onClick={() => setDescriptionExpanded(false)}
+                            className="text-emerald-600 dark:text-emerald-400 hover:underline font-medium inline"
+                          >
+                            Show less
+                          </button>
+                        </>
+                      )}
+                    </p>
+                    {!descriptionExpanded && (
+                      <button
+                        type="button"
+                        onClick={() => setDescriptionExpanded(true)}
+                        className="absolute bottom-0 right-0 text-emerald-600 dark:text-emerald-400 hover:underline font-medium pl-8 bg-gradient-to-r from-transparent via-[var(--bg)] to-[var(--bg)] sm:via-[var(--bg-soft)] sm:to-[var(--bg-soft)]"
+                      >
+                        more
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Links row */}
+                <div className="flex flex-wrap items-center gap-3 text-xs">
+                  {(book.isbn_13 || book.isbn_10) && (
+                    <span className="text-gray-500 dark:text-gray-400">
+                      ISBN: {book.isbn_13 || book.isbn_10}
+                    </span>
+                  )}
+                  {book.source_url && (
+                    <a
+                      href={book.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:underline"
+                    >
+                      View on {providerDisplay}
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Source tabs + filters - sticky within scroll container */}
+            <div className="sticky top-0 z-10 border-b border-[var(--border-muted)] bg-[var(--bg)] sm:bg-[var(--bg-soft)]">
+              {sourcesLoading ? (
+                <div className="flex gap-1 px-5 py-2">
+                  <div className="h-10 w-32 animate-pulse bg-gray-200 dark:bg-gray-700 rounded" />
+                </div>
+              ) : (
+                <div className="flex items-center justify-between px-5">
+                  {/* Tabs - scrollable on narrow screens */}
+                  <div className="flex-1 min-w-0 overflow-x-auto scrollbar-hide">
+                    <div className="flex gap-1">
+                      {allTabs.map((tab) => (
+                          <button
+                            key={tab.name}
+                            onClick={() => setActiveTab(tab.name)}
+                            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                              activeTab === tab.name
+                                ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
+                                : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                            }`}
+                          >
+                            {tab.displayName}
+                          </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Filter funnel button - stays fixed */}
+                  {(availableFormats.length > 0 || availableLanguages.length > 0) && (
+                    <Dropdown
+                      align="right"
+                      widthClassName="w-auto flex-shrink-0"
+                      panelClassName="w-48"
+                      renderTrigger={({ isOpen, toggle }) => {
+                        const hasActiveFilter = formatFilter !== '' || languageFilter !== '';
+                        return (
+                          <button
+                            type="button"
+                            onClick={toggle}
+                            className={`relative p-2 rounded-full transition-colors ${
+                              isOpen
+                                ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+                                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
+                            }`}
+                            aria-label="Filter releases"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
+                            </svg>
+                            {hasActiveFilter && (
+                              <span className="absolute top-1 right-1 w-2 h-2 bg-emerald-500 rounded-full" />
+                            )}
+                          </button>
+                        );
+                      }}
+                    >
+                      {() => (
+                        <div className="p-3 space-y-3">
+                          {availableFormats.length > 0 && (
+                            <div>
+                              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                                Format
+                              </label>
+                              <select
+                                value={formatFilter}
+                                onChange={(e) => setFormatFilter(e.target.value)}
+                                className="w-full px-2.5 py-1.5 text-sm rounded-md border focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                                style={{
+                                  background: 'var(--bg-soft)',
+                                  color: 'var(--text)',
+                                  borderColor: 'var(--border-muted)',
+                                }}
+                              >
+                                {formatOptions.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                          {availableLanguages.length > 0 && (
+                            <div>
+                              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                                Language
+                              </label>
+                              <select
+                                value={languageFilter}
+                                onChange={(e) => setLanguageFilter(e.target.value)}
+                                className="w-full px-2.5 py-1.5 text-sm rounded-md border focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                                style={{
+                                  background: 'var(--bg-soft)',
+                                  color: 'var(--text)',
+                                  borderColor: 'var(--border-muted)',
+                                }}
+                              >
+                                {languageOptions.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </Dropdown>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Release list content */}
+            <div className="min-h-[200px]">
+              {currentTabStatus === 'coming_soon' ? (
+                <ComingSoonState
+                  sourceName={allTabs.find((t) => t.name === activeTab)?.displayName || activeTab}
+                />
+              ) : currentTabStatus === 'not_configured' ? (
+                <ConfigureSourceCTA
+                  sourceName={allTabs.find((t) => t.name === activeTab)?.displayName || activeTab}
+                />
+              ) : currentTabLoading ? (
+                <ReleaseSkeleton />
+              ) : currentTabError ? (
+                <ErrorState message={currentTabError} />
+              ) : filteredReleases.length === 0 ? (
+                <EmptyState
+                  message={
+                    formatFilter
+                      ? `No ${formatFilter.toUpperCase()} releases found. Try a different format.`
+                      : 'No releases found for this book.'
+                  }
+                />
+              ) : (
+                <div className="divide-y divide-gray-200/60 dark:divide-gray-800/60">
+                  {filteredReleases.map((release, index) => (
+                    <ReleaseRow
+                      key={`${release.source}-${release.source_id}`}
+                      release={release}
+                      index={index}
+                      onDownload={() => handleDownload(release)}
+                      buttonState={getButtonState(release.source_id)}
+                      columns={columnConfig.columns}
+                      gridTemplate={columnConfig.grid_template}
+                      leadingCell={columnConfig.leading_cell}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
