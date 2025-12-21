@@ -186,25 +186,31 @@ The frontend dev server proxies to the backend on port 8084.
 ### Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│            Web Interface                │
-│       (React + TypeScript + Vite)       │
-├─────────────────────────────────────────┤
-│            Flask Backend                │
-│        (REST API + WebSocket)           │
-├───────────────────┬─────────────────────┤
-│ Metadata Providers│   Release Sources   │
-├───────────────────┼─────────────────────┤
-│ • Hardcover       │ • Direct Download   │
-│ • Open Library    │                     │
-└───────────────────┴─────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      Web Interface                          │
+│                 (React + TypeScript + Vite)                 │
+├─────────────────────────────────────────────────────────────┤
+│                      Flask Backend                          │
+│                   (REST API + WebSocket)                    │
+├───────────────────┬─────────────────────┬───────────────────┤
+│ Metadata Providers│   Download Queue    │  Cloudflare       │
+│                   │   & Orchestrator    │  Bypass           │
+├───────────────────┼─────────────────────┼───────────────────┤
+│ • Hardcover       │ • Task scheduling   │ • Internal        │
+│ • Open Library    │ • Progress tracking │ • External        │
+│                   │ • Retry logic       │   (FlareSolverr)  │
+├───────────────────┴─────────────────────┴───────────────────┤
+│                     Release Sources                         │
+├─────────────────────────────────────────────────────────────┤
+│ • Direct Download (Anna's Archive → Libgen → Welib)         │
+├─────────────────────────────────────────────────────────────┤
+│                     Network Layer                           │
+├─────────────────────────────────────────────────────────────┤
+│ • Auto DNS rotation  • Mirror failover  • Resume support    │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-The backend uses a plugin-based architecture for extensibility:
-- **Metadata Providers** (`cwa_book_downloader/metadata_providers/`) - Add new book information sources
-- **Release Sources** (`cwa_book_downloader/release_sources/`) - Add new download sources
-
-Plugins are self-contained and register themselves automatically via decorators.
+The backend uses a plugin architecture. Metadata providers and release sources register via decorators and are automatically discovered.
 
 ## Contributing
 
@@ -225,9 +231,9 @@ This tool can access various sources including those that might contain copyrigh
 - Respecting copyright laws and intellectual property rights
 - Using the tool in compliance with their local regulations
 
-### Duplicate Downloads
+### Library Integration
 
-The application does not currently check for existing files in the download directory. Exercise caution when downloading to avoid duplicates.
+Downloads are written atomically (via intermediate `.crdownload` files) to prevent partial files from being ingested. However, if your library tool (CWA, Booklore, Calibre) is actively scanning or importing, there's a small chance of race conditions. If you experience database errors or import failures, try pausing your library's auto-import during bulk downloads.
 
 ## Support
 
