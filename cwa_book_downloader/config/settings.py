@@ -219,8 +219,8 @@ def general_settings():
             options=[
                 {
                     "value": "direct",
-                    "label": "Anna's Archive",
-                    "description": "Search Anna's Archive and download direct from AA, Welib or Libgen.",
+                    "label": "Direct (Anna's Archive)",
+                    "description": "Search Anna's Archive and download directly. Works out of the box.",
                 },
                 {
                     "value": "universal",

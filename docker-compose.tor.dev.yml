@@ -1,3 +1,4 @@
+# Local development - Tor variant
 services:
   calibre-web-automated-book-downloader-tor-dev:
     extends:
@@ -10,5 +11,7 @@ services:
     environment:
       DEBUG: true
     volumes:
-      - /tmp/cwa-book-downloader:/tmp/cwa-book-downloader
-      - /tmp/cwa-book-downloader-log:/var/log/cwa-book-downloader
+      - ./.local/config:/config
+      - ./.local/ingest:/cwa-book-ingest
+      - ./.local/log:/var/log/cwa-book-downloader
+      - ./.local/tmp:/tmp/cwa-book-downloader

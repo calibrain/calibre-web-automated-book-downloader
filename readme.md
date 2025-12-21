@@ -20,12 +20,16 @@ A unified web interface for searching and downloading books from multiple source
 
 ## 🖼️ Screenshots
 
+**Home screen**
 ![Home screen](README_images/homescreen.png 'Home screen')
 
+**Search results**
 ![Search results](README_images/search-results.png 'Search results')
 
+**Multi-source downloads**
 ![Multi-source downloads](README_images/multi-source.png 'Multi-source downloads')
 
+**Download queue**
 ![Download queue](README_images/downloads.png 'Download queue')
 
 ## 🚀 Quick Start
@@ -54,10 +58,12 @@ That's it! Most configuration is done through the web interface.
 
 ```yaml
 volumes:
+  - /your/config/path:/config             # Settings database
   - /your/download/path:/cwa-book-ingest  # Where downloaded books go
 ```
 
-Books are downloaded to `/cwa-book-ingest` inside the container. Mount this to wherever you want books saved on your host system.
+- `/config` stores the settings database - mount this to persist settings across container restarts
+- `/cwa-book-ingest` is where downloaded books go - mount this to wherever you want books saved on your host system
 
 > **Tip**: If using Calibre-Web-Automated, point this to your CWA ingest folder for automatic import.
 
@@ -68,14 +74,14 @@ Books are downloaded to `/cwa-book-ingest` inside the container. Mount this to w
 ### Search Modes
 
 **Direct Download Mode** (default)
-- Searches popular web sources directly
+- Works out of the box, no setup required
+- Searches a huge library of books directly
 - Returns downloadable releases immediately
-- Best for: Quick searches when you know what you want
 
 **Universal Mode**
-- First searches metadata providers (Hardcover, Open Library) for book information
-- Then finds downloadable releases from multiple configured sources
-- Best for: Discovering books, browsing by author, multi-source downloads
+- Cleaner search results via metadata providers (Hardcover, Open Library)
+- Aggregates releases from multiple configured sources
+- Requires manual setup (API keys, additional sources)
 
 Set the mode via the Settings UI or `SEARCH_MODE` environment variable.
 

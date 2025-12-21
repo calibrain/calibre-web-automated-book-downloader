@@ -3,11 +3,10 @@ services:
     image: ghcr.io/calibrain/calibre-web-automated-book-downloader:latest
     container_name: calibre-web-automated-book-downloader
     environment:
-      FLASK_PORT: 8084
       TZ: America/New_York
-      UID: 1000
-      GID: 100
-      # CWA_DB_PATH: /auth/app.db  # Uncomment to use CW authentication
+      # UID: 1000
+      # GID: 100
+      # CWA_DB_PATH: /auth/app.db
     ports:
       - 8084:8084
     restart: unless-stopped
