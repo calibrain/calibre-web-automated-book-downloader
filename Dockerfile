@@ -153,6 +153,8 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     # --- Tor ---
     tor \
+    # --- Supervisor ---
+    supervisor \
     # --- iptables ---
     iptables && \
     update-alternatives --set iptables /usr/sbin/iptables-legacy && \
