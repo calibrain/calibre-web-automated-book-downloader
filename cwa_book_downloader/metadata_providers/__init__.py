@@ -413,6 +413,31 @@ def get_provider_search_fields(provider_name: Optional[str] = None) -> List[Dict
     return [serialize_search_field(f) for f in fields]
 
 
+def get_provider_default_sort(provider_name: Optional[str] = None) -> str:
+    """Get the default sort order for a metadata provider.
+
+    Reads from the provider-specific config setting (e.g., HARDCOVER_DEFAULT_SORT).
+
+    Args:
+        provider_name: Provider name. If None, uses configured provider.
+
+    Returns:
+        Default sort value string, or "relevance" if not configured.
+    """
+    from cwa_book_downloader.core.config import config as app_config
+
+    if provider_name is None:
+        app_config.refresh()
+        provider_name = app_config.get("METADATA_PROVIDER", "")
+
+    if not provider_name:
+        return "relevance"
+
+    # Look up provider-specific default sort setting
+    setting_key = f"{provider_name.upper()}_DEFAULT_SORT"
+    return app_config.get(setting_key, "relevance")
+
+
 def sync_metadata_provider_selection() -> None:
     """Sync the METADATA_PROVIDER setting based on enabled providers.
 

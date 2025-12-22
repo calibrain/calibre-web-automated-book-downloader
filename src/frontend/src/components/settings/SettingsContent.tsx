@@ -9,6 +9,8 @@ import {
   CheckboxFieldConfig,
   SelectFieldConfig,
   MultiSelectFieldConfig,
+  OrderableListFieldConfig,
+  OrderableListItem,
   ActionButtonConfig,
   HeadingFieldConfig,
 } from '../../types/settings';
@@ -20,6 +22,7 @@ import {
   CheckboxField,
   SelectField,
   MultiSelectField,
+  OrderableListField,
   ActionButton,
   HeadingField,
 } from './fields';
@@ -39,11 +42,6 @@ function isFieldVisible(
   field: SettingsField,
   values: Record<string, unknown>
 ): boolean {
-  // HeadingField doesn't have showWhen
-  if (field.type === 'HeadingField') {
-    return true;
-  }
-
   const showWhen = field.showWhen;
   if (!showWhen) return true;
 
@@ -157,6 +155,15 @@ const renderField = (
         <MultiSelectField
           field={field as MultiSelectFieldConfig}
           value={(value as string[]) ?? []}
+          onChange={onChange}
+          disabled={isDisabled}
+        />
+      );
+    case 'OrderableListField':
+      return (
+        <OrderableListField
+          field={field as OrderableListFieldConfig}
+          value={(value as OrderableListItem[]) ?? []}
           onChange={onChange}
           disabled={isDisabled}
         />

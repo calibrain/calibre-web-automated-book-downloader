@@ -162,21 +162,42 @@ def cache_key(*args, **kwargs) -> str:
     return ":".join(parts)
 
 
-def cacheable(ttl: int, key_prefix: str = ""):
+def cacheable(
+    ttl: Optional[int] = None,
+    ttl_key: Optional[str] = None,
+    ttl_default: int = 300,
+    key_prefix: str = ""
+):
     """Decorator for caching function results.
 
     Args:
-        ttl: Time to live in seconds.
+        ttl: Static time to live in seconds (use this OR ttl_key, not both).
+        ttl_key: Config key to read TTL from (e.g., "METADATA_CACHE_SEARCH_TTL").
+        ttl_default: Default TTL if ttl_key not found in config.
         key_prefix: Optional prefix for cache keys.
 
-    Usage:
-        @cacheable(ttl=300, key_prefix="hardcover:search")
-        def search(self, query: str, limit: int = 20):
-            ...
+    Examples:
+        @cacheable(ttl=300, key_prefix="hardcover:search")  # Static TTL
+        @cacheable(ttl_key="METADATA_CACHE_SEARCH_TTL", key_prefix="hardcover:search")  # Dynamic TTL
     """
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
         def wrapper(*args, **kwargs) -> T:
+            # Check if metadata caching is enabled
+            from cwa_book_downloader.core.config import config
+
+            if not config.get("METADATA_CACHE_ENABLED", True):
+                # Caching disabled, execute function directly
+                return func(*args, **kwargs)
+
+            # Determine TTL: static or from config
+            if ttl is not None:
+                effective_ttl = ttl
+            elif ttl_key:
+                effective_ttl = config.get(ttl_key, ttl_default)
+            else:
+                effective_ttl = ttl_default
+
             # Generate cache key from function name and arguments
             # Skip 'self' argument if present (first arg of method)
             cache_args = args[1:] if args and hasattr(args[0], func.__name__) else args
@@ -199,7 +220,7 @@ def cacheable(ttl: int, key_prefix: str = ""):
 
             # Only cache non-None results
             if result is not None:
-                _metadata_cache.set(key, result, ttl)
+                _metadata_cache.set(key, result, effective_ttl)
 
             return result
 
