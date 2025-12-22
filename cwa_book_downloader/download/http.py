@@ -19,10 +19,11 @@ from cwa_book_downloader.core.logger import setup_logger
 if USE_CF_BYPASS:
     if USING_EXTERNAL_BYPASSER:
         from cwa_book_downloader.bypass.external_bypasser import get_bypassed_page
-        # External bypasser doesn't share cookies
+        # External bypasser doesn't share cookies/UA
         get_cf_cookies_for_domain = lambda domain: {}
+        get_cf_user_agent_for_domain = lambda domain: None
     else:
-        from cwa_book_downloader.bypass.internal_bypasser import get_bypassed_page, get_cf_cookies_for_domain
+        from cwa_book_downloader.bypass.internal_bypasser import get_bypassed_page, get_cf_cookies_for_domain, get_cf_user_agent_for_domain
 
 logger = setup_logger(__name__)
 
@@ -132,12 +133,17 @@ def html_get_page(
                     return ""
 
             logger.info(f"GET: {current_url}")
-            # Try with CF cookies if available (from previous bypass)
+            # Try with CF cookies/UA if available (from previous bypass)
             cookies = {}
+            headers = {}
             if USE_CF_BYPASS:
                 parsed = urlparse(current_url)
-                cookies = get_cf_cookies_for_domain(parsed.hostname or "")
-            response = requests.get(current_url, proxies=_get_proxies(), timeout=REQUEST_TIMEOUT, cookies=cookies)
+                hostname = parsed.hostname or ""
+                cookies = get_cf_cookies_for_domain(hostname)
+                stored_ua = get_cf_user_agent_for_domain(hostname)
+                if stored_ua:
+                    headers['User-Agent'] = stored_ua
+            response = requests.get(current_url, proxies=_get_proxies(), timeout=REQUEST_TIMEOUT, cookies=cookies, headers=headers)
             response.raise_for_status()
             time.sleep(1)
             return response.text
@@ -204,6 +210,7 @@ def download_url(
     total_size = parse_size_string(size) or 0
 
     attempt = 0
+    zlib_cookie_refresh_attempted = False
 
     while attempt < MAX_DOWNLOAD_RETRIES:
         if cancel_flag and cancel_flag.is_set():
@@ -217,13 +224,21 @@ def download_url(
                 status_callback("resolving", f"Connecting (Attempt {attempt + 1}/{MAX_DOWNLOAD_RETRIES})")
 
             logger.info(f"Downloading: {current_url} (attempt {attempt + 1}/{MAX_DOWNLOAD_RETRIES})")
-            # Try with CF cookies if available
+            # Try with CF cookies/UA if available
             cookies = {}
             if USE_CF_BYPASS:
                 parsed = urlparse(current_url)
-                cookies = get_cf_cookies_for_domain(parsed.hostname or "")
+                hostname = parsed.hostname or ""
+                cookies = get_cf_cookies_for_domain(hostname)
+                # Use stored UA - Cloudflare ties cf_clearance to the UA that solved the challenge
+                stored_ua = get_cf_user_agent_for_domain(hostname)
+                if stored_ua:
+                    headers['User-Agent'] = stored_ua
+                    logger.debug(f"Using stored UA for {hostname}")
+                else:
+                    logger.debug(f"No stored UA available for {hostname}")
                 if cookies:
-                    logger.debug(f"Using {len(cookies)} cookies for {parsed.hostname}: {list(cookies.keys())}")
+                    logger.debug(f"Using {len(cookies)} cookies for {hostname}: {list(cookies.keys())}")
             response = requests.get(current_url, stream=True, proxies=_get_proxies(), timeout=REQUEST_TIMEOUT, cookies=cookies, headers=headers)
             response.raise_for_status()
 
@@ -257,6 +272,20 @@ def download_url(
         except requests.exceptions.RequestException as e:
             status = _get_status_code(e)
             retryable = _is_retryable_error(e)
+
+            # Z-Library 403 - try refreshing cookies via bypasser once before giving up
+            if status == 403 and USE_CF_BYPASS and not zlib_cookie_refresh_attempted:
+                parsed = urlparse(current_url)
+                if parsed.hostname and 'z-lib' in parsed.hostname and referer:
+                    zlib_cookie_refresh_attempted = True
+                    logger.info(f"Z-Library 403 - refreshing cookies via referer: {referer}")
+                    try:
+                        get_bypassed_page(referer, selector, cancel_flag)
+                        time.sleep(0.5)
+                        # Retry with fresh cookies (don't increment attempt)
+                        continue
+                    except Exception as cookie_err:
+                        logger.warning(f"Z-Library cookie refresh failed: {cookie_err}")
 
             # Non-retryable errors
             if status in (403, 404):
@@ -316,12 +345,16 @@ def _try_resume(
         time.sleep(_backoff_delay(attempt + 1, base=0.5, cap=5.0))
 
         try:
-            # Try with CF cookies if available
+            # Try with CF cookies/UA if available
             cookies = {}
+            resume_headers = {**(base_headers or DOWNLOAD_HEADERS), 'Range': f'bytes={start_byte}-'}
             if USE_CF_BYPASS:
                 parsed = urlparse(url)
-                cookies = get_cf_cookies_for_domain(parsed.hostname or "")
-            resume_headers = {**(base_headers or DOWNLOAD_HEADERS), 'Range': f'bytes={start_byte}-'}
+                hostname = parsed.hostname or ""
+                cookies = get_cf_cookies_for_domain(hostname)
+                stored_ua = get_cf_user_agent_for_domain(hostname)
+                if stored_ua:
+                    resume_headers['User-Agent'] = stored_ua
             response = requests.get(
                 url, stream=True, proxies=_get_proxies(), timeout=REQUEST_TIMEOUT,
                 headers=resume_headers, cookies=cookies

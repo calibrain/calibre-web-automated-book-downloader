@@ -92,6 +92,10 @@ export const ListView = ({ books, onDetails, onDownload, onGetReleases, getButto
             : getButtonState(book.id);
           const isLoadingDetails = detailsLoadingId === book.id;
 
+          // Compute color styles for direct mode badges
+          const languageColor = getLanguageColor(book.language);
+          const formatColor = getFormatColor(book.format);
+
           return (
             <div
               key={book.id}
@@ -173,7 +177,7 @@ export const ListView = ({ books, onDetails, onDownload, onGetReleases, getButto
                 {searchMode !== 'universal' && (
                   <div className="hidden sm:flex justify-center">
                     <span
-                      className={`${getLanguageColor(book.language)} text-white text-[11px] font-semibold px-2 py-0.5 rounded uppercase tracking-wide`}
+                      className={`${languageColor.bg} ${languageColor.text} text-[11px] font-semibold px-2 py-0.5 rounded-lg uppercase tracking-wide`}
                       title={book.language || 'Unknown'}
                     >
                       {book.language || '-'}
@@ -185,7 +189,7 @@ export const ListView = ({ books, onDetails, onDownload, onGetReleases, getButto
                 {searchMode !== 'universal' && (
                   <div className="hidden sm:flex justify-center">
                     <span
-                      className={`${getFormatColor(book.format)} text-white text-[11px] font-semibold px-2 py-0.5 rounded uppercase tracking-wide`}
+                      className={`${formatColor.bg} ${formatColor.text} text-[11px] font-semibold px-2 py-0.5 rounded-lg uppercase tracking-wide`}
                       title={book.format || 'Unknown'}
                     >
                       {book.format || '-'}

@@ -48,10 +48,7 @@ logger.debug(f"STAT TMP_DIR: {os.stat(env.TMP_DIR)}")
 logger.debug(f"STAT INGEST_DIR: {os.stat(env.INGEST_DIR)}")
 logger.debug(f"CROSS_FILE_SYSTEM: {CROSS_FILE_SYSTEM}")
 
-# Network settings - DNS configuration is managed by network.py
-# These are placeholder values that will be set when network.init() is called
-# The authoritative DNS state lives in network.py and is configured via set_dns_provider()
-# Actual DNS provider is determined from config singleton (settings UI) or ENV var
+# DNS placeholders - actual values set by network.init() from config/ENV
 CUSTOM_DNS: list[str] = []
 DOH_SERVER: str = ""
 
@@ -116,6 +113,7 @@ from cwa_book_downloader.core.settings_registry import (
     CheckboxField,
     SelectField,
     MultiSelectField,
+    OrderableListField,
     HeadingField,
     ActionButton,
 )
@@ -136,7 +134,17 @@ register_group(
 )
 
 
-# Build format options from supported formats
+# Anna's Archive sort options (for Direct mode)
+_AA_SORT_OPTIONS = [
+    {"value": "relevance", "label": "Most relevant"},
+    {"value": "newest", "label": "Newest (publication year)"},
+    {"value": "oldest", "label": "Oldest (publication year)"},
+    {"value": "largest", "label": "Largest (filesize)"},
+    {"value": "smallest", "label": "Smallest (filesize)"},
+    {"value": "newest_added", "label": "Newest (open sourced)"},
+    {"value": "oldest_added", "label": "Oldest (open sourced)"},
+]
+
 _FORMAT_OPTIONS = [
     {"value": "epub", "label": "EPUB"},
     {"value": "mobi", "label": "MOBI"},
@@ -181,7 +189,6 @@ def _get_release_source_options():
         for source in list_available_sources()
     ]
 
-# Build language options from supported languages
 _LANGUAGE_OPTIONS = [{"value": lang["code"], "label": lang["language"]} for lang in _SUPPORTED_BOOK_LANGUAGE]
 
 
@@ -202,6 +209,27 @@ def _clear_covers_cache(current_values: dict) -> dict:
         }
     except Exception as e:
         logger.error(f"Failed to clear cover cache: {e}")
+        return {
+            "success": False,
+            "message": f"Failed to clear cache: {str(e)}",
+        }
+
+
+def _clear_metadata_cache(current_values: dict) -> dict:
+    """Clear the in-memory metadata cache."""
+    try:
+        from cwa_book_downloader.core.cache import get_metadata_cache
+
+        cache = get_metadata_cache()
+        stats_before = cache.stats()
+        cache.clear()
+
+        return {
+            "success": True,
+            "message": f"Cleared {stats_before['size']} cached entries.",
+        }
+    except Exception as e:
+        logger.error(f"Failed to clear metadata cache: {e}")
         return {
             "success": False,
             "message": f"Failed to clear cache: {str(e)}",
@@ -231,6 +259,15 @@ def general_settings():
             default="direct",
         ),
         SelectField(
+            key="AA_DEFAULT_SORT",
+            label="Default Sort Order",
+            description="Default sort order for Anna's Archive search results.",
+            options=_AA_SORT_OPTIONS,
+            default="relevance",
+            env_supported=False,  # UI-only setting
+            show_when={"field": "SEARCH_MODE", "value": "direct"},
+        ),
+        SelectField(
             key="METADATA_PROVIDER",
             label="Metadata Provider for Universal Search",
             description="Choose which metadata provider to use for book searches.",
@@ -247,6 +284,12 @@ def general_settings():
             env_supported=False,  # UI-only setting, not configurable via ENV
             show_when={"field": "SEARCH_MODE", "value": "universal"},
         ),
+        TextField(
+            key="CALIBRE_WEB_URL",
+            label="Book Management App URL",
+            description="Adds a navigation button to your book manager instance (Calibre-Web Automated, Booklore, etc).",
+            placeholder="http://calibre-web:8083",
+        ),
         MultiSelectField(
             key="SUPPORTED_FORMATS",
             label="Supported Formats",
@@ -260,35 +303,6 @@ def general_settings():
             description="Default language filter for searches. Can be overridden in advanced search options.",
             options=_LANGUAGE_OPTIONS,
             default=["en"],
-        ),
-        CheckboxField(
-            key="USE_BOOK_TITLE",
-            label="Use Book Title as Filename",
-            description="Save files using book title instead of ID. May cause issues with special characters.",
-            default=False,
-        ),
-        TextField(
-            key="CALIBRE_WEB_URL",
-            label="Book Management App URL",
-            description="Adds a navigation button to your book manager instance (Calibre-Web Automated, Booklore, etc).",
-            placeholder="http://calibre-web:8083",
-        ),
-        NumberField(
-            key="MAX_CONCURRENT_DOWNLOADS",
-            label="Max Concurrent Downloads",
-            description="Maximum number of simultaneous downloads.",
-            default=3,
-            min_value=1,
-            max_value=10,
-            requires_restart=True,
-        ),
-        NumberField(
-            key="STATUS_TIMEOUT",
-            label="Status Timeout (seconds)",
-            description="How long to keep completed/failed downloads in the queue display.",
-            default=3600,
-            min_value=60,
-            max_value=86400,
         ),
     ]
 
@@ -398,68 +412,198 @@ def network_settings():
     ]
 
 
-@register_settings("ingest_directories", "Ingest Directories", icon="folder", order=5)
-def ingest_directory_settings():
-    """Configure where different content types are saved."""
+@register_settings("downloads", "Downloads", icon="folder", order=5)
+def download_settings():
+    """Configure download behavior and file locations."""
     return [
         TextField(
             key="INGEST_DIR",
-            label="Default Ingest Directory",
-            description="Default directory for all downloads. Used when no specific directory is set.",
+            label="Download Directory",
+            description="Directory where downloaded files are saved.",
             default="/cwa-book-ingest",
             required=True,
+        ),
+        CheckboxField(
+            key="USE_BOOK_TITLE",
+            label="Use Book Info as Filename",
+            description="Save files using Author, Title and Year instead of ID. May cause issues with special characters.",
+            default=False,
+        ),
+        CheckboxField(
+            key="AUTO_OPEN_DOWNLOADS_SIDEBAR",
+            label="Auto-Open Downloads Sidebar",
+            description="Automatically open the downloads sidebar when a new download is queued.",
+            default=True,
+            env_supported=False,  # UI-only setting
+        ),
+        CheckboxField(
+            key="DOWNLOAD_TO_BROWSER",
+            label="Download to Browser",
+            description="Automatically download completed files to your browser.",
+            default=False,
+            env_supported=False,  # UI-only setting
+        ),
+        NumberField(
+            key="MAX_CONCURRENT_DOWNLOADS",
+            label="Max Concurrent Downloads",
+            description="Maximum number of simultaneous downloads.",
+            default=3,
+            min_value=1,
+            max_value=10,
+            requires_restart=True,
+        ),
+        NumberField(
+            key="STATUS_TIMEOUT",
+            label="Status Timeout (seconds)",
+            description="How long to keep completed/failed downloads in the queue display.",
+            default=3600,
+            min_value=60,
+            max_value=86400,
+        ),
+        CheckboxField(
+            key="USE_CONTENT_TYPE_DIRECTORIES",
+            label="Use Content-Type Subdirectories",
+            description="Save different content types (fiction, non-fiction, comics, etc.) to separate subdirectories.",
+            default=False,
         ),
         HeadingField(
             key="content_type_directories_heading",
             title="Content-Type Directories",
-            description="Override the default directory for specific content types. Leave empty to use the default.",
+            description="Configure where each content type is saved. Leave empty to use the default directory with an auto-generated subdirectory name.",
+            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
         ),
         TextField(
             key="INGEST_DIR_BOOK_FICTION",
             label="Fiction Books",
             placeholder="/cwa-book-ingest/fiction",
+            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
         ),
         TextField(
             key="INGEST_DIR_BOOK_NON_FICTION",
             label="Non-Fiction Books",
             placeholder="/cwa-book-ingest/non-fiction",
+            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
         ),
         TextField(
             key="INGEST_DIR_BOOK_UNKNOWN",
             label="Unknown Books",
             placeholder="/cwa-book-ingest/unknown",
+            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
         ),
         TextField(
             key="INGEST_DIR_MAGAZINE",
             label="Magazines",
             placeholder="/cwa-book-ingest/magazines",
+            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
         ),
         TextField(
             key="INGEST_DIR_COMIC_BOOK",
             label="Comic Books",
             placeholder="/cwa-book-ingest/comics",
+            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
         ),
         TextField(
             key="INGEST_DIR_AUDIOBOOK",
             label="Audiobooks",
             placeholder="/cwa-book-ingest/audiobooks",
+            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
         ),
         TextField(
             key="INGEST_DIR_STANDARDS_DOCUMENT",
             label="Standards Documents",
             placeholder="/cwa-book-ingest/standards",
+            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
         ),
         TextField(
             key="INGEST_DIR_MUSICAL_SCORE",
             label="Musical Scores",
             placeholder="/cwa-book-ingest/scores",
+            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
         ),
         TextField(
             key="INGEST_DIR_OTHER",
             label="Other",
             placeholder="/cwa-book-ingest/other",
+            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
         ),
     ]
+
+
+def _get_source_priority_options():
+    """Build source priority options with dynamic disabled states."""
+    from cwa_book_downloader.core.config import config
+
+    has_donator_key = bool(config.get("AA_DONATOR_KEY", ""))
+    use_cf_bypass = config.get("USE_CF_BYPASS", True)
+    using_external_bypasser = config.get("USING_EXTERNAL_BYPASSER", False)
+    has_internal_bypasser = use_cf_bypass and not using_external_bypasser
+
+    return [
+        {
+            "id": "aa-fast",
+            "label": "Anna's Archive (Fast)",
+            "description": "Fast downloads for donators",
+            "isLocked": not has_donator_key,
+            "disabledReason": "Requires AA Donator Key" if not has_donator_key else None,
+        },
+        {
+            "id": "welib",
+            "label": "Welib",
+            "description": "Alternative mirror with good availability",
+            "isLocked": not has_internal_bypasser,
+            "disabledReason": "Requires internal bypasser" if not has_internal_bypasser else None,
+        },
+        {
+            "id": "aa-slow-nowait",
+            "label": "Anna's Archive (Slowest, No Waitlist)",
+            "description": "Partner servers without countdown",
+        },
+        {
+            "id": "aa-slow-wait",
+            "label": "Anna's Archive (Slow, Waitlist)",
+            "description": "Partner servers with countdown timer",
+        },
+        {
+            "id": "libgen",
+            "label": "Libgen",
+            "description": "Library Genesis mirrors",
+        },
+        {
+            "id": "zlib",
+            "label": "Z-Library",
+            "description": "Z-Library mirrors (requires Cloudflare bypass)",
+            "isLocked": not has_internal_bypasser,
+            "disabledReason": "Requires internal bypasser" if not has_internal_bypasser else None,
+        },
+    ]
+
+
+def _get_default_source_priority():
+    """Default source priority order, respecting legacy env vars.
+
+    ALLOW_USE_WELIB (default true) controls whether welib is enabled.
+    PRIORITIZE_WELIB (default false) controls whether welib is moved to position 1.
+    """
+    from cwa_book_downloader.config.env import _LEGACY_PRIORITIZE_WELIB, _LEGACY_ALLOW_USE_WELIB
+
+    welib_entry = {"id": "welib", "enabled": _LEGACY_ALLOW_USE_WELIB}
+
+    priority = [
+        {"id": "aa-fast", "enabled": True},
+        {"id": "aa-slow-nowait", "enabled": True},
+        {"id": "aa-slow-wait", "enabled": True},
+        {"id": "libgen", "enabled": True},
+    ]
+
+    if _LEGACY_PRIORITIZE_WELIB:
+        priority.insert(1, welib_entry)  # After aa-fast
+    else:
+        priority.append(welib_entry)  # Before zlib
+
+    # Z-Library last - it's quite brittle
+    priority.append({"id": "zlib", "enabled": True})
+
+    return priority
 
 
 @register_settings("download_sources", "Download Sources", icon="download", order=21, group="direct_download")
@@ -489,18 +633,17 @@ def download_source_settings():
             label="Anna's Archive Donator Key",
             description="Optional donator key for faster downloads from Anna's Archive.",
         ),
-        CheckboxField(
-            key="ALLOW_USE_WELIB",
-            label="Allow Welib Downloads",
-            description="Enable Welib as a fallback download source.",
-            default=True,
+        HeadingField(
+            key="source_priority_heading",
+            title="Source Priority",
+            description="Configure which download sources to use and in what order.",
         ),
-        CheckboxField(
-            key="PRIORITIZE_WELIB",
-            label="Prioritize Welib",
-            description="Try Welib before other slow download sources.",
-            default=False,
-            show_when={"field": "ALLOW_USE_WELIB", "value": True},
+        OrderableListField(
+            key="SOURCE_PRIORITY",
+            label="Download Source Order",
+            description="Drag to reorder. Sources are tried from top to bottom until a download succeeds.",
+            options=_get_source_priority_options,
+            default=_get_default_source_priority(),
         ),
         NumberField(
             key="MAX_RETRY",
@@ -672,5 +815,41 @@ def advanced_settings():
             description="Delete all cached cover images.",
             style="danger",
             callback=_clear_covers_cache,
+        ),
+        HeadingField(
+            key="metadata_cache_heading",
+            title="Metadata Cache",
+            description="Cache book metadata from providers (Hardcover, Open Library) to reduce API calls and speed up repeated searches.",
+        ),
+        CheckboxField(
+            key="METADATA_CACHE_ENABLED",
+            label="Enable Metadata Caching",
+            description="When disabled, all metadata searches hit the provider API directly.",
+            default=True,
+        ),
+        NumberField(
+            key="METADATA_CACHE_SEARCH_TTL",
+            label="Search Results Cache (seconds)",
+            description="How long to cache search results. Default: 300 (5 minutes). Max: 604800 (7 days).",
+            default=300,
+            min_value=60,
+            max_value=604800,
+            show_when={"field": "METADATA_CACHE_ENABLED", "value": True},
+        ),
+        NumberField(
+            key="METADATA_CACHE_BOOK_TTL",
+            label="Book Details Cache (seconds)",
+            description="How long to cache individual book details. Default: 600 (10 minutes). Max: 604800 (7 days).",
+            default=600,
+            min_value=60,
+            max_value=604800,
+            show_when={"field": "METADATA_CACHE_ENABLED", "value": True},
+        ),
+        ActionButton(
+            key="clear_metadata_cache",
+            label="Clear Metadata Cache",
+            description="Clear all cached search results and book details.",
+            style="danger",
+            callback=_clear_metadata_cache,
         ),
     ]

@@ -9,12 +9,9 @@ from cwa_book_downloader.core.settings_registry import (
     register_settings,
     CheckboxField,
     PasswordField,
+    SelectField,
     ActionButton,
     HeadingField,
-)
-from cwa_book_downloader.config.env import (
-    METADATA_CACHE_SEARCH_TTL,
-    METADATA_CACHE_BOOK_TTL,
 )
 from cwa_book_downloader.core.config import config as app_config
 from cwa_book_downloader.metadata_providers import (
@@ -150,7 +147,7 @@ class HardcoverProvider(MetadataProvider):
         cache_key = f"{options.query}:{options.search_type.value}:{options.sort.value}:{options.limit}:{options.page}:{fields_key}"
         return self._search_cached(cache_key, options)
 
-    @cacheable(ttl=METADATA_CACHE_SEARCH_TTL, key_prefix="hardcover:search")
+    @cacheable(ttl_key="METADATA_CACHE_SEARCH_TTL", ttl_default=300, key_prefix="hardcover:search")
     def _search_cached(self, cache_key: str, options: MetadataSearchOptions) -> List[BookMetadata]:
         """Cached search implementation.
 
@@ -275,7 +272,7 @@ class HardcoverProvider(MetadataProvider):
             logger.error(f"Hardcover search error: {e}")
             return []
 
-    @cacheable(ttl=METADATA_CACHE_BOOK_TTL, key_prefix="hardcover:book")
+    @cacheable(ttl_key="METADATA_CACHE_BOOK_TTL", ttl_default=600, key_prefix="hardcover:book")
     def get_book(self, book_id: str) -> Optional[BookMetadata]:
         """Get book details by Hardcover ID.
 
@@ -331,7 +328,7 @@ class HardcoverProvider(MetadataProvider):
             logger.error(f"Hardcover get_book error: {e}")
             return None
 
-    @cacheable(ttl=METADATA_CACHE_BOOK_TTL, key_prefix="hardcover:isbn")
+    @cacheable(ttl_key="METADATA_CACHE_BOOK_TTL", ttl_default=600, key_prefix="hardcover:isbn")
     def search_by_isbn(self, isbn: str) -> Optional[BookMetadata]:
         """Search for a book by ISBN.
 
@@ -699,6 +696,16 @@ def _get_connected_username() -> Optional[str]:
     return config.get("_connected_username")
 
 
+# Hardcover sort options for settings UI
+_HARDCOVER_SORT_OPTIONS = [
+    {"value": "relevance", "label": "Most relevant"},
+    {"value": "popularity", "label": "Most popular"},
+    {"value": "rating", "label": "Highest rated"},
+    {"value": "newest", "label": "Newest"},
+    {"value": "oldest", "label": "Oldest"},
+]
+
+
 @register_settings("hardcover", "Hardcover", icon="book", order=51, group="metadata_providers")
 def hardcover_settings():
     """Hardcover metadata provider settings."""
@@ -733,5 +740,13 @@ def hardcover_settings():
             description=test_button_description,
             style="primary",
             callback=_test_hardcover_connection,
+        ),
+        SelectField(
+            key="HARDCOVER_DEFAULT_SORT",
+            label="Default Sort Order",
+            description="Default sort order for Hardcover search results.",
+            options=_HARDCOVER_SORT_OPTIONS,
+            default="relevance",
+            env_supported=False,  # UI-only setting
         ),
     ]

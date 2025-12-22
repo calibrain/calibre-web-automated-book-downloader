@@ -12,12 +12,9 @@ from cwa_book_downloader.core.logger import setup_logger
 from cwa_book_downloader.core.settings_registry import (
     register_settings,
     CheckboxField,
+    SelectField,
     ActionButton,
     HeadingField,
-)
-from cwa_book_downloader.config.env import (
-    METADATA_CACHE_SEARCH_TTL,
-    METADATA_CACHE_BOOK_TTL,
 )
 from cwa_book_downloader.metadata_providers import (
     BookMetadata,
@@ -160,7 +157,7 @@ class OpenLibraryProvider(MetadataProvider):
         cache_key = f"{options.query}:{options.search_type.value}:{options.sort.value}:{options.language}:{options.limit}:{options.page}:{fields_key}"
         return self._search_cached(cache_key, options)
 
-    @cacheable(ttl=METADATA_CACHE_SEARCH_TTL, key_prefix="openlibrary:search")
+    @cacheable(ttl_key="METADATA_CACHE_SEARCH_TTL", ttl_default=300, key_prefix="openlibrary:search")
     def _search_cached(self, cache_key: str, options: MetadataSearchOptions) -> List[BookMetadata]:
         """Cached search implementation.
 
@@ -241,7 +238,7 @@ class OpenLibraryProvider(MetadataProvider):
             logger.error(f"Open Library search error: {e}")
             return []
 
-    @cacheable(ttl=METADATA_CACHE_BOOK_TTL, key_prefix="openlibrary:book")
+    @cacheable(ttl_key="METADATA_CACHE_BOOK_TTL", ttl_default=600, key_prefix="openlibrary:book")
     def get_book(self, book_id: str) -> Optional[BookMetadata]:
         """Get book details by Open Library work ID.
 
@@ -282,7 +279,7 @@ class OpenLibraryProvider(MetadataProvider):
             logger.error(f"Open Library get_book error: {e}")
             return None
 
-    @cacheable(ttl=METADATA_CACHE_BOOK_TTL, key_prefix="openlibrary:isbn")
+    @cacheable(ttl_key="METADATA_CACHE_BOOK_TTL", ttl_default=600, key_prefix="openlibrary:isbn")
     def search_by_isbn(self, isbn: str) -> Optional[BookMetadata]:
         """Search for a book by ISBN.
 
@@ -598,6 +595,14 @@ def _test_openlibrary_connection() -> Dict[str, Any]:
         return {"success": False, "message": f"Error: {str(e)}"}
 
 
+# Open Library sort options for settings UI
+_OPENLIBRARY_SORT_OPTIONS = [
+    {"value": "relevance", "label": "Most relevant"},
+    {"value": "newest", "label": "Newest"},
+    {"value": "oldest", "label": "Oldest"},
+]
+
+
 @register_settings("openlibrary", "Open Library", icon="library", order=52, group="metadata_providers")
 def openlibrary_settings():
     """Open Library metadata provider settings."""
@@ -621,5 +626,13 @@ def openlibrary_settings():
             description="Verify Open Library API is accessible",
             style="primary",
             callback=_test_openlibrary_connection,
+        ),
+        SelectField(
+            key="OPENLIBRARY_DEFAULT_SORT",
+            label="Default Sort Order",
+            description="Default sort order for Open Library search results.",
+            options=_OPENLIBRARY_SORT_OPTIONS,
+            default="relevance",
+            env_supported=False,  # UI-only setting
         ),
     ]

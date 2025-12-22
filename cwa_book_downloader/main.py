@@ -518,6 +518,7 @@ def api_config() -> Union[Response, Tuple[Response, int]]:
         from cwa_book_downloader.metadata_providers import (
             get_provider_sort_options,
             get_provider_search_fields,
+            get_provider_default_sort,
         )
 
         config = {
@@ -532,7 +533,12 @@ def api_config() -> Union[Response, Tuple[Response, int]]:
             "metadata_sort_options": get_provider_sort_options(),
             "metadata_search_fields": get_provider_search_fields(),
             "default_release_source": app_config.get("DEFAULT_RELEASE_SOURCE", "direct_download"),
+            "auto_open_downloads_sidebar": app_config.get("AUTO_OPEN_DOWNLOADS_SIDEBAR", True),
+            "download_to_browser": app_config.get("DOWNLOAD_TO_BROWSER", False),
             "settings_enabled": _is_settings_enabled(),
+            # Default sort orders
+            "default_sort": app_config.get("AA_DEFAULT_SORT", "relevance"),  # For direct mode (Anna's Archive)
+            "metadata_default_sort": get_provider_default_sort(),  # For universal mode
         }
         return jsonify(config)
     except Exception as e:

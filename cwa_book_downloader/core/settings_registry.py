@@ -81,6 +81,28 @@ class MultiSelectField(FieldBase):
 
 
 @dataclass
+class OrderableListField(FieldBase):
+    """
+    Drag-and-drop reorderable list with enable/disable toggles.
+
+    A generic field for any ordered list of items where each item can be
+    enabled or disabled. Used for source priority, format preference, etc.
+
+    Options define the available items:
+        [{"id": "item1", "label": "Item 1", "description": "...",
+          "disabledReason": "...", "isLocked": False}, ...]
+
+    Value is stored as:
+        [{"id": "item1", "enabled": True}, {"id": "item2", "enabled": False}, ...]
+    """
+    # Options can be a list or a callable that returns a list (for lazy evaluation)
+    # Each option: {id, label, description?, disabledReason?, isLocked?}
+    options: Any = field(default_factory=list)
+    # Default value: [{id, enabled}, ...] in priority order
+    default: List[Dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
 class ActionButton:
     """
     Button that triggers a callback function.
@@ -115,13 +137,14 @@ class HeadingField:
     description: str = ""                 # Description text (supports markdown-style links)
     link_url: str = ""                    # Optional URL for a link
     link_text: str = ""                   # Text for the link (defaults to URL if not provided)
+    show_when: Optional[Dict[str, Any]] = None  # Conditional visibility: {"field": "key", "value": "expected"}
 
     def get_field_type(self) -> str:
         return "HeadingField"
 
 
 # Type alias for all field types
-SettingsField = Union[TextField, PasswordField, NumberField, CheckboxField, SelectField, MultiSelectField, ActionButton, HeadingField]
+SettingsField = Union[TextField, PasswordField, NumberField, CheckboxField, SelectField, MultiSelectField, OrderableListField, ActionButton, HeadingField]
 
 
 @dataclass
@@ -431,6 +454,13 @@ def _parse_env_value(value: str, field: SettingsField) -> Any:
             return field.default
     elif isinstance(field, MultiSelectField):
         return [v.strip() for v in value.split(',') if v.strip()]
+    elif isinstance(field, OrderableListField):
+        # Parse JSON array: [{"id": "...", "enabled": true}, ...]
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid JSON for {field.key}, using default")
+            return field.default
     else:
         return value
 
@@ -471,6 +501,8 @@ def serialize_field(field: SettingsField, tab_name: str, include_value: bool = T
         if field.link_url:
             result["linkUrl"] = field.link_url
             result["linkText"] = field.link_text or field.link_url
+        if field.show_when:
+            result["showWhen"] = field.show_when
         return result
 
     result = {
@@ -506,6 +538,10 @@ def serialize_field(field: SettingsField, tab_name: str, include_value: bool = T
         result["max"] = field.max_value
         result["step"] = field.step
     elif isinstance(field, (SelectField, MultiSelectField)):
+        # Support callable options for lazy evaluation (avoids circular imports)
+        options = field.options() if callable(field.options) else field.options
+        result["options"] = options
+    elif isinstance(field, OrderableListField):
         # Support callable options for lazy evaluation (avoids circular imports)
         options = field.options() if callable(field.options) else field.options
         result["options"] = options

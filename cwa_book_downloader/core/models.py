@@ -1,10 +1,45 @@
 """Data structures and models used across the application."""
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional
 from enum import Enum
 import re
 import time
+
+
+def build_filename(
+    title: str,
+    author: Optional[str] = None,
+    year: Optional[str] = None,
+    fmt: Optional[str] = None,
+) -> str:
+    """Build sanitized filename: 'Author - Title (Year).format'
+
+    Args:
+        title: Book title (required)
+        author: Book author
+        year: Publication year
+        fmt: File format/extension
+
+    Returns:
+        Sanitized filename safe for filesystem use
+    """
+    parts = []
+    if author:
+        parts.append(author)
+        parts.append(" - ")
+    parts.append(title)
+    if year:
+        parts.append(f" ({year})")
+
+    filename = "".join(parts)
+    filename = re.sub(r'[\\/:*?"<>|]', '_', filename.strip())[:245]
+
+    if fmt:
+        filename = f"{filename}.{fmt}"
+
+    return filename
 
 
 class QueueStatus(str, Enum):
@@ -65,6 +100,12 @@ class DownloadTask:
             return self.priority < other.priority
         return self.added_time < other.added_time
 
+    def get_filename(self) -> str:
+        """Build sanitized filename from task metadata."""
+        if self.download_path:
+            return Path(self.download_path).name
+        return build_filename(self.title, self.author, fmt=self.format)
+
 
 @dataclass
 class BookInfo:
@@ -109,22 +150,7 @@ class BookInfo:
                         self.format = ext
                         break
 
-        # Build filename
-        parts = []
-        if self.author:
-            parts.append(self.author)
-            parts.append(" - ")
-        parts.append(self.title)
-        if self.year:
-            parts.append(f" ({self.year})")
-
-        filename = "".join(parts)
-        filename = re.sub(r'[\\/:*?"<>|]', '_', filename.strip())[:245]
-
-        if self.format:
-            filename = f"{filename}.{self.format}"
-
-        return filename
+        return build_filename(self.title, self.author, self.year, self.format)
 
 
 @dataclass

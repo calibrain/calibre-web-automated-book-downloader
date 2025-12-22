@@ -56,6 +56,52 @@ _DOWNLOAD_SOURCES = [
 _SOURCE_FAILURE_THRESHOLD = 4
 _MIN_VALID_FILE_SIZE = 10 * 1024
 
+# Sources that require Cloudflare bypass
+_CF_BYPASS_REQUIRED = frozenset({"aa-slow-nowait", "aa-slow-wait", "zlib", "welib"})
+
+# Sources whose URLs come from AA page (multiple mirrors)
+_AA_PAGE_SOURCES = frozenset({"aa-slow-nowait", "aa-slow-wait"})
+
+# URL templates for sources that generate URLs from MD5 hash
+_MD5_URL_TEMPLATES = {
+    "zlib": "https://z-lib.fm/md5/{md5}",
+    "libgen": "https://libgen.gl/ads.php?md5={md5}",
+    "welib": "https://welib.org/md5/{md5}",
+}
+
+def _get_source_priority() -> list[dict]:
+    """Get the current source priority configuration."""
+    return config.get("SOURCE_PRIORITY") or []
+
+
+def _is_source_enabled(source_id: str) -> bool:
+    """Check if a source is enabled in the priority config."""
+    for item in _get_source_priority():
+        if item["id"] == source_id:
+            return item.get("enabled", True)
+    return False  # Unknown sources are disabled
+
+
+def _get_enabled_source_order() -> list[str]:
+    """Get ordered list of enabled source IDs."""
+    return [
+        item["id"]
+        for item in _get_source_priority()
+        if item.get("enabled", True)
+    ]
+
+
+def _get_source_position(source_id: str) -> int:
+    """Get the position of a source in the priority list (lower = higher priority).
+
+    Returns a high number if source not found or disabled.
+    """
+    priority = _get_source_priority()
+    for i, item in enumerate(priority):
+        if item["id"] == source_id and item.get("enabled", True):
+            return i
+    return 999  # Not found or disabled
+
 
 class SearchUnavailable(Exception):
     """Raised when Anna's Archive cannot be reached via any mirror/DNS."""
@@ -90,7 +136,7 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
         if value != "all":
             filters_query += f"&lang={quote(value)}"
 
-    if filters.sort:
+    if filters.sort and filters.sort != "relevance":
         filters_query += f"&sort={quote(filters.sort)}"
 
     if filters.content:
@@ -225,8 +271,6 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     slow_urls_no_waitlist: list[str] = []
     slow_urls_with_waitlist: list[str] = []
-    external_urls_libgen: list[str] = []
-    external_urls_z_lib: list[str] = []
 
     def _append_unique(lst: list[str], href: str) -> None:
         if href and href not in lst:
@@ -245,43 +289,30 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                     _append_unique(slow_urls_no_waitlist, href)
                 else:
                     _append_unique(slow_urls_with_waitlist, href)
-            elif 'libgen.li' in href:
-                libgen_url = re.sub(r'libgen\.(li|lc|is|bz|st)', 'libgen.gl', href)
-                _append_unique(external_urls_libgen, libgen_url)
-            elif text.startswith("z-lib") and ".onion/" not in href:
-                _append_unique(external_urls_z_lib, href)
         except Exception:
             pass
 
     logger.debug(
-        "Source inventory for %s -> aa_no_wait=%d, aa_wait=%d, libgen=%d, zlib=%d",
+        "Source inventory for %s -> aa_no_wait=%d, aa_wait=%d",
         book_id,
         len(slow_urls_no_waitlist),
         len(slow_urls_with_waitlist),
-        len(external_urls_libgen),
-        len(external_urls_z_lib),
     )
 
+    # Convert to absolute URLs and tag by source type
+    base_url = network.get_aa_base_url()
     urls = []
 
-    # Z-Library disabled - download tokens are session-bound
-    urls += slow_urls_no_waitlist if config.USE_CF_BYPASS else []
-    urls += external_urls_libgen
-    urls += slow_urls_with_waitlist if config.USE_CF_BYPASS else []
-
-    for i in range(len(urls)):
-        urls[i] = downloader.get_absolute_url(network.get_aa_base_url(), urls[i])
-
-    urls = [url for url in urls if url != ""]
-
-    base_url = network.get_aa_base_url()
     for rel_url in slow_urls_no_waitlist:
         abs_url = downloader.get_absolute_url(base_url, rel_url)
         if abs_url:
+            urls.append(abs_url)
             _url_source_types[abs_url] = "aa-slow-nowait"
+
     for rel_url in slow_urls_with_waitlist:
         abs_url = downloader.get_absolute_url(base_url, rel_url)
         if abs_url:
+            urls.append(abs_url)
             _url_source_types[abs_url] = "aa-slow-wait"
 
     original_divs = divs
@@ -475,12 +506,136 @@ def _friendly_source_name(link: str) -> str:
     return _get_source_info(link)[1]
 
 
+def _fetch_aa_page_urls(book_info: BookInfo, urls_by_source: dict[str, list[str]]) -> None:
+    """Fetch and parse AA page, populating urls_by_source dict.
+
+    Groups existing book_info.download_urls by source type. If book_info
+    has no URLs, fetches the AA page fresh.
+    """
+    # If book_info already has URLs, group them by source type
+    if book_info.download_urls:
+        for url in book_info.download_urls:
+            source_type = _url_source_types.get(url)
+            if source_type:
+                if source_type not in urls_by_source:
+                    urls_by_source[source_type] = []
+                urls_by_source[source_type].append(url)
+        return
+
+    # Otherwise fetch the page fresh
+    try:
+        fresh_book_info = get_book_info(book_info.id)
+        for url in fresh_book_info.download_urls:
+            source_type = _url_source_types.get(url)
+            if source_type:
+                if source_type not in urls_by_source:
+                    urls_by_source[source_type] = []
+                urls_by_source[source_type].append(url)
+    except Exception as e:
+        logger.warning(f"Failed to fetch AA page: {e}")
+
+
+def _get_urls_for_source(
+    source_id: str,
+    book_info: BookInfo,
+    selector: network.AAMirrorSelector,
+    cancel_flag: Optional[Event],
+    status_callback: Optional[Callable[[str, Optional[str]], None]],
+    urls_by_source: dict[str, list[str]],
+    aa_page_fetched: bool
+) -> list[str]:
+    """Get URLs for a specific source, fetching lazily if needed."""
+    # AA Fast - generate URL dynamically
+    if source_id == "aa-fast":
+        if not config.AA_DONATOR_KEY:
+            return []
+        url = f"{network.get_aa_base_url()}/dyn/api/fast_download.json?md5={book_info.id}&key={config.AA_DONATOR_KEY}"
+        _url_source_types[url] = "aa-fast"
+        return [url]
+
+    # MD5-based sources - generate URL from template
+    if source_id in _MD5_URL_TEMPLATES:
+        url = _MD5_URL_TEMPLATES[source_id].format(md5=book_info.id)
+        _url_source_types[url] = source_id
+        return [url]
+
+    # Welib - fetch page and parse for slow_download links
+    if source_id == "welib":
+        if status_callback:
+            status_callback("resolving", "Fetching welib sources...")
+        return _get_download_urls_from_welib(book_info.id, selector=selector, cancel_flag=cancel_flag)
+
+    # AA page sources - fetch AA page if not already done
+    if source_id in _AA_PAGE_SOURCES:
+        if not aa_page_fetched and not urls_by_source:
+            if status_callback:
+                status_callback("resolving", "Fetching download sources...")
+            _fetch_aa_page_urls(book_info, urls_by_source)
+
+        return urls_by_source.get(source_id, [])
+
+    return []
+
+
+def _try_download_url(
+    url: str,
+    source_id: str,
+    book_info: BookInfo,
+    book_path: Path,
+    progress_callback: Optional[Callable[[float], None]],
+    cancel_flag: Optional[Event],
+    status_callback: Optional[Callable[[str, Optional[str]], None]],
+    selector: network.AAMirrorSelector,
+    source_context: str
+) -> Optional[str]:
+    """Attempt to download from a single URL.
+
+    Returns: download URL on success, None on failure.
+    """
+    try:
+        logger.info(f"Trying download source [{source_id}]: {url}")
+
+        if status_callback:
+            status_callback("resolving", f"Trying {source_context}")
+
+        download_url = _get_download_url(url, book_info.title, cancel_flag, status_callback, selector, source_context)
+        if not download_url:
+            raise Exception("No download URL resolved")
+
+        logger.info(f"Resolved download URL [{source_id}]: {download_url}")
+
+        data = downloader.download_url(
+            download_url, book_info.size or "",
+            progress_callback, cancel_flag, selector,
+            status_callback, referer=url
+        )
+
+        if not data:
+            raise Exception("No data received from download")
+
+        file_size = data.tell()
+        if file_size < _MIN_VALID_FILE_SIZE:
+            logger.warning(f"Downloaded file too small ({file_size} bytes), likely an error page")
+            raise Exception(f"File too small ({file_size} bytes)")
+
+        logger.debug(f"Download finished ({file_size} bytes). Writing to {book_path}")
+        data.seek(0)
+        with open(book_path, "wb") as f:
+            f.write(data.getbuffer())
+
+        return download_url
+
+    except Exception as e:
+        logger.warning(f"Failed to download from {url} (source={source_id}): {e}")
+        return None
+
+
 def _get_download_urls_from_welib(book_id: str, selector: Optional[network.AAMirrorSelector] = None, cancel_flag: Optional[Event] = None) -> list[str]:
     """Get download URLs from welib.org (bypasser required)."""
-    if not config.ALLOW_USE_WELIB:
+    if not _is_source_enabled("welib"):
         return []
-    url = f"https://welib.org/md5/{book_id}"
-    logger.info(f"Fetching welib.org download URLs for {book_id}")
+    url = _MD5_URL_TEMPLATES["welib"].format(md5=book_id)
+    logger.info(f"Fetching welib download URLs for {book_id}")
     try:
         html = downloader.html_get_page(url, use_bypasser=True, selector=selector or network.AAMirrorSelector(), cancel_flag=cancel_flag)
     except Exception as exc:
@@ -506,167 +661,88 @@ def _download_book(
     cancel_flag: Optional[Event] = None,
     status_callback: Optional[Callable[[str, Optional[str]], None]] = None
 ) -> Optional[str]:
-    """Download a book from available sources.
+    """Download a book using sources in configured priority order.
 
-    Args:
-        book_info: Book information with download URLs
-        book_path: Path to save the downloaded file
-        progress_callback: Optional callback for download progress updates
-        cancel_flag: Optional cancellation flag
-        status_callback: Optional callback for status updates (status, message)
-
-    Returns:
-        str: Download URL if successful, None otherwise
+    Returns: Download URL if successful, None otherwise.
     """
     selector = network.AAMirrorSelector()
-
-    if len(book_info.download_urls) == 0:
-        book_info = get_book_info(book_info.id)
-    download_links = list(book_info.download_urls)
-
-    # If config.AA_DONATOR_KEY is set, use the fast download URL. Else try other sources.
-    # Use truthiness check to handle both None and empty string
-    if config.AA_DONATOR_KEY:
-        download_links.insert(
-            0,
-            f"{network.get_aa_base_url()}/dyn/api/fast_download.json?md5={book_info.id}&key={config.AA_DONATOR_KEY}",
-        )
-
-    # Preserve order but drop duplicates to avoid retrying the same host
-    download_links = list(dict.fromkeys(download_links))
-
-    # Round-robin rotation for AA slow download URLs to distribute load across mirrors
-    # This prevents all concurrent downloads from hitting the same partner server first
-    # Rotate aa-slow-nowait and aa-slow-wait independently to preserve priority ordering
-    rotation_value = next(_aa_slow_rotation)
-
-    def _rotate_category_in_place(links: list, source_type: str) -> int:
-        """Rotate URLs of a specific source type within the list, preserving their positions."""
-        indices = [i for i, u in enumerate(links) if _url_source_types.get(u) == source_type]
-        if len(indices) <= 1:
-            return 0
-        rotation = rotation_value % len(indices)
-        if rotation == 0:
-            return 0
-        # Extract values, rotate, put back
-        values = [links[i] for i in indices]
-        rotated = values[rotation:] + values[:rotation]
-        for idx, val in zip(indices, rotated):
-            links[idx] = val
-        return rotation
-
-    nowait_rotation = _rotate_category_in_place(download_links, "aa-slow-nowait")
-    wait_rotation = _rotate_category_in_place(download_links, "aa-slow-wait")
-
-    if nowait_rotation or wait_rotation:
-        logger.info(f"AA source rotation: nowait={nowait_rotation}, wait={wait_rotation}")
-
-    links_queue = download_links
-
-    # Fetch welib URLs upfront when prioritized
-    welib_fallback_loaded = "welib" in DEBUG_SKIP_SOURCES  # Skip welib entirely if in debug skip list
-    if config.USE_CF_BYPASS and config.PRIORITIZE_WELIB and config.ALLOW_USE_WELIB and not welib_fallback_loaded:
-        logger.info("Fetching welib.org download URLs (config.PRIORITIZE_WELIB enabled)")
-        if status_callback:
-            status_callback("resolving", "Fetching welib sources...")
-        welib_links = _get_download_urls_from_welib(book_info.id, selector=selector, cancel_flag=cancel_flag)
-        if welib_links:
-            links_queue = welib_links + [l for l in links_queue if l not in welib_links]
-        welib_fallback_loaded = True
-
-    total_sources = len(links_queue)
-
-    # Handle case where no download sources are available
-    if total_sources == 0:
-        logger.warning(f"No download sources available for: {book_info.title}")
-        if status_callback:
-            status_callback("error", "No download sources found")
-        return None
-
-    # Track consecutive failures per source type to skip after threshold
     source_failures: dict[str, int] = {}
-    # Iterate with index so we can append welib links later
-    idx = 0
-    while idx < len(links_queue):
-        link = links_queue[idx]
-        source_label = _label_source(link)
-        friendly_name = _friendly_source_name(link)
+    urls_by_source: dict[str, list[str]] = {}
+    aa_page_fetched = False
+    url_attempt_counter = 0
+
+    # Get enabled sources in priority order
+    priority = [s for s in _get_source_priority() if s.get("enabled", True)]
+
+    for source_config in priority:
+        source_id = source_config["id"]
+
+        if cancel_flag and cancel_flag.is_set():
+            return None
 
         # Debug: skip sources for testing fallback chains
-        if source_label in DEBUG_SKIP_SOURCES:
-            logger.info("DEBUG_SKIP_SOURCES: skipping %s (%s)", source_label, link)
-            idx += 1
+        if source_id in DEBUG_SKIP_SOURCES:
+            logger.info("DEBUG_SKIP_SOURCES: skipping %s", source_id)
             continue
 
-        # Skip source types that have failed too many times
-        if source_failures.get(source_label, 0) >= _SOURCE_FAILURE_THRESHOLD:
-            logger.info("Skipping %s - source type '%s' failed %d times", link, source_label, _SOURCE_FAILURE_THRESHOLD)
-            idx += 1
+        # Skip if source requires CF bypass and it's not enabled
+        if source_id in _CF_BYPASS_REQUIRED and not config.USE_CF_BYPASS:
+            logger.debug(f"Skipping {source_id} - requires CF bypass")
             continue
 
-        try:
-            current_pos = idx + 1
-            # Update total if we added more sources
-            total_sources = len(links_queue)
-
-            logger.info("Trying download source [%s]: %s (%d/%d)", source_label, link, current_pos, total_sources)
-
-            # Build source context for status messages (e.g., "Welib (1/12)")
-            source_context = f"{friendly_name} (Server #{current_pos})"
-
-            # Update status with simple message showing which source we're trying
-            if status_callback:
-                status_callback("resolving", f"Trying {source_context}")
-
-            download_url = _get_download_url(link, book_info.title, cancel_flag, status_callback, selector, source_context)
-            if download_url == "":
-                raise Exception("No download URL resolved")
-
-            logger.info("Resolved download URL [%s]: %s", source_label, download_url)
-
-            # Pass source page as referer (required by some sites)
-            data = downloader.download_url(download_url, book_info.size or "", progress_callback, cancel_flag, selector, status_callback, referer=link)
-            if not data:
-                raise Exception("No data received from download")
-
-            # Validate file size - reject suspiciously small files
-            file_size = data.tell()
-            if file_size < _MIN_VALID_FILE_SIZE:
-                logger.warning(f"Downloaded file too small ({file_size} bytes), likely an error page")
-                raise Exception(f"File too small ({file_size} bytes)")
-
-            logger.debug(f"Download finished ({file_size} bytes). Writing to {book_path}")
-            data.seek(0)  # Reset buffer position before writing
-            with open(book_path, "wb") as f:
-                f.write(data.getbuffer())
-            return download_url
-
-        except Exception as e:
-            logger.warning(f"Failed to download from {link} (source={source_label}): {e}")
-            source_failures[source_label] = source_failures.get(source_label, 0) + 1
-            idx += 1
-            # If we exhausted primary links and haven't loaded welib yet, fetch them lazily
-            if (
-                idx >= len(links_queue)
-                and not welib_fallback_loaded
-                and config.USE_CF_BYPASS
-                and config.ALLOW_USE_WELIB
-            ):
-                welib_selector = selector  # reuse AA mirror selector for consistency
-                welib_links = _get_download_urls_from_welib(book_info.id, selector=welib_selector, cancel_flag=cancel_flag)
-                welib_fallback_loaded = True
-                if welib_links:
-                    new_links = [wl for wl in welib_links if wl not in links_queue]
-                    if new_links:
-                        logger.info("Adding welib fallback links (%d)", len(new_links))
-                        links_queue.extend(new_links)
-                        # continue loop to try newly added links
+        # Skip if source has failed too many times
+        if source_failures.get(source_id, 0) >= _SOURCE_FAILURE_THRESHOLD:
+            logger.debug(f"Skipping {source_id} - too many failures")
             continue
 
-    # All sources exhausted - report final error to UI
+        # Get URLs for this source (lazy-loads as needed)
+        urls_to_try = _get_urls_for_source(
+            source_id, book_info, selector, cancel_flag, status_callback,
+            urls_by_source, aa_page_fetched
+        )
+
+        # Track if we fetched AA page
+        if source_id in _AA_PAGE_SOURCES and not aa_page_fetched:
+            aa_page_fetched = bool(urls_by_source)
+
+        if not urls_to_try:
+            continue
+
+        # Apply round-robin rotation if multiple URLs
+        if len(urls_to_try) > 1:
+            rotation_value = next(_aa_slow_rotation)
+            rotation = rotation_value % len(urls_to_try)
+            urls_to_try = urls_to_try[rotation:] + urls_to_try[:rotation]
+            if rotation:
+                logger.debug(f"Rotated {source_id} URLs by {rotation}")
+
+        # Try each URL for this source
+        for url in urls_to_try:
+            if cancel_flag and cancel_flag.is_set():
+                return None
+
+            url_attempt_counter += 1
+            friendly_name = _friendly_source_name(url)
+            source_context = f"{friendly_name} (Server #{url_attempt_counter})"
+
+            result = _try_download_url(
+                url, source_id, book_info, book_path,
+                progress_callback, cancel_flag, status_callback, selector,
+                source_context
+            )
+
+            if result:
+                return result
+
+            source_failures[source_id] = source_failures.get(source_id, 0) + 1
+
+            # Check if we've hit the failure threshold
+            if source_failures[source_id] >= _SOURCE_FAILURE_THRESHOLD:
+                logger.info(f"Source {source_id} hit failure threshold, moving to next source")
+                break
+
     if status_callback:
-        status_callback("error", f"All {len(links_queue)} sources failed")
-
+        status_callback("error", "All sources failed")
     return None
 
 
@@ -705,6 +781,13 @@ def _get_download_url(
     # Z-Library
     if link.startswith("https://z-lib."):
         dl = soup.find("a", href=True, class_="addDownloadedBook")
+        if not dl:
+            # Retry after delay if page not fully loaded
+            time.sleep(2)
+            html = downloader.html_get_page(link, selector=sel, cancel_flag=cancel_flag)
+            if html:
+                soup = BeautifulSoup(html, "html.parser")
+                dl = soup.find("a", href=True, class_="addDownloadedBook")
         url = dl["href"] if dl else ""
 
     # AA slow download / partner servers
@@ -963,9 +1046,9 @@ class DirectDownloadHandler(DownloadHandler):
     """
     Handler for direct HTTP downloads from Anna's Archive, Libgen, etc.
 
-    Receives a DownloadTask with task_id (AA MD5 hash) and fetches the
-    book page internally to get download URLs, then cascades through
-    fallback sources (AA Fast → AA Slow → Libgen → Welib → Z-Lib).
+    Receives a DownloadTask with task_id (AA MD5 hash) and cascades through
+    sources in priority order. The AA page is only fetched if AA slow sources
+    are enabled in the user's source priority configuration.
     """
 
     def download(
@@ -978,8 +1061,8 @@ class DirectDownloadHandler(DownloadHandler):
         """
         Execute a direct HTTP download.
 
-        Uses task.task_id to fetch the book page from Anna's Archive,
-        extract download URLs, and cascade through fallback sources.
+        Uses task.task_id (AA MD5 hash) to cascade through sources in priority
+        order. The AA page is only fetched if AA slow sources are enabled.
 
         Args:
             task: Download task with task_id (AA MD5 hash)
@@ -996,19 +1079,18 @@ class DirectDownloadHandler(DownloadHandler):
                 logger.info(f"Download cancelled before starting: {task.task_id}")
                 return None
 
-            # Fetch book info from Anna's Archive using task_id
-            status_callback("resolving", "Fetching book details...")
-            book_info = get_book_info(task.task_id)
+            # Create BookInfo from task data - NO AA page fetch here
+            # AA page is fetched lazily by _fetch_aa_page_urls only when
+            # we actually reach an AA slow source in the priority order
+            book_info = BookInfo(
+                id=task.task_id,
+                title=task.title,
+                author=task.author,
+                format=task.format,
+                size=task.size,
+                preview=task.preview,
+            )
 
-            if not book_info:
-                status_callback("error", "Could not fetch book details")
-                return None
-
-            if not book_info.download_urls:
-                status_callback("error", "No download sources found")
-                return None
-
-            # Execute the download with the fetched book info
             return self._execute_download(
                 book_info,
                 cancel_flag,
