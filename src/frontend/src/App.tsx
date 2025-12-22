@@ -1,82 +1,130 @@
-import { useState, useEffect, useCallback, useRef, CSSProperties } from 'react';
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef, useMemo, CSSProperties } from 'react';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import {
   Book,
+  Release,
   StatusData,
-  ButtonStateInfo,
   AppConfig,
-  LoginCredentials,
-  AdvancedFilterState,
 } from './types';
-import { searchBooks, getBookInfo, downloadBook, cancelDownload, clearCompleted, getConfig, login, logout, checkAuth, AuthenticationError } from './services/api';
+import { getBookInfo, getMetadataBookInfo, downloadBook, downloadRelease, cancelDownload, clearCompleted, getConfig } from './services/api';
 import { useToast } from './hooks/useToast';
 import { useRealtimeStatus } from './hooks/useRealtimeStatus';
+import { useAuth } from './hooks/useAuth';
+import { useSearch } from './hooks/useSearch';
+import { useUrlSearch } from './hooks/useUrlSearch';
+import { useDownloadTracking } from './hooks/useDownloadTracking';
 import { Header } from './components/Header';
 import { SearchSection } from './components/SearchSection';
 import { AdvancedFilters } from './components/AdvancedFilters';
 import { ResultsSection } from './components/ResultsSection';
 import { DetailsModal } from './components/DetailsModal';
+import { ReleaseModal } from './components/ReleaseModal';
 import { DownloadsSidebar } from './components/DownloadsSidebar';
 import { ToastContainer } from './components/ToastContainer';
 import { Footer } from './components/Footer';
 import { LoginPage } from './pages/LoginPage';
+import { SettingsModal } from './components/settings';
+import { ConfigSetupBanner } from './components/ConfigSetupBanner';
 import { DEFAULT_LANGUAGES, DEFAULT_SUPPORTED_FORMATS } from './data/languages';
-import { LANGUAGE_OPTION_DEFAULT } from './utils/languageFilters';
 import { buildSearchQuery } from './utils/buildSearchQuery';
+import { SearchModeProvider } from './contexts/SearchModeContext';
 import './styles.css';
 
-const DEFAULT_FORMAT_SELECTION = DEFAULT_SUPPORTED_FORMATS.filter(format => format !== 'pdf');
-
 function App() {
-  // Authentication state
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [authRequired, setAuthRequired] = useState<boolean>(true);
-  const [authChecked, setAuthChecked] = useState<boolean>(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
-  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
-  const navigate = useNavigate();
-  
-  const [books, setBooks] = useState<Book[]>([]);
-  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
-  const [config, setConfig] = useState<AppConfig | null>(null);
-  const [searchInput, setSearchInput] = useState('');
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [downloadsSidebarOpen, setDownloadsSidebarOpen] = useState(false);
-  const [lastSearchQuery, setLastSearchQuery] = useState('');
-  const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilterState>({
-    isbn: '',
-    author: '',
-    title: '',
-    lang: [LANGUAGE_OPTION_DEFAULT],
-    sort: '',
-    content: '',
-    formats: DEFAULT_FORMAT_SELECTION,
-  });
   const { toasts, showToast, removeToast } = useToast();
-  const updateAdvancedFilters = useCallback((updates: Partial<AdvancedFilterState>) => {
-    setAdvancedFilters(prev => ({ ...prev, ...updates }));
-  }, []);
-  
-  // Determine WebSocket URL based on current location
-  // In production, use the same origin as the page; in dev, use localhost
+
+  // WebSocket URL based on current location
   const wsUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? 'http://localhost:8084'
     : window.location.origin;
-  
-  // Use realtime status with WebSocket and polling fallback
-  const { 
-    status: currentStatus, 
+
+  // Realtime status with WebSocket and polling fallback
+  const {
+    status: currentStatus,
     isUsingWebSocket,
-    forceRefresh: fetchStatus 
+    forceRefresh: fetchStatus
   } = useRealtimeStatus({
     wsUrl,
     pollInterval: 5000,
     reconnectAttempts: 3,
   });
-  
-  // Calculate status counts for header badges
-  const getStatusCounts = () => {
+
+  // Download tracking for universal mode
+  const {
+    bookToReleaseMap,
+    trackRelease,
+    markBookCompleted,
+    clearTracking,
+    getButtonState,
+    getUniversalButtonState,
+  } = useDownloadTracking(currentStatus);
+
+  // Authentication state and handlers
+  // Initialized first since search hook needs auth state
+  const {
+    isAuthenticated,
+    authRequired,
+    authChecked,
+    loginError,
+    isLoggingIn,
+    setIsAuthenticated,
+    handleLogin,
+    handleLogout,
+  } = useAuth({
+    showToast,
+  });
+
+  // Search state and handlers
+  const {
+    books,
+    setBooks,
+    isSearching,
+    searchInput,
+    setSearchInput,
+    showAdvanced,
+    setShowAdvanced,
+    advancedFilters,
+    setAdvancedFilters,
+    updateAdvancedFilters,
+    handleSearch,
+    handleResetSearch,
+    handleSortChange,
+    resetSortFilter,
+    searchFieldValues,
+    updateSearchFieldValue,
+  } = useSearch({
+    showToast,
+    setIsAuthenticated,
+    authRequired,
+    onSearchReset: clearTracking,
+  });
+
+  // Wire up logout callback to clear search state
+  const handleLogoutWithCleanup = useCallback(async () => {
+    await handleLogout();
+    setBooks([]);
+    clearTracking();
+  }, [handleLogout, setBooks, clearTracking]);
+
+  // UI state
+  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
+  const [releaseBook, setReleaseBook] = useState<Book | null>(null);
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [downloadsSidebarOpen, setDownloadsSidebarOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [configBannerOpen, setConfigBannerOpen] = useState(false);
+
+  // URL-based search: parse URL params for automatic search on page load
+  const urlSearchEnabled = isAuthenticated && config !== null;
+  const { parsedParams, wasProcessed } = useUrlSearch({ enabled: urlSearchEnabled });
+  const urlSearchExecutedRef = useRef(false);
+
+  // Track previous status and search mode for change detection
+  const prevStatusRef = useRef<StatusData>({});
+  const prevSearchModeRef = useRef<string | undefined>(undefined);
+
+  // Calculate status counts for header badges (memoized)
+  const statusCounts = useMemo(() => {
     const ongoing = [
       currentStatus.queued,
       currentStatus.resolving,
@@ -90,9 +138,8 @@ function App() {
     const errored = currentStatus.error ? Object.keys(currentStatus.error).length : 0;
 
     return { ongoing, completed, errored };
-  };
+  }, [currentStatus]);
 
-  const statusCounts = getStatusCounts();
   const activeCount = statusCounts.ongoing;
 
   // Compute visibility states
@@ -133,6 +180,13 @@ function App() {
       if (prevDownloadingIds.has(bookId) || prevQueuedIds.has(bookId)) {
         const book = currComplete[bookId];
         showToast(`${book.title || 'Book'} completed`, 'success');
+
+        // Track completed release IDs in session state for universal mode
+        Object.entries(bookToReleaseMap).forEach(([metadataBookId, releaseIds]) => {
+          if (releaseIds.includes(bookId)) {
+            markBookCompleted(metadataBookId);
+          }
+        });
       }
     });
 
@@ -145,72 +199,7 @@ function App() {
         showToast(`${book.title || 'Book'}: ${errorMsg}`, 'error');
       }
     });
-  }, [showToast]);
-
-  // Track previous status for change detection
-  const prevStatusRef = useRef<StatusData>({});
-  
-  // Check authentication on mount
-  useEffect(() => {
-    const verifyAuth = async () => {
-      try {
-        const response = await checkAuth();
-        const authenticated = response.authenticated || false;
-        const authIsRequired = response.auth_required !== false; // Default to true if undefined
-        
-        setAuthRequired(authIsRequired);
-        setIsAuthenticated(authenticated);
-      } catch (error) {
-        console.error('Auth check failed:', error);
-        // On error, assume auth is required and user is not authenticated
-        setAuthRequired(true);
-        setIsAuthenticated(false);
-      } finally {
-        setAuthChecked(true);
-      }
-    };
-    verifyAuth();
-  }, []);
-
-  // Authentication handlers
-  const handleLogin = async (credentials: LoginCredentials) => {
-    setIsLoggingIn(true);
-    setLoginError(null);
-    try {
-      const response = await login(credentials);
-      if (response.success) {
-        setIsAuthenticated(true);
-        setLoginError(null);
-        navigate('/', { replace: true });
-      } else {
-        setLoginError(response.error || 'Login failed');
-      }
-    } catch (error) {
-      if (error instanceof Error) {
-        setLoginError(error.message || 'Login failed');
-      } else {
-        setLoginError('Login failed');
-      }
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await logout();
-      setIsAuthenticated(false);
-      // Clear application state
-      setBooks([]);
-      setSelectedBook(null);
-      setSearchInput('');
-      setLastSearchQuery('');
-      navigate('/login', { replace: true });
-    } catch (error) {
-      console.error('Logout failed:', error);
-      showToast('Logout failed', 'error');
-    }
-  };
+  }, [showToast, bookToReleaseMap, markBookCompleted]);
 
   // Detect status changes when currentStatus updates
   useEffect(() => {
@@ -220,32 +209,119 @@ function App() {
     prevStatusRef.current = currentStatus;
   }, [currentStatus, detectChanges]);
 
-  // Fetch config on mount and when authentication changes
-  useEffect(() => {
-    const loadConfig = async () => {
-      try {
-        const cfg = await getConfig();
-        setConfig(cfg);
-        // Update format selection to match supported formats from config
-        // This ensures PDF is auto-selected when added to SUPPORTED_FORMATS env var
-        if (cfg?.supported_formats) {
+  // Load config function
+  const loadConfig = useCallback(async (mode: 'initial' | 'settings-saved' = 'initial') => {
+    try {
+      const cfg = await getConfig();
+
+      // Check if search mode changed (only on settings save)
+      if (mode === 'settings-saved' && prevSearchModeRef.current !== cfg.search_mode) {
+        setBooks([]);
+        setSelectedBook(null);
+        resetSortFilter();
+        clearTracking();
+      }
+
+      prevSearchModeRef.current = cfg.search_mode;
+      setConfig(cfg);
+
+      if (cfg?.supported_formats) {
+        if (mode === 'initial') {
           setAdvancedFilters(prev => ({
             ...prev,
             formats: cfg.supported_formats,
           }));
+        } else if (mode === 'settings-saved') {
+          setAdvancedFilters(prev => ({
+            ...prev,
+            formats: prev.formats.filter(f => cfg.supported_formats.includes(f)),
+          }));
         }
-      } catch (error) {
-        console.error('Failed to load config:', error);
-        // Use defaults if config fails to load
       }
-    };
-    // Only fetch config if authenticated (or auth is not required)
-    if (isAuthenticated) {
-      loadConfig();
+    } catch (error) {
+      console.error('Failed to load config:', error);
     }
-  }, [isAuthenticated]);
+  }, [setBooks, setAdvancedFilters, resetSortFilter, clearTracking]);
 
-  // Log WebSocket connection status changes
+  // Fetch config when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadConfig('initial');
+    }
+  }, [isAuthenticated, loadConfig]);
+
+  // Execute URL-based search when params are present
+  useEffect(() => {
+    if (
+      wasProcessed &&
+      parsedParams?.hasSearchParams &&
+      !urlSearchExecutedRef.current &&
+      config
+    ) {
+      urlSearchExecutedRef.current = true;
+
+      const searchMode = config.search_mode || 'direct';
+      const bookLanguages = config.book_languages || [];
+      const defaultLanguageCodes =
+        config.default_language && config.default_language.length > 0
+          ? config.default_language
+          : [bookLanguages[0]?.code || 'en'];
+
+      // Populate search input from URL
+      if (parsedParams.searchInput) {
+        setSearchInput(parsedParams.searchInput);
+      }
+
+      // Apply advanced filters from URL
+      if (Object.keys(parsedParams.advancedFilters).length > 0) {
+        setAdvancedFilters(prev => ({
+          ...prev,
+          ...parsedParams.advancedFilters,
+        }));
+
+        // Show advanced panel if we have filter values (not just query/sort)
+        const hasAdvancedValues = ['isbn', 'author', 'title', 'content'].some(
+          key => parsedParams.advancedFilters[key as keyof typeof parsedParams.advancedFilters]
+        );
+        if (hasAdvancedValues) {
+          setShowAdvanced(true);
+        }
+      }
+
+      // Build query and trigger search
+      const mergedFilters = {
+        ...advancedFilters,
+        ...parsedParams.advancedFilters,
+      };
+
+      const query = buildSearchQuery({
+        searchInput: parsedParams.searchInput,
+        showAdvanced: true,
+        advancedFilters: mergedFilters as typeof advancedFilters,
+        bookLanguages,
+        defaultLanguage: defaultLanguageCodes,
+        searchMode,
+      });
+
+      handleSearch(query, config, searchFieldValues);
+    }
+  }, [
+    wasProcessed,
+    parsedParams,
+    config,
+    advancedFilters,
+    searchFieldValues,
+    handleSearch,
+    setSearchInput,
+    setAdvancedFilters,
+    setShowAdvanced,
+  ]);
+
+  const handleSettingsSaved = useCallback(() => {
+    loadConfig('settings-saved');
+  }, [loadConfig]);
+
+  // Log WebSocket connection status
   useEffect(() => {
     if (isUsingWebSocket) {
       console.log('✅ Using WebSocket for real-time updates');
@@ -254,67 +330,52 @@ function App() {
     }
   }, [isUsingWebSocket]);
 
-  // Fetch status immediately on startup
+  // Fetch status on startup
   useEffect(() => {
     fetchStatus();
   }, [fetchStatus]);
 
-  // Search handler
-  const handleSearch = async (query: string) => {
-    if (!query) {
-      setBooks([]);
-      setLastSearchQuery('');
-      return;
-    }
-    setIsSearching(true);
-    setLastSearchQuery(query);
-    try {
-      const results = await searchBooks(query);
-      setBooks(results);
-      if (results.length === 0) {
-        showToast('No results found', 'error');
+  // Show book details
+  const handleShowDetails = async (id: string): Promise<void> => {
+    const metadataBook = books.find(b => b.id === id && b.provider && b.provider_id);
+
+    if (metadataBook) {
+      try {
+        const fullBook = await getMetadataBookInfo(metadataBook.provider!, metadataBook.provider_id!);
+        setSelectedBook({
+          ...metadataBook,
+          description: fullBook.description || metadataBook.description,
+        });
+      } catch (error) {
+        console.error('Failed to load book description, using search data:', error);
+        setSelectedBook(metadataBook);
       }
-    } catch (error) {
-      if (error instanceof AuthenticationError) {
-        setIsAuthenticated(false);
-        if (authRequired) {
-          navigate('/login', { replace: true });
-        }
-      } else {
-        console.error('Search failed:', error);
-        setBooks([]);
-        const message = error instanceof Error ? error.message : 'Search failed';
-        const friendly = message.includes("Anna's Archive") || message.includes('Network restricted')
-          ? message
-          : "Unable to reach Anna's Archive. Network may be restricted or mirrors blocked.";
-        showToast(friendly, 'error');
+    } else {
+      try {
+        const book = await getBookInfo(id);
+        setSelectedBook(book);
+      } catch (error) {
+        console.error('Failed to load book details:', error);
+        showToast('Failed to load book details', 'error');
       }
-    } finally {
-      setIsSearching(false);
     }
   };
 
-  // Show book details
-  const handleShowDetails = async (id: string): Promise<void> => {
-    try {
-      const book = await getBookInfo(id);
-      setSelectedBook(book);
-    } catch (error) {
-      console.error('Failed to load book details:', error);
-      showToast('Failed to load book details', 'error');
-    }
+  // Handle "Find Downloads" from DetailsModal
+  const handleFindDownloads = (book: Book) => {
+    setSelectedBook(null);
+    setReleaseBook(book);
   };
 
   // Download book
   const handleDownload = async (book: Book): Promise<void> => {
     try {
       await downloadBook(book.id);
-      // Fetch status to update button states (detectChanges will show toast)
       await fetchStatus();
     } catch (error) {
       console.error('Download failed:', error);
       showToast('Failed to queue download', 'error');
-      throw error; // Re-throw so button components can reset their queuing state
+      throw error;
     }
   };
 
@@ -338,68 +399,51 @@ function App() {
     }
   };
 
-  // Reset search state (clear books and search input)
-  const handleResetSearch = () => {
-    setBooks([]);
-    setSearchInput('');
-    setShowAdvanced(false);
-    setLastSearchQuery('');
-    // Use config's supported formats if available, otherwise fall back to default
-    const resetFormats = config?.supported_formats || DEFAULT_FORMAT_SELECTION;
-    setAdvancedFilters({
-      isbn: '',
-      author: '',
-      title: '',
-      lang: [LANGUAGE_OPTION_DEFAULT],
-      sort: '',
-      content: '',
-      formats: resetFormats,
-    });
-  };
-
-  const handleSortChange = (value: string) => {
-    updateAdvancedFilters({ sort: value });
-    if (!lastSearchQuery) return;
-
-    const params = new URLSearchParams(lastSearchQuery);
-    if (value) {
-      params.set('sort', value);
+  // Open release modal
+  const handleGetReleases = async (book: Book) => {
+    if (book.provider && book.provider_id) {
+      try {
+        const fullBook = await getMetadataBookInfo(book.provider, book.provider_id);
+        setReleaseBook({
+          ...book,
+          description: fullBook.description || book.description,
+        });
+      } catch (error) {
+        console.error('Failed to load book description, using search data:', error);
+        setReleaseBook(book);
+      }
     } else {
-      params.delete('sort');
+      setReleaseBook(book);
     }
-
-    const nextQuery = params.toString();
-    if (!nextQuery) return;
-    handleSearch(nextQuery);
   };
 
-  // Get button state for a book - memoized to ensure proper re-renders when status changes
-  const getButtonState = useCallback((bookId: string): ButtonStateInfo => {
-    // Check error first
-    if (currentStatus.error && currentStatus.error[bookId]) {
-      return { text: 'Failed', state: 'error' };
+  // Handle download from ReleaseModal
+  const handleReleaseDownload = async (book: Book, release: Release) => {
+    try {
+      trackRelease(book.id, release.source_id);
+
+      await downloadRelease({
+        source: release.source,
+        source_id: release.source_id,
+        title: release.title,
+        format: release.format,
+        size: release.size,
+        size_bytes: release.size_bytes,
+        download_url: release.download_url,
+        protocol: release.protocol,
+        indexer: release.indexer,
+        seeders: release.seeders,
+        extra: release.extra,
+        preview: book.preview,  // Pass book cover from metadata
+        author: book.author,    // Pass author from metadata
+      });
+      await fetchStatus();
+    } catch (error) {
+      console.error('Release download failed:', error);
+      showToast('Failed to queue download', 'error');
+      throw error;
     }
-    // Check completed
-    if (currentStatus.complete && currentStatus.complete[bookId]) {
-      return { text: 'Downloaded', state: 'complete' };
-    }
-    // Check in-progress states
-    if (currentStatus.downloading && currentStatus.downloading[bookId]) {
-      const book = currentStatus.downloading[bookId];
-      return {
-        text: 'Downloading',
-        state: 'downloading',
-        progress: book.progress
-      };
-    }
-    if (currentStatus.resolving && currentStatus.resolving[bookId]) {
-      return { text: 'Resolving', state: 'resolving' };
-    }
-    if (currentStatus.queued && currentStatus.queued[bookId]) {
-      return { text: 'Queued', state: 'queued' };
-    }
-    return { text: 'Download', state: 'download' };
-  }, [currentStatus]);
+  };
 
   const bookLanguages = config?.book_languages || DEFAULT_LANGUAGES;
   const supportedFormats = config?.supported_formats || DEFAULT_SUPPORTED_FORMATS;
@@ -408,21 +452,30 @@ function App() {
       ? config.default_language
       : [bookLanguages[0]?.code || 'en'];
 
+  const searchMode = config?.search_mode || 'direct';
+
   const mainAppContent = (
-    <>
-      <Header 
-        calibreWebUrl={config?.calibre_web_url || ''} 
+    <SearchModeProvider searchMode={searchMode}>
+      <Header
+        calibreWebUrl={config?.calibre_web_url || ''}
         debug={config?.debug || false}
         logoUrl="/logo.png"
         showSearch={!isInitialState}
         searchInput={searchInput}
         onSearchChange={setSearchInput}
         onDownloadsClick={() => setDownloadsSidebarOpen(true)}
+        onSettingsClick={() => {
+          if (config?.settings_enabled) {
+            setSettingsOpen(true);
+          } else {
+            setConfigBannerOpen(true);
+          }
+        }}
         statusCounts={statusCounts}
-        onLogoClick={handleResetSearch}
+        onLogoClick={() => handleResetSearch(config)}
         authRequired={authRequired}
         isAuthenticated={isAuthenticated}
-        onLogout={handleLogout}
+        onLogout={handleLogoutWithCleanup}
         onSearch={() => {
           const query = buildSearchQuery({
             searchInput,
@@ -430,15 +483,16 @@ function App() {
             advancedFilters,
             bookLanguages,
             defaultLanguage: defaultLanguageCodes,
+            searchMode,
           });
-          handleSearch(query);
+          handleSearch(query, config, searchFieldValues);
         }}
         onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
         isLoading={isSearching}
         onShowToast={showToast}
         onRemoveToast={removeToast}
       />
-      
+
       <AdvancedFilters
         visible={showAdvanced && !isInitialState}
         bookLanguages={bookLanguages}
@@ -446,11 +500,25 @@ function App() {
         supportedFormats={supportedFormats}
         filters={advancedFilters}
         onFiltersChange={updateAdvancedFilters}
+        metadataSearchFields={config?.metadata_search_fields}
+        searchFieldValues={searchFieldValues}
+        onSearchFieldChange={updateSearchFieldValue}
+        onSubmit={() => {
+          const query = buildSearchQuery({
+            searchInput,
+            showAdvanced,
+            advancedFilters,
+            bookLanguages,
+            defaultLanguage: defaultLanguageCodes,
+            searchMode,
+          });
+          handleSearch(query, config, searchFieldValues);
+        }}
       />
-      
+
       <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-6">
         <SearchSection
-          onSearch={handleSearch}
+          onSearch={(query) => handleSearch(query, config, searchFieldValues)}
           isLoading={isSearching}
           isInitialState={isInitialState}
           bookLanguages={bookLanguages}
@@ -461,8 +529,11 @@ function App() {
           onSearchInputChange={setSearchInput}
           showAdvanced={showAdvanced}
           onAdvancedToggle={() => setShowAdvanced(!showAdvanced)}
-        advancedFilters={advancedFilters}
-        onAdvancedFiltersChange={updateAdvancedFilters}
+          advancedFilters={advancedFilters}
+          onAdvancedFiltersChange={updateAdvancedFilters}
+          metadataSearchFields={config?.metadata_search_fields}
+          searchFieldValues={searchFieldValues}
+          onSearchFieldChange={updateSearchFieldValue}
         />
 
         <ResultsSection
@@ -470,9 +541,12 @@ function App() {
           visible={hasResults}
           onDetails={handleShowDetails}
           onDownload={handleDownload}
+          onGetReleases={handleGetReleases}
           getButtonState={getButtonState}
+          getUniversalButtonState={getUniversalButtonState}
           sortValue={advancedFilters.sort}
-          onSortChange={handleSortChange}
+          onSortChange={(value) => handleSortChange(value, config)}
+          metadataSortOptions={config?.metadata_sort_options}
         />
 
         {selectedBook && (
@@ -480,20 +554,33 @@ function App() {
             book={selectedBook}
             onClose={() => setSelectedBook(null)}
             onDownload={handleDownload}
+            onFindDownloads={handleFindDownloads}
             buttonState={getButtonState(selectedBook.id)}
+          />
+        )}
+
+        {releaseBook && (
+          <ReleaseModal
+            book={releaseBook}
+            onClose={() => setReleaseBook(null)}
+            onDownload={handleReleaseDownload}
+            supportedFormats={supportedFormats}
+            defaultLanguages={defaultLanguageCodes}
+            bookLanguages={bookLanguages}
+            currentStatus={currentStatus}
+            defaultReleaseSource={config?.default_release_source}
           />
         )}
 
       </main>
 
-      <Footer 
-        buildVersion={config?.build_version} 
-        releaseVersion={config?.release_version} 
+      <Footer
+        buildVersion={config?.build_version}
+        releaseVersion={config?.release_version}
         debug={config?.debug}
       />
       <ToastContainer toasts={toasts} />
-      
-      {/* Downloads Sidebar */}
+
       <DownloadsSidebar
         isOpen={downloadsSidebarOpen}
         onClose={() => setDownloadsSidebarOpen(false)}
@@ -503,7 +590,29 @@ function App() {
         onCancel={handleCancel}
         activeCount={activeCount}
       />
-    </>
+
+      <SettingsModal
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onShowToast={showToast}
+        onSettingsSaved={handleSettingsSaved}
+      />
+
+      {/* Auto-show banner on startup for users without config */}
+      {config && (
+        <ConfigSetupBanner settingsEnabled={config.settings_enabled} />
+      )}
+
+      {/* Controlled banner shown when clicking settings without config */}
+      <ConfigSetupBanner
+        isOpen={configBannerOpen}
+        onClose={() => setConfigBannerOpen(false)}
+        onContinue={() => {
+          setConfigBannerOpen(false);
+          setSettingsOpen(true);
+        }}
+      />
+    </SearchModeProvider>
   );
 
   const visuallyHiddenStyle: CSSProperties = {

@@ -1,5 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
-import { SearchBar } from './SearchBar';
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
+import { SearchBar, SearchBarHandle } from './SearchBar';
+
+export interface HeaderHandle {
+  submitSearch: () => void;
+}
 
 interface StatusCounts {
   ongoing: number;
@@ -18,6 +22,7 @@ interface HeaderProps {
   onAdvancedToggle?: () => void;
   isLoading?: boolean;
   onDownloadsClick?: () => void;
+  onSettingsClick?: () => void;
   statusCounts?: StatusCounts;
   onLogoClick?: () => void;
   authRequired?: boolean;
@@ -27,8 +32,8 @@ interface HeaderProps {
   onRemoveToast?: (id: string) => void;
 }
 
-export const Header = ({ 
-  calibreWebUrl, 
+export const Header = forwardRef<HeaderHandle, HeaderProps>(({
+  calibreWebUrl,
   debug,
   logoUrl,
   showSearch = false,
@@ -38,6 +43,7 @@ export const Header = ({
   onAdvancedToggle,
   isLoading = false,
   onDownloadsClick,
+  onSettingsClick,
   statusCounts = { ongoing: 0, completed: 0, errored: 0 },
   onLogoClick,
   authRequired = false,
@@ -45,8 +51,14 @@ export const Header = ({
   onLogout,
   onShowToast,
   onRemoveToast,
-}: HeaderProps) => {
-  const [theme, setTheme] = useState<string>('auto');
+}, ref) => {
+  const searchBarRef = useRef<SearchBarHandle>(null);
+
+  useImperativeHandle(ref, () => ({
+    submitSearch: () => {
+      searchBarRef.current?.submit();
+    },
+  }));
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [shouldAnimateIn, setShouldAnimateIn] = useState(false);
@@ -54,9 +66,8 @@ export const Header = ({
 
   useEffect(() => {
     const saved = localStorage.getItem('preferred-theme') || 'auto';
-    setTheme(saved);
     applyTheme(saved);
-    
+
     // Remove preload class after initial theme is applied to enable transitions
     requestAnimationFrame(() => {
       document.documentElement.classList.remove('preload');
@@ -115,19 +126,6 @@ export const Header = ({
     } else {
       document.documentElement.setAttribute('data-theme', pref);
     }
-  };
-
-  const handleThemeChange = (newTheme: string) => {
-    localStorage.setItem('preferred-theme', newTheme);
-    setTheme(newTheme);
-    applyTheme(newTheme);
-  };
-
-  const cycleTheme = () => {
-    const themeOrder = ['light', 'dark', 'auto'];
-    const currentIndex = themeOrder.indexOf(theme);
-    const nextIndex = (currentIndex + 1) % themeOrder.length;
-    handleThemeChange(themeOrder[nextIndex]);
   };
 
   const handleLogout = () => {
@@ -199,12 +197,12 @@ export const Header = ({
             </svg>
             {/* Show badge with appropriate color based on status */}
             {(statusCounts.ongoing > 0 || statusCounts.completed > 0 || statusCounts.errored > 0) && (
-            <span 
+            <span
               className={`absolute -top-1 -right-1 text-white text-[0.55rem] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center ${
-                  statusCounts.errored > 0 
-                    ? 'bg-red-500' 
-                    : statusCounts.ongoing > 0 
-                    ? 'bg-blue-500' 
+                  statusCounts.errored > 0
+                    ? 'bg-red-500'
+                    : statusCounts.ongoing > 0
+                    ? 'bg-blue-500'
                     : 'bg-green-500'
                 }`}
                 title={`${statusCounts.ongoing} ongoing, ${statusCounts.completed} completed, ${statusCounts.errored} failed`}
@@ -256,30 +254,6 @@ export const Header = ({
             }}
           >
             <div className="py-1">
-              {/* Theme Button */}
-              <button
-                type="button"
-                onClick={cycleTheme}
-                className="w-full text-left px-4 py-2 hover-surface transition-colors flex items-center gap-3"
-              >
-                {theme === 'light' && (
-                  <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
-                  </svg>
-                )}
-                {theme === 'dark' && (
-                  <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
-                  </svg>
-                )}
-                {theme === 'auto' && (
-                  <svg className="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" />
-                  </svg>
-                )}
-                <span>Theme: {theme.charAt(0).toUpperCase() + theme.slice(1)}</span>
-              </button>
-
               <a
                 href="https://github.com/calibrain/calibre-web-automated-book-downloader/issues"
                 target="_blank"
@@ -304,6 +278,35 @@ export const Header = ({
                 <span>Report a Bug</span>
               </a>
 
+              {/* Settings Button */}
+              {onSettingsClick && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeDropdown();
+                    onSettingsClick();
+                  }}
+                  className="w-full text-left px-4 py-2 hover-surface transition-colors flex items-center gap-3"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth="1.5"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"
+                    />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <span>Settings</span>
+                </button>
+              )}
+
               {/* Debug Buttons */}
               {debug && (
                 <>
@@ -318,16 +321,16 @@ export const Header = ({
                           method: 'GET',
                           credentials: 'include',
                         });
-                        
+
                         // Remove the loading toast
                         if (loadingToastId) onRemoveToast?.(loadingToastId);
-                        
+
                         if (!response.ok) {
                           const errorData = await response.json().catch(() => ({}));
                           onShowToast?.(`Debug download failed: ${errorData.error || response.statusText}`, 'error');
                           return;
                         }
-                        
+
                         // Get the filename from Content-Disposition header or use default
                         const contentDisposition = response.headers.get('Content-Disposition');
                         let filename = 'debug.zip';
@@ -337,7 +340,7 @@ export const Header = ({
                             filename = filenameMatch[1].replace(/['"]/g, '');
                           }
                         }
-                        
+
                         // Create blob and trigger download
                         const blob = await response.blob();
                         const url = window.URL.createObjectURL(blob);
@@ -348,7 +351,7 @@ export const Header = ({
                         a.click();
                         window.URL.revokeObjectURL(url);
                         a.remove();
-                        
+
                         onShowToast?.('Debug logs downloaded successfully', 'success');
                       } catch (error) {
                         // Remove the loading toast on error too
@@ -412,14 +415,14 @@ export const Header = ({
             <div className="flex items-center justify-between w-full lg:w-auto lg:justify-end lg:order-2">
               {/* Logo - visible on mobile only, aligned left */}
               {logoUrl && (
-                <img 
-                  src={logoUrl} 
-                  onClick={onLogoClick} 
-                  alt="Logo" 
-                  className="h-10 w-10 flex-shrink-0 cursor-pointer lg:hidden" 
+                <img
+                  src={logoUrl}
+                  onClick={onLogoClick}
+                  alt="Logo"
+                  className="h-10 w-10 flex-shrink-0 cursor-pointer lg:hidden"
                 />
               )}
-              
+
               <IconButtons />
             </div>
 
@@ -427,14 +430,15 @@ export const Header = ({
             <div className="flex items-center gap-4 lg:order-1 flex-1">
               {/* Logo - visible on desktop only, aligned with search */}
               {logoUrl && (
-                <img 
-                  src={logoUrl} 
-                  onClick={onLogoClick} 
-                  alt="Logo" 
-                  className="hidden lg:block h-12 w-12 flex-shrink-0 cursor-pointer" 
+                <img
+                  src={logoUrl}
+                  onClick={onLogoClick}
+                  alt="Logo"
+                  className="hidden lg:block h-12 w-12 flex-shrink-0 cursor-pointer"
                 />
               )}
               <SearchBar
+                ref={searchBarRef}
                 className="flex-1 lg:flex-initial"
                 inputClassName="lg:w-[50vw]"
                 value={searchInput}
@@ -456,4 +460,4 @@ export const Header = ({
       </div>
     </header>
   );
-};
+});

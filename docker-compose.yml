@@ -1,32 +1,15 @@
 services:
   calibre-web-automated-book-downloader:
     image: ghcr.io/calibrain/calibre-web-automated-book-downloader:latest
-    # Uncomment to build the image from the Dockerfile for local testing changes.
-    # Remember to comment out the image line above.
-    #build: .
     container_name: calibre-web-automated-book-downloader
     environment:
-      FLASK_PORT: 8084
-      LOG_LEVEL: info
-      BOOK_LANGUAGE: en
-      USE_BOOK_TITLE: true
       TZ: America/New_York
-      UID: 1000
-      GID: 100
-      # CWA_DB_PATH: /auth/app.db  # Uncomment to enable authentication (also uncomment volume below)
-      # CALIBRE_WEB_URL: http://localhost:8080 # Uncomment and add your custom library URL to enable "Go To Library" button in the Web UI
-      # SESSION_COOKIE_SECURE: 'true'  # Set to 'true' if accessing ONLY via HTTPS
-      # DEBUG: 'true'  # Enable debug mode (debug button, verbose logging)
-      # Queue management settings
-      MAX_CONCURRENT_DOWNLOADS: 3
-      DOWNLOAD_PROGRESS_UPDATE_INTERVAL: 5
+      # UID: 1000
+      # GID: 100
+      # CWA_DB_PATH: /auth/app.db
     ports:
       - 8084:8084
     restart: unless-stopped
     volumes:
-      # This is where the books will be downloaded to, usually it would be
-      # the same as whatever you gave in "calibre-web-automated"
-      - /tmp/data/calibre-web/ingest:/cwa-book-ingest
-      # This is the location of CWA's app.db, which contains authentication
-      # details. Uncomment to enable authentication (also uncomment CWA_DB_PATH above)
-      #- /cwa/config/path/app.db:/auth/app.db:ro
+      - /tmp/data/calibre-web/ingest:/cwa-book-ingest # This is where the books will be downloaded and ingested by your book management application
+      - /path/to/config:/config # Configuration files and database

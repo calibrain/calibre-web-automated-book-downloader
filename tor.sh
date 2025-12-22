@@ -11,8 +11,6 @@ echo "Log file: $LOG_FILE"
 set +x
 set -e
 
-#!/bin/bash
-
 # Check if EXT_BYPASSER_URL is defined
 if [ -n "$EXT_BYPASSER_URL" ]; then
     echo "Extracting hostname and ip from bypasser into /etc/hosts"
@@ -160,14 +158,26 @@ echo "[*] Starting Tor via Supervisor..."
 
 # Wait a bit to ensure Tor has bootstrapped
 echo "[*] Waiting for Tor to finish bootstrapping... (up to 5 minutes)"
-timeout 300 bash -c '
-  while ! grep -q "Bootstrapped 100%" <(tail -n 20 -F /var/log/tor/notices.log 2>/dev/null); do
-    printf "\r\033[KCurrent log: %s" "$(tail -n 1 /var/log/tor/notices.log 2>/dev/null)"
+BOOTSTRAP_TIMEOUT=300
+BOOTSTRAP_START=$(date +%s)
+while true; do
+    if grep -q "Bootstrapped 100%" /var/log/tor/notices.log 2>/dev/null; then
+        echo ""
+        echo "[✓] Tor bootstrap complete."
+        break
+    fi
+
+    ELAPSED=$(($(date +%s) - BOOTSTRAP_START))
+    if [ $ELAPSED -ge $BOOTSTRAP_TIMEOUT ]; then
+        echo ""
+        echo "[✗] Tor bootstrap timed out after ${BOOTSTRAP_TIMEOUT}s"
+        exit 1
+    fi
+
+    CURRENT_LOG=$(tail -n 1 /var/log/tor/notices.log 2>/dev/null)
+    printf "\r\033[K[%ds] %s" "$ELAPSED" "$CURRENT_LOG"
     sleep 1
-  done
-  # Print a newline when finished.
-  echo ""
-'
+done
 echo "[✓] Tor is ready."
 
 
@@ -240,6 +250,72 @@ else
     ls -la /usr/share/zoneinfo/
     echo "[*] Falling back to container's default timezone: $TZ"
 fi
+
+# Start a background health check process to monitor Tor
+echo "[*] Starting Tor health check monitor..."
+(
+    check_count=0
+    first_check=true
+
+    while true; do
+        if [ "$first_check" = true ]; then
+            sleep 60
+            first_check=false
+        else
+            sleep 300
+        fi
+
+        check_count=$((check_count + 1))
+        echo "[*] Tor health check #$check_count at $(date)"
+
+        # Check Tor service
+        if ! service tor status > /dev/null 2>&1; then
+            echo "[!] $(date): Tor service not running, restarting..."
+            service tor restart
+            sleep 10
+            continue
+        fi
+
+        # Test DNS
+        if ! timeout 10 nslookup google.com 127.0.0.1 > /dev/null 2>&1; then
+            echo "[!] $(date): DNS resolution failed, reloading Tor..."
+            service tor reload
+            sleep 5
+            if timeout 10 nslookup google.com 127.0.0.1 > /dev/null 2>&1; then
+                echo "[✓] $(date): DNS resolution restored"
+            else
+                echo "[✗] $(date): DNS still failing after reload, restarting Tor..."
+                service tor restart
+                sleep 10
+                continue
+            fi
+        fi
+
+        # Test TCP connectivity
+        if ! timeout 15 curl -s --max-time 10 https://check.torproject.org/api/ip > /dev/null 2>&1; then
+            echo "[!] $(date): TCP connectivity test failed, rotating circuits..."
+            pkill -HUP tor || true
+            sleep 5
+            if ! timeout 15 curl -s --max-time 10 https://check.torproject.org/api/ip > /dev/null 2>&1; then
+                echo "[✗] $(date): TCP still failing after rotation, restarting Tor..."
+                service tor restart
+                sleep 10
+                continue
+            else
+                echo "[✓] $(date): TCP connectivity restored after circuit rotation"
+            fi
+        else
+            echo "[✓] $(date): Health check passed (DNS + TCP OK)"
+        fi
+
+        # Rotate circuits
+        echo "[*] $(date): Rotating Tor circuits..."
+        pkill -HUP tor || true
+    done
+) >> $LOG_FILE 2>&1 &
+
+TOR_MONITOR_PID=$!
+echo "[✓] Tor health check monitor started in background (PID: $TOR_MONITOR_PID)"
 
 # Run the entrypoint script
 echo "[*] End of tor script"

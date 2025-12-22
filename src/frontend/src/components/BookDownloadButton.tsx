@@ -1,45 +1,6 @@
 import { useEffect, useState, CSSProperties } from 'react';
 import { ButtonStateInfo } from '../types';
-
-interface CircularProgressProps {
-  progress?: number;
-  size?: number;
-  className?: string;
-}
-
-const CircularProgress = ({ progress, size = 16, className }: CircularProgressProps) => {
-  const radius = (size - 2) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const progressValue = progress ?? 0;
-  const strokeDashoffset = circumference - (progressValue / 100) * circumference;
-  const svgClassName = className ? `transform -rotate-90 ${className}` : 'transform -rotate-90';
-
-  return (
-    <svg width={size} height={size} className={svgClassName}>
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        opacity="0.3"
-      />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeDasharray={circumference}
-        strokeDashoffset={strokeDashoffset}
-        strokeLinecap="round"
-        style={{ transition: 'stroke-dashoffset 0.3s ease' }}
-      />
-    </svg>
-  );
-};
+import { CircularProgress } from './shared';
 
 type ButtonSize = 'sm' | 'md';
 type ButtonVariant = 'primary' | 'icon';
@@ -62,8 +23,8 @@ const sizeClasses: Record<ButtonSize, string> = {
 };
 
 const iconVariantSizeClasses: Record<ButtonSize, string> = {
-  sm: 'p-1 sm:p-1.5',
-  md: 'p-1.5 sm:p-2',
+  sm: 'p-px m-0.5 sm:p-1 sm:m-0.5 aspect-square',
+  md: 'p-0.5 m-0.5 sm:p-1.5 sm:m-0.5 aspect-square',
 };
 
 const primaryIconSizes: Record<ButtonSize, string> = {
@@ -72,13 +33,13 @@ const primaryIconSizes: Record<ButtonSize, string> = {
 };
 
 const iconVariantIconSizes: Record<ButtonSize, { mobile: string; desktop: string }> = {
-  sm: { mobile: 'w-3.5 h-3.5', desktop: 'w-4 h-4' },
-  md: { mobile: 'w-4 h-4', desktop: 'w-5 h-5' },
+  sm: { mobile: 'w-5 h-5', desktop: 'w-5 h-5' },
+  md: { mobile: 'w-6 h-6', desktop: 'w-6 h-6' },
 };
 
 const iconVariantProgressSizes: Record<ButtonSize, { mobile: number; desktop: number }> = {
-  sm: { mobile: 14, desktop: 16 },
-  md: { mobile: 16, desktop: 20 },
+  sm: { mobile: 20, desktop: 20 },
+  md: { mobile: 24, desktop: 24 },
 };
 
 export const BookDownloadButton = ({
@@ -190,26 +151,19 @@ export const BookDownloadButton = ({
 
     if (showCircularProgress) {
       if (variant === 'icon') {
-        const sizes = iconVariantProgressSizes[size];
-        return (
-          <>
-            <CircularProgress progress={buttonState.progress} size={sizes.mobile} className="block sm:hidden" />
-            <CircularProgress progress={buttonState.progress} size={sizes.desktop} className="hidden sm:block" />
-          </>
-        );
+        const progressSize = iconVariantProgressSizes[size].mobile;
+        return <CircularProgress progress={buttonState.progress} size={progressSize} />;
       }
       return <CircularProgress progress={buttonState.progress} size={size === 'sm' ? 12 : 16} />;
     }
 
     if (showSpinner) {
-      const spinnerClass =
-        variant === 'icon'
-          ? size === 'sm'
-            ? 'w-3.5 h-3.5 sm:w-4 h-4'
-            : 'w-4 h-4 sm:w-5 h-5'
-          : size === 'sm'
-          ? 'w-3 h-3'
-          : 'w-4 h-4';
+      if (variant === 'icon' && iconSizes) {
+        return (
+          <div className={`${iconSizes.mobile} border-2 border-current border-t-transparent rounded-full animate-spin`} />
+        );
+      }
+      const spinnerClass = size === 'sm' ? 'w-3 h-3' : 'w-4 h-4';
       return <div className={`${spinnerClass} border-2 border-current border-t-transparent rounded-full animate-spin`} />;
     }
 

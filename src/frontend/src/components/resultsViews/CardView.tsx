@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Book, ButtonStateInfo } from '../../types';
-import { BookDownloadButton } from '../BookDownloadButton';
+import { useSearchMode } from '../../contexts/SearchModeContext';
+import { BookActionButton } from '../BookActionButton';
+import { DisplayFieldBadges } from '../shared';
 
 const SkeletonLoader = () => (
   <div className="w-full h-full bg-gradient-to-r from-gray-300 via-gray-200 to-gray-300 dark:from-gray-700 dark:via-gray-600 dark:to-gray-700 animate-pulse" />
@@ -10,12 +12,15 @@ interface CardViewProps {
   book: Book;
   onDetails: (id: string) => Promise<void>;
   onDownload: (book: Book) => Promise<void>;
+  onGetReleases: (book: Book) => Promise<void>;
   buttonState: ButtonStateInfo;
   animationDelay?: number;
 }
 
-export const CardView = ({ book, onDetails, onDownload, buttonState, animationDelay = 0 }: CardViewProps) => {
+export const CardView = ({ book, onDetails, onDownload, onGetReleases, buttonState, animationDelay = 0 }: CardViewProps) => {
+  const { searchMode } = useSearchMode();
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [isLoadingReleases, setIsLoadingReleases] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -26,6 +31,15 @@ export const CardView = ({ book, onDetails, onDownload, buttonState, animationDe
       await onDetails(id);
     } finally {
       setIsLoadingDetails(false);
+    }
+  };
+
+  const handleGetReleases = async (book: Book) => {
+    setIsLoadingReleases(true);
+    try {
+      await onGetReleases(book);
+    } finally {
+      setIsLoadingReleases(false);
     }
   };
 
@@ -104,19 +118,27 @@ export const CardView = ({ book, onDetails, onDownload, buttonState, animationDe
             {book.title || 'Untitled'}
           </h3>
           <p className="text-sm max-sm:text-xs opacity-80 truncate max-sm:min-w-0">{book.author || 'Unknown author'}</p>
-          <div className="text-xs max-sm:text-[10px] opacity-70 flex flex-wrap gap-2 max-sm:gap-1">
-            <span>{book.year || '-'}</span>
-            <span>•</span>
-            <span>{book.language || '-'}</span>
-            <span>•</span>
-            <span>{book.format || '-'}</span>
-            {book.size && (
-              <>
-                <span>•</span>
-                <span>{book.size}</span>
-              </>
-            )}
-          </div>
+          {searchMode === 'universal' && book.display_fields && book.display_fields.length > 0 ? (
+            <div className="text-xs max-sm:text-[10px] opacity-70 flex flex-wrap gap-2 max-sm:gap-1">
+              <span>{book.year || '-'}</span>
+              <span>•</span>
+              <DisplayFieldBadges fields={book.display_fields} />
+            </div>
+          ) : (
+            <div className="text-xs max-sm:text-[10px] opacity-70 flex flex-wrap gap-2 max-sm:gap-1">
+              <span>{book.year || '-'}</span>
+              <span>•</span>
+              <span>{book.language || '-'}</span>
+              <span>•</span>
+              <span>{book.format || '-'}</span>
+              {book.size && (
+                <>
+                  <span>•</span>
+                  <span>{book.size}</span>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex gap-1.5 sm:hidden">
@@ -131,13 +153,24 @@ export const CardView = ({ book, onDetails, onDownload, buttonState, animationDe
               className={`details-spinner w-3 h-3 border-2 border-current border-t-transparent rounded-full ${isLoadingDetails ? '' : 'hidden'}`}
             />
           </button>
-          <BookDownloadButton buttonState={buttonState} onDownload={() => onDownload(book)} size="sm" className="flex-1" />
+          <BookActionButton
+            book={book}
+            buttonState={buttonState}
+            onDownload={onDownload}
+            onGetReleases={handleGetReleases}
+            isLoadingReleases={isLoadingReleases}
+            size="sm"
+            className="flex-1"
+          />
         </div>
       </div>
 
-      <BookDownloadButton
+      <BookActionButton
+        book={book}
         buttonState={buttonState}
-        onDownload={() => onDownload(book)}
+        onDownload={onDownload}
+        onGetReleases={handleGetReleases}
+        isLoadingReleases={isLoadingReleases}
         className="hidden sm:flex rounded-none"
         fullWidth
         style={{

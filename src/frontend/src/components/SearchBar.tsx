@@ -1,4 +1,5 @@
-import { KeyboardEvent, InputHTMLAttributes, useRef } from 'react';
+import { KeyboardEvent, InputHTMLAttributes, useRef, forwardRef, useImperativeHandle } from 'react';
+import { useSearchMode } from '../contexts/SearchModeContext';
 
 interface SearchBarProps {
   value: string;
@@ -21,7 +22,11 @@ interface SearchBarProps {
   enterKeyHint?: InputHTMLAttributes<HTMLInputElement>['enterKeyHint'];
 }
 
-export const SearchBar = ({
+export interface SearchBarHandle {
+  submit: () => void;
+}
+
+export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({
   value,
   onChange,
   onSubmit,
@@ -40,9 +45,17 @@ export const SearchBar = ({
   searchButtonTitle = 'Search',
   autoComplete = 'off',
   enterKeyHint = 'search',
-}: SearchBarProps) => {
+}, ref) => {
+  const { searchMode } = useSearchMode();
   const inputRef = useRef<HTMLInputElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const hasSearchQuery = value.trim().length > 0;
+
+  useImperativeHandle(ref, () => ({
+    submit: () => {
+      buttonRef.current?.click();
+    },
+  }));
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -139,9 +152,14 @@ export const SearchBar = ({
           </button>
         )}
         <button
+          ref={buttonRef}
           type="button"
           onClick={onSubmit}
-          className="p-2 rounded-full text-white bg-sky-700 hover:bg-sky-800 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center transition-colors search-bar-button"
+          className={`p-2 rounded-full text-white disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center transition-colors search-bar-button ${
+            searchMode === 'universal'
+              ? 'bg-emerald-600 hover:bg-emerald-700'
+              : 'bg-sky-700 hover:bg-sky-800'
+          }`}
           aria-label={searchButtonLabel}
           title={searchButtonTitle}
           disabled={isLoading}
@@ -169,6 +187,4 @@ export const SearchBar = ({
       </div>
     </div>
   );
-};
-
-
+});

@@ -33,9 +33,36 @@ if (!document.head.querySelector('style[data-wave-animation]')) {
   document.head.appendChild(styleSheet);
 }
 
-// Helper to get book preview image
-const getBookPreview = (book: Book): string => {
-  return book.preview || '/placeholder-book.png';
+// Book thumbnail component with fallback
+const BookThumbnail = ({ preview, title }: { preview?: string; title?: string }) => {
+  if (!preview) {
+    return (
+      <div
+        className="w-16 h-24 rounded-tl bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-[8px] font-medium text-gray-500 dark:text-gray-400"
+        style={{ aspectRatio: '2/3' }}
+      >
+        No Cover
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={preview}
+      alt={title || 'Book cover'}
+      className="w-16 h-24 object-cover rounded-tl shadow-sm"
+      style={{ aspectRatio: '2/3' }}
+      onError={(e) => {
+        // Replace with placeholder on error
+        const target = e.target as HTMLImageElement;
+        const placeholder = document.createElement('div');
+        placeholder.className = 'w-16 h-24 rounded-tl bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-[8px] font-medium text-gray-500 dark:text-gray-400';
+        placeholder.style.aspectRatio = '2/3';
+        placeholder.textContent = 'No Cover';
+        target.replaceWith(placeholder);
+      }}
+    />
+  );
 };
 
 // Helper to get progress percentage based on status
@@ -126,19 +153,14 @@ export const DownloadsSidebar = ({
     const progress = getStatusProgress(statusName, book.progress);
     const progressBarColor = getProgressBarColor(statusName);
     
-    // Format progress text - use status_message if available, otherwise fall back to label
+    // Format progress text - use status_message from backend if available
     let progressText = book.status_message || statusStyle.label;
-    if (statusName === 'downloading' && book.progress && book.size) {
+    if (statusName === 'downloading' && !book.status_message && book.progress && book.size) {
+      // Fallback: calculate size progress only if backend didn't provide a message
       const sizeValue = parseFloat(book.size.replace(/[^\d.]/g, ''));
-      const sizeUnit = book.size.replace(/[\d.\s]/g, ''); // Extract unit as-is from backend
+      const sizeUnit = book.size.replace(/[\d.\s]/g, '');
       const downloadedSize = (book.progress / 100) * sizeValue;
-      const sizeProgress = `${downloadedSize.toFixed(1)}${sizeUnit} / ${book.size}`;
-      // If there's attempt info in the status message, prepend it to the progress
-      if (book.status_message?.startsWith('Attempt')) {
-        progressText = `${book.status_message} - ${sizeProgress}`;
-      } else {
-        progressText = sizeProgress;
-      }
+      progressText = `${downloadedSize.toFixed(1)}${sizeUnit} / ${book.size}`;
     } else if (isCompleted) {
       progressText = 'Complete';
     } else if (hasError) {
@@ -171,22 +193,13 @@ export const DownloadsSidebar = ({
         <div className="flex gap-2">
           {/* Book Thumbnail - left side */}
           <div className="flex-shrink-0">
-            <img
-              src={getBookPreview(book)}
-              alt={book.title || 'Book cover'}
-              className="w-16 h-24 object-cover rounded shadow-sm"
-              style={{ aspectRatio: '2/3' }}
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.src = '/placeholder-book.png';
-              }}
-            />
+            <BookThumbnail preview={book.preview} title={book.title} />
           </div>
 
           {/* Book Info - right side */}
-          <div className="flex-1 min-w-0 flex flex-col justify-between px-3 pt-2 pb-3">
+          <div className="flex-1 min-w-0 flex flex-col pl-1.5 pr-3 pt-2 pb-2">
             {/* Title & Author - with safe area for cancel/clear button */}
-            <div className="mb-1 pr-6">
+            <div className="pr-6">
               <h3 className="font-semibold text-sm truncate" title={book.title}>
                 {isCompleted && book.download_path ? (
                   <a
@@ -204,59 +217,59 @@ export const DownloadsSidebar = ({
               </p>
             </div>
 
-            {/* Details Row */}
-            <div className="space-y-1 pb-8">
-              <div className="flex items-center gap-2">
-                {/* Format and Size */}
-                <div className="text-xs opacity-70">
-                  {book.format && <span className="uppercase">{book.format}</span>}
-                  {book.format && book.size && <span> • </span>}
-                  {book.size && <span>{book.size}</span>}
-                </div>
-              </div>
+            {/* Format, Size, Source */}
+            <div className="text-xs opacity-70 mt-1">
+              {book.format && <span className="uppercase">{book.format}</span>}
+              {book.format && book.size && <span> • </span>}
+              {book.size && <span>{book.size}</span>}
+              {book.source_display_name && (
+                <>
+                  <span> • </span>
+                  <span>{book.source_display_name}</span>
+                </>
+              )}
+            </div>
+
+            {/* Status Badge */}
+            <div className="flex justify-end mt-auto pt-1">
+              <span
+                className={`relative px-2 py-0.5 rounded-lg text-xs font-medium ${statusStyle.bg} ${statusStyle.text}`}
+              >
+                {/* Wave animation overlay for in-progress states */}
+                {isInProgress && statusStyle.waveColor && (
+                  <span
+                    key={statusName}
+                    className="absolute inset-0 rounded-lg"
+                    style={{
+                      background: `linear-gradient(90deg, transparent 0%, ${statusStyle.waveColor} 50%, transparent 100%)`,
+                      backgroundSize: '200% 100%',
+                      animation: 'wave 2s linear infinite',
+                    }}
+                  />
+                )}
+                <span className="relative">{progressText}</span>
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Progress Bar - absolute positioned at bottom - always visible */}
-        <div className="absolute bottom-0 left-0 right-0 pointer-events-none">
-          {/* ml-16 clears the 64px thumbnail, gap-2 adds spacing */}
-          <div className="flex justify-end p-2 ml-16 gap-2">
-            <span
-              className={`relative px-2 py-0.5 rounded-lg text-xs font-medium text-right ${statusStyle.bg} ${statusStyle.text}`}
-            >
-              {/* Wave animation overlay for in-progress states */}
-              {isInProgress && statusStyle.waveColor && (
-                <span
-                  key={statusName}
-                  className="absolute inset-0 rounded-lg"
-                  style={{
-                    background: `linear-gradient(90deg, transparent 0%, ${statusStyle.waveColor} 50%, transparent 100%)`,
-                    backgroundSize: '200% 100%',
-                    animation: 'wave 2s linear infinite',
-                  }}
-                />
-              )}
-              <span className="relative">{progressText}</span>
-            </span>
-          </div>
-          <div className="h-1.5 bg-gray-200 dark:bg-gray-700 overflow-hidden relative">
-            <div
-              className={`h-full ${progressBarColor} transition-all duration-300 relative overflow-hidden`}
-              style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
-            >
-              {/* Animated wave effect for in-progress states */}
-              {isInProgress && progress < 100 && (
-                <div
-                  className="absolute inset-0 opacity-30"
-                  style={{
-                    background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.5) 50%, transparent 100%)',
-                    backgroundSize: '200% 100%',
-                    animation: 'wave 2s ease-in-out infinite',
-                  }}
-                />
-              )}
-            </div>
+        {/* Progress Bar - at bottom */}
+        <div className="h-1.5 bg-gray-200 dark:bg-gray-700 overflow-hidden relative">
+          <div
+            className={`h-full ${progressBarColor} transition-all duration-300 relative overflow-hidden`}
+            style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+          >
+            {/* Animated wave effect for in-progress states */}
+            {isInProgress && progress < 100 && (
+              <div
+                className="absolute inset-0 opacity-30"
+                style={{
+                  background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.5) 50%, transparent 100%)',
+                  backgroundSize: '200% 100%',
+                  animation: 'wave 2s ease-in-out infinite',
+                }}
+              />
+            )}
           </div>
         </div>
       </div>

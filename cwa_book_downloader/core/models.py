@@ -1,0 +1,139 @@
+"""Data structures and models used across the application."""
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+from enum import Enum
+import re
+import time
+
+
+class QueueStatus(str, Enum):
+    """Enum for possible book queue statuses."""
+    QUEUED = "queued"
+    RESOLVING = "resolving"
+    DOWNLOADING = "downloading"
+    COMPLETE = "complete"
+    AVAILABLE = "available"
+    ERROR = "error"
+    DONE = "done"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class QueueItem:
+    """Queue item with priority and metadata."""
+    book_id: str
+    priority: int
+    added_time: float
+
+    def __lt__(self, other):
+        """Compare items for priority queue (lower priority number = higher precedence)."""
+        if self.priority != other.priority:
+            return self.priority < other.priority
+        return self.added_time < other.added_time
+
+
+@dataclass
+class DownloadTask:
+    """Source-agnostic download task for the queue.
+
+    This replaces BookInfo in the queue, providing a unified interface
+    for both Direct Download and Universal modes. The handler uses task_id
+    to fetch whatever source-specific data it needs internally.
+    """
+    task_id: str                                # Unique ID (e.g., AA MD5 hash, Prowlarr GUID)
+    source: str                                 # Handler name ("direct_download", "prowlarr")
+    title: str                                  # Display title for queue sidebar
+
+    # Display info for queue sidebar
+    author: Optional[str] = None
+    format: Optional[str] = None
+    size: Optional[str] = None
+    preview: Optional[str] = None
+
+    # Runtime state
+    priority: int = 0
+    added_time: float = field(default_factory=time.time)
+    progress: float = 0.0
+    status: QueueStatus = QueueStatus.QUEUED
+    status_message: Optional[str] = None
+    download_path: Optional[str] = None
+
+    def __lt__(self, other):
+        """Compare tasks for priority queue (lower priority number = higher precedence)."""
+        if self.priority != other.priority:
+            return self.priority < other.priority
+        return self.added_time < other.added_time
+
+
+@dataclass
+class BookInfo:
+    """Data class representing book information."""
+    id: str
+    title: str
+    preview: Optional[str] = None
+    author: Optional[str] = None
+    publisher: Optional[str] = None
+    year: Optional[str] = None
+    language: Optional[str] = None
+    content: Optional[str] = None
+    format: Optional[str] = None
+    size: Optional[str] = None
+    info: Optional[Dict[str, List[str]]] = None
+    description: Optional[str] = None
+    download_urls: List[str] = field(default_factory=list)
+    download_path: Optional[str] = None
+    priority: int = 0
+    progress: Optional[float] = None
+    status_message: Optional[str] = None  # Detailed status message for UI display
+    added_time: Optional[float] = None  # Timestamp when added to queue
+    source: str = "direct_download"  # Release source handler to use for downloads
+
+    def get_filename(self, fallback_url: Optional[str] = None) -> str:
+        """Build sanitized filename: 'Author - Title (Year).format'
+
+        Resolves format from self.format, download_urls, or fallback_url.
+
+        Args:
+            fallback_url: URL to extract format from if not already known
+
+        Returns:
+            Sanitized filename safe for filesystem use
+        """
+        # Resolve format if needed
+        if not self.format:
+            for url in (self.download_urls[0] if self.download_urls else None, fallback_url):
+                if url:
+                    ext = url.split(".")[-1].lower()
+                    if ext and len(ext) <= 5 and ext.isalnum():
+                        self.format = ext
+                        break
+
+        # Build filename
+        parts = []
+        if self.author:
+            parts.append(self.author)
+            parts.append(" - ")
+        parts.append(self.title)
+        if self.year:
+            parts.append(f" ({self.year})")
+
+        filename = "".join(parts)
+        filename = re.sub(r'[\\/:*?"<>|]', '_', filename.strip())[:245]
+
+        if self.format:
+            filename = f"{filename}.{self.format}"
+
+        return filename
+
+
+@dataclass
+class SearchFilters:
+    """Filters for book search queries."""
+    isbn: Optional[List[str]] = None
+    author: Optional[List[str]] = None
+    title: Optional[List[str]] = None
+    lang: Optional[List[str]] = None
+    sort: Optional[str] = None
+    content: Optional[List[str]] = None
+    format: Optional[List[str]] = None
