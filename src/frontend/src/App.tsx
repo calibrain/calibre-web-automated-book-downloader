@@ -89,7 +89,6 @@ function App() {
     handleSearch,
     handleResetSearch,
     handleSortChange,
-    resetSortFilter,
     searchFieldValues,
     updateSearchFieldValue,
   } = useSearch({
@@ -157,6 +156,10 @@ function App() {
       if (!prevQueued[bookId]) {
         const book = currQueued[bookId];
         showToast(`${book.title || 'Book'} added to queue`, 'info');
+        // Auto-open downloads sidebar if enabled
+        if (config?.auto_open_downloads_sidebar !== false) {
+          setDownloadsSidebarOpen(true);
+        }
       }
     });
 
@@ -181,6 +184,16 @@ function App() {
         const book = currComplete[bookId];
         showToast(`${book.title || 'Book'} completed`, 'success');
 
+        // Auto-download to browser if enabled
+        if (config?.download_to_browser && book.download_path) {
+          const link = document.createElement('a');
+          link.href = `/api/localdownload?id=${encodeURIComponent(bookId)}`;
+          link.download = '';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+
         // Track completed release IDs in session state for universal mode
         Object.entries(bookToReleaseMap).forEach(([metadataBookId, releaseIds]) => {
           if (releaseIds.includes(bookId)) {
@@ -199,7 +212,7 @@ function App() {
         showToast(`${book.title || 'Book'}: ${errorMsg}`, 'error');
       }
     });
-  }, [showToast, bookToReleaseMap, markBookCompleted]);
+  }, [showToast, bookToReleaseMap, markBookCompleted, config]);
 
   // Detect status changes when currentStatus updates
   useEffect(() => {
@@ -218,30 +231,37 @@ function App() {
       if (mode === 'settings-saved' && prevSearchModeRef.current !== cfg.search_mode) {
         setBooks([]);
         setSelectedBook(null);
-        resetSortFilter();
         clearTracking();
       }
 
       prevSearchModeRef.current = cfg.search_mode;
       setConfig(cfg);
 
+      // Determine the default sort based on search mode
+      const defaultSort = cfg.search_mode === 'universal'
+        ? (cfg.metadata_default_sort || 'relevance')
+        : (cfg.default_sort || 'relevance');
+
       if (cfg?.supported_formats) {
         if (mode === 'initial') {
           setAdvancedFilters(prev => ({
             ...prev,
             formats: cfg.supported_formats,
+            sort: defaultSort,
           }));
         } else if (mode === 'settings-saved') {
+          // On settings save, update formats and reset sort to new default
           setAdvancedFilters(prev => ({
             ...prev,
             formats: prev.formats.filter(f => cfg.supported_formats.includes(f)),
+            sort: defaultSort,
           }));
         }
       }
     } catch (error) {
       console.error('Failed to load config:', error);
     }
-  }, [setBooks, setAdvancedFilters, resetSortFilter, clearTracking]);
+  }, [setBooks, setAdvancedFilters, clearTracking]);
 
   // Fetch config when authenticated
   useEffect(() => {

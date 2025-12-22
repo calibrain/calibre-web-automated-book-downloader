@@ -150,7 +150,11 @@ export interface AppConfig {
   metadata_sort_options: SortOption[];
   metadata_search_fields: MetadataSearchField[];
   default_release_source?: string;  // Default tab in ReleaseModal (e.g., 'direct_download')
+  auto_open_downloads_sidebar: boolean;  // Auto-open sidebar when download is queued
+  download_to_browser: boolean;  // Auto-download completed files to browser
   settings_enabled: boolean;  // Whether config directory is mounted and writable
+  default_sort: string;  // Default sort for direct mode (Anna's Archive)
+  metadata_default_sort: string;  // Default sort for universal mode (from metadata provider)
 }
 
 // Authentication types

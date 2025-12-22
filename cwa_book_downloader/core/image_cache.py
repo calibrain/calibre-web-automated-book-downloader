@@ -36,6 +36,10 @@ MAX_IMAGE_SIZE = 5 * 1024 * 1024
 # Negative cache TTL (for failed fetches) - 1 hour
 NEGATIVE_CACHE_TTL = 3600
 
+# Transient failure cache TTL (for timeouts/connection errors) - 60 seconds
+# Short enough to retry soon, long enough to prevent spam during one page view
+TRANSIENT_CACHE_TTL = 60
+
 
 def _detect_image_type(data: bytes) -> Optional[Tuple[str, str]]:
     """Detect image type from magic bytes.
@@ -82,8 +86,9 @@ class ImageCacheService:
         # Ensure cache directory exists
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Load existing index
+        # Load existing index and sync with files on disk (once at startup)
         self._load_index()
+        self._sync_index_with_files()
 
     def _load_index(self) -> None:
         """Load cache index from disk."""
@@ -91,9 +96,69 @@ class ImageCacheService:
             if self.index_path.exists():
                 with open(self.index_path, 'r') as f:
                     self._index = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
-            logger.warning(f"Failed to load cache index, starting fresh: {e}")
+        except (json.JSONDecodeError, IOError):
             self._index = {}
+
+    def _sync_index_with_files(self) -> None:
+        """Sync cache index with actual files on disk.
+
+        - Adds entries for files that exist but aren't in index
+        - Removes entries for files that no longer exist (non-negative only)
+        - Preserves negative cache entries (they have no files)
+        """
+        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.webp'}
+        added_count = 0
+        removed_count = 0
+
+        # Build set of files that exist on disk
+        existing_files: Dict[str, Path] = {}
+        for file_path in self.cache_dir.iterdir():
+            if not file_path.is_file():
+                continue
+            if file_path.suffix.lower() not in image_extensions:
+                continue
+            existing_files[file_path.stem] = file_path
+
+        # Add files that aren't in the index
+        for cache_id, file_path in existing_files.items():
+            if cache_id in self._index:
+                continue
+
+            ext = file_path.suffix.lstrip('.')
+            stat = file_path.stat()
+
+            # Detect content type
+            try:
+                with open(file_path, 'rb') as f:
+                    header = f.read(16)
+                detected = _detect_image_type(header)
+                content_type = detected[0] if detected else f'image/{ext}'
+            except IOError:
+                content_type = f'image/{ext}'
+
+            self._index[cache_id] = {
+                'ext': ext,
+                'content_type': content_type,
+                'size': stat.st_size,
+                'cached_at': stat.st_mtime,
+                'accessed_at': stat.st_mtime,
+            }
+            added_count += 1
+
+        # Remove index entries for missing files (skip negative cache entries)
+        stale_entries = []
+        for cache_id, entry in self._index.items():
+            if entry.get('negative', False):
+                continue  # Negative entries don't have files
+            if cache_id not in existing_files:
+                stale_entries.append(cache_id)
+
+        for cache_id in stale_entries:
+            del self._index[cache_id]
+            removed_count += 1
+
+        if added_count > 0 or removed_count > 0:
+            self._save_index()
 
     def _save_index(self) -> None:
         """Save cache index to disk."""
@@ -103,8 +168,8 @@ class ImageCacheService:
             with open(temp_path, 'w') as f:
                 json.dump(self._index, f)
             temp_path.rename(self.index_path)
-        except IOError as e:
-            logger.error(f"Failed to save cache index: {e}")
+        except IOError:
+            pass
 
     def _get_image_path(self, cache_id: str, ext: str) -> Path:
         """Get the file path for a cached image."""
@@ -119,11 +184,20 @@ class ImageCacheService:
         return (time.time() - cached_at) > self.ttl_seconds
 
     def _is_negative_expired(self, entry: Dict[str, Any]) -> bool:
-        """Check if a negative cache entry is expired."""
+        """Check if a negative cache entry is expired.
+
+        Transient failures (timeouts) expire after TRANSIENT_CACHE_TTL (60s).
+        Permanent failures (404s) expire after NEGATIVE_CACHE_TTL (1 hour).
+        """
         if not entry.get('negative', False):
             return False
 
         cached_at = entry.get('cached_at', 0)
+
+        # Transient failures (timeouts, connection errors) use shorter TTL
+        if entry.get('transient', False):
+            return (time.time() - cached_at) > TRANSIENT_CACHE_TTL
+
         return (time.time() - cached_at) > NEGATIVE_CACHE_TTL
 
     def _calculate_total_size(self) -> int:
@@ -158,8 +232,8 @@ class ImageCacheService:
             try:
                 if image_path.exists():
                     image_path.unlink()
-            except IOError as e:
-                logger.warning(f"Failed to delete cached image {cache_id}: {e}")
+            except IOError:
+                pass
 
             # Update tracking
             current_size -= entry.get('size', 0)
@@ -167,7 +241,6 @@ class ImageCacheService:
             evicted_count += 1
 
         if evicted_count > 0:
-            logger.info(f"Evicted {evicted_count} images from cache (LRU)")
             self._save_index()
 
     def get(self, cache_id: str) -> Optional[Tuple[bytes, str]]:
@@ -240,8 +313,7 @@ class ImageCacheService:
                 self._hits += 1
                 return data, content_type
 
-            except IOError as e:
-                logger.warning(f"Failed to read cached image {cache_id}: {e}")
+            except IOError:
                 self._misses += 1
                 return None
 
@@ -284,8 +356,7 @@ class ImageCacheService:
             try:
                 with open(image_path, 'wb') as f:
                     f.write(data)
-            except IOError as e:
-                logger.warning(f"Failed to write cached image {cache_id}: {e}")
+            except IOError:
                 return False
 
             # Update index
@@ -301,15 +372,17 @@ class ImageCacheService:
             self._save_index()
             return True
 
-    def put_negative(self, cache_id: str) -> None:
+    def put_negative(self, cache_id: str, transient: bool = False) -> None:
         """Store a negative cache entry (failed fetch).
 
         Args:
             cache_id: Cache key
+            transient: If True, uses shorter TTL (for timeouts/connection errors)
         """
         with self._lock:
             self._index[cache_id] = {
                 'negative': True,
+                'transient': transient,
                 'cached_at': time.time(),
             }
             self._save_index()
@@ -335,8 +408,8 @@ class ImageCacheService:
                 try:
                     if image_path.exists():
                         image_path.unlink()
-                except IOError as e:
-                    logger.warning(f"Failed to delete cached image {cache_id}: {e}")
+                except IOError:
+                    pass
 
             del self._index[cache_id]
             self._save_index()
@@ -370,7 +443,6 @@ class ImageCacheService:
             self._hits = 0
             self._misses = 0
 
-            logger.info(f"Cleared {count} entries from image cache")
             return count
 
     def stats(self) -> Dict[str, Any]:
@@ -420,7 +492,6 @@ class ImageCacheService:
             # Validate content type
             content_type = response.headers.get('content-type', '')
             if not content_type.startswith('image/'):
-                logger.warning(f"Invalid content type for cover: {content_type}")
                 self.put_negative(cache_id)
                 return None
 
@@ -429,14 +500,12 @@ class ImageCacheService:
             for chunk in response.iter_content(chunk_size=8192):
                 data.write(chunk)
                 if data.tell() > MAX_IMAGE_SIZE:
-                    logger.warning(f"Cover image too large: {url}")
                     self.put_negative(cache_id)
                     return None
 
             image_data = data.getvalue()
 
             if not image_data:
-                logger.warning(f"Empty image response: {url}")
                 self.put_negative(cache_id)
                 return None
 
@@ -451,17 +520,18 @@ class ImageCacheService:
             return None
 
         except requests.exceptions.Timeout:
-            logger.warning(f"Timeout fetching cover: {url}")
-            # Don't cache timeout - it's transient
+            self.put_negative(cache_id, transient=True)
+            return None
+        except requests.exceptions.ConnectionError:
+            self.put_negative(cache_id, transient=True)
             return None
         except requests.exceptions.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
                 self.put_negative(cache_id)
             else:
-                logger.warning(f"HTTP error fetching cover: {e}")
+                self.put_negative(cache_id, transient=True)
             return None
-        except Exception as e:
-            logger.warning(f"Error fetching cover: {e}")
+        except Exception:
             return None
 
 

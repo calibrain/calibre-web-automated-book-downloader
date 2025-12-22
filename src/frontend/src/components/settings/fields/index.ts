@@ -4,5 +4,6 @@ export { NumberField } from './NumberField';
 export { CheckboxField } from './CheckboxField';
 export { SelectField } from './SelectField';
 export { MultiSelectField } from './MultiSelectField';
+export { OrderableListField } from './OrderableListField';
 export { ActionButton } from './ActionButton';
 export { HeadingField } from './HeadingField';

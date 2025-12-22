@@ -74,6 +74,9 @@ _dns_rotation_lock = threading.Lock()
 _cf_cookies: dict[str, dict] = {}
 _cf_cookies_lock = threading.Lock()
 
+# User-Agent storage - Cloudflare ties cf_clearance to the UA that solved the challenge
+_cf_user_agents: dict[str, str] = {}
+
 # Protection cookie names we care about (Cloudflare and DDoS-Guard)
 CF_COOKIE_NAMES = {'cf_clearance', '__cf_bm', 'cf_chl_2', 'cf_chl_prog'}
 DDG_COOKIE_NAMES = {'__ddg1_', '__ddg2_', '__ddg5_', '__ddg8_', '__ddg9_', '__ddg10_', '__ddgid_', '__ddgmark_', 'ddg_last_challenge'}
@@ -118,8 +121,20 @@ def _extract_cookies_from_driver(driver, url: str) -> None:
                 }
 
         if cookies_found:
+            # Extract User-Agent - Cloudflare ties cf_clearance to the UA
+            try:
+                user_agent = driver.execute_script("return navigator.userAgent")
+            except Exception:
+                user_agent = None
+
             with _cf_cookies_lock:
                 _cf_cookies[base_domain] = cookies_found
+                if user_agent:
+                    _cf_user_agents[base_domain] = user_agent
+                    logger.debug(f"Stored UA for {base_domain}: {user_agent[:60]}...")
+                else:
+                    logger.debug(f"No UA captured for {base_domain}")
+
             cookie_type = "all" if extract_all else "protection"
             logger.debug(f"Extracted {len(cookies_found)} {cookie_type} cookies for {base_domain}")
 
@@ -158,14 +173,25 @@ def has_valid_cf_cookies(domain: str) -> bool:
     return bool(get_cf_cookies_for_domain(domain))
 
 
+def get_cf_user_agent_for_domain(domain: str) -> Optional[str]:
+    """Get the User-Agent that was used during bypass for a domain."""
+    if not domain:
+        return None
+    base_domain = '.'.join(domain.split('.')[-2:]) if '.' in domain else domain
+    with _cf_cookies_lock:
+        return _cf_user_agents.get(base_domain)
+
+
 def clear_cf_cookies(domain: str = None) -> None:
-    """Clear stored Cloudflare cookies. If domain is None, clear all."""
+    """Clear stored Cloudflare cookies and User-Agent. If domain is None, clear all."""
     with _cf_cookies_lock:
         if domain:
             base_domain = '.'.join(domain.split('.')[-2:]) if '.' in domain else domain
             _cf_cookies.pop(base_domain, None)
+            _cf_user_agents.pop(base_domain, None)
         else:
             _cf_cookies.clear()
+            _cf_user_agents.clear()
 
 
 def _reset_pyautogui_display_state():
@@ -484,7 +510,7 @@ def _bypass(sb, max_retries: Optional[int] = None, cancel_flag: Optional[Event] 
 
 def _get_chromium_args():
     """Build Chrome arguments dynamically, pre-resolving hostnames via Python's DNS.
-    
+
     Instead of trying to configure Chrome's DNS (which is unreliable), we pre-resolve
     AA hostnames using Python's patched socket (which uses DoH/custom DNS) and pass
     the resolved IPs directly to Chrome via --host-resolver-rules. This bypasses
@@ -988,11 +1014,17 @@ def get_bypassed_page(url: str, selector: Optional[network.AAMirrorSelector] = N
     # Before using Chrome, check if cookies are available (from a previous bypass)
     # This helps concurrent downloads avoid unnecessary Chrome usage
     parsed = urlparse(attempt_url)
-    cookies = get_cf_cookies_for_domain(parsed.hostname or "")
+    hostname = parsed.hostname or ""
+    cookies = get_cf_cookies_for_domain(hostname)
     if cookies:
         try:
+            # Use stored UA - Cloudflare ties cf_clearance to the UA that solved the challenge
+            headers = {}
+            stored_ua = get_cf_user_agent_for_domain(hostname)
+            if stored_ua:
+                headers['User-Agent'] = stored_ua
             logger.debug(f"Trying request with cached cookies before Chrome: {attempt_url}")
-            response = requests.get(attempt_url, cookies=cookies, proxies=_get_proxies(), timeout=(5, 10))
+            response = requests.get(attempt_url, cookies=cookies, headers=headers, proxies=_get_proxies(), timeout=(5, 10))
             if response.status_code == 200:
                 logger.debug(f"Cached cookies worked, skipped Chrome bypass")
                 return response.text
@@ -1016,7 +1048,7 @@ def get_bypassed_page(url: str, selector: Optional[network.AAMirrorSelector] = N
             raise
 
     logger.debug(f"Cloudflare Bypasser response length: {len(response_html)}")
-    if response_html.strip() != "":
-        return response_html
-    else:
+    if response_html.strip() == "":
         raise requests.exceptions.RequestException("Failed to bypass Cloudflare")
+
+    return response_html

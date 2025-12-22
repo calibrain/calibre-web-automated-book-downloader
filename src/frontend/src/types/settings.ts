@@ -7,6 +7,7 @@ export type FieldType =
   | 'CheckboxField'
   | 'SelectField'
   | 'MultiSelectField'
+  | 'OrderableListField'
   | 'ActionButton'
   | 'HeadingField';
 
@@ -82,6 +83,26 @@ export interface MultiSelectFieldConfig extends BaseField {
   options: SelectOption[];
 }
 
+// OrderableListField types - generic drag-and-drop reorderable list
+export interface OrderableListItem {
+  id: string;
+  enabled: boolean;
+}
+
+export interface OrderableListOption {
+  id: string;
+  label: string;
+  description?: string;
+  disabledReason?: string; // Explanation when item cannot be enabled
+  isLocked?: boolean; // Item cannot be toggled (e.g., missing dependency)
+}
+
+export interface OrderableListFieldConfig extends BaseField {
+  type: 'OrderableListField';
+  value: OrderableListItem[];
+  options: OrderableListOption[];
+}
+
 export interface ActionButtonConfig extends BaseField {
   type: 'ActionButton';
   style: 'default' | 'primary' | 'danger';
@@ -94,6 +115,7 @@ export interface HeadingFieldConfig {
   description?: string;
   linkUrl?: string;
   linkText?: string;
+  showWhen?: ShowWhenCondition; // Conditional visibility based on another field's value
 }
 
 // Union type for all fields
@@ -104,6 +126,7 @@ export type SettingsField =
   | CheckboxFieldConfig
   | SelectFieldConfig
   | MultiSelectFieldConfig
+  | OrderableListFieldConfig
   | ActionButtonConfig
   | HeadingFieldConfig;
 

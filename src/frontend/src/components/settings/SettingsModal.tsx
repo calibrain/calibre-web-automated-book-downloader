@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSettings } from '../../hooks/useSettings';
 import { SettingsHeader } from './SettingsHeader';
 import { SettingsSidebar } from './SettingsSidebar';
@@ -31,6 +31,9 @@ export const SettingsModal = ({ isOpen, onClose, onShowToast, onSettingsSaved }:
   const [isMobile, setIsMobile] = useState(false);
   const [showMobileDetail, setShowMobileDetail] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+
+  // Track previous isOpen state to detect modal open transition
+  const prevIsOpenRef = useRef(false);
 
   // Check for mobile viewport
   useEffect(() => {
@@ -87,12 +90,16 @@ export const SettingsModal = ({ isOpen, onClose, onShowToast, onSettingsSaved }:
     }
   }, [isOpen]);
 
-  // On desktop, select first tab when modal first opens (only if no tab selected)
+  // Reset to first tab when modal transitions from closed to open
   useEffect(() => {
-    if (isOpen && !isMobile && tabs.length > 0 && !selectedTab) {
+    const justOpened = isOpen && !prevIsOpenRef.current;
+    prevIsOpenRef.current = isOpen;
+
+    // On desktop, select first tab when modal opens (reset on each open)
+    if (justOpened && !isMobile && tabs.length > 0) {
       setSelectedTab(tabs[0].name);
     }
-  }, [isOpen, isMobile, tabs, selectedTab, setSelectedTab]);
+  }, [isOpen, isMobile, tabs, setSelectedTab]);
 
   const handleSelectTab = useCallback(
     (tabName: string) => {

@@ -60,8 +60,11 @@ DEBUG = string_to_bool(os.getenv("DEBUG", "false"))
 # Comma-separated values: aa-fast, aa-slow-nowait, aa-slow-wait, libgen, zlib, welib
 _DEBUG_SKIP_SOURCES_RAW = os.getenv("DEBUG_SKIP_SOURCES", "").strip().lower()
 DEBUG_SKIP_SOURCES = set(s.strip() for s in _DEBUG_SKIP_SOURCES_RAW.split(",") if s.strip())
-PRIORITIZE_WELIB = string_to_bool(os.getenv("PRIORITIZE_WELIB", "false"))
-ALLOW_USE_WELIB = string_to_bool(os.getenv("ALLOW_USE_WELIB", "true"))
+
+# Legacy welib settings - replaced by SOURCE_PRIORITY OrderableListField
+# Kept for migration: if set, used to build initial SOURCE_PRIORITY config
+_LEGACY_PRIORITIZE_WELIB = string_to_bool(os.getenv("PRIORITIZE_WELIB", "false"))
+_LEGACY_ALLOW_USE_WELIB = string_to_bool(os.getenv("ALLOW_USE_WELIB", "true"))
 
 # Version information from Docker build
 BUILD_VERSION = os.getenv("BUILD_VERSION", "N/A")
@@ -99,8 +102,7 @@ if USING_TOR:
     HTTP_PROXY = ""
     HTTPS_PROXY = ""
 
-# Check if this is the Tor variant (has tor binary installed)
-# Only the Tor variant image includes the tor binary
+# Detect Tor variant (has tor binary installed)
 TOR_VARIANT_AVAILABLE = shutil.which("tor") is not None
 
 # Calibre-Web URL for navigation button
