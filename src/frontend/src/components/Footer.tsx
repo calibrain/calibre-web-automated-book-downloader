@@ -30,6 +30,8 @@ export const Footer = ({ buildVersion, releaseVersion, debug }: FooterProps) => 
         <div className="flex items-center gap-3 shrink-0">
           <a
             href="https://github.com/calibrain/calibre-web-automated-book-downloader"
+            target="_blank"
+            rel="noopener noreferrer"
             className="opacity-80 hover:opacity-100"
             aria-label="GitHub"
           >
