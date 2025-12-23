@@ -11,9 +11,12 @@ export const SelectField = ({ field, value, onChange, disabled }: SelectFieldPro
   // disabled prop is already computed by SettingsContent.getDisabledState()
   const isDisabled = disabled ?? false;
 
+  // Use field's default value as fallback when value is empty
+  const effectiveValue = value || field.default || '';
+
   return (
     <select
-      value={value ?? ''}
+      value={effectiveValue}
       onChange={(e) => onChange(e.target.value)}
       disabled={isDisabled}
       className="w-full px-3 py-2 rounded-lg border border-[var(--border-muted)]
@@ -28,7 +31,7 @@ export const SelectField = ({ field, value, onChange, disabled }: SelectFieldPro
         backgroundSize: '1.5em 1.5em',
       }}
     >
-      {!value && (
+      {!effectiveValue && (
         <option value="" disabled hidden>
           Select...
         </option>

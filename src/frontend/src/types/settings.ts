@@ -75,6 +75,7 @@ export interface SelectFieldConfig extends BaseField {
   type: 'SelectField';
   value: string;
   options: SelectOption[];
+  default?: string;
 }
 
 export interface MultiSelectFieldConfig extends BaseField {

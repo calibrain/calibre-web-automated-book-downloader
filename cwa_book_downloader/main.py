@@ -1348,6 +1348,16 @@ def api_releases() -> Union[Response, Tuple[Response, int]]:
         if errors:
             response["errors"] = errors
 
+        # If no releases found and there were errors, return 503 with error message
+        # This matches the behavior of /api/search when Anna's Archive is unreachable
+        if not releases_data and errors:
+            # Use the first error message (typically the most relevant)
+            error_message = errors[0]
+            # Strip the source prefix if present (e.g., "direct_download: message" -> "message")
+            if ": " in error_message:
+                error_message = error_message.split(": ", 1)[1]
+            return jsonify({"error": error_message}), 503
+
         return jsonify(response)
     except Exception as e:
         logger.error_trace(f"Releases search error: {e}")

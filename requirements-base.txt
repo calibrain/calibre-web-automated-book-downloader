@@ -11,3 +11,4 @@ gevent
 gevent-websocket
 psutil
 emoji
+rarfile

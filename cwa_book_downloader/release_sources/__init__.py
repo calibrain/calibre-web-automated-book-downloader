@@ -220,11 +220,30 @@ class ReleaseSource(ABC):
 class DownloadHandler(ABC):
     """Interface for executing downloads from a source.
 
-    Handlers receive a DownloadTask and do everything internally:
-    - Fetch source-specific data using task.task_id
-    - Execute the download (HTTP, torrent, usenet, etc.)
-    - Report progress via callbacks
-    - Return the final file path
+    ## Staging Architecture
+
+    Handlers are responsible for getting files into the STAGING directory (TMP_DIR).
+    The orchestrator handles all post-processing and moving to the INGEST directory.
+
+    This means handlers should:
+    1. Download/retrieve the file to the staging directory
+    2. Return the path to the staged file
+    3. NOT move files to the ingest folder (orchestrator does this)
+
+    Examples by source type:
+    - **Direct downloads**: Download directly to staging dir
+    - **Torrents**: Copy completed file from torrent client to staging (keep seeding)
+    - **Usenet**: Move completed file from NZB client to staging
+
+    Use the staging helpers from orchestrator:
+    - `get_staging_dir()` - Get the staging directory path
+    - `get_staging_path(task_id, ext)` - Get a staging path for a task
+    - `stage_file(source, task_id, copy=False)` - Stage a file (copy or move)
+
+    The orchestrator then handles:
+    - Archive extraction (RAR/ZIP)
+    - Custom script execution
+    - Moving to the final ingest folder
     """
 
     @abstractmethod
@@ -236,7 +255,11 @@ class DownloadHandler(ABC):
         status_callback: Callable[[str, Optional[str]], None]
     ) -> Optional[str]:
         """
-        Execute download. Handler does everything internally.
+        Execute download and return path to STAGED file.
+
+        Handlers should download/copy files to the staging directory (TMP_DIR),
+        NOT directly to the ingest folder. The orchestrator handles post-processing
+        (archive extraction, custom scripts) and final move to ingest.
 
         Args:
             task: The download task with task_id and display info
@@ -245,7 +268,7 @@ class DownloadHandler(ABC):
             status_callback: Called with (status, message) for status updates
 
         Returns:
-            Path to downloaded file if successful, None otherwise
+            Path to staged file (in TMP_DIR) if successful, None otherwise
         """
         pass
 

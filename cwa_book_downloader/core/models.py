@@ -85,6 +85,7 @@ class DownloadTask:
     format: Optional[str] = None
     size: Optional[str] = None
     preview: Optional[str] = None
+    content_type: Optional[str] = None  # "book (fiction)", "audiobook", "magazine", etc.
 
     # Runtime state
     priority: int = 0

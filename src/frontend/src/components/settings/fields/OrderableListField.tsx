@@ -57,7 +57,6 @@ export const OrderableListField = ({
   const items = mergeValueWithOptions(value ?? [], field.options);
 
   const handleDragStart = (e: React.DragEvent, index: number) => {
-    if (isDisabled) return;
     setDraggedIndex(index);
     dragNodeRef.current = e.currentTarget as HTMLDivElement;
     e.dataTransfer.effectAllowed = 'move';
@@ -153,7 +152,6 @@ export const OrderableListField = ({
   };
 
   const moveItem = (fromIndex: number, direction: 'up' | 'down') => {
-    if (isDisabled) return;
     const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
     if (toIndex < 0 || toIndex >= items.length) return;
 
@@ -196,7 +194,7 @@ export const OrderableListField = ({
             )}
 
             <div
-              draggable={!isDisabled}
+              draggable
               onDragStart={(e) => handleDragStart(e, index)}
               onDragEnd={handleDragEnd}
               onDragOver={(e) => handleDragOver(e, index)}
@@ -205,7 +203,7 @@ export const OrderableListField = ({
               className={`
                 flex items-center gap-3 p-3 rounded-lg border
                 transition-all duration-150
-                ${isDragging ? 'opacity-50' : ''}
+                ${isDragging ? 'opacity-50 cursor-grabbing' : 'cursor-grab'}
                 border-[var(--border-muted)]
                 ${isDisabled ? 'opacity-60' : 'hover:bg-[var(--hover-surface)]'}
               `}
@@ -218,10 +216,10 @@ export const OrderableListField = ({
                   e.stopPropagation();
                   moveItem(index, 'up');
                 }}
-                disabled={isDisabled || index === 0}
+                disabled={index === 0}
                 className={`
                   p-1.5 sm:p-0.5 rounded transition-colors
-                  ${isDisabled || index === 0
+                  ${index === 0
                     ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
                     : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 sm:hover:bg-gray-100 sm:dark:hover:bg-gray-700'
                   }
@@ -238,10 +236,10 @@ export const OrderableListField = ({
                   e.stopPropagation();
                   moveItem(index, 'down');
                 }}
-                disabled={isDisabled || index === items.length - 1}
+                disabled={index === items.length - 1}
                 className={`
                   p-1.5 sm:p-0.5 rounded transition-colors
-                  ${isDisabled || index === items.length - 1
+                  ${index === items.length - 1
                     ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
                     : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 sm:hover:bg-gray-100 sm:dark:hover:bg-gray-700'
                   }
