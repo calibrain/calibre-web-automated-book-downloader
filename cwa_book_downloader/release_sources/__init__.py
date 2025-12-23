@@ -337,4 +337,4 @@ def get_source_display_name(name: str) -> str:
 # Import source implementations to trigger registration
 # These must be imported AFTER the base classes and registry are defined
 from cwa_book_downloader.release_sources import direct_download  # noqa: F401, E402
-# from cwa_book_downloader.release_sources import prowlarr  # noqa: F401, E402
+from cwa_book_downloader.release_sources import prowlarr  # noqa: F401, E402
