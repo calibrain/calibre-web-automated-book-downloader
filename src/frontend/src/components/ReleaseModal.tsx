@@ -124,6 +124,42 @@ function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
   }, obj as unknown);
 }
 
+// 5-star rating display with partial fill support
+const StarRating = ({ rating, maxRating = 5 }: { rating: number; maxRating?: number }) => {
+  // Normalize rating to 0-5 scale if needed
+  const normalizedRating = Math.min(Math.max(rating, 0), maxRating);
+
+  return (
+    <div className="flex items-center gap-0.5" title={`${rating} out of ${maxRating}`}>
+      {[...Array(5)].map((_, index) => {
+        const fillPercentage = Math.min(Math.max((normalizedRating - index) * 100, 0), 100);
+
+        return (
+          <div key={index} className="relative w-4 h-4">
+            {/* Empty star (gray background) */}
+            <svg
+              className="absolute inset-0 w-4 h-4 text-gray-300 dark:text-gray-600"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+            </svg>
+            {/* Filled star (gold, clipped to fill percentage) */}
+            <svg
+              className="absolute inset-0 w-4 h-4 text-amber-400"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+              style={{ clipPath: `inset(0 ${100 - fillPercentage}% 0 0)` }}
+            >
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+            </svg>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 // Thumbnail component for release rows
 const ReleaseThumbnail = ({ preview, title }: { preview?: string; title?: string }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
@@ -563,6 +599,8 @@ export const ReleaseModal = ({
 
   // Description expansion
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const [descriptionOverflows, setDescriptionOverflows] = useState(false);
+  const descriptionRef = useRef<HTMLParagraphElement>(null);
 
   // Close handler with animation
   const handleClose = useCallback(() => {
@@ -596,12 +634,26 @@ export const ReleaseModal = ({
   // Reset modal state when book changes to prevent stale data
   useEffect(() => {
     setDescriptionExpanded(false);
+    setDescriptionOverflows(false);
     setReleasesBySource({});
     setLoadingBySource({});
     setErrorBySource({});
     setFormatFilter('');
     setLanguageFilter('');
   }, [book?.id]);
+
+  // Check if description text overflows (needs "more" button)
+  useEffect(() => {
+    const el = descriptionRef.current;
+    if (el && !descriptionExpanded) {
+      // Compare scrollHeight to clientHeight to detect overflow
+      setDescriptionOverflows(el.scrollHeight > el.clientHeight);
+    }
+  }, [book?.description, descriptionExpanded]);
+
+  // Tab indicator refs and state for sliding animation
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [tabIndicatorStyle, setTabIndicatorStyle] = useState({ left: 0, width: 0 });
 
   // Track scroll to show/hide header thumbnail
   useEffect(() => {
@@ -657,8 +709,8 @@ export const ReleaseModal = ({
     const provider = book.provider;
     const bookId = book.provider_id;
 
-    // Skip if already loaded in component state or currently loading
-    if (releasesBySource[activeTab] !== undefined || loadingBySource[activeTab]) return;
+    // Skip if already loaded, currently loading, or has error (prevents retry loop)
+    if (releasesBySource[activeTab] !== undefined || loadingBySource[activeTab] || errorBySource[activeTab]) return;
 
     // Check module-level cache first
     const cached = getCachedReleases(provider, bookId, activeTab);
@@ -685,7 +737,7 @@ export const ReleaseModal = ({
     };
 
     fetchReleases();
-  }, [book, activeTab, releasesBySource, loadingBySource]);
+  }, [book, activeTab, releasesBySource, loadingBySource, errorBySource]);
 
   // Build list of tabs to show
   // Status: 'available' = working, 'coming_soon' = in development, 'not_configured' = needs setup
@@ -728,6 +780,22 @@ export const ReleaseModal = ({
     // Combine in order: configured (with default first), unconfigured, coming soon
     return [...configuredTabs, ...unconfiguredTabs, ...comingSoonTabs];
   }, [availableSources, defaultReleaseSource]);
+
+  // Update tab indicator position when active tab changes
+  useEffect(() => {
+    const activeButton = tabRefs.current[activeTab];
+    if (activeButton) {
+      // Get position relative to parent container
+      const containerRect = activeButton.parentElement?.getBoundingClientRect();
+      const buttonRect = activeButton.getBoundingClientRect();
+      if (containerRect) {
+        setTabIndicatorStyle({
+          left: buttonRect.left - containerRect.left,
+          width: buttonRect.width,
+        });
+      }
+    }
+  }, [activeTab, allTabs]);
 
   // Get unique formats from current releases for filter dropdown
   // Only show formats that are in the supported list
@@ -978,20 +1046,25 @@ export const ReleaseModal = ({
                 {/* Metadata row */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
                   {book.year && <span>{book.year}</span>}
-                  {book.display_fields?.find(f => f.icon === 'star') && (
-                    <span className="flex items-center gap-1">
-                      <svg className="h-3.5 w-3.5 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                      </svg>
-                      {book.display_fields.find(f => f.icon === 'star')?.value}
-                    </span>
-                  )}
+                  {book.display_fields?.find(f => f.icon === 'star') && (() => {
+                    const starField = book.display_fields!.find(f => f.icon === 'star')!;
+                    const ratingsField = book.display_fields?.find(f => f.icon === 'ratings');
+                    return (
+                      <span className="flex items-center gap-1.5">
+                        <StarRating rating={parseFloat(starField.value || '0')} />
+                        <span>{starField.value}</span>
+                        {ratingsField && (
+                          <span className="text-gray-400 dark:text-gray-500">({ratingsField.value})</span>
+                        )}
+                      </span>
+                    );
+                  })()}
                   {book.display_fields?.find(f => f.icon === 'users') && (
                     <span className="flex items-center gap-1">
                       <svg className="h-3.5 w-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" />
                       </svg>
-                      {book.display_fields.find(f => f.icon === 'users')?.value}
+                      {book.display_fields.find(f => f.icon === 'users')?.value} readers
                     </span>
                   )}
                   {book.display_fields?.find(f => f.icon === 'book') && (
@@ -1002,9 +1075,9 @@ export const ReleaseModal = ({
                 {/* Description */}
                 {book.description && (
                   <div className="text-sm text-gray-600 dark:text-gray-400 relative">
-                    <p className={descriptionExpanded ? '' : 'line-clamp-3'}>
+                    <p ref={descriptionRef} className={descriptionExpanded ? '' : 'line-clamp-3'}>
                       {book.description}
-                      {descriptionExpanded && (
+                      {descriptionExpanded && descriptionOverflows && (
                         <>
                           {' '}
                           <button
@@ -1017,7 +1090,7 @@ export const ReleaseModal = ({
                         </>
                       )}
                     </p>
-                    {!descriptionExpanded && (
+                    {!descriptionExpanded && descriptionOverflows && (
                       <button
                         type="button"
                         onClick={() => setDescriptionExpanded(true)}
@@ -1063,15 +1136,24 @@ export const ReleaseModal = ({
                 <div className="flex items-center justify-between px-5">
                   {/* Tabs - scrollable on narrow screens */}
                   <div className="flex-1 min-w-0 overflow-x-auto scrollbar-hide">
-                    <div className="flex gap-1">
+                    <div className="relative flex gap-1">
+                      {/* Sliding indicator */}
+                      <div
+                        className="absolute bottom-0 h-0.5 bg-emerald-600 transition-all duration-300 ease-out"
+                        style={{
+                          left: tabIndicatorStyle.left,
+                          width: tabIndicatorStyle.width,
+                        }}
+                      />
                       {allTabs.map((tab) => (
                           <button
                             key={tab.name}
+                            ref={(el) => { tabRefs.current[tab.name] = el; }}
                             onClick={() => setActiveTab(tab.name)}
-                            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                            className={`px-4 py-2.5 text-sm font-medium border-b-2 border-transparent transition-colors whitespace-nowrap ${
                               activeTab === tab.name
-                                ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
-                                : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
                             }`}
                           >
                             {tab.displayName}

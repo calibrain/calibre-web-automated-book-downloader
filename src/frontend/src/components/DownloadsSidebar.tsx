@@ -162,7 +162,7 @@ export const DownloadsSidebar = ({
       const downloadedSize = (book.progress / 100) * sizeValue;
       progressText = `${downloadedSize.toFixed(1)}${sizeUnit} / ${book.size}`;
     } else if (isCompleted) {
-      progressText = 'Complete';
+      progressText = book.status_message || 'Complete';
     } else if (hasError) {
       progressText = book.status_message || 'Failed';
     }

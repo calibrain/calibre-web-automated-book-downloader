@@ -128,7 +128,11 @@ RUN apt-get update && \
     # --- ChromeDriver ---
     chromium-driver \
     # For tkinter (pyautogui)
-    python3-tk
+    python3-tk \
+    # For RAR extraction
+    unrar-free && \
+    # Create symlink so rarfile library can find unrar
+    ln -sf /usr/bin/unrar-free /usr/bin/unrar
 
 # install additional dependencies
 COPY requirements-cwa-bd.txt ./

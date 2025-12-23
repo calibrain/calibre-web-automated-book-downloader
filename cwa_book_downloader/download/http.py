@@ -35,14 +35,26 @@ MAX_RESUME_ATTEMPTS = 3
 
 def _get_proxies() -> dict:
     """Get current proxy configuration from config singleton."""
-    proxies = {}
-    http_proxy = app_config.get("HTTP_PROXY", "")
-    https_proxy = app_config.get("HTTPS_PROXY", "")
-    if http_proxy:
-        proxies["http"] = http_proxy
-    if https_proxy:
-        proxies["https"] = https_proxy
-    return proxies
+    proxy_mode = app_config.get("PROXY_MODE", "none")
+
+    if proxy_mode == "socks5":
+        socks_proxy = app_config.get("SOCKS5_PROXY", "")
+        if socks_proxy:
+            return {"http": socks_proxy, "https": socks_proxy}
+    elif proxy_mode == "http":
+        proxies = {}
+        http_proxy = app_config.get("HTTP_PROXY", "")
+        https_proxy = app_config.get("HTTPS_PROXY", "")
+        if http_proxy:
+            proxies["http"] = http_proxy
+        if https_proxy:
+            proxies["https"] = https_proxy
+        elif http_proxy:
+            # Fallback: use HTTP proxy for HTTPS if HTTPS proxy not specified
+            proxies["https"] = http_proxy
+        return proxies
+
+    return {}
 
 
 RETRYABLE_CODES = (429, 500, 502, 503, 504)

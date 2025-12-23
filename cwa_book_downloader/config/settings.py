@@ -158,6 +158,8 @@ _FORMAT_OPTIONS = [
     {"value": "rtf", "label": "RTF"},
     {"value": "doc", "label": "DOC"},
     {"value": "docx", "label": "DOCX"},
+    {"value": "zip", "label": "ZIP"},
+    {"value": "rar", "label": "RAR"},
 ]
 
 
@@ -240,6 +242,17 @@ def _clear_metadata_cache(current_values: dict) -> dict:
 def general_settings():
     """Core application settings."""
     return [
+        TextField(
+            key="CALIBRE_WEB_URL",
+            label="Book Management App URL",
+            description="Adds a navigation button to your book manager instance (Calibre-Web Automated, Booklore, etc).",
+            placeholder="http://calibre-web:8083",
+        ),
+        HeadingField(
+            key="search_mode_heading",
+            title="Search Mode",
+            description="Direct searches Anna's Archive and downloads immediately. Universal searches book metadata first, letting you choose from multiple release sources including Anna's Archive and Prowlarr.",
+        ),
         SelectField(
             key="SEARCH_MODE",
             label="Search Mode",
@@ -269,7 +282,7 @@ def general_settings():
         ),
         SelectField(
             key="METADATA_PROVIDER",
-            label="Metadata Provider for Universal Search",
+            label="Metadata Provider",
             description="Choose which metadata provider to use for book searches.",
             options=_get_metadata_provider_options,  # Callable - evaluated lazily to avoid circular imports
             default="openlibrary",
@@ -284,23 +297,22 @@ def general_settings():
             env_supported=False,  # UI-only setting, not configurable via ENV
             show_when={"field": "SEARCH_MODE", "value": "universal"},
         ),
-        TextField(
-            key="CALIBRE_WEB_URL",
-            label="Book Management App URL",
-            description="Adds a navigation button to your book manager instance (Calibre-Web Automated, Booklore, etc).",
-            placeholder="http://calibre-web:8083",
+        HeadingField(
+            key="search_defaults_heading",
+            title="Default Search Options",
+            description="Default filters applied to searches. Can be overridden using advanced search options.",
         ),
         MultiSelectField(
             key="SUPPORTED_FORMATS",
             label="Supported Formats",
-            description="Book formats to include in search results.",
+            description="Book formats to include in search results. ZIP/RAR archives are extracted automatically and book files are used if found.",
             options=_FORMAT_OPTIONS,
             default=["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"],
         ),
         MultiSelectField(
             key="BOOK_LANGUAGE",
             label="Default Book Languages",
-            description="Default language filter for searches. Can be overridden in advanced search options.",
+            description="Default language filter for searches.",
             options=_LANGUAGE_OPTIONS,
             default=["en"],
         ),
@@ -319,22 +331,6 @@ def network_settings():
     tor_overrides_network = tor_available  # If Tor variant, network settings are always managed by Tor
 
     return [
-        CheckboxField(
-            key="USING_TOR",
-            label="Tor Routing",
-            description=(
-                "All traffic is routed through Tor in this container variant. This cannot be changed."
-                if tor_available
-                else "Tor routing is not available in this container variant."
-            ),
-            default=tor_available,  # Reflects actual state: True if Tor variant, False otherwise
-            disabled=True,  # Always disabled - Tor state is determined by container variant
-            disabled_reason=(
-                "Tor routing is always active in the Tor container variant."
-                if tor_available
-                else "Requires the Tor container variant (calibre-web-automated-book-downloader-tor)."
-            ),
-        ),
         SelectField(
             key="CUSTOM_DNS",
             label="DNS Provider",
@@ -385,29 +381,65 @@ def network_settings():
                 "reason": "Auto mode always uses DNS over HTTPS for reliable provider rotation.",
             },
         ),
-        TextField(
-            key="HTTP_PROXY",
-            label="HTTP Proxy",
+        CheckboxField(
+            key="USING_TOR",
+            label="Tor Routing",
+            description=(
+                "All traffic is routed through Tor in this container variant. This cannot be changed."
+                if tor_available
+                else "Tor routing is not available in this container variant."
+            ),
+            default=tor_available,  # Reflects actual state: True if Tor variant, False otherwise
+            disabled=True,  # Always disabled - Tor state is determined by container variant
+            disabled_reason=(
+                "Tor routing is always active in the Tor container variant."
+                if tor_available
+                else "Requires the Tor container variant (calibre-web-automated-book-downloader-tor)."
+            ),
+        ),
+        SelectField(
+            key="PROXY_MODE",
+            label="Proxy Mode",
             description=(
                 "Not applicable when Tor routing is enabled."
                 if tor_overrides_network
-                else "HTTP proxy URL (e.g., http://proxy:8080). Leave empty for direct connection."
+                else "Choose proxy type. SOCKS5 handles all traffic through a single proxy."
             ),
-            placeholder="http://proxy:8080",
+            options=[
+                {"value": "none", "label": "None (Direct Connection)"},
+                {"value": "http", "label": "HTTP/HTTPS Proxy"},
+                {"value": "socks5", "label": "SOCKS5 Proxy"},
+            ],
+            default="none",
             disabled=tor_overrides_network,
             disabled_reason="Proxy settings are not used when Tor routing is enabled.",
         ),
         TextField(
-            key="HTTPS_PROXY",
-            label="HTTPS Proxy",
-            description=(
-                "Not applicable when Tor routing is enabled."
-                if tor_overrides_network
-                else "HTTPS proxy URL. Leave empty for direct connection."
-            ),
+            key="HTTP_PROXY",
+            label="HTTP Proxy",
+            description="HTTP proxy URL (e.g., http://proxy:8080)",
             placeholder="http://proxy:8080",
             disabled=tor_overrides_network,
             disabled_reason="Proxy settings are not used when Tor routing is enabled.",
+            show_when={"field": "PROXY_MODE", "value": "http"},
+        ),
+        TextField(
+            key="HTTPS_PROXY",
+            label="HTTPS Proxy",
+            description="HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS)",
+            placeholder="http://proxy:8080",
+            disabled=tor_overrides_network,
+            disabled_reason="Proxy settings are not used when Tor routing is enabled.",
+            show_when={"field": "PROXY_MODE", "value": "http"},
+        ),
+        TextField(
+            key="SOCKS5_PROXY",
+            label="SOCKS5 Proxy",
+            description="SOCKS5 proxy URL. Supports auth: socks5://user:pass@host:port",
+            placeholder="socks5://localhost:1080",
+            disabled=tor_overrides_network,
+            disabled_reason="Proxy settings are not used when Tor routing is enabled.",
+            show_when={"field": "PROXY_MODE", "value": "socks5"},
         ),
     ]
 
@@ -427,13 +459,13 @@ def download_settings():
             key="USE_BOOK_TITLE",
             label="Use Book Info as Filename",
             description="Save files using Author, Title and Year instead of ID. May cause issues with special characters.",
-            default=False,
+            default=True,
         ),
         CheckboxField(
             key="AUTO_OPEN_DOWNLOADS_SIDEBAR",
             label="Auto-Open Downloads Sidebar",
             description="Automatically open the downloads sidebar when a new download is queued.",
-            default=True,
+            default=False,
             env_supported=False,  # UI-only setting
         ),
         CheckboxField(
@@ -462,14 +494,15 @@ def download_settings():
         ),
         CheckboxField(
             key="USE_CONTENT_TYPE_DIRECTORIES",
-            label="Use Content-Type Subdirectories",
-            description="Save different content types (fiction, non-fiction, comics, etc.) to separate subdirectories.",
+            label="Configure Content-Type Directories",
+            description="Show options to specify custom directories for each content type (fiction, non-fiction, comics, etc.). If a directory is set, that content type will be saved there instead of the default download directory.",
             default=False,
+            env_supported=False,  # UI-only toggle to show/hide directory fields
         ),
         HeadingField(
             key="content_type_directories_heading",
             title="Content-Type Directories",
-            description="Configure where each content type is saved. Leave empty to use the default directory with an auto-generated subdirectory name.",
+            description="Specify custom directories for each content type. Leave empty to use the default download directory.",
             show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
         ),
         TextField(
@@ -610,29 +643,6 @@ def _get_default_source_priority():
 def download_source_settings():
     """Settings for download source behavior."""
     return [
-        SelectField(
-            key="AA_BASE_URL",
-            label="Anna's Archive URL",
-            description="Primary Anna's Archive mirror to use. 'auto' selects automatically.",
-            options=[
-                {"value": "auto", "label": "Auto (Recommended)"},
-                {"value": "https://annas-archive.org", "label": "annas-archive.org"},
-                {"value": "https://annas-archive.se", "label": "annas-archive.se"},
-                {"value": "https://annas-archive.li", "label": "annas-archive.li"},
-            ],
-            default="auto",
-        ),
-        TextField(
-            key="AA_ADDITIONAL_URLS",
-            label="Additional AA Mirrors",
-            description="Comma-separated list of additional Anna's Archive mirror URLs.",
-            placeholder="https://example.com,https://another.com",
-        ),
-        PasswordField(
-            key="AA_DONATOR_KEY",
-            label="Anna's Archive Donator Key",
-            description="Optional donator key for faster downloads from Anna's Archive.",
-        ),
         HeadingField(
             key="source_priority_heading",
             title="Source Priority",
@@ -660,6 +670,34 @@ def download_source_settings():
             default=5,
             min_value=1,
             max_value=60,
+        ),
+        HeadingField(
+            key="aa_settings_heading",
+            title="Anna's Archive",
+            description="Configure Anna's Archive mirror and donator settings.",
+        ),
+        SelectField(
+            key="AA_BASE_URL",
+            label="Anna's Archive URL",
+            description="Primary Anna's Archive mirror to use. 'auto' selects automatically.",
+            options=[
+                {"value": "auto", "label": "Auto (Recommended)"},
+                {"value": "https://annas-archive.org", "label": "annas-archive.org"},
+                {"value": "https://annas-archive.se", "label": "annas-archive.se"},
+                {"value": "https://annas-archive.li", "label": "annas-archive.li"},
+            ],
+            default="auto",
+        ),
+        TextField(
+            key="AA_ADDITIONAL_URLS",
+            label="Additional AA Mirrors",
+            description="Comma-separated list of additional Anna's Archive mirror URLs.",
+            placeholder="https://example.com,https://another.com",
+        ),
+        PasswordField(
+            key="AA_DONATOR_KEY",
+            label="Anna's Archive Donator Key",
+            description="Optional donator key for faster downloads from Anna's Archive.",
         ),
     ]
 
@@ -692,7 +730,7 @@ def cloudflare_bypass_settings():
         CheckboxField(
             key="USING_EXTERNAL_BYPASSER",
             label="Use External Bypasser",
-            description="Use FlareSolverr or similar external service instead of built-in bypasser.",
+            description="Use FlareSolverr or similar external service instead of built-in bypasser. Caution: May have limitations with custom DNS, Tor and proxies. You may experience slower downloads and and poorer reliability compared to the internal bypasser.",
             default=False,
             requires_restart=True,
         ),
@@ -740,28 +778,8 @@ def advanced_settings():
         CheckboxField(
             key="DEBUG",
             label="Debug Mode",
-            description="Enable verbose logging. Not recommended for normal use.",
+            description="Enable verbose logging to console and file. Not recommended for normal use.",
             default=False,
-            requires_restart=True,
-        ),
-        SelectField(
-            key="LOG_LEVEL",
-            label="Log Level",
-            description="Logging verbosity level.",
-            options=[
-                {"value": "DEBUG", "label": "Debug"},
-                {"value": "INFO", "label": "Info"},
-                {"value": "WARNING", "label": "Warning"},
-                {"value": "ERROR", "label": "Error"},
-            ],
-            default="INFO",
-            requires_restart=True,
-        ),
-        CheckboxField(
-            key="ENABLE_LOGGING",
-            label="Enable File Logging",
-            description="Write logs to file in addition to console output.",
-            default=True,
             requires_restart=True,
         ),
         NumberField(

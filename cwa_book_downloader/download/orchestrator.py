@@ -1,22 +1,104 @@
-"""Download queue orchestration and worker management."""
+"""Download queue orchestration and worker management.
+
+## Download Architecture
+
+All downloads follow a two-stage process:
+
+1. **Staging (TMP_DIR)**: Handlers download/copy files to a temp staging area.
+   - Direct downloads: Downloaded directly to staging
+   - Torrent downloads: Copied from torrent client's completed folder to staging
+   - NZB downloads: Moved from NZB client's completed folder to staging
+
+2. **Ingest (INGEST_DIR)**: Orchestrator moves staged files to the final location.
+   - Archive extraction (RAR/ZIP) happens here
+   - Custom scripts run here
+   - Final move to ingest folder
+
+This ensures:
+- Handlers don't need to know about ingest folder logic
+- Archive handling works uniformly for all sources
+- Single point of control for what enters the ingest folder
+"""
 
 import os
 import random
+import shutil
+import subprocess
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path
 from threading import Event, Lock
 from typing import Any, Dict, List, Optional, Tuple
 
 from cwa_book_downloader.release_sources import direct_download
 from cwa_book_downloader.release_sources.direct_download import SearchUnavailable
 from cwa_book_downloader.core.config import config
+from cwa_book_downloader.config.env import TMP_DIR, DOWNLOAD_PATHS, INGEST_DIR
+from cwa_book_downloader.download.archive import is_archive, process_archive
 from cwa_book_downloader.release_sources import get_handler, get_source_display_name
 from cwa_book_downloader.core.logger import setup_logger
 from cwa_book_downloader.core.models import BookInfo, DownloadTask, QueueStatus, SearchFilters
 from cwa_book_downloader.core.queue import book_queue
 
 logger = setup_logger(__name__)
+
+
+# =============================================================================
+# Staging Directory Helpers
+# =============================================================================
+# Handlers should use these to get paths in the staging area.
+# The orchestrator handles moving staged files to the ingest folder.
+
+def get_staging_dir() -> Path:
+    """Get the staging directory for downloads.
+
+    All handlers should stage their downloads here. The orchestrator
+    handles moving staged files to the final ingest location.
+    """
+    TMP_DIR.mkdir(parents=True, exist_ok=True)
+    return TMP_DIR
+
+
+def get_staging_path(task_id: str, extension: str) -> Path:
+    """Get a staging path for a download.
+
+    Args:
+        task_id: Unique task identifier
+        extension: File extension (e.g., 'epub', 'zip')
+
+    Returns:
+        Path in staging directory for this download
+    """
+    staging_dir = get_staging_dir()
+    return staging_dir / f"{task_id}.{extension.lstrip('.')}"
+
+
+def stage_file(source_path: Path, task_id: str, copy: bool = False) -> Path:
+    """Stage a file for ingest processing.
+
+    Use this when a download client has completed a download and the file
+    needs to be staged for orchestrator processing.
+
+    Args:
+        source_path: Path to the completed download
+        task_id: Unique task identifier
+        copy: If True, copy the file (for torrents). If False, move it.
+
+    Returns:
+        Path to the staged file
+    """
+    staging_dir = get_staging_dir()
+    staged_path = staging_dir / f"{task_id}{source_path.suffix}"
+
+    if copy:
+        shutil.copy2(str(source_path), str(staged_path))
+        logger.debug(f"Copied to staging: {source_path} -> {staged_path}")
+    else:
+        shutil.move(str(source_path), str(staged_path))
+        logger.debug(f"Moved to staging: {source_path} -> {staged_path}")
+
+    return staged_path
 
 # WebSocket manager (initialized by app.py)
 try:
@@ -100,6 +182,7 @@ def queue_book(book_id: str, priority: int = 0, source: str = "direct_download")
             format=book_info.format,
             size=book_info.size,
             preview=book_info.preview,
+            content_type=book_info.content,
             priority=priority,
         )
 
@@ -139,9 +222,10 @@ def queue_release(release_data: dict, priority: int = 0) -> bool:
         source = release_data.get('source', 'direct_download')
         extra = release_data.get('extra', {})
 
-        # Get author and preview from top-level (preferred) or extra (fallback)
+        # Get author, preview, and content_type from top-level (preferred) or extra (fallback)
         author = release_data.get('author') or extra.get('author')
         preview = release_data.get('preview') or extra.get('preview')
+        content_type = release_data.get('content_type') or extra.get('content_type')
 
         # Create a source-agnostic download task from release data
         task = DownloadTask(
@@ -152,6 +236,7 @@ def queue_release(release_data: dict, priority: int = 0) -> bool:
             format=release_data.get('format'),
             size=release_data.get('size'),
             preview=preview,
+            content_type=content_type,
             priority=priority,
         )
 
@@ -272,6 +357,7 @@ def _task_to_dict(task: DownloadTask) -> Dict[str, Any]:
         'format': task.format,
         'size': task.size,
         'preview': preview,
+        'content_type': task.content_type,
         'source': task.source,
         'source_display_name': get_source_display_name(task.source),
         'priority': task.priority,
@@ -287,7 +373,8 @@ def _download_task(task_id: str, cancel_flag: Event) -> Optional[str]:
     """Download a task with cancellation support.
 
     Delegates to the appropriate handler based on the task's source.
-    Each handler encapsulates all download and post-processing logic.
+    Handlers return a temp file path, orchestrator handles post-processing
+    (archive extraction, moving to ingest) uniformly for all sources.
 
     Args:
         task_id: Task identifier
@@ -313,11 +400,31 @@ def _download_task(task_id: str, cancel_flag: Event) -> Optional[str]:
 
         # Get the download handler based on the task's source
         handler = get_handler(task.source)
-        return handler.download(
+        temp_path = handler.download(
             task,
             cancel_flag,
             progress_callback,
             status_callback
+        )
+
+        # Handler returns temp path - orchestrator handles post-processing
+        if not temp_path:
+            return None
+
+        temp_file = Path(temp_path)
+        if not temp_file.exists():
+            logger.error(f"Handler returned non-existent path: {temp_path}")
+            return None
+
+        # Check cancellation before post-processing
+        if cancel_flag.is_set():
+            logger.info(f"Download cancelled before post-processing: {task_id}")
+            temp_file.unlink(missing_ok=True)
+            return None
+
+        # Post-processing: archive extraction or direct move to ingest
+        return _post_process_download(
+            temp_file, task, cancel_flag, status_callback
         )
 
     except Exception as e:
@@ -326,6 +433,105 @@ def _download_task(task_id: str, cancel_flag: Event) -> Optional[str]:
         else:
             logger.error_trace(f"Error downloading: {e}")
         return None
+
+
+def _post_process_download(
+    temp_file: Path,
+    task: DownloadTask,
+    cancel_flag: Event,
+    status_callback,
+) -> Optional[str]:
+    """Post-process a downloaded file: handle archives and move to ingest.
+
+    This runs uniformly for all download sources, ensuring consistent behavior.
+
+    Args:
+        temp_file: Path to downloaded file in temp directory
+        task: Download task with metadata
+        cancel_flag: Cancellation event
+        status_callback: Callback for status updates
+
+    Returns:
+        Final path in ingest directory, or None on failure
+    """
+    # Route to content-type-specific ingest directory if configured
+    content_type = task.content_type.lower() if task.content_type else None
+    ingest_dir = DOWNLOAD_PATHS.get(content_type, INGEST_DIR)
+    if content_type and ingest_dir != INGEST_DIR:
+        logger.debug(f"Routing content type '{content_type}' to {ingest_dir}")
+    os.makedirs(ingest_dir, exist_ok=True)
+
+    # Handle archive extraction (RAR/ZIP)
+    if is_archive(temp_file):
+        logger.info(f"Archive detected, extracting: {temp_file.name}")
+        status_callback("resolving", "Extracting archive...")
+
+        result = process_archive(
+            archive_path=temp_file,
+            temp_dir=TMP_DIR,
+            ingest_dir=ingest_dir,
+            archive_id=task.task_id,
+        )
+
+        if result.success:
+            status_callback("complete", result.message)
+            return str(result.final_paths[0])
+        else:
+            status_callback("error", result.error)
+            return None
+
+    # Non-archive: run custom script if configured, then move to ingest
+    if config.CUSTOM_SCRIPT:
+        logger.info(f"Running custom script: {config.CUSTOM_SCRIPT}")
+        subprocess.run([config.CUSTOM_SCRIPT, str(temp_file)])
+
+    # Check cancellation before final move
+    if cancel_flag.is_set():
+        logger.info(f"Download cancelled before ingest: {task.task_id}")
+        temp_file.unlink(missing_ok=True)
+        return None
+
+    # Generate filename and move to ingest
+    filename = task.get_filename()
+    if not filename:
+        filename = f"{task.task_id}.{task.format or 'bin'}"
+
+    final_path = ingest_dir / filename
+
+    # Handle duplicate filenames
+    if final_path.exists():
+        base = final_path.stem
+        ext = final_path.suffix
+        counter = 1
+        while final_path.exists():
+            final_path = ingest_dir / f"{base}_{counter}{ext}"
+            counter += 1
+        logger.info(f"File already exists, saving as: {final_path.name}")
+
+    # Use intermediate .crdownload file for atomic move
+    intermediate_path = ingest_dir / f"{task.task_id}.crdownload"
+
+    try:
+        shutil.move(str(temp_file), str(intermediate_path))
+    except Exception as e:
+        logger.debug(f"Error moving file: {e}, trying copy instead")
+        try:
+            shutil.copyfile(str(temp_file), str(intermediate_path))
+            temp_file.unlink(missing_ok=True)
+        except Exception as e2:
+            logger.error(f"Failed to move/copy file to ingest: {e2}")
+            return None
+
+    # Final cancellation check
+    if cancel_flag.is_set():
+        logger.info(f"Download cancelled before final rename: {task.task_id}")
+        intermediate_path.unlink(missing_ok=True)
+        return None
+
+    os.rename(str(intermediate_path), str(final_path))
+    logger.info(f"Download completed: {final_path.name}")
+
+    return str(final_path)
 
 def update_download_progress(book_id: str, progress: float) -> None:
     """Update download progress with throttled WebSocket broadcasts.
@@ -484,11 +690,12 @@ def _process_single_download(task_id: str, cancel_flag: Event) -> None:
 
         if download_path:
             book_queue.update_download_path(task_id, download_path)
-            new_status = QueueStatus.COMPLETE
+            # Only update status if not already set (e.g., by archive extraction callback)
+            task = book_queue.get_task(task_id)
+            if not task or task.status != QueueStatus.COMPLETE:
+                book_queue.update_status(task_id, QueueStatus.COMPLETE)
         else:
-            new_status = QueueStatus.ERROR
-
-        book_queue.update_status(task_id, new_status)
+            book_queue.update_status(task_id, QueueStatus.ERROR)
 
         # Broadcast final status (completed or error)
         if ws_manager:

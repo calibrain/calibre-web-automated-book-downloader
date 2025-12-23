@@ -134,7 +134,36 @@ else
 fi
 
 # Add environment variables (redacting sensitive info)
-env | grep -v -E "(AA_DONATOR_KEY)" | sort > "$LOG_DIR/environment.txt"
+env | grep -v -E "(AA_DONATOR_KEY|HARDCOVER_API_KEY|_KEY=|_SECRET=|_PASSWORD=|_TOKEN=)" | sort > "$LOG_DIR/environment.txt"
+
+# Add configuration files (redacting sensitive values)
+CONFIG_DIR=${CONFIG_DIR:-"/config"}
+if [ -d "$CONFIG_DIR" ]; then
+  mkdir -p "$LOG_DIR/config"
+
+  # Copy and redact main settings file
+  if [ -f "$CONFIG_DIR/settings.json" ]; then
+    # Redact sensitive fields (API keys, passwords, tokens)
+    sed -E 's/("(AA_DONATOR_KEY|HARDCOVER_API_KEY|[^"]*_KEY|[^"]*_SECRET|[^"]*_PASSWORD|[^"]*_TOKEN)"[[:space:]]*:[[:space:]]*")[^"]+"/\1[REDACTED]"/g' \
+      "$CONFIG_DIR/settings.json" > "$LOG_DIR/config/settings.json" 2>/dev/null
+  fi
+
+  # Copy and redact plugin config files
+  if [ -d "$CONFIG_DIR/plugins" ]; then
+    mkdir -p "$LOG_DIR/config/plugins"
+    for config_file in "$CONFIG_DIR/plugins"/*.json; do
+      if [ -f "$config_file" ]; then
+        filename=$(basename "$config_file")
+        sed -E 's/("(AA_DONATOR_KEY|HARDCOVER_API_KEY|[^"]*_KEY|[^"]*_SECRET|[^"]*_PASSWORD|[^"]*_TOKEN)"[[:space:]]*:[[:space:]]*")[^"]+"/\1[REDACTED]"/g' \
+          "$config_file" > "$LOG_DIR/config/plugins/$filename" 2>/dev/null
+      fi
+    done
+  fi
+
+  echo "Configuration files copied (sensitive values redacted)" >> "$LOG_DIR/container_info.txt"
+else
+  echo "Config directory not found at $CONFIG_DIR" >> "$LOG_DIR/container_info.txt"
+fi
 
 echo "--- HTTPBin ---" >> $LOG_DIR/network_info.txt
 curl -s https://httpbin.org/get >> $LOG_DIR/network_info.txt 2>&1

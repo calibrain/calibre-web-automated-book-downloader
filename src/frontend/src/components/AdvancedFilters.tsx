@@ -7,7 +7,7 @@ import { DropdownList } from './DropdownList';
 import { CONTENT_OPTIONS } from '../data/filterOptions';
 import { SearchFieldRenderer } from './shared';
 
-const FORMAT_TYPES = ['pdf', 'epub', 'mobi', 'azw3', 'fb2', 'djvu', 'cbz', 'cbr'] as const;
+const FORMAT_TYPES = ['pdf', 'epub', 'mobi', 'azw3', 'fb2', 'djvu', 'cbz', 'cbr', 'zip', 'rar'] as const;
 
 interface AdvancedFiltersProps {
   visible: boolean;

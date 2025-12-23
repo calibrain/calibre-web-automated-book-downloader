@@ -4,8 +4,6 @@ import itertools
 import json
 import os
 import re
-import shutil
-import subprocess
 import time
 from pathlib import Path
 from threading import Event
@@ -994,7 +992,7 @@ class DirectDownloadSource(ReleaseSource):
                 logger.debug(f"No results from ISBN search, falling back to title+author")
             except SearchUnavailable:
                 logger.warning("Direct download search unavailable during ISBN search")
-                # Fall through to title search
+                raise  # Service unreachable - no point trying title search
             except Exception as e:
                 logger.warning(f"ISBN search failed, falling back to title+author: {e}")
                 # Fall through to title search
@@ -1022,10 +1020,10 @@ class DirectDownloadSource(ReleaseSource):
             return [_book_info_to_release(bi) for bi in book_infos]
         except SearchUnavailable:
             logger.warning("Direct download search unavailable")
-            return []
+            raise  # Re-raise so the API endpoint can report the error
         except Exception as e:
             logger.error(f"Error searching direct download source: {e}")
-            return []
+            raise  # Re-raise so the API endpoint can report the error
 
     def search_raw(self, query: str, filters: SearchFilters) -> List[BookInfo]:
         """
@@ -1153,67 +1151,8 @@ class DirectDownloadHandler(DownloadHandler):
                 status_callback("error", "All download sources failed")
                 return None
 
-            # Check cancellation before post-processing
-            if cancel_flag.is_set():
-                logger.info(f"Download cancelled before post-processing: {book_info.id}")
-                if book_path.exists():
-                    book_path.unlink()
-                return None
-
-            logger.debug(f"Post-processing download: {book_info.title}")
-
-            # Run custom script if configured
-            if config.CUSTOM_SCRIPT:
-                logger.info(f"Running custom script: {config.CUSTOM_SCRIPT}")
-                subprocess.run([config.CUSTOM_SCRIPT, str(book_path)])
-
-            # Regenerate filename with fallback to successful download URL for format
-            full_name = book_info.get_filename(success_url)
-            book_name = full_name if config.USE_BOOK_TITLE else f"{book_info.id}.{book_info.format or 'bin'}"
-
-            # Determine final directory based on content type
-            content = book_info.content
-            final_dir = DOWNLOAD_PATHS.get(content) if content and content in DOWNLOAD_PATHS else Path(config.INGEST_DIR)
-            os.makedirs(final_dir, exist_ok=True)
-
-            intermediate_path = final_dir / f"{book_info.id}.crdownload"
-            final_path = final_dir / book_name
-
-            # Handle file already exists - add suffix to avoid overwrite
-            if final_path.exists():
-                base = final_path.stem
-                ext = final_path.suffix
-                counter = 1
-                while final_path.exists():
-                    final_path = final_dir / f"{base}_{counter}{ext}"
-                    counter += 1
-                logger.info(f"File already exists, saving as: {final_path.name}")
-
-            # Move file to final destination
-            if book_path.exists():
-                logger.info(f"Moving book to ingest directory: {book_path} -> {final_path}")
-                try:
-                    shutil.move(str(book_path), str(intermediate_path))
-                except Exception as e:
-                    try:
-                        logger.debug(f"Error moving book: {e}, will try copying instead")
-                        shutil.copyfile(str(book_path), str(intermediate_path))
-                        os.remove(str(book_path))
-                    except Exception as e2:
-                        logger.debug(f"Error copying book: {e2}")
-                        raise
-
-                # Final cancellation check before completing
-                if cancel_flag.is_set():
-                    logger.info(f"Download cancelled before final rename: {book_info.id}")
-                    if intermediate_path.exists():
-                        intermediate_path.unlink()
-                    return None
-
-                os.rename(str(intermediate_path), str(final_path))
-                logger.info(f"Download completed successfully: {book_info.title}")
-
-            return str(final_path)
+            # Return temp path - orchestrator handles post-processing (archive extraction, ingest)
+            return str(book_path)
 
         except Exception as e:
             if cancel_flag.is_set():
