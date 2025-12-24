@@ -208,6 +208,7 @@ def prowlarr_config_settings():
             title="Indexer Selection",
             description="Select which indexers to search. 📚 = has book categories. "
                        "Leave empty to search all.",
+            show_when={"field": "PROWLARR_URL", "notEmpty": True},
         ),
         MultiSelectField(
             key="PROWLARR_INDEXERS",
@@ -215,6 +216,7 @@ def prowlarr_config_settings():
             description="Select specific indexers or leave empty for all",
             options=_get_indexer_options,
             default=[],
+            show_when={"field": "PROWLARR_URL", "notEmpty": True},
         ),
     ]
 
@@ -277,16 +279,8 @@ def prowlarr_clients_settings():
             callback=_test_qbittorrent_connection,
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
         ),
-        TextField(
-            key="QBITTORRENT_DOWNLOAD_PATH",
-            label="Download Path",
-            description="Path where qBittorrent saves files (as seen by this container)",
-            placeholder="/downloads",
-            default="/downloads",
-            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
-        ),
-        # Note: Torrents always copy (not move) to preserve seeding capability.
-        # Hardlinks aren't viable because the ingest folder consumes files.
+        # Note: qBittorrent's download path must be mounted identically in both containers.
+        # Torrents are always copied (not moved) to preserve seeding capability.
 
         # --- Usenet Client Selection ---
         HeadingField(
@@ -335,14 +329,7 @@ def prowlarr_clients_settings():
             callback=_test_nzbget_connection,
             show_when={"field": "PROWLARR_USENET_CLIENT", "value": "nzbget"},
         ),
-        TextField(
-            key="NZBGET_DOWNLOAD_PATH",
-            label="Download Path",
-            description="Path where NZBGet saves completed files (as seen by this container)",
-            placeholder="/downloads",
-            default="/downloads",
-            show_when={"field": "PROWLARR_USENET_CLIENT", "value": "nzbget"},
-        ),
+        # Note: NZBGet's download path must be mounted identically in both containers.
         SelectField(
             key="PROWLARR_USENET_ACTION",
             label="Completion Action",

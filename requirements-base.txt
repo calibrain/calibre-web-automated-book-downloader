@@ -12,3 +12,4 @@ gevent-websocket
 psutil
 emoji
 rarfile
+qbittorrent-api

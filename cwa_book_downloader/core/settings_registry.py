@@ -24,7 +24,7 @@ class FieldBase:
     env_supported: bool = True            # Whether this setting can be set via ENV var (False = UI-only)
     disabled: bool = False                # Whether field is disabled/greyed out
     disabled_reason: str = ""             # Explanation shown when disabled
-    show_when: Optional[Dict[str, Any]] = None  # Conditional visibility: {"field": "key", "value": "expected"}
+    show_when: Optional[Dict[str, Any]] = None  # Conditional visibility: {"field": "key", "value": "expected"} or {"field": "key", "notEmpty": True}
     disabled_when: Optional[Dict[str, Any]] = None  # Conditional disable: {"field": "key", "value": "expected", "reason": "..."}
     requires_restart: bool = False        # Whether changing this setting requires a container restart
 
@@ -117,7 +117,7 @@ class ActionButton:
     callback: Optional[Callable[[], Dict[str, Any]]] = None  # Returns {"success": bool, "message": str}
     disabled: bool = False                # Whether button is disabled/greyed out
     disabled_reason: str = ""             # Explanation shown when disabled
-    show_when: Optional[Dict[str, Any]] = None  # Conditional visibility: {"field": "key", "value": "expected"}
+    show_when: Optional[Dict[str, Any]] = None  # Conditional visibility: {"field": "key", "value": "expected"} or {"field": "key", "notEmpty": True}
     disabled_when: Optional[Dict[str, Any]] = None  # Conditional disable: {"field": "key", "value": "expected", "reason": "..."}
 
     def get_field_type(self) -> str:
@@ -137,7 +137,7 @@ class HeadingField:
     description: str = ""                 # Description text (supports markdown-style links)
     link_url: str = ""                    # Optional URL for a link
     link_text: str = ""                   # Text for the link (defaults to URL if not provided)
-    show_when: Optional[Dict[str, Any]] = None  # Conditional visibility: {"field": "key", "value": "expected"}
+    show_when: Optional[Dict[str, Any]] = None  # Conditional visibility: {"field": "key", "value": "expected"} or {"field": "key", "notEmpty": True}
 
     def get_field_type(self) -> str:
         return "HeadingField"

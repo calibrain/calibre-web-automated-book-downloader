@@ -31,7 +31,6 @@ class NZBGetClient(DownloadClient):
         self.url = config.get("NZBGET_URL", "").rstrip("/")
         self.username = config.get("NZBGET_USERNAME", "nzbget")
         self.password = config.get("NZBGET_PASSWORD", "")
-        self.download_path = config.get("NZBGET_DOWNLOAD_PATH", "/downloads")
 
     @staticmethod
     def is_configured() -> bool:

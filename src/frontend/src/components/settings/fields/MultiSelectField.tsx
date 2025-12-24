@@ -68,10 +68,11 @@ export const MultiSelectField = ({ field, value, onChange, disabled }: MultiSele
     }
   }, [selected, field.options]);
 
-  // Update sortedOptions when field.options changes (e.g., different field)
+  // Update sortedOptions when field itself changes (different field or options refreshed)
   useEffect(() => {
     setSortedOptions(sortOptionsWithSelectedFirst(field.options, selected));
-  }, [field.key]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally omit 'selected' to avoid re-sorting on user toggle
+  }, [field.key, field.options]);
 
   // Verify collapse need after render (handles edge cases where few options still fit)
   useEffect(() => {

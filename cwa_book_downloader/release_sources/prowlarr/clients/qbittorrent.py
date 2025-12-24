@@ -124,7 +124,6 @@ class QBittorrentClient(DownloadClient):
             username=config.get("QBITTORRENT_USERNAME", ""),
             password=config.get("QBITTORRENT_PASSWORD", ""),
         )
-        self._download_path = config.get("QBITTORRENT_DOWNLOAD_PATH", "/downloads")
 
     @staticmethod
     def is_configured() -> bool:
