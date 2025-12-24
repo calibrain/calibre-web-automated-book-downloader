@@ -36,7 +36,6 @@ from cwa_book_downloader.release_sources import direct_download
 from cwa_book_downloader.release_sources.direct_download import SearchUnavailable
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.config.env import TMP_DIR, DOWNLOAD_PATHS, INGEST_DIR
-from cwa_book_downloader.config.settings import SUPPORTED_FORMATS
 from cwa_book_downloader.download.archive import is_archive, process_archive
 from cwa_book_downloader.release_sources import get_handler, get_source_display_name
 from cwa_book_downloader.core.logger import setup_logger
@@ -111,23 +110,38 @@ def stage_file(source_path: Path, task_id: str, copy: bool = False) -> Path:
     return staged_path
 
 
-def _find_book_files_in_directory(directory: Path) -> List[Path]:
+def _get_supported_formats() -> List[str]:
+    """Get current supported formats from config singleton."""
+    formats = config.get("SUPPORTED_FORMATS", ["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"])
+    # Handle both list (from MultiSelectField) and comma-separated string (legacy/env)
+    if isinstance(formats, str):
+        return [fmt.strip().lower() for fmt in formats.split(",") if fmt.strip()]
+    return [fmt.lower() for fmt in formats]
+
+
+def _find_book_files_in_directory(directory: Path) -> Tuple[List[Path], List[Path]]:
     """Find all book files in a directory matching SUPPORTED_FORMATS.
 
     Args:
         directory: Directory to search recursively
 
     Returns:
-        List of paths to book files found
+        Tuple of (matching book files, rejected files with unsupported extensions)
     """
     book_files = []
-    supported_exts = {f".{fmt.lower()}" for fmt in SUPPORTED_FORMATS}
+    rejected_files = []
+    supported_formats = _get_supported_formats()
+    supported_exts = {f".{fmt}" for fmt in supported_formats}
 
     for file_path in directory.rglob("*"):
-        if file_path.is_file() and file_path.suffix.lower() in supported_exts:
-            book_files.append(file_path)
+        if file_path.is_file():
+            if file_path.suffix.lower() in supported_exts:
+                book_files.append(file_path)
+            elif file_path.suffix.lower() in {'.pdf', '.epub', '.mobi', '.azw', '.azw3', '.fb2', '.djvu', '.cbz', '.cbr', '.doc', '.docx', '.rtf', '.txt'}:
+                # Track ebook-like files that were rejected due to format settings
+                rejected_files.append(file_path)
 
-    return book_files
+    return book_files, rejected_files
 
 
 def process_directory(
@@ -148,14 +162,30 @@ def process_directory(
         Tuple of (list of final paths, error message if failed)
     """
     try:
-        book_files = _find_book_files_in_directory(directory)
+        book_files, rejected_files = _find_book_files_in_directory(directory)
 
         if not book_files:
             # Clean up empty directory
             shutil.rmtree(directory, ignore_errors=True)
+
+            if rejected_files:
+                # Files were found but didn't match supported formats
+                rejected_exts = sorted(set(f.suffix.lower() for f in rejected_files))
+                rejected_list = ", ".join(rejected_exts)
+                supported_formats = _get_supported_formats()
+                logger.warning(
+                    f"Found {len(rejected_files)} file(s) but none match supported formats. "
+                    f"Rejected formats: {rejected_list}. Supported: {', '.join(sorted(supported_formats))}"
+                )
+                return [], f"Found {len(rejected_files)} file(s) but format not supported ({rejected_list}). Enable in Settings > Formats."
+
             return [], "No book files found in download"
 
         logger.info(f"Found {len(book_files)} book file(s) in directory")
+
+        if rejected_files:
+            rejected_exts = sorted(set(f.suffix.lower() for f in rejected_files))
+            logger.debug(f"Also found {len(rejected_files)} file(s) with unsupported formats: {', '.join(rejected_exts)}")
 
         # Move each book file to ingest
         final_paths = []
@@ -164,6 +194,10 @@ def process_directory(
             # since metadata title only applies to the searched book, not the whole pack.
             # For single files, respect USE_BOOK_TITLE setting.
             if len(book_files) == 1 and config.USE_BOOK_TITLE:
+                # Update task format from actual file if not already set
+                # (Prowlarr releases may not know the format until download completes)
+                if not task.format:
+                    task.format = book_file.suffix.lower().lstrip('.')
                 filename = task.get_filename() or book_file.name
             else:
                 filename = book_file.name

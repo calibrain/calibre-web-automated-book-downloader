@@ -1,12 +1,11 @@
 """
-qBittorrent download client for Prowlarr integration.
+Transmission download client for Prowlarr integration.
 
-Uses the qbittorrent-api library to communicate with qBittorrent's Web API.
+Uses the transmission-rpc library to communicate with Transmission's RPC API.
 """
 
 import hashlib
 import re
-import time
 from typing import Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
@@ -23,10 +22,10 @@ from cwa_book_downloader.release_sources.prowlarr.clients import (
 logger = setup_logger(__name__)
 
 
+# Reuse the bencode functions from qbittorrent module for hash extraction
 def _bencode_decode(data: bytes) -> tuple:
     """Simple bencode decoder. Returns (decoded_value, remaining_bytes)."""
     if data[0:1] == b'd':
-        # Dictionary
         result = {}
         data = data[1:]
         while data[0:1] != b'e':
@@ -35,7 +34,6 @@ def _bencode_decode(data: bytes) -> tuple:
             result[key] = value
         return result, data[1:]
     elif data[0:1] == b'l':
-        # List
         result = []
         data = data[1:]
         while data[0:1] != b'e':
@@ -43,11 +41,9 @@ def _bencode_decode(data: bytes) -> tuple:
             result.append(value)
         return result, data[1:]
     elif data[0:1] == b'i':
-        # Integer
         end = data.index(b'e')
         return int(data[1:end]), data[end + 1:]
     elif data[0:1].isdigit():
-        # String (byte string)
         colon = data.index(b':')
         length = int(data[:colon])
         start = colon + 1
@@ -56,34 +52,9 @@ def _bencode_decode(data: bytes) -> tuple:
         raise ValueError(f"Invalid bencode data: {data[:20]}")
 
 
-def _extract_info_hash_from_torrent(torrent_data: bytes) -> Optional[str]:
-    """Extract info_hash from raw .torrent file data."""
-    try:
-        decoded, _ = _bencode_decode(torrent_data)
-        if b'info' not in decoded:
-            return None
-
-        # Find the raw info dict bytes to hash
-        # We need to find where 'info' dict starts and ends in the original data
-        info_start = torrent_data.find(b'4:info') + 6
-        if info_start < 6:
-            return None
-
-        # Re-encode the info dict to get consistent bytes for hashing
-        info_dict = decoded[b'info']
-        info_bencoded = _bencode_encode(info_dict)
-
-        # SHA1 hash of the info dict is the info_hash
-        return hashlib.sha1(info_bencoded).hexdigest().lower()
-    except Exception as e:
-        logger.debug(f"Failed to parse torrent file: {e}")
-        return None
-
-
 def _bencode_encode(data) -> bytes:
     """Simple bencode encoder."""
     if isinstance(data, dict):
-        # Keys must be sorted
         result = b'd'
         for key in sorted(data.keys()):
             result += _bencode_encode(key)
@@ -107,38 +78,69 @@ def _bencode_encode(data) -> bytes:
         raise ValueError(f"Cannot bencode type: {type(data)}")
 
 
+def _extract_info_hash_from_torrent(torrent_data: bytes) -> Optional[str]:
+    """Extract info_hash from raw .torrent file data."""
+    try:
+        decoded, _ = _bencode_decode(torrent_data)
+        if b'info' not in decoded:
+            return None
+
+        info_dict = decoded[b'info']
+        info_bencoded = _bencode_encode(info_dict)
+
+        return hashlib.sha1(info_bencoded).hexdigest().lower()
+    except Exception as e:
+        logger.debug(f"Failed to parse torrent file: {e}")
+        return None
+
+
 @register_client("torrent")
-class QBittorrentClient(DownloadClient):
-    """qBittorrent download client."""
+class TransmissionClient(DownloadClient):
+    """Transmission download client using transmission-rpc library."""
 
     protocol = "torrent"
-    name = "qbittorrent"
+    name = "transmission"
 
     def __init__(self):
-        """Initialize qBittorrent client with settings from config."""
-        # Lazy import to avoid dependency issues if not using torrents
-        from qbittorrentapi import Client
+        """Initialize Transmission client with settings from config."""
+        from transmission_rpc import Client
+
+        url = config.get("TRANSMISSION_URL", "")
+        username = config.get("TRANSMISSION_USERNAME", "")
+        password = config.get("TRANSMISSION_PASSWORD", "")
+
+        # Parse URL to extract host, port, and path
+        parsed = urlparse(url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 9091
+        path = parsed.path or "/transmission/rpc"
+
+        # Ensure path ends with /rpc
+        if not path.endswith("/rpc"):
+            path = path.rstrip("/") + "/transmission/rpc"
 
         self._client = Client(
-            host=config.get("QBITTORRENT_URL", ""),
-            username=config.get("QBITTORRENT_USERNAME", ""),
-            password=config.get("QBITTORRENT_PASSWORD", ""),
+            host=host,
+            port=port,
+            path=path,
+            username=username if username else None,
+            password=password if password else None,
         )
-        self._category = config.get("QBITTORRENT_CATEGORY", "cwabd")
+        self._category = config.get("TRANSMISSION_CATEGORY", "cwabd")
 
     @staticmethod
     def is_configured() -> bool:
-        """Check if qBittorrent is configured and selected as the torrent client."""
+        """Check if Transmission is configured and selected as the torrent client."""
         client = config.get("PROWLARR_TORRENT_CLIENT", "")
-        url = config.get("QBITTORRENT_URL", "")
-        return client == "qbittorrent" and bool(url)
+        url = config.get("TRANSMISSION_URL", "")
+        return client == "transmission" and bool(url)
 
     def test_connection(self) -> Tuple[bool, str]:
-        """Test connection to qBittorrent."""
+        """Test connection to Transmission."""
         try:
-            self._client.auth_log_in()
-            version = self._client.app.version
-            return True, f"Connected to qBittorrent {version}"
+            session = self._client.get_session()
+            version = session.version
+            return True, f"Connected to Transmission {version}"
         except Exception as e:
             return False, f"Connection failed: {str(e)}"
 
@@ -147,21 +149,16 @@ class QBittorrentClient(DownloadClient):
         if not magnet_url.startswith("magnet:"):
             return None
 
-        # Parse the magnet URL
         parsed = urlparse(magnet_url)
         params = parse_qs(parsed.query)
 
-        # Get the xt (exact topic) parameter
         xt_list = params.get("xt", [])
         for xt in xt_list:
-            # Format: urn:btih:<hash>
             match = re.match(r"urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})", xt)
             if match:
                 hash_value = match.group(1)
-                # Convert base32 to hex if needed (32 chars = base32, 40 chars = hex)
                 if len(hash_value) == 32:
                     import base64
-
                     try:
                         decoded = base64.b32decode(hash_value.upper())
                         return decoded.hex().lower()
@@ -188,12 +185,6 @@ class QBittorrentClient(DownloadClient):
         try:
             # Use configured category if not explicitly provided
             category = category or self._category
-
-            # Ensure category exists
-            try:
-                self._client.torrents_create_category(name=category)
-            except Exception:
-                pass  # Category may already exist
 
             # Try to extract hash from magnet URL before adding
             expected_hash = self._extract_hash_from_magnet(url)
@@ -222,50 +213,34 @@ class QBittorrentClient(DownloadClient):
 
             logger.debug(f"Expected hash: {expected_hash}")
 
-            # Add the torrent - use file content if we have it, otherwise URL
+            # Add the torrent
             if torrent_data:
-                result = self._client.torrents_add(
-                    torrent_files=torrent_data,
-                    category=category,
-                    rename=name,
+                # Add from torrent file content (pass raw bytes, library handles encoding)
+                torrent = self._client.add_torrent(
+                    torrent=torrent_data,
+                    labels=[category],
                 )
             else:
-                result = self._client.torrents_add(
-                    urls=url,
-                    category=category,
-                    rename=name,
+                # Add from URL or magnet
+                torrent = self._client.add_torrent(
+                    torrent=url,
+                    labels=[category],
                 )
 
-            logger.debug(f"qBittorrent add result: {result}")
+            # Get the hash from the returned torrent
+            torrent_hash = torrent.hashString.lower()
+            logger.info(f"Added torrent to Transmission: {torrent_hash}")
 
-            if result == "Ok.":
-                if expected_hash:
-                    # We know the hash - verify it was added
-                    for attempt in range(10):
-                        torrents = self._client.torrents_info(
-                            torrent_hashes=expected_hash
-                        )
-                        if torrents:
-                            logger.info(f"Added torrent to qBittorrent: {expected_hash}")
-                            return expected_hash
-                        time.sleep(0.5)
-
-                    # qBittorrent said Ok, trust it even if we can't find it yet
-                    logger.warning(
-                        f"qBittorrent returned Ok but torrent not yet visible. "
-                        f"Returning expected hash: {expected_hash}"
-                    )
-                    return expected_hash
-
-                # No hash available - this shouldn't happen often
-                raise Exception(
-                    "Could not determine torrent hash. "
-                    "Try using a magnet link instead."
+            # Verify hash matches if we extracted one
+            if expected_hash and torrent_hash != expected_hash:
+                logger.warning(
+                    f"Hash mismatch: expected {expected_hash}, got {torrent_hash}"
                 )
 
-            raise Exception(f"Failed to add torrent: {result}")
+            return torrent_hash
+
         except Exception as e:
-            logger.error(f"qBittorrent add failed: {e}")
+            logger.error(f"Transmission add failed: {e}")
             raise
 
     def get_status(self, download_id: str) -> DownloadStatus:
@@ -279,63 +254,74 @@ class QBittorrentClient(DownloadClient):
             Current download status.
         """
         try:
-            torrents = self._client.torrents_info(torrent_hashes=download_id)
-            if not torrents:
-                return DownloadStatus(
-                    progress=0,
-                    state="error",
-                    message="Torrent not found",
-                    complete=False,
-                    file_path=None,
-                )
+            torrent = self._client.get_torrent(download_id)
 
-            torrent = torrents[0]
-
-            # Map qBittorrent states to our states and user-friendly messages
-            state_info = {
-                "downloading": ("downloading", None),  # None = use default progress message
-                "stalledDL": ("downloading", "Stalled"),
-                "metaDL": ("downloading", "Fetching metadata"),
-                "forcedDL": ("downloading", None),
-                "allocating": ("downloading", "Allocating space"),
-                "uploading": ("seeding", "Seeding"),
-                "stalledUP": ("seeding", "Seeding (stalled)"),
-                "forcedUP": ("seeding", "Seeding"),
-                "pausedDL": ("paused", "Paused"),
-                "pausedUP": ("paused", "Paused"),
-                "queuedDL": ("queued", "Queued"),
-                "queuedUP": ("queued", "Queued"),
-                "checkingDL": ("checking", "Checking files"),
-                "checkingUP": ("checking", "Checking files"),
-                "checkingResumeData": ("checking", "Checking resume data"),
-                "moving": ("processing", "Moving files"),
-                "error": ("error", "Error"),
-                "missingFiles": ("error", "Missing files"),
-                "unknown": ("unknown", "Unknown state"),
+            # Transmission status values:
+            # 0: stopped
+            # 1: check pending
+            # 2: checking
+            # 3: download pending
+            # 4: downloading
+            # 5: seed pending
+            # 6: seeding
+            # torrent.status is an enum with .value as string
+            status_value = torrent.status.value if hasattr(torrent.status, 'value') else str(torrent.status)
+            status_map = {
+                "stopped": ("paused", "Paused"),
+                "check pending": ("checking", "Waiting to check"),
+                "checking": ("checking", "Checking files"),
+                "download pending": ("queued", "Waiting to download"),
+                "downloading": ("downloading", "Downloading"),
+                "seed pending": ("processing", "Moving files"),
+                "seeding": ("seeding", "Seeding"),
             }
 
-            state, message = state_info.get(torrent.state, ("unknown", torrent.state))
-            complete = torrent.progress >= 1.0
+            state, message = status_map.get(status_value, ("downloading", "Downloading"))
+            progress = torrent.percent_done * 100
+            # Only mark complete when seeding - seed pending means files still being moved
+            complete = progress >= 100 and status_value == "seeding"
 
-            # For active downloads without a special message, leave message as None
-            # so the handler can build the progress message
             if complete:
                 message = "Download complete"
 
-            # Only include ETA if it's reasonable (less than 1 week)
-            eta = torrent.eta if 0 < torrent.eta < 604800 else None
+            # Get ETA if available and reasonable (less than 1 week)
+            eta = None
+            if hasattr(torrent, 'eta') and torrent.eta:
+                eta_seconds = torrent.eta.total_seconds()
+                if 0 < eta_seconds < 604800:
+                    eta = int(eta_seconds)
+
+            # Get download speed
+            download_speed = torrent.rate_download if hasattr(torrent, 'rate_download') else None
+
+            # Get file path for completed downloads
+            file_path = None
+            if complete:
+                download_dir = torrent.download_dir
+                name = torrent.name
+                file_path = f"{download_dir}/{name}"
 
             return DownloadStatus(
-                progress=torrent.progress * 100,
+                progress=progress,
                 state="complete" if complete else state,
                 message=message,
                 complete=complete,
-                file_path=torrent.content_path if complete else None,
-                download_speed=torrent.dlspeed,
+                file_path=file_path,
+                download_speed=download_speed,
                 eta=eta,
             )
+
+        except KeyError:
+            # Torrent not found
+            return DownloadStatus(
+                progress=0,
+                state="error",
+                message="Torrent not found",
+                complete=False,
+                file_path=None,
+            )
         except Exception as e:
-            logger.error(f"qBittorrent get_status failed: {e}")
+            logger.error(f"Transmission get_status failed: {e}")
             return DownloadStatus(
                 progress=0,
                 state="error",
@@ -346,7 +332,7 @@ class QBittorrentClient(DownloadClient):
 
     def remove(self, download_id: str, delete_files: bool = False) -> bool:
         """
-        Remove a torrent from qBittorrent.
+        Remove a torrent from Transmission.
 
         Args:
             download_id: Torrent info_hash
@@ -356,16 +342,17 @@ class QBittorrentClient(DownloadClient):
             True if successful.
         """
         try:
-            self._client.torrents_delete(
-                torrent_hashes=download_id, delete_files=delete_files
+            self._client.remove_torrent(
+                download_id,
+                delete_data=delete_files,
             )
             logger.info(
-                f"Removed torrent from qBittorrent: {download_id}"
+                f"Removed torrent from Transmission: {download_id}"
                 + (" (with files)" if delete_files else "")
             )
             return True
         except Exception as e:
-            logger.error(f"qBittorrent remove failed: {e}")
+            logger.error(f"Transmission remove failed: {e}")
             return False
 
     def get_download_path(self, download_id: str) -> Optional[str]:
@@ -379,19 +366,16 @@ class QBittorrentClient(DownloadClient):
             Content path (file or directory), or None.
         """
         try:
-            torrents = self._client.torrents_info(torrent_hashes=download_id)
-            if torrents:
-                return torrents[0].content_path
-            return None
+            torrent = self._client.get_torrent(download_id)
+            download_dir = torrent.download_dir
+            name = torrent.name
+            return f"{download_dir}/{name}"
         except Exception:
             return None
 
     def find_existing(self, url: str) -> Optional[Tuple[str, DownloadStatus]]:
         """
-        Check if a torrent for this URL already exists in qBittorrent.
-
-        Extracts the info_hash from the magnet link or .torrent file and
-        checks if qBittorrent already has this torrent.
+        Check if a torrent for this URL already exists in Transmission.
 
         Args:
             url: Magnet link or .torrent URL
@@ -418,14 +402,15 @@ class QBittorrentClient(DownloadClient):
                 logger.debug("Could not extract hash from URL")
                 return None
 
-            # Check if this torrent exists in qBittorrent
-            torrents = self._client.torrents_info(torrent_hashes=expected_hash)
-            if torrents:
+            # Check if this torrent exists in Transmission
+            try:
+                torrent = self._client.get_torrent(expected_hash)
                 status = self.get_status(expected_hash)
-                logger.info(f"Found existing torrent in qBittorrent: {expected_hash} (state: {status.state})")
+                logger.info(f"Found existing torrent in Transmission: {expected_hash} (state: {status.state})")
                 return (expected_hash, status)
-
-            return None
+            except KeyError:
+                # Torrent not found
+                return None
 
         except Exception as e:
             logger.debug(f"Error checking for existing torrent: {e}")

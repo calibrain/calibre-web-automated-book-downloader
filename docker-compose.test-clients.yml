@@ -1,0 +1,103 @@
+# Test stack for download client development
+# Includes cwabd + all download clients on same network with shared volumes
+#
+# Usage:
+#   docker compose -f docker-compose.test-clients.yml up -d
+#   # Access cwabd at http://localhost:8084
+#   # Configure clients in Settings > Prowlarr > Download Clients
+#
+# Hot-reload: Python code changes are picked up automatically (source mounted)
+# Rebuild needed only for: requirements changes, frontend changes, Dockerfile changes
+
+services:
+  # ============ MAIN APPLICATION ============
+
+  cwabd:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: cwa-bd
+    container_name: test-cwabd
+    environment:
+      TZ: UTC
+      DEBUG: "true"
+      # All client configuration is done via Settings UI
+      # Use Docker service names for URLs:
+      #   - Transmission: http://transmission:9091
+      #   - Deluge host: deluge (port 58846)
+      #   - SABnzbd: http://sabnzbd:8080
+    ports:
+      - "8084:8084"
+    volumes:
+      # Config and state
+      - ./.local/test-clients/cwabd/config:/config
+      - ./.local/test-clients/cwabd/log:/var/log/cwa-book-downloader
+      # Ingest directory (where completed books go)
+      - ./.local/test-clients/ingest:/cwa-book-ingest
+      # Staging directory
+      - ./.local/test-clients/tmp:/tmp/cwa-book-downloader
+      # CRITICAL: Mount client download directories so cwabd can access completed files
+      - ./.local/test-clients/downloads:/downloads
+      # Mount source code for hot-reload (no rebuild needed for Python changes)
+      - ./cwa_book_downloader:/app/cwa_book_downloader:ro
+    depends_on:
+      - sabnzbd
+      - transmission
+      - deluge
+    restart: unless-stopped
+
+  # ============ USENET CLIENTS ============
+
+  sabnzbd:
+    image: lscr.io/linuxserver/sabnzbd:latest
+    container_name: test-sabnzbd
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ./.local/test-clients/sabnzbd/config:/config
+      - ./.local/test-clients/downloads:/downloads
+    ports:
+      - "8085:8080"  # Web UI (external:internal)
+    restart: unless-stopped
+
+  # ============ TORRENT CLIENTS ============
+
+  transmission:
+    image: lscr.io/linuxserver/transmission:latest
+    container_name: test-transmission
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - USER=admin
+      - PASS=admin
+    volumes:
+      - ./.local/test-clients/transmission/config:/config
+      - ./.local/test-clients/downloads:/downloads
+    ports:
+      - "9091:9091"  # Web UI / RPC
+      - "51413:51413"
+      - "51413:51413/udp"
+    restart: unless-stopped
+
+  deluge:
+    image: lscr.io/linuxserver/deluge:latest
+    container_name: test-deluge
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - DELUGE_LOGLEVEL=error
+    volumes:
+      - ./.local/test-clients/deluge/config:/config
+      - ./.local/test-clients/downloads:/downloads
+    ports:
+      - "8112:8112"  # Web UI
+      - "58846:58846"  # Daemon RPC
+      - "6881:6881"
+      - "6881:6881/udp"
+    restart: unless-stopped
+
+# All services automatically on same network (test-clients_default)

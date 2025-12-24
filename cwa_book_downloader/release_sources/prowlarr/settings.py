@@ -122,6 +122,82 @@ def _test_qbittorrent_connection(current_values: Dict[str, Any] = None) -> Dict[
         return {"success": False, "message": f"Connection failed: {str(e)}"}
 
 
+def _test_transmission_connection(current_values: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Test the Transmission connection using current form values."""
+    from urllib.parse import urlparse
+    from cwa_book_downloader.core.config import config
+
+    current_values = current_values or {}
+
+    url = current_values.get("TRANSMISSION_URL") or config.get("TRANSMISSION_URL", "")
+    username = current_values.get("TRANSMISSION_USERNAME") or config.get("TRANSMISSION_USERNAME", "")
+    password = current_values.get("TRANSMISSION_PASSWORD") or config.get("TRANSMISSION_PASSWORD", "")
+
+    if not url:
+        return {"success": False, "message": "Transmission URL is required"}
+
+    try:
+        from transmission_rpc import Client
+
+        # Parse URL to extract host, port, and path
+        parsed = urlparse(url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 9091
+        path = parsed.path or "/transmission/rpc"
+
+        if not path.endswith("/rpc"):
+            path = path.rstrip("/") + "/transmission/rpc"
+
+        client = Client(
+            host=host,
+            port=port,
+            path=path,
+            username=username if username else None,
+            password=password if password else None,
+        )
+        session = client.get_session()
+        version = session.version
+        return {"success": True, "message": f"Connected to Transmission {version}"}
+    except ImportError:
+        return {"success": False, "message": "transmission-rpc package not installed"}
+    except Exception as e:
+        return {"success": False, "message": f"Connection failed: {str(e)}"}
+
+
+def _test_deluge_connection(current_values: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Test the Deluge connection using current form values."""
+    from cwa_book_downloader.core.config import config
+
+    current_values = current_values or {}
+
+    host = current_values.get("DELUGE_HOST") or config.get("DELUGE_HOST", "localhost")
+    port = current_values.get("DELUGE_PORT") or config.get("DELUGE_PORT", "58846")
+    username = current_values.get("DELUGE_USERNAME") or config.get("DELUGE_USERNAME", "")
+    password = current_values.get("DELUGE_PASSWORD") or config.get("DELUGE_PASSWORD", "")
+
+    if not host:
+        return {"success": False, "message": "Deluge host is required"}
+    if not password:
+        return {"success": False, "message": "Deluge password is required"}
+
+    try:
+        from deluge_client import DelugeRPCClient
+
+        client = DelugeRPCClient(
+            host=host,
+            port=int(port),
+            username=username,
+            password=password,
+        )
+        client.connect()
+        version = client.call('daemon.info')
+        return {"success": True, "message": f"Connected to Deluge {version}"}
+    except ImportError:
+        return {"success": False, "message": "deluge-client package not installed"}
+    except Exception as e:
+        return {"success": False, "message": f"Connection failed: {str(e)}"}
+
+
 def _test_nzbget_connection(current_values: Dict[str, Any] = None) -> Dict[str, Any]:
     """Test the NZBGet connection using current form values."""
     import requests
@@ -148,6 +224,37 @@ def _test_nzbget_connection(current_values: Dict[str, Any] = None) -> Dict[str, 
         return {"success": True, "message": f"Connected to NZBGet {version}"}
     except requests.exceptions.ConnectionError:
         return {"success": False, "message": "Could not connect to NZBGet"}
+    except requests.exceptions.Timeout:
+        return {"success": False, "message": "Connection timed out"}
+    except Exception as e:
+        return {"success": False, "message": f"Connection failed: {str(e)}"}
+
+
+def _test_sabnzbd_connection(current_values: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Test the SABnzbd connection using current form values."""
+    import requests
+    from cwa_book_downloader.core.config import config
+
+    current_values = current_values or {}
+
+    url = current_values.get("SABNZBD_URL") or config.get("SABNZBD_URL", "")
+    api_key = current_values.get("SABNZBD_API_KEY") or config.get("SABNZBD_API_KEY", "")
+
+    if not url:
+        return {"success": False, "message": "SABnzbd URL is required"}
+    if not api_key:
+        return {"success": False, "message": "API key is required"}
+
+    try:
+        api_url = f"{url.rstrip('/')}/api"
+        params = {"apikey": api_key, "mode": "version", "output": "json"}
+        response = requests.get(api_url, params=params, timeout=30)
+        response.raise_for_status()
+        result = response.json()
+        version = result.get("version", "unknown")
+        return {"success": True, "message": f"Connected to SABnzbd {version}"}
+    except requests.exceptions.ConnectionError:
+        return {"success": False, "message": "Could not connect to SABnzbd"}
     except requests.exceptions.Timeout:
         return {"success": False, "message": "Connection timed out"}
     except Exception as e:
@@ -239,6 +346,8 @@ def prowlarr_clients_settings():
             options=[
                 {"value": "", "label": "None"},
                 {"value": "qbittorrent", "label": "qBittorrent"},
+                {"value": "transmission", "label": "Transmission"},
+                {"value": "deluge", "label": "Deluge"},
             ],
             default="",
         ),
@@ -272,7 +381,107 @@ def prowlarr_clients_settings():
             callback=_test_qbittorrent_connection,
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
         ),
-        # Note: qBittorrent's download path must be mounted identically in both containers.
+        TextField(
+            key="QBITTORRENT_CATEGORY",
+            label="Category",
+            description="Category to assign to downloads in qBittorrent",
+            placeholder="cwabd",
+            default="cwabd",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
+        ),
+
+        # --- Transmission Settings ---
+        TextField(
+            key="TRANSMISSION_URL",
+            label="Transmission URL",
+            description="URL of your Transmission instance",
+            placeholder="http://transmission:9091",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
+            env_supported=False,
+        ),
+        TextField(
+            key="TRANSMISSION_USERNAME",
+            label="Username",
+            description="Transmission RPC username (if authentication enabled)",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
+            env_supported=False,
+        ),
+        PasswordField(
+            key="TRANSMISSION_PASSWORD",
+            label="Password",
+            description="Transmission RPC password",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
+            env_supported=False,
+        ),
+        ActionButton(
+            key="test_transmission",
+            label="Test Connection",
+            description="Verify your Transmission configuration",
+            style="primary",
+            callback=_test_transmission_connection,
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
+        ),
+        TextField(
+            key="TRANSMISSION_CATEGORY",
+            label="Label",
+            description="Label to assign to downloads in Transmission",
+            placeholder="cwabd",
+            default="cwabd",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
+            env_supported=False,
+        ),
+
+        # --- Deluge Settings ---
+        TextField(
+            key="DELUGE_HOST",
+            label="Deluge Host",
+            description="Hostname or IP of your Deluge daemon",
+            placeholder="localhost",
+            default="localhost",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
+            env_supported=False,
+        ),
+        TextField(
+            key="DELUGE_PORT",
+            label="Deluge Port",
+            description="Deluge daemon RPC port (default: 58846). IMPORTANT: Ensure \"Allow Remote Connections\" is enabled in Deluge settings.",
+            placeholder="58846",
+            default="58846",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
+            env_supported=False,
+        ),
+        TextField(
+            key="DELUGE_USERNAME",
+            label="Username",
+            description="Deluge daemon username (from auth file)",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
+            env_supported=False,
+        ),
+        PasswordField(
+            key="DELUGE_PASSWORD",
+            label="Password",
+            description="Deluge daemon password (from auth file)",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
+            env_supported=False,
+        ),
+        ActionButton(
+            key="test_deluge",
+            label="Test Connection",
+            description="Verify your Deluge configuration",
+            style="primary",
+            callback=_test_deluge_connection,
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
+        ),
+        TextField(
+            key="DELUGE_CATEGORY",
+            label="Label",
+            description="Label to assign to downloads in Deluge",
+            placeholder="cwabd",
+            default="cwabd",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
+            env_supported=False,
+        ),
+        # Note: Torrent client download path must be mounted identically in both containers.
         # Torrents are always copied (not moved) to preserve seeding capability.
 
         # --- Usenet Client Selection ---
@@ -288,6 +497,7 @@ def prowlarr_clients_settings():
             options=[
                 {"value": "", "label": "None"},
                 {"value": "nzbget", "label": "NZBGet"},
+                {"value": "sabnzbd", "label": "SABnzbd"},
             ],
             default="",
         ),
@@ -322,7 +532,47 @@ def prowlarr_clients_settings():
             callback=_test_nzbget_connection,
             show_when={"field": "PROWLARR_USENET_CLIENT", "value": "nzbget"},
         ),
-        # Note: NZBGet's download path must be mounted identically in both containers.
+        TextField(
+            key="NZBGET_CATEGORY",
+            label="Category",
+            description="Category to assign to downloads in NZBGet",
+            placeholder="Books",
+            default="Books",
+            show_when={"field": "PROWLARR_USENET_CLIENT", "value": "nzbget"},
+        ),
+
+        # --- SABnzbd Settings ---
+        TextField(
+            key="SABNZBD_URL",
+            label="SABnzbd URL",
+            description="URL of your SABnzbd instance",
+            placeholder="http://sabnzbd:8080",
+            show_when={"field": "PROWLARR_USENET_CLIENT", "value": "sabnzbd"},
+        ),
+        PasswordField(
+            key="SABNZBD_API_KEY",
+            label="API Key",
+            description="Found in SABnzbd: Config > General > API Key",
+            show_when={"field": "PROWLARR_USENET_CLIENT", "value": "sabnzbd"},
+        ),
+        ActionButton(
+            key="test_sabnzbd",
+            label="Test Connection",
+            description="Verify your SABnzbd configuration",
+            style="primary",
+            callback=_test_sabnzbd_connection,
+            show_when={"field": "PROWLARR_USENET_CLIENT", "value": "sabnzbd"},
+        ),
+        TextField(
+            key="SABNZBD_CATEGORY",
+            label="Category",
+            description="Category to assign to downloads in SABnzbd",
+            placeholder="cwabd",
+            default="cwabd",
+            show_when={"field": "PROWLARR_USENET_CLIENT", "value": "sabnzbd"},
+        ),
+
+        # Note: Usenet client download path must be mounted identically in both containers.
         SelectField(
             key="PROWLARR_USENET_ACTION",
             label="Completion Action",
@@ -332,6 +582,6 @@ def prowlarr_clients_settings():
                 {"value": "copy", "label": "Copy to ingest"},
             ],
             default="move",
-            show_when={"field": "PROWLARR_USENET_CLIENT", "value": "nzbget"},
+            show_when={"field": "PROWLARR_USENET_CLIENT", "notEmpty": True},
         ),
     ]

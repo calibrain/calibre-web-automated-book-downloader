@@ -9,9 +9,17 @@ from typing import List, Optional, Tuple
 
 from cwa_book_downloader.core.logger import setup_logger
 from cwa_book_downloader.core.config import config
-from cwa_book_downloader.config.settings import SUPPORTED_FORMATS
 
 logger = setup_logger(__name__)
+
+
+def _get_supported_formats() -> List[str]:
+    """Get current supported formats from config singleton."""
+    formats = config.get("SUPPORTED_FORMATS", ["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"])
+    # Handle both list (from MultiSelectField) and comma-separated string (legacy/env)
+    if isinstance(formats, str):
+        return [fmt.strip().lower() for fmt in formats.split(",") if fmt.strip()]
+    return [fmt.lower() for fmt in formats]
 
 # Check for rarfile availability at module load
 try:
@@ -50,27 +58,36 @@ def is_archive(file_path: Path) -> bool:
 def _is_book_file(file_path: Path) -> bool:
     """Check if file matches user's SUPPORTED_FORMATS setting."""
     ext = file_path.suffix.lower().lstrip(".")
-    supported_exts = {fmt.lower() for fmt in SUPPORTED_FORMATS}
-    return ext in supported_exts
+    supported_formats = _get_supported_formats()
+    return ext in supported_formats
 
 
-def _filter_book_files(extracted_files: List[Path]) -> Tuple[List[Path], List[Path]]:
+def _filter_book_files(extracted_files: List[Path]) -> Tuple[List[Path], List[Path], List[Path]]:
     """
     Filter extracted files to only book formats.
 
     Returns:
-        Tuple of (book_files, non_book_files)
+        Tuple of (book_files, rejected_ebook_files, non_book_files)
+        - book_files: Match SUPPORTED_FORMATS
+        - rejected_ebook_files: Ebook formats not in SUPPORTED_FORMATS
+        - non_book_files: Non-ebook files (images, html, etc)
     """
+    # All known ebook extensions (superset of what user might enable)
+    ALL_EBOOK_EXTENSIONS = {'.pdf', '.epub', '.mobi', '.azw', '.azw3', '.fb2', '.djvu', '.cbz', '.cbr', '.doc', '.docx', '.rtf', '.txt'}
+
     book_files = []
+    rejected_ebook_files = []
     non_book_files = []
 
     for file_path in extracted_files:
         if _is_book_file(file_path):
             book_files.append(file_path)
+        elif file_path.suffix.lower() in ALL_EBOOK_EXTENSIONS:
+            rejected_ebook_files.append(file_path)
         else:
             non_book_files.append(file_path)
 
-    return book_files, non_book_files
+    return book_files, rejected_ebook_files, non_book_files
 
 
 def extract_archive(
@@ -105,8 +122,21 @@ def extract_archive(
         raise ArchiveExtractionError(f"Unsupported archive format: {suffix}")
 
     # Filter to only book files, delete non-book files
-    book_files, non_book_files = _filter_book_files(extracted_files)
+    book_files, rejected_ebook_files, non_book_files = _filter_book_files(extracted_files)
 
+    # Delete rejected ebook files (valid formats but not enabled by user)
+    for rejected_file in rejected_ebook_files:
+        try:
+            rejected_file.unlink()
+            logger.debug(f"Deleted rejected ebook file: {rejected_file.name}")
+        except OSError as e:
+            logger.warning(f"Failed to delete rejected ebook file {rejected_file}: {e}")
+
+    if rejected_ebook_files:
+        rejected_exts = sorted(set(f.suffix.lower() for f in rejected_ebook_files))
+        warnings.append(f"Skipped {len(rejected_ebook_files)} ebook(s) with unsupported format: {', '.join(rejected_exts)}")
+
+    # Delete non-book files (images, html, etc)
     for non_book_file in non_book_files:
         try:
             non_book_file.unlink()
@@ -117,7 +147,7 @@ def extract_archive(
     if non_book_files:
         warnings.append(f"Skipped {len(non_book_files)} non-book file(s)")
 
-    return book_files, warnings
+    return book_files, warnings, rejected_ebook_files
 
 
 def _extract_zip(
@@ -277,12 +307,29 @@ def process_archive(
         os.makedirs(ingest_dir, exist_ok=True)
 
         # Extract to temp directory (filters to book files only)
-        extracted_files, warnings = extract_archive(archive_path, extract_dir)
+        extracted_files, warnings, rejected_ebook_files = extract_archive(archive_path, extract_dir)
 
         if not extracted_files:
             # Clean up and return error
             shutil.rmtree(extract_dir, ignore_errors=True)
             archive_path.unlink(missing_ok=True)
+
+            if rejected_ebook_files:
+                # Found ebooks but they weren't in supported formats
+                rejected_exts = sorted(set(f.suffix.lower() for f in rejected_ebook_files))
+                rejected_list = ", ".join(rejected_exts)
+                supported_formats = _get_supported_formats()
+                logger.warning(
+                    f"Found {len(rejected_ebook_files)} ebook(s) in archive but format not supported. "
+                    f"Rejected: {rejected_list}. Supported: {', '.join(sorted(supported_formats))}"
+                )
+                return ArchiveResult(
+                    success=False,
+                    final_paths=[],
+                    message="",
+                    error=f"Found {len(rejected_ebook_files)} ebook(s) but format not supported ({rejected_list}). Enable in Settings > Formats.",
+                )
+
             return ArchiveResult(
                 success=False,
                 final_paths=[],
@@ -302,6 +349,10 @@ def process_archive(
             # since metadata title only applies to the searched book, not the whole pack.
             # For single files, respect USE_BOOK_TITLE setting.
             if len(extracted_files) == 1 and config.USE_BOOK_TITLE and task:
+                # Update task format from actual file if not already set
+                # (Prowlarr releases may not know the format until download completes)
+                if not task.format:
+                    task.format = extracted_file.suffix.lower().lstrip('.')
                 filename = task.get_filename() or extracted_file.name
             else:
                 filename = extracted_file.name

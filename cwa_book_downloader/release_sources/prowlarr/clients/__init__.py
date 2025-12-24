@@ -134,13 +134,16 @@ class DownloadClient(ABC):
         return None
 
 
-# Client registry: protocol -> client class
-_CLIENTS: Dict[str, Type[DownloadClient]] = {}
+# Client registry: protocol -> list of client classes
+_CLIENTS: Dict[str, List[Type[DownloadClient]]] = {}
 
 
 def register_client(protocol: str):
     """
     Decorator to register a download client for a protocol.
+
+    Multiple clients can be registered for the same protocol.
+    The `is_configured()` method determines which one is active.
 
     Args:
         protocol: The protocol this client handles ("torrent" or "usenet")
@@ -152,7 +155,9 @@ def register_client(protocol: str):
     """
 
     def decorator(cls: Type[DownloadClient]) -> Type[DownloadClient]:
-        _CLIENTS[protocol] = cls
+        if protocol not in _CLIENTS:
+            _CLIENTS[protocol] = []
+        _CLIENTS[protocol].append(cls)
         return cls
 
     return decorator
@@ -161,6 +166,9 @@ def register_client(protocol: str):
 def get_client(protocol: str) -> Optional[DownloadClient]:
     """
     Get a configured client instance for the given protocol.
+
+    Iterates through all registered clients for the protocol and
+    returns the first one that is configured.
 
     Args:
         protocol: "torrent" or "usenet"
@@ -171,11 +179,11 @@ def get_client(protocol: str) -> Optional[DownloadClient]:
     if protocol not in _CLIENTS:
         return None
 
-    client_cls = _CLIENTS[protocol]
-    if not client_cls.is_configured():
-        return None
+    for client_cls in _CLIENTS[protocol]:
+        if client_cls.is_configured():
+            return client_cls()
 
-    return client_cls()
+    return None
 
 
 def list_configured_clients() -> List[str]:
@@ -185,15 +193,21 @@ def list_configured_clients() -> List[str]:
     Returns:
         List of protocol names (e.g., ["torrent", "usenet"]).
     """
-    return [protocol for protocol, cls in _CLIENTS.items() if cls.is_configured()]
+    result = []
+    for protocol, client_classes in _CLIENTS.items():
+        for cls in client_classes:
+            if cls.is_configured():
+                result.append(protocol)
+                break
+    return result
 
 
-def get_all_clients() -> Dict[str, Type[DownloadClient]]:
+def get_all_clients() -> Dict[str, List[Type[DownloadClient]]]:
     """
     Get all registered client classes.
 
     Returns:
-        Dict of protocol -> client class.
+        Dict of protocol -> list of client classes.
     """
     return dict(_CLIENTS)
 
@@ -202,3 +216,6 @@ def get_all_clients() -> Dict[str, Type[DownloadClient]]:
 # These imports are at the bottom to avoid circular imports
 from cwa_book_downloader.release_sources.prowlarr.clients import qbittorrent  # noqa: F401, E402
 from cwa_book_downloader.release_sources.prowlarr.clients import nzbget  # noqa: F401, E402
+from cwa_book_downloader.release_sources.prowlarr.clients import sabnzbd  # noqa: F401, E402
+from cwa_book_downloader.release_sources.prowlarr.clients import transmission  # noqa: F401, E402
+from cwa_book_downloader.release_sources.prowlarr.clients import deluge  # noqa: F401, E402

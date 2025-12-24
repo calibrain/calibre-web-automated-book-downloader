@@ -1,12 +1,12 @@
 """
-qBittorrent download client for Prowlarr integration.
+Deluge download client for Prowlarr integration.
 
-Uses the qbittorrent-api library to communicate with qBittorrent's Web API.
+Uses the deluge-client library to communicate with Deluge's RPC daemon.
 """
 
+import base64
 import hashlib
 import re
-import time
 from typing import Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
@@ -23,10 +23,10 @@ from cwa_book_downloader.release_sources.prowlarr.clients import (
 logger = setup_logger(__name__)
 
 
+# Reuse the bencode functions for hash extraction
 def _bencode_decode(data: bytes) -> tuple:
     """Simple bencode decoder. Returns (decoded_value, remaining_bytes)."""
     if data[0:1] == b'd':
-        # Dictionary
         result = {}
         data = data[1:]
         while data[0:1] != b'e':
@@ -35,7 +35,6 @@ def _bencode_decode(data: bytes) -> tuple:
             result[key] = value
         return result, data[1:]
     elif data[0:1] == b'l':
-        # List
         result = []
         data = data[1:]
         while data[0:1] != b'e':
@@ -43,11 +42,9 @@ def _bencode_decode(data: bytes) -> tuple:
             result.append(value)
         return result, data[1:]
     elif data[0:1] == b'i':
-        # Integer
         end = data.index(b'e')
         return int(data[1:end]), data[end + 1:]
     elif data[0:1].isdigit():
-        # String (byte string)
         colon = data.index(b':')
         length = int(data[:colon])
         start = colon + 1
@@ -56,34 +53,9 @@ def _bencode_decode(data: bytes) -> tuple:
         raise ValueError(f"Invalid bencode data: {data[:20]}")
 
 
-def _extract_info_hash_from_torrent(torrent_data: bytes) -> Optional[str]:
-    """Extract info_hash from raw .torrent file data."""
-    try:
-        decoded, _ = _bencode_decode(torrent_data)
-        if b'info' not in decoded:
-            return None
-
-        # Find the raw info dict bytes to hash
-        # We need to find where 'info' dict starts and ends in the original data
-        info_start = torrent_data.find(b'4:info') + 6
-        if info_start < 6:
-            return None
-
-        # Re-encode the info dict to get consistent bytes for hashing
-        info_dict = decoded[b'info']
-        info_bencoded = _bencode_encode(info_dict)
-
-        # SHA1 hash of the info dict is the info_hash
-        return hashlib.sha1(info_bencoded).hexdigest().lower()
-    except Exception as e:
-        logger.debug(f"Failed to parse torrent file: {e}")
-        return None
-
-
 def _bencode_encode(data) -> bytes:
     """Simple bencode encoder."""
     if isinstance(data, dict):
-        # Keys must be sorted
         result = b'd'
         for key in sorted(data.keys()):
             result += _bencode_encode(key)
@@ -107,39 +79,70 @@ def _bencode_encode(data) -> bytes:
         raise ValueError(f"Cannot bencode type: {type(data)}")
 
 
+def _extract_info_hash_from_torrent(torrent_data: bytes) -> Optional[str]:
+    """Extract info_hash from raw .torrent file data."""
+    try:
+        decoded, _ = _bencode_decode(torrent_data)
+        if b'info' not in decoded:
+            return None
+
+        info_dict = decoded[b'info']
+        info_bencoded = _bencode_encode(info_dict)
+
+        return hashlib.sha1(info_bencoded).hexdigest().lower()
+    except Exception as e:
+        logger.debug(f"Failed to parse torrent file: {e}")
+        return None
+
+
 @register_client("torrent")
-class QBittorrentClient(DownloadClient):
-    """qBittorrent download client."""
+class DelugeClient(DownloadClient):
+    """Deluge download client using deluge-client RPC library."""
 
     protocol = "torrent"
-    name = "qbittorrent"
+    name = "deluge"
 
     def __init__(self):
-        """Initialize qBittorrent client with settings from config."""
-        # Lazy import to avoid dependency issues if not using torrents
-        from qbittorrentapi import Client
+        """Initialize Deluge client with settings from config."""
+        from deluge_client import DelugeRPCClient
 
-        self._client = Client(
-            host=config.get("QBITTORRENT_URL", ""),
-            username=config.get("QBITTORRENT_USERNAME", ""),
-            password=config.get("QBITTORRENT_PASSWORD", ""),
+        host = config.get("DELUGE_HOST", "localhost")
+        port = int(config.get("DELUGE_PORT", "58846"))
+        username = config.get("DELUGE_USERNAME", "")
+        password = config.get("DELUGE_PASSWORD", "")
+
+        self._client = DelugeRPCClient(
+            host=host,
+            port=port,
+            username=username,
+            password=password,
         )
-        self._category = config.get("QBITTORRENT_CATEGORY", "cwabd")
+        self._connected = False
+        self._category = config.get("DELUGE_CATEGORY", "cwabd")
+
+    def _ensure_connected(self):
+        """Ensure we're connected to the Deluge daemon."""
+        if not self._connected:
+            self._client.connect()
+            self._connected = True
 
     @staticmethod
     def is_configured() -> bool:
-        """Check if qBittorrent is configured and selected as the torrent client."""
+        """Check if Deluge is configured and selected as the torrent client."""
         client = config.get("PROWLARR_TORRENT_CLIENT", "")
-        url = config.get("QBITTORRENT_URL", "")
-        return client == "qbittorrent" and bool(url)
+        host = config.get("DELUGE_HOST", "")
+        password = config.get("DELUGE_PASSWORD", "")
+        return client == "deluge" and bool(host) and bool(password)
 
     def test_connection(self) -> Tuple[bool, str]:
-        """Test connection to qBittorrent."""
+        """Test connection to Deluge."""
         try:
-            self._client.auth_log_in()
-            version = self._client.app.version
-            return True, f"Connected to qBittorrent {version}"
+            self._ensure_connected()
+            # Get daemon info
+            version = self._client.call('daemon.info')
+            return True, f"Connected to Deluge {version}"
         except Exception as e:
+            self._connected = False
             return False, f"Connection failed: {str(e)}"
 
     def _extract_hash_from_magnet(self, magnet_url: str) -> Optional[str]:
@@ -147,21 +150,15 @@ class QBittorrentClient(DownloadClient):
         if not magnet_url.startswith("magnet:"):
             return None
 
-        # Parse the magnet URL
         parsed = urlparse(magnet_url)
         params = parse_qs(parsed.query)
 
-        # Get the xt (exact topic) parameter
         xt_list = params.get("xt", [])
         for xt in xt_list:
-            # Format: urn:btih:<hash>
             match = re.match(r"urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})", xt)
             if match:
                 hash_value = match.group(1)
-                # Convert base32 to hex if needed (32 chars = base32, 40 chars = hex)
                 if len(hash_value) == 32:
-                    import base64
-
                     try:
                         decoded = base64.b32decode(hash_value.upper())
                         return decoded.hex().lower()
@@ -186,14 +183,10 @@ class QBittorrentClient(DownloadClient):
             Exception: If adding fails.
         """
         try:
+            self._ensure_connected()
+
             # Use configured category if not explicitly provided
             category = category or self._category
-
-            # Ensure category exists
-            try:
-                self._client.torrents_create_category(name=category)
-            except Exception:
-                pass  # Category may already exist
 
             # Try to extract hash from magnet URL before adding
             expected_hash = self._extract_hash_from_magnet(url)
@@ -205,8 +198,8 @@ class QBittorrentClient(DownloadClient):
 
             torrent_data = None
 
-            # For non-magnet URLs, fetch the .torrent file to extract the hash
-            if not is_magnet and not expected_hash:
+            # For non-magnet URLs, fetch the .torrent file
+            if not is_magnet:
                 logger.debug(f"Fetching torrent file from: {url[:80]}...")
                 try:
                     resp = requests.get(url, timeout=30)
@@ -219,53 +212,41 @@ class QBittorrentClient(DownloadClient):
                         logger.warning("Could not extract hash from torrent file")
                 except Exception as e:
                     logger.warning(f"Failed to fetch torrent file: {e}")
+                    raise
 
-            logger.debug(f"Expected hash: {expected_hash}")
+            # Add options
+            options = {}
 
-            # Add the torrent - use file content if we have it, otherwise URL
-            if torrent_data:
-                result = self._client.torrents_add(
-                    torrent_files=torrent_data,
-                    category=category,
-                    rename=name,
+            # Add the torrent
+            if is_magnet:
+                # Add magnet link
+                torrent_id = self._client.call(
+                    'core.add_torrent_magnet',
+                    url,
+                    options,
                 )
             else:
-                result = self._client.torrents_add(
-                    urls=url,
-                    category=category,
-                    rename=name,
+                # Add from torrent file content (base64 encoded)
+                filedump = base64.b64encode(torrent_data).decode('ascii')
+                torrent_id = self._client.call(
+                    'core.add_torrent_file',
+                    f"{name}.torrent",
+                    filedump,
+                    options,
                 )
 
-            logger.debug(f"qBittorrent add result: {result}")
+            if torrent_id:
+                # Deluge returns bytes, decode to string
+                if isinstance(torrent_id, bytes):
+                    torrent_id = torrent_id.decode('utf-8')
+                logger.info(f"Added torrent to Deluge: {torrent_id}")
+                return torrent_id.lower()
 
-            if result == "Ok.":
-                if expected_hash:
-                    # We know the hash - verify it was added
-                    for attempt in range(10):
-                        torrents = self._client.torrents_info(
-                            torrent_hashes=expected_hash
-                        )
-                        if torrents:
-                            logger.info(f"Added torrent to qBittorrent: {expected_hash}")
-                            return expected_hash
-                        time.sleep(0.5)
+            raise Exception("Deluge returned no torrent ID")
 
-                    # qBittorrent said Ok, trust it even if we can't find it yet
-                    logger.warning(
-                        f"qBittorrent returned Ok but torrent not yet visible. "
-                        f"Returning expected hash: {expected_hash}"
-                    )
-                    return expected_hash
-
-                # No hash available - this shouldn't happen often
-                raise Exception(
-                    "Could not determine torrent hash. "
-                    "Try using a magnet link instead."
-                )
-
-            raise Exception(f"Failed to add torrent: {result}")
         except Exception as e:
-            logger.error(f"qBittorrent add failed: {e}")
+            self._connected = False
+            logger.error(f"Deluge add failed: {e}")
             raise
 
     def get_status(self, download_id: str) -> DownloadStatus:
@@ -279,8 +260,16 @@ class QBittorrentClient(DownloadClient):
             Current download status.
         """
         try:
-            torrents = self._client.torrents_info(torrent_hashes=download_id)
-            if not torrents:
+            self._ensure_connected()
+
+            # Get torrent status
+            status = self._client.call(
+                'core.get_torrent_status',
+                download_id,
+                ['state', 'progress', 'download_payload_rate', 'eta', 'save_path', 'name'],
+            )
+
+            if not status:
                 return DownloadStatus(
                     progress=0,
                     state="error",
@@ -289,53 +278,59 @@ class QBittorrentClient(DownloadClient):
                     file_path=None,
                 )
 
-            torrent = torrents[0]
-
-            # Map qBittorrent states to our states and user-friendly messages
-            state_info = {
-                "downloading": ("downloading", None),  # None = use default progress message
-                "stalledDL": ("downloading", "Stalled"),
-                "metaDL": ("downloading", "Fetching metadata"),
-                "forcedDL": ("downloading", None),
-                "allocating": ("downloading", "Allocating space"),
-                "uploading": ("seeding", "Seeding"),
-                "stalledUP": ("seeding", "Seeding (stalled)"),
-                "forcedUP": ("seeding", "Seeding"),
-                "pausedDL": ("paused", "Paused"),
-                "pausedUP": ("paused", "Paused"),
-                "queuedDL": ("queued", "Queued"),
-                "queuedUP": ("queued", "Queued"),
-                "checkingDL": ("checking", "Checking files"),
-                "checkingUP": ("checking", "Checking files"),
-                "checkingResumeData": ("checking", "Checking resume data"),
-                "moving": ("processing", "Moving files"),
-                "error": ("error", "Error"),
-                "missingFiles": ("error", "Missing files"),
-                "unknown": ("unknown", "Unknown state"),
+            # Deluge states: Downloading, Seeding, Paused, Checking, Queued, Error, Moving
+            state_map = {
+                'Downloading': ('downloading', None),
+                'Seeding': ('seeding', 'Seeding'),
+                'Paused': ('paused', 'Paused'),
+                'Checking': ('checking', 'Checking files'),
+                'Queued': ('queued', 'Queued'),
+                'Error': ('error', 'Error'),
+                'Moving': ('processing', 'Moving files'),
+                'Allocating': ('downloading', 'Allocating space'),
             }
 
-            state, message = state_info.get(torrent.state, ("unknown", torrent.state))
-            complete = torrent.progress >= 1.0
+            deluge_state = status.get(b'state', b'Unknown')
+            if isinstance(deluge_state, bytes):
+                deluge_state = deluge_state.decode('utf-8')
 
-            # For active downloads without a special message, leave message as None
-            # so the handler can build the progress message
+            state, message = state_map.get(deluge_state, ('unknown', deluge_state))
+            progress = status.get(b'progress', 0)
+            complete = progress >= 100
+
             if complete:
                 message = "Download complete"
 
-            # Only include ETA if it's reasonable (less than 1 week)
-            eta = torrent.eta if 0 < torrent.eta < 604800 else None
+            # Get ETA if available and reasonable
+            eta = status.get(b'eta')
+            if eta and eta > 604800:  # More than 1 week
+                eta = None
+
+            # Build file path for completed downloads
+            file_path = None
+            if complete:
+                save_path = status.get(b'save_path', b'')
+                name = status.get(b'name', b'')
+                if isinstance(save_path, bytes):
+                    save_path = save_path.decode('utf-8')
+                if isinstance(name, bytes):
+                    name = name.decode('utf-8')
+                if save_path and name:
+                    file_path = f"{save_path}/{name}"
 
             return DownloadStatus(
-                progress=torrent.progress * 100,
+                progress=progress,
                 state="complete" if complete else state,
                 message=message,
                 complete=complete,
-                file_path=torrent.content_path if complete else None,
-                download_speed=torrent.dlspeed,
+                file_path=file_path,
+                download_speed=status.get(b'download_payload_rate'),
                 eta=eta,
             )
+
         except Exception as e:
-            logger.error(f"qBittorrent get_status failed: {e}")
+            self._connected = False
+            logger.error(f"Deluge get_status failed: {e}")
             return DownloadStatus(
                 progress=0,
                 state="error",
@@ -346,7 +341,7 @@ class QBittorrentClient(DownloadClient):
 
     def remove(self, download_id: str, delete_files: bool = False) -> bool:
         """
-        Remove a torrent from qBittorrent.
+        Remove a torrent from Deluge.
 
         Args:
             download_id: Torrent info_hash
@@ -356,16 +351,25 @@ class QBittorrentClient(DownloadClient):
             True if successful.
         """
         try:
-            self._client.torrents_delete(
-                torrent_hashes=download_id, delete_files=delete_files
+            self._ensure_connected()
+
+            result = self._client.call(
+                'core.remove_torrent',
+                download_id,
+                delete_files,
             )
-            logger.info(
-                f"Removed torrent from qBittorrent: {download_id}"
-                + (" (with files)" if delete_files else "")
-            )
-            return True
+
+            if result:
+                logger.info(
+                    f"Removed torrent from Deluge: {download_id}"
+                    + (" (with files)" if delete_files else "")
+                )
+                return True
+            return False
+
         except Exception as e:
-            logger.error(f"qBittorrent remove failed: {e}")
+            self._connected = False
+            logger.error(f"Deluge remove failed: {e}")
             return False
 
     def get_download_path(self, download_id: str) -> Optional[str]:
@@ -379,19 +383,33 @@ class QBittorrentClient(DownloadClient):
             Content path (file or directory), or None.
         """
         try:
-            torrents = self._client.torrents_info(torrent_hashes=download_id)
-            if torrents:
-                return torrents[0].content_path
+            self._ensure_connected()
+
+            status = self._client.call(
+                'core.get_torrent_status',
+                download_id,
+                ['save_path', 'name'],
+            )
+
+            if status:
+                save_path = status.get(b'save_path', b'')
+                name = status.get(b'name', b'')
+                if isinstance(save_path, bytes):
+                    save_path = save_path.decode('utf-8')
+                if isinstance(name, bytes):
+                    name = name.decode('utf-8')
+                if save_path and name:
+                    return f"{save_path}/{name}"
             return None
-        except Exception:
+
+        except Exception as e:
+            self._connected = False
+            logger.debug(f"Deluge get_download_path failed: {e}")
             return None
 
     def find_existing(self, url: str) -> Optional[Tuple[str, DownloadStatus]]:
         """
-        Check if a torrent for this URL already exists in qBittorrent.
-
-        Extracts the info_hash from the magnet link or .torrent file and
-        checks if qBittorrent already has this torrent.
+        Check if a torrent for this URL already exists in Deluge.
 
         Args:
             url: Magnet link or .torrent URL
@@ -400,6 +418,8 @@ class QBittorrentClient(DownloadClient):
             Tuple of (info_hash, status) if found, None if not found.
         """
         try:
+            self._ensure_connected()
+
             # Try to extract hash from magnet URL
             expected_hash = self._extract_hash_from_magnet(url)
 
@@ -418,15 +438,21 @@ class QBittorrentClient(DownloadClient):
                 logger.debug("Could not extract hash from URL")
                 return None
 
-            # Check if this torrent exists in qBittorrent
-            torrents = self._client.torrents_info(torrent_hashes=expected_hash)
-            if torrents:
-                status = self.get_status(expected_hash)
-                logger.info(f"Found existing torrent in qBittorrent: {expected_hash} (state: {status.state})")
-                return (expected_hash, status)
+            # Check if this torrent exists in Deluge
+            status = self._client.call(
+                'core.get_torrent_status',
+                expected_hash,
+                ['state'],
+            )
+
+            if status:
+                full_status = self.get_status(expected_hash)
+                logger.info(f"Found existing torrent in Deluge: {expected_hash} (state: {full_status.state})")
+                return (expected_hash, full_status)
 
             return None
 
         except Exception as e:
+            self._connected = False
             logger.debug(f"Error checking for existing torrent: {e}")
             return None

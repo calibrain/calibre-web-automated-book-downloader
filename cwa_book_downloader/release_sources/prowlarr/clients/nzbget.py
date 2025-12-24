@@ -31,6 +31,7 @@ class NZBGetClient(DownloadClient):
         self.url = config.get("NZBGET_URL", "").rstrip("/")
         self.username = config.get("NZBGET_USERNAME", "nzbget")
         self.password = config.get("NZBGET_PASSWORD", "")
+        self._category = config.get("NZBGET_CATEGORY", "Books")
 
     @staticmethod
     def is_configured() -> bool:
@@ -93,7 +94,7 @@ class NZBGetClient(DownloadClient):
         except Exception as e:
             return False, f"Connection failed: {str(e)}"
 
-    def add_download(self, url: str, name: str, category: str = "Books") -> str:
+    def add_download(self, url: str, name: str, category: str = None) -> str:
         """
         Add NZB by URL.
 
@@ -103,7 +104,7 @@ class NZBGetClient(DownloadClient):
         Args:
             url: NZB URL (can be Prowlarr proxy URL)
             name: Display name for the download
-            category: Category for organization
+            category: Category for organization (uses configured default if not specified)
 
         Returns:
             NZBGet download ID (NZBID).
@@ -112,6 +113,9 @@ class NZBGetClient(DownloadClient):
             Exception: If adding fails.
         """
         import base64
+
+        # Use configured category if not explicitly provided
+        category = category or self._category
 
         try:
             # Fetch NZB content from the URL (handles Prowlarr proxy redirects)
@@ -263,14 +267,17 @@ class NZBGetClient(DownloadClient):
 
         Args:
             download_id: NZBGet NZBID
-            delete_files: Whether to also delete files (not fully supported)
+            delete_files: Whether to permanently delete (vs move to history)
 
         Returns:
             True if successful.
         """
         try:
             nzb_id = int(download_id)
-            result = self._rpc_call("editqueue", ["GroupDelete", 0, "", [nzb_id]])
+            # editqueue params: Command (str), Param (str), IDs (int[])
+            # GroupFinalDelete = permanent removal, GroupDelete = move to history
+            command = "GroupFinalDelete" if delete_files else "GroupDelete"
+            result = self._rpc_call("editqueue", [command, "", [nzb_id]])
             if result:
                 logger.info(f"Removed NZB from NZBGet: {download_id}")
             return bool(result)

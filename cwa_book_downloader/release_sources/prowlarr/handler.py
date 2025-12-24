@@ -125,7 +125,6 @@ class ProwlarrHandler(DownloadHandler):
                     download_id = client.add_download(
                         url=download_url,
                         name=task.title or "Unknown",
-                        category="cwabd"
                     )
                 except Exception as e:
                     logger.error(f"Failed to add to {client.name}: {e}")

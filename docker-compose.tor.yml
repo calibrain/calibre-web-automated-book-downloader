@@ -17,3 +17,5 @@ services:
       - /tmp/data/calibre-web/ingest:/cwa-book-ingest
       - /path/to/config:/config
       # - /cwa/config/path/app.db:/auth/app.db:ro
+      # If using Prowlarr with external download clients (qBittorrent, Deluge, Transmission, NZBGet, SABnzbd):
+      # - /path/to/downloads:/downloads # MUST match the container path used by your download client
