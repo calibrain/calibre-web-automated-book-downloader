@@ -159,7 +159,7 @@ def _test_nzbget_connection(current_values: Dict[str, Any] = None) -> Dict[str, 
 register_group(
     name="prowlarr",
     display_name="Prowlarr",
-    icon="search",
+    icon="download",
     order=40,
 )
 
@@ -203,17 +203,10 @@ def prowlarr_config_settings():
             style="primary",
             callback=_test_prowlarr_connection,
         ),
-        HeadingField(
-            key="indexers_heading",
-            title="Indexer Selection",
-            description="Select which indexers to search. 📚 = has book categories. "
-                       "Leave empty to search all.",
-            show_when={"field": "PROWLARR_URL", "notEmpty": True},
-        ),
         MultiSelectField(
             key="PROWLARR_INDEXERS",
             label="Indexers to Search",
-            description="Select specific indexers or leave empty for all",
+            description="Select which indexers to search. 📚 = has book categories. Leave empty to search all.",
             options=_get_indexer_options,
             default=[],
             show_when={"field": "PROWLARR_URL", "notEmpty": True},

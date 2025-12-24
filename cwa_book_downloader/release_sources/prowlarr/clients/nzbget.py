@@ -105,9 +105,9 @@ class NZBGetClient(DownloadClient):
             Exception: If adding fails.
         """
         try:
-            # NZBGet append method parameters:
-            # NZBFilename, Content (URL or base64), Category, Priority,
-            # DupeCheck, DupeMode, DupeKey, DupeScore, AddPaused, AddToTop
+            # NZBGet append method parameters (order is important):
+            # NZBFilename, Content, Category, Priority, AddToTop, AddPaused,
+            # DupeKey, DupeScore, DupeMode, PPParameters
             nzb_id = self._rpc_call(
                 "append",
                 [
@@ -115,12 +115,12 @@ class NZBGetClient(DownloadClient):
                     url,  # Content (URL)
                     category,  # Category
                     0,  # Priority (0 = normal)
-                    False,  # DupeCheck
-                    "score",  # DupeMode
+                    False,  # AddToTop
+                    False,  # AddPaused
                     "",  # DupeKey
                     0,  # DupeScore
-                    False,  # AddPaused
-                    False,  # AddToTop
+                    "SCORE",  # DupeMode
+                    [],  # PPParameters
                 ],
             )
 
