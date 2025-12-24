@@ -523,7 +523,7 @@ def api_config() -> Union[Response, Tuple[Response, int]]:
 
         config = {
             "calibre_web_url": app_config.get("CALIBRE_WEB_URL", ""),
-            "debug": DEBUG,
+            "debug": app_config.get("DEBUG", False),
             "build_version": BUILD_VERSION,
             "release_version": RELEASE_VERSION,
             "book_languages": _SUPPORTED_BOOK_LANGUAGE,

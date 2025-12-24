@@ -14,8 +14,9 @@ WORKDIR /frontend
 # Copy frontend package files
 COPY src/frontend/package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies (cache mount for faster rebuilds)
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
 
 # Copy frontend source
 COPY src/frontend/ ./
@@ -84,12 +85,11 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install Python dependencies using pip
-# Upgrade pip first, then copy requirements and install
-# Copying requirements-base.txt separately leverages build cache
-COPY requirements-base.txt .
-RUN pip install --no-cache-dir -r requirements-base.txt && \
-    # Clean root's pip cache
-    rm -rf /root/.cache
+# Copying requirements files separately leverages build cache
+# Cache mount persists pip cache between builds for faster installs
+COPY requirements-base.txt requirements-cwa-bd.txt ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements-base.txt
 
 # Copy application code *after* dependencies are installed
 COPY . .
@@ -132,15 +132,17 @@ RUN apt-get update && \
     # For RAR extraction
     unrar-free && \
     # Create symlink so rarfile library can find unrar
-    ln -sf /usr/bin/unrar-free /usr/bin/unrar
+    ln -sf /usr/bin/unrar-free /usr/bin/unrar && \
+    # Cleanup APT cache
+    apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# install additional dependencies
-COPY requirements-cwa-bd.txt ./
-RUN pip install --no-cache-dir -r requirements-cwa-bd.txt && \
-    # Clean root's pip cache
-    rm -rf /root/.cache
+# Install additional dependencies (requirements file already copied in base stage)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements-cwa-bd.txt
 
-# Add this line to grant read/execute permissions to others
+# Grant read/execute permissions to others
 RUN chmod -R o+rx /usr/bin/chromium && \
     chmod -R o+rx /usr/bin/chromedriver && \
     chmod -R o+w /usr/local/lib/python3.10/site-packages/seleniumbase/drivers/

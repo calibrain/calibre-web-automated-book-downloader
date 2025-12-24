@@ -15,3 +15,5 @@ services:
       - ./.local/ingest:/cwa-book-ingest
       - ./.local/log:/var/log/cwa-book-downloader
       - ./.local/tmp:/tmp/cwa-book-downloader
+      # Mount source code for development (no rebuild needed for Python code changes)
+      - ./cwa_book_downloader:/app/cwa_book_downloader:ro

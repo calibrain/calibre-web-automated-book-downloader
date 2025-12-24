@@ -20,6 +20,7 @@ This ensures:
 - Single point of control for what enters the ingest folder
 """
 
+import hashlib
 import os
 import random
 import shutil
@@ -35,6 +36,7 @@ from cwa_book_downloader.release_sources import direct_download
 from cwa_book_downloader.release_sources.direct_download import SearchUnavailable
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.config.env import TMP_DIR, DOWNLOAD_PATHS, INGEST_DIR
+from cwa_book_downloader.config.settings import SUPPORTED_FORMATS
 from cwa_book_downloader.download.archive import is_archive, process_archive
 from cwa_book_downloader.release_sources import get_handler, get_source_display_name
 from cwa_book_downloader.core.logger import setup_logger
@@ -71,7 +73,9 @@ def get_staging_path(task_id: str, extension: str) -> Path:
         Path in staging directory for this download
     """
     staging_dir = get_staging_dir()
-    return staging_dir / f"{task_id}.{extension.lstrip('.')}"
+    # Hash task_id in case it contains invalid filename chars (e.g., Prowlarr URLs)
+    safe_id = hashlib.md5(task_id.encode()).hexdigest()[:16]
+    return staging_dir / f"{safe_id}.{extension.lstrip('.')}"
 
 
 def stage_file(source_path: Path, task_id: str, copy: bool = False) -> Path:
@@ -89,7 +93,13 @@ def stage_file(source_path: Path, task_id: str, copy: bool = False) -> Path:
         Path to the staged file
     """
     staging_dir = get_staging_dir()
-    staged_path = staging_dir / f"{task_id}{source_path.suffix}"
+    # Stage with original filename, add counter suffix if collision
+    staged_path = staging_dir / source_path.name
+    if staged_path.exists():
+        counter = 1
+        while staged_path.exists():
+            staged_path = staging_dir / f"{source_path.stem}_{counter}{source_path.suffix}"
+            counter += 1
 
     if copy:
         shutil.copy2(str(source_path), str(staged_path))
@@ -99,6 +109,97 @@ def stage_file(source_path: Path, task_id: str, copy: bool = False) -> Path:
         logger.debug(f"Moved to staging: {source_path} -> {staged_path}")
 
     return staged_path
+
+
+def _find_book_files_in_directory(directory: Path) -> List[Path]:
+    """Find all book files in a directory matching SUPPORTED_FORMATS.
+
+    Args:
+        directory: Directory to search recursively
+
+    Returns:
+        List of paths to book files found
+    """
+    book_files = []
+    supported_exts = {f".{fmt.lower()}" for fmt in SUPPORTED_FORMATS}
+
+    for file_path in directory.rglob("*"):
+        if file_path.is_file() and file_path.suffix.lower() in supported_exts:
+            book_files.append(file_path)
+
+    return book_files
+
+
+def process_directory(
+    directory: Path,
+    ingest_dir: Path,
+    task: DownloadTask,
+) -> Tuple[List[Path], Optional[str]]:
+    """Process a staged directory: find book files, filter by SUPPORTED_FORMATS, move to ingest.
+
+    Similar to archive processing but for multi-file torrent/usenet downloads.
+
+    Args:
+        directory: Staged directory containing downloaded files
+        ingest_dir: Final destination directory for book files
+        task: Download task for filename generation
+
+    Returns:
+        Tuple of (list of final paths, error message if failed)
+    """
+    try:
+        book_files = _find_book_files_in_directory(directory)
+
+        if not book_files:
+            # Clean up empty directory
+            shutil.rmtree(directory, ignore_errors=True)
+            return [], "No book files found in download"
+
+        logger.info(f"Found {len(book_files)} book file(s) in directory")
+
+        # Move each book file to ingest
+        final_paths = []
+        for book_file in book_files:
+            # Generate filename based on USE_BOOK_TITLE setting
+            if config.USE_BOOK_TITLE:
+                # Try to use formatted name, fall back to original
+                base_filename = task.get_filename()
+                if base_filename and len(book_files) > 1:
+                    # Multiple files: append format to distinguish
+                    stem = Path(base_filename).stem
+                    filename = f"{stem}{book_file.suffix}"
+                elif base_filename:
+                    filename = base_filename
+                else:
+                    filename = book_file.name
+            else:
+                filename = book_file.name
+
+            final_path = ingest_dir / filename
+
+            # Handle duplicates
+            if final_path.exists():
+                base = final_path.stem
+                ext = final_path.suffix
+                counter = 1
+                while final_path.exists():
+                    final_path = ingest_dir / f"{base}_{counter}{ext}"
+                    counter += 1
+
+            shutil.move(str(book_file), str(final_path))
+            final_paths.append(final_path)
+            logger.debug(f"Moved to ingest: {final_path.name}")
+
+        # Clean up the now-empty directory
+        shutil.rmtree(directory, ignore_errors=True)
+
+        return final_paths, None
+
+    except Exception as e:
+        logger.error(f"Error processing directory: {e}")
+        shutil.rmtree(directory, ignore_errors=True)
+        return [], str(e)
+
 
 # WebSocket manager (initialized by app.py)
 try:
@@ -419,7 +520,10 @@ def _download_task(task_id: str, cancel_flag: Event) -> Optional[str]:
         # Check cancellation before post-processing
         if cancel_flag.is_set():
             logger.info(f"Download cancelled before post-processing: {task_id}")
-            temp_file.unlink(missing_ok=True)
+            if temp_file.is_dir():
+                shutil.rmtree(temp_file, ignore_errors=True)
+            else:
+                temp_file.unlink(missing_ok=True)
             return None
 
         # Post-processing: archive extraction or direct move to ingest
@@ -480,6 +584,33 @@ def _post_process_download(
             status_callback("error", result.error)
             return None
 
+    # Handle directory (multi-file torrent/usenet downloads)
+    if temp_file.is_dir():
+        logger.info(f"Directory detected, processing: {temp_file.name}")
+        status_callback("resolving", "Processing download folder...")
+
+        final_paths, error = process_directory(
+            directory=temp_file,
+            ingest_dir=ingest_dir,
+            task=task,
+        )
+
+        if error:
+            status_callback("error", error)
+            return None
+
+        if final_paths:
+            formats = [p.suffix.lstrip(".").upper() for p in final_paths]
+            if len(formats) == 1:
+                message = f"Downloaded: {formats[0]}"
+            else:
+                message = f"Downloaded: {len(formats)} files ({', '.join(formats)})"
+            status_callback("complete", message)
+            return str(final_paths[0])
+        else:
+            status_callback("error", "No book files found")
+            return None
+
     # Non-archive: run custom script if configured, then move to ingest
     if config.CUSTOM_SCRIPT:
         logger.info(f"Running custom script: {config.CUSTOM_SCRIPT}")
@@ -491,10 +622,13 @@ def _post_process_download(
         temp_file.unlink(missing_ok=True)
         return None
 
-    # Generate filename and move to ingest
-    filename = task.get_filename()
-    if not filename:
-        filename = f"{task.task_id}.{task.format or 'bin'}"
+    # Generate filename: use formatted name if USE_BOOK_TITLE, else preserve original
+    if config.USE_BOOK_TITLE:
+        filename = task.get_filename()
+        if not filename:
+            filename = temp_file.name
+    else:
+        filename = temp_file.name
 
     final_path = ingest_dir / filename
 
@@ -509,7 +643,7 @@ def _post_process_download(
         logger.info(f"File already exists, saving as: {final_path.name}")
 
     # Use intermediate .crdownload file for atomic move
-    intermediate_path = ingest_dir / f"{task.task_id}.crdownload"
+    intermediate_path = ingest_dir / f"{temp_file.stem}.crdownload"
 
     try:
         shutil.move(str(temp_file), str(intermediate_path))

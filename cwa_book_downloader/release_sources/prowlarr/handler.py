@@ -34,21 +34,6 @@ def _determine_protocol(result: dict) -> str:
     return "unknown"
 
 
-def _find_book_file(directory: Path) -> Optional[Path]:
-    """Find the main book file in a directory (for multi-file torrents)."""
-    extensions = {".epub", ".mobi", ".azw3", ".pdf", ".cbz", ".cbr", ".fb2", ".djvu"}
-    candidates = []
-
-    for ext in extensions:
-        candidates.extend(directory.rglob(f"*{ext}"))
-
-    if not candidates:
-        return None
-
-    # Return the largest file (most likely the actual book)
-    return max(candidates, key=lambda f: f.stat().st_size)
-
-
 @register_handler("prowlarr")
 class ProwlarrHandler(DownloadHandler):
     """Handler for Prowlarr downloads via qBittorrent (torrents) or NZBGet (usenet)."""
@@ -261,7 +246,11 @@ class ProwlarrHandler(DownloadHandler):
         task: DownloadTask,
         status_callback: Callable[[str, Optional[str]], None],
     ) -> Optional[str]:
-        """Stage completed download for orchestrator post-processing."""
+        """Stage completed download for orchestrator post-processing.
+
+        For directories (multi-file torrents), copies the entire directory.
+        The orchestrator will find and filter book files.
+        """
         try:
             status_callback("processing", "Staging file...")
 
@@ -275,21 +264,34 @@ class ProwlarrHandler(DownloadHandler):
             staging_dir = get_staging_dir()
 
             if source_path.is_dir():
-                book_file = _find_book_file(source_path)
-                if not book_file:
-                    status_callback("error", "No book file found in download")
-                    return None
-                source_file = book_file
-            else:
-                source_file = source_path
+                # Multi-file download: stage entire directory
+                # Orchestrator will extract book files
+                staged_path = staging_dir / source_path.name
+                if staged_path.exists():
+                    counter = 1
+                    while staged_path.exists():
+                        staged_path = staging_dir / f"{source_path.name}_{counter}"
+                        counter += 1
 
-            staged_path = staging_dir / f"{task.task_id}{source_file.suffix}"
-
-            if use_copy:
-                shutil.copy2(str(source_file), str(staged_path))
+                if use_copy:
+                    shutil.copytree(str(source_path), str(staged_path))
+                else:
+                    shutil.move(str(source_path), str(staged_path))
+                logger.debug(f"Staged directory: {staged_path.name}")
             else:
-                shutil.move(str(source_file), str(staged_path))
-            logger.debug(f"Staged: {staged_path.name}")
+                # Single file download
+                staged_path = staging_dir / source_path.name
+                if staged_path.exists():
+                    counter = 1
+                    while staged_path.exists():
+                        staged_path = staging_dir / f"{source_path.stem}_{counter}{source_path.suffix}"
+                        counter += 1
+
+                if use_copy:
+                    shutil.copy2(str(source_path), str(staged_path))
+                else:
+                    shutil.move(str(source_path), str(staged_path))
+                logger.debug(f"Staged: {staged_path.name}")
 
             return str(staged_path)
 

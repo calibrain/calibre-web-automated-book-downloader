@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from cwa_book_downloader.core.logger import setup_logger
+from cwa_book_downloader.config.settings import SUPPORTED_FORMATS
 
 logger = setup_logger(__name__)
 
@@ -19,12 +20,6 @@ try:
 except ImportError:
     RAR_AVAILABLE = False
     logger.warning("rarfile not installed - RAR extraction disabled")
-
-# Book file extensions that should be kept after extraction
-BOOK_EXTENSIONS = frozenset({
-    "epub", "mobi", "azw", "azw3", "pdf", "fb2", "djvu",
-    "cbz", "cbr", "txt", "rtf", "doc", "docx", "lit", "pdb",
-})
 
 
 class ArchiveExtractionError(Exception):
@@ -52,9 +47,10 @@ def is_archive(file_path: Path) -> bool:
 
 
 def _is_book_file(file_path: Path) -> bool:
-    """Check if file is a recognized book format."""
+    """Check if file matches user's SUPPORTED_FORMATS setting."""
     ext = file_path.suffix.lower().lstrip(".")
-    return ext in BOOK_EXTENSIONS
+    supported_exts = {fmt.lower() for fmt in SUPPORTED_FORMATS}
+    return ext in supported_exts
 
 
 def _filter_book_files(extracted_files: List[Path]) -> Tuple[List[Path], List[Path]]:
