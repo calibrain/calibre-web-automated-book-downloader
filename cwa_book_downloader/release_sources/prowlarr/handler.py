@@ -13,7 +13,6 @@ from typing import Callable, Optional
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.core.logger import setup_logger
 from cwa_book_downloader.core.models import DownloadTask
-from cwa_book_downloader.download.orchestrator import get_staging_dir
 from cwa_book_downloader.release_sources import DownloadHandler, register_handler
 from cwa_book_downloader.release_sources.prowlarr.cache import get_release, remove_release
 from cwa_book_downloader.release_sources.prowlarr.clients import get_client, list_configured_clients
@@ -272,6 +271,7 @@ class ProwlarrHandler(DownloadHandler):
             else:
                 use_copy = config.get("PROWLARR_USENET_ACTION", "move") == "copy"
 
+            from cwa_book_downloader.download.orchestrator import get_staging_dir
             staging_dir = get_staging_dir()
 
             if source_path.is_dir():
