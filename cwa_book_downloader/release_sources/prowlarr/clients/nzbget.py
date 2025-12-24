@@ -55,16 +55,20 @@ class NZBGetClient(DownloadClient):
         """
         rpc_url = f"{self.url}/jsonrpc"
 
-        payload = {
+        # NZBGet has a primitive JSON parser - 'id' MUST come before 'params'
+        # Using a list of tuples to preserve order, then converting to JSON manually
+        import json
+        payload = json.dumps({
             "jsonrpc": "2.0",
+            "id": 1,
             "method": method,
             "params": params or [],
-            "id": 1,
-        }
+        }, separators=(',', ':'))
 
         response = requests.post(
             rpc_url,
-            json=payload,
+            data=payload,
+            headers={"Content-Type": "application/json"},
             auth=(self.username, self.password),
             timeout=30,
         )
@@ -105,7 +109,7 @@ class NZBGetClient(DownloadClient):
             Exception: If adding fails.
         """
         try:
-            # NZBGet append method parameters (order is important):
+            # NZBGet append method parameters (all 10 required):
             # NZBFilename, Content, Category, Priority, AddToTop, AddPaused,
             # DupeKey, DupeScore, DupeMode, PPParameters
             nzb_id = self._rpc_call(
@@ -120,7 +124,7 @@ class NZBGetClient(DownloadClient):
                     "",  # DupeKey
                     0,  # DupeScore
                     "SCORE",  # DupeMode
-                    [],  # PPParameters
+                    [],  # PPParameters (empty array)
                 ],
             )
 
