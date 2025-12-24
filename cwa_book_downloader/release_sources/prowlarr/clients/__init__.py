@@ -60,7 +60,7 @@ class DownloadClient(ABC):
         pass
 
     @abstractmethod
-    def add_download(self, url: str, name: str, category: str = "cwa-books") -> str:
+    def add_download(self, url: str, name: str, category: str = "cwabd") -> str:
         """
         Add a download to the client.
 

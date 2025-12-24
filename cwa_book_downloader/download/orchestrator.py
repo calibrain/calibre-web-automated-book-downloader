@@ -160,18 +160,11 @@ def process_directory(
         # Move each book file to ingest
         final_paths = []
         for book_file in book_files:
-            # Generate filename based on USE_BOOK_TITLE setting
-            if config.USE_BOOK_TITLE:
-                # Try to use formatted name, fall back to original
-                base_filename = task.get_filename()
-                if base_filename and len(book_files) > 1:
-                    # Multiple files: append format to distinguish
-                    stem = Path(base_filename).stem
-                    filename = f"{stem}{book_file.suffix}"
-                elif base_filename:
-                    filename = base_filename
-                else:
-                    filename = book_file.name
+            # For multi-file downloads (book packs, series), always preserve original filenames
+            # since metadata title only applies to the searched book, not the whole pack.
+            # For single files, respect USE_BOOK_TITLE setting.
+            if len(book_files) == 1 and config.USE_BOOK_TITLE:
+                filename = task.get_filename() or book_file.name
             else:
                 filename = book_file.name
 
@@ -323,8 +316,9 @@ def queue_release(release_data: dict, priority: int = 0) -> bool:
         source = release_data.get('source', 'direct_download')
         extra = release_data.get('extra', {})
 
-        # Get author, preview, and content_type from top-level (preferred) or extra (fallback)
+        # Get author, year, preview, and content_type from top-level (preferred) or extra (fallback)
         author = release_data.get('author') or extra.get('author')
+        year = release_data.get('year') or extra.get('year')
         preview = release_data.get('preview') or extra.get('preview')
         content_type = release_data.get('content_type') or extra.get('content_type')
 
@@ -334,6 +328,7 @@ def queue_release(release_data: dict, priority: int = 0) -> bool:
             source=source,
             title=release_data.get('title', 'Unknown'),
             author=author,
+            year=year,
             format=release_data.get('format'),
             size=release_data.get('size'),
             preview=preview,
@@ -575,6 +570,7 @@ def _post_process_download(
             temp_dir=TMP_DIR,
             ingest_dir=ingest_dir,
             archive_id=task.task_id,
+            task=task,
         )
 
         if result.success:

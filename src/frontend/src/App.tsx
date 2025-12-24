@@ -445,7 +445,9 @@ function App() {
       await downloadRelease({
         source: release.source,
         source_id: release.source_id,
-        title: release.title,
+        title: book.title,    // Use book metadata title, not release/torrent title
+        author: book.author,  // Pass author from metadata
+        year: book.year,      // Pass year from metadata
         format: release.format,
         size: release.size,
         size_bytes: release.size_bytes,
@@ -455,7 +457,6 @@ function App() {
         seeders: release.seeders,
         extra: release.extra,
         preview: book.preview,  // Pass book cover from metadata
-        author: book.author,    // Pass author from metadata
       });
       await fetchStatus();
     } catch (error) {

@@ -82,6 +82,7 @@ class DownloadTask:
 
     # Display info for queue sidebar
     author: Optional[str] = None
+    year: Optional[str] = None
     format: Optional[str] = None
     size: Optional[str] = None
     preview: Optional[str] = None
@@ -105,7 +106,7 @@ class DownloadTask:
         """Build sanitized filename from task metadata."""
         if self.download_path:
             return Path(self.download_path).name
-        return build_filename(self.title, self.author, fmt=self.format)
+        return build_filename(self.title, self.author, self.year, self.format)
 
 
 @dataclass

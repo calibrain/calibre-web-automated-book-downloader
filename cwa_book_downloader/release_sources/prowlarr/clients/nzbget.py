@@ -89,7 +89,7 @@ class NZBGetClient(DownloadClient):
         except Exception as e:
             return False, f"Connection failed: {str(e)}"
 
-    def add_download(self, url: str, name: str, category: str = "cwa-books") -> str:
+    def add_download(self, url: str, name: str, category: str = "Books") -> str:
         """
         Add NZB by URL.
 

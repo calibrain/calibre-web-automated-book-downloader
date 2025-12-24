@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from cwa_book_downloader.core.logger import setup_logger
+from cwa_book_downloader.core.config import config
 from cwa_book_downloader.config.settings import SUPPORTED_FORMATS
 
 logger = setup_logger(__name__)
@@ -249,6 +250,7 @@ def process_archive(
     temp_dir: Path,
     ingest_dir: Path,
     archive_id: str,
+    task: Optional["DownloadTask"] = None,
 ) -> ArchiveResult:
     """
     Process an archive file: extract, filter to book files, move to ingest.
@@ -260,10 +262,13 @@ def process_archive(
         temp_dir: Base temp directory for extraction (e.g., TMP_DIR)
         ingest_dir: Final destination directory for book files
         archive_id: Unique identifier for temp directory naming
+        task: Optional download task for filename generation
 
     Returns:
         ArchiveResult with success status, final paths, and status message
     """
+    # Import here to avoid circular import
+    from cwa_book_downloader.core.models import DownloadTask
     extract_dir = temp_dir / f"extract_{archive_id}"
 
     try:
@@ -293,7 +298,15 @@ def process_archive(
         # Move book files to ingest folder
         final_paths = []
         for extracted_file in extracted_files:
-            final_path = ingest_dir / extracted_file.name
+            # For multi-file archives (book packs, series), always preserve original filenames
+            # since metadata title only applies to the searched book, not the whole pack.
+            # For single files, respect USE_BOOK_TITLE setting.
+            if len(extracted_files) == 1 and config.USE_BOOK_TITLE and task:
+                filename = task.get_filename() or extracted_file.name
+            else:
+                filename = extracted_file.name
+
+            final_path = ingest_dir / filename
             final_path = _handle_duplicate_filename(final_path)
             shutil.move(str(extracted_file), str(final_path))
             final_paths.append(final_path)

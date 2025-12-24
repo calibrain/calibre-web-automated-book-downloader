@@ -169,7 +169,7 @@ class QBittorrentClient(DownloadClient):
                 return hash_value.lower()
         return None
 
-    def add_download(self, url: str, name: str, category: str = "cwa-books") -> str:
+    def add_download(self, url: str, name: str, category: str = "cwabd") -> str:
         """
         Add torrent by URL (magnet or .torrent).
 

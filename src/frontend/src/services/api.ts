@@ -142,6 +142,8 @@ export const downloadRelease = async (release: {
   source: string;
   source_id: string;
   title: string;
+  author?: string;   // Author from metadata provider
+  year?: string;     // Year from metadata provider
   format?: string;
   size?: string;
   size_bytes?: number;
@@ -151,7 +153,6 @@ export const downloadRelease = async (release: {
   seeders?: number;
   extra?: Record<string, unknown>;
   preview?: string;  // Book cover from metadata provider
-  author?: string;   // Author from metadata provider
 }): Promise<void> => {
   await fetchJSON(`${API_BASE}/releases/download`, {
     method: 'POST',
