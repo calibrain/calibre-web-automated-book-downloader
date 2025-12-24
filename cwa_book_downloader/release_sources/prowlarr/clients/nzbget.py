@@ -97,8 +97,11 @@ class NZBGetClient(DownloadClient):
         """
         Add NZB by URL.
 
+        Fetches the NZB content from the URL (e.g., Prowlarr proxy) and sends
+        it base64-encoded to NZBGet, since NZBGet may not handle redirects well.
+
         Args:
-            url: NZB URL
+            url: NZB URL (can be Prowlarr proxy URL)
             name: Display name for the download
             category: Category for organization
 
@@ -108,15 +111,26 @@ class NZBGetClient(DownloadClient):
         Raises:
             Exception: If adding fails.
         """
+        import base64
+
         try:
+            # Fetch NZB content from the URL (handles Prowlarr proxy redirects)
+            logger.debug(f"Fetching NZB from: {url}")
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            nzb_content = base64.b64encode(response.content).decode('ascii')
+
+            # Ensure filename has .nzb extension
+            nzb_filename = name if name.endswith('.nzb') else f"{name}.nzb"
+
             # NZBGet append method parameters (all 10 required):
             # NZBFilename, Content, Category, Priority, AddToTop, AddPaused,
             # DupeKey, DupeScore, DupeMode, PPParameters
             nzb_id = self._rpc_call(
                 "append",
                 [
-                    name,  # NZBFilename
-                    url,  # Content (URL)
+                    nzb_filename,  # NZBFilename
+                    nzb_content,  # Content (base64-encoded NZB)
                     category,  # Category
                     0,  # Priority (0 = normal)
                     False,  # AddToTop
@@ -133,6 +147,9 @@ class NZBGetClient(DownloadClient):
                 return str(nzb_id)
 
             raise Exception("NZBGet returned invalid ID")
+        except requests.RequestException as e:
+            logger.error(f"Failed to fetch NZB from URL: {e}")
+            raise Exception(f"Failed to fetch NZB: {e}")
         except Exception as e:
             logger.error(f"NZBGet add failed: {e}")
             raise
