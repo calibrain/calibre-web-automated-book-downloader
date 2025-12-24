@@ -22,7 +22,7 @@ from seleniumbase import Driver
 from cwa_book_downloader.config import env
 from cwa_book_downloader.download import network
 from cwa_book_downloader.config.settings import RECORDING_DIR, VIRTUAL_SCREEN_SIZE
-from cwa_book_downloader.config.env import DEBUG, LOG_DIR
+from cwa_book_downloader.config.env import LOG_DIR
 from cwa_book_downloader.core.config import config as app_config
 from cwa_book_downloader.core.logger import setup_logger
 
@@ -538,7 +538,7 @@ def _get_chromium_args():
     ]
     
     # Conditionally add verbose logging arguments
-    if DEBUG:
+    if app_config.get("DEBUG", False):
         arguments.extend([
             "--enable-logging", # Enable Chrome browser logging
             "--v=1",            # Set verbosity level for Chrome logs
@@ -725,7 +725,8 @@ def _get_driver():
     
     # Start FFmpeg recording on first actual bypass request (not during warmup)
     # This ensures we only record active bypass sessions, not idle time
-    if env.DEBUG and DISPLAY["xvfb"] and not DISPLAY["ffmpeg"]:
+    if app_config.get("DEBUG", False) and DISPLAY["xvfb"] and not DISPLAY["ffmpeg"]:
+        RECORDING_DIR.mkdir(parents=True, exist_ok=True)
         display = DISPLAY["xvfb"]
         timestamp = datetime.now().strftime("%y%m%d-%H%M%S")
         output_file = RECORDING_DIR / f"screen_recording_{timestamp}.mp4"

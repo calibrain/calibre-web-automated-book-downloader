@@ -100,8 +100,6 @@ if not env.USING_EXTERNAL_BYPASSER:
     # Virtual display settings for debugging internal cloudflare bypasser
     VIRTUAL_SCREEN_SIZE = (1024, 768)
     RECORDING_DIR = env.LOG_DIR / "recording"
-    if env.DEBUG:
-        RECORDING_DIR.mkdir(parents=True, exist_ok=True)
 
 
 from cwa_book_downloader.core.settings_registry import (
