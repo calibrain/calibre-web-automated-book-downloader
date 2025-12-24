@@ -13,5 +13,3 @@ services:
     volumes:
       - /tmp/data/calibre-web/ingest:/cwa-book-ingest # This is where the books will be downloaded and ingested by your book management application
       - /path/to/config:/config # Configuration files and database
-      # If using Prowlarr with external download clients (qBittorrent, Deluge, Transmission, NZBGet, SABnzbd):
-      # - /path/to/downloads:/downloads # MUST match the container path used by your download client
