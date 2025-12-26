@@ -1,0 +1,26 @@
+[project]
+name = "cwa-book-downloader"
+version = "0.1.0"
+description = "Calibre-Web Automated Book Downloader"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+]
+markers = [
+    "integration: marks tests that require running services (deselect with '-m \"not integration\"')",
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "e2e: marks end-to-end tests that require the full application stack",
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
+ignore_missing_imports = true

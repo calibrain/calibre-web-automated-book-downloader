@@ -124,8 +124,10 @@ def _test_qbittorrent_connection(current_values: Dict[str, Any] = None) -> Dict[
 
 def _test_transmission_connection(current_values: Dict[str, Any] = None) -> Dict[str, Any]:
     """Test the Transmission connection using current form values."""
-    from urllib.parse import urlparse
     from cwa_book_downloader.core.config import config
+    from cwa_book_downloader.release_sources.prowlarr.clients.torrent_utils import (
+        parse_transmission_url,
+    )
 
     current_values = current_values or {}
 
@@ -140,13 +142,7 @@ def _test_transmission_connection(current_values: Dict[str, Any] = None) -> Dict
         from transmission_rpc import Client
 
         # Parse URL to extract host, port, and path
-        parsed = urlparse(url)
-        host = parsed.hostname or "localhost"
-        port = parsed.port or 9091
-        path = parsed.path or "/transmission/rpc"
-
-        if not path.endswith("/rpc"):
-            path = path.rstrip("/") + "/transmission/rpc"
+        host, port, path = parse_transmission_url(url)
 
         client = Client(
             host=host,
@@ -397,21 +393,18 @@ def prowlarr_clients_settings():
             description="URL of your Transmission instance",
             placeholder="http://transmission:9091",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
-            env_supported=False,
         ),
         TextField(
             key="TRANSMISSION_USERNAME",
             label="Username",
             description="Transmission RPC username (if authentication enabled)",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
-            env_supported=False,
         ),
         PasswordField(
             key="TRANSMISSION_PASSWORD",
             label="Password",
             description="Transmission RPC password",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
-            env_supported=False,
         ),
         ActionButton(
             key="test_transmission",
@@ -428,7 +421,6 @@ def prowlarr_clients_settings():
             placeholder="cwabd",
             default="cwabd",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
-            env_supported=False,
         ),
 
         # --- Deluge Settings ---
@@ -439,7 +431,6 @@ def prowlarr_clients_settings():
             placeholder="localhost",
             default="localhost",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
-            env_supported=False,
         ),
         TextField(
             key="DELUGE_PORT",
@@ -448,21 +439,18 @@ def prowlarr_clients_settings():
             placeholder="58846",
             default="58846",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
-            env_supported=False,
         ),
         TextField(
             key="DELUGE_USERNAME",
             label="Username",
             description="Deluge daemon username (from auth file)",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
-            env_supported=False,
         ),
         PasswordField(
             key="DELUGE_PASSWORD",
             label="Password",
             description="Deluge daemon password (from auth file)",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
-            env_supported=False,
         ),
         ActionButton(
             key="test_deluge",
@@ -479,7 +467,6 @@ def prowlarr_clients_settings():
             placeholder="cwabd",
             default="cwabd",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
-            env_supported=False,
         ),
         # Note: Torrent client download path must be mounted identically in both containers.
         # Torrents are always copied (not moved) to preserve seeding capability.

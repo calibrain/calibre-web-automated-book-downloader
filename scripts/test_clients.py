@@ -18,18 +18,20 @@ Usage:
 
 Web UIs:
     - cwabd:        http://localhost:8084
-    - SABnzbd:      http://localhost:8085
+    - qBittorrent:  http://localhost:8080
     - Transmission: http://localhost:9091
     - Deluge:       http://localhost:8112
+    - NZBGet:       http://localhost:6789
+    - SABnzbd:      http://localhost:8085
 
 Prerequisites (for running this script locally):
-    pip install requests transmission-rpc deluge-client
+    pip install requests transmission-rpc deluge-client qbittorrent-api
 
 First-Time Setup:
-    SABnzbd:
-        - Complete the setup wizard at http://localhost:8085
-        - API key will be auto-detected by this script
-        - In cwabd, copy API key from SABnzbd Config > General
+    qBittorrent:
+        - Check container logs for temporary password: docker logs test-qbittorrent
+        - Login at http://localhost:8080, change password to something known
+        - Default username is 'admin'
 
     Transmission:
         - No setup needed, credentials pre-configured (admin/admin)
@@ -39,6 +41,14 @@ First-Time Setup:
         2. Add auth line to .local/test-clients/deluge/config/auth:
            echo "admin:admin:10" >> .local/test-clients/deluge/config/auth
         3. Restart: docker restart test-deluge
+
+    NZBGet:
+        - No setup needed, credentials pre-configured (admin/admin)
+
+    SABnzbd:
+        - Complete the setup wizard at http://localhost:8085
+        - API key will be auto-detected by this script
+        - In cwabd, copy API key from SABnzbd Config > General
 """
 
 import sys
@@ -46,9 +56,21 @@ import time
 
 # Test configuration - matches docker-compose.test-clients.yml
 CONFIG = {
+    # Usenet clients
+    "nzbget": {
+        "url": "http://localhost:6789",
+        "username": "admin",
+        "password": "admin",
+    },
     "sabnzbd": {
         "url": "http://localhost:8085",
         "api_key": None,  # Will be read from config on first run
+    },
+    # Torrent clients
+    "qbittorrent": {
+        "url": "http://localhost:8080",
+        "username": "admin",
+        "password": "5NCngsHXm",  # Temp password from: docker logs test-qbittorrent | grep password
     },
     "transmission": {
         "url": "http://localhost:9091",
@@ -65,6 +87,55 @@ CONFIG = {
 
 # Test magnet link (Ubuntu ISO - legal, small metadata)
 TEST_MAGNET = "magnet:?xt=urn:btih:3b245504cf5f11bbdbe1201cea6a6bf45aee1bc0&dn=ubuntu-22.04.3-live-server-amd64.iso"
+
+
+def test_nzbget():
+    """Test NZBGet connection."""
+    import requests
+
+    print("\n" + "=" * 50)
+    print("Testing NZBGet")
+    print("=" * 50)
+
+    url = CONFIG["nzbget"]["url"]
+    username = CONFIG["nzbget"]["username"]
+    password = CONFIG["nzbget"]["password"]
+
+    try:
+        # Test connection via JSON-RPC
+        rpc_url = f"{url}/jsonrpc"
+        response = requests.post(
+            rpc_url,
+            json={"method": "version", "params": []},
+            auth=(username, password),
+            timeout=10,
+        )
+        response.raise_for_status()
+        result = response.json()
+        version = result.get("result", "unknown")
+        print(f"  Connected to NZBGet {version}")
+
+        # Test status
+        response = requests.post(
+            rpc_url,
+            json={"method": "status", "params": []},
+            auth=(username, password),
+            timeout=10,
+        )
+        status = response.json().get("result", {})
+        print(f"  Server state: {'Paused' if status.get('ServerPaused') else 'Running'}")
+        print(f"  Downloads in queue: {status.get('DownloadedSizeMB', 0)} MB downloaded")
+
+        print("  SUCCESS: NZBGet is working!")
+        return True
+
+    except requests.exceptions.ConnectionError:
+        print("  ERROR: Could not connect to NZBGet")
+        print("  Is the container running? docker ps | grep nzbget")
+        return False
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return False
 
 
 def test_sabnzbd():
@@ -130,6 +201,73 @@ def test_sabnzbd():
         return False
     except Exception as e:
         print(f"  ERROR: {e}")
+        return False
+
+
+def test_qbittorrent():
+    """Test qBittorrent connection."""
+    print("\n" + "=" * 50)
+    print("Testing qBittorrent")
+    print("=" * 50)
+
+    try:
+        import qbittorrentapi
+
+        url = CONFIG["qbittorrent"]["url"]
+        username = CONFIG["qbittorrent"]["username"]
+        password = CONFIG["qbittorrent"]["password"]
+
+        # Parse URL for host/port
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+
+        client = qbittorrentapi.Client(
+            host=parsed.hostname,
+            port=parsed.port or 8080,
+            username=username,
+            password=password,
+        )
+
+        # Test connection
+        client.auth_log_in()
+        version = client.app.version
+        print(f"  Connected to qBittorrent {version}")
+
+        # Get torrent list
+        torrents = client.torrents_info()
+        print(f"  Active torrents: {len(torrents)}")
+
+        # Test adding a torrent (then remove it)
+        print("  Testing add/remove torrent...")
+        result = client.torrents_add(urls=TEST_MAGNET, is_paused=True)
+        if result == "Ok.":
+            # Wait a moment for it to be added
+            time.sleep(1)
+            torrents = client.torrents_info()
+            if torrents:
+                test_torrent = torrents[-1]  # Most recently added
+                print(f"  Added test torrent: {test_torrent.name[:50]}...")
+                print(f"  Status: {test_torrent.state}")
+
+                # Remove it
+                client.torrents_delete(torrent_hashes=test_torrent.hash, delete_files=True)
+                print("  Removed test torrent")
+        else:
+            print(f"  Add result: {result}")
+
+        print("  SUCCESS: qBittorrent is working!")
+        return True
+
+    except ImportError:
+        print("  ERROR: qbittorrent-api not installed")
+        print("  Run: pip install qbittorrent-api")
+        return False
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        if "Forbidden" in str(e) or "401" in str(e):
+            print("\n  Authentication failed. Check password:")
+            print("  1. docker logs test-qbittorrent | grep password")
+            print("  2. Login to http://localhost:8080 and set a known password")
         return False
 
 
@@ -258,8 +396,18 @@ def main():
 
     results = {}
 
-    # Test each client
+    # Test usenet clients
+    print("\n" + "=" * 50)
+    print("USENET CLIENTS")
+    print("=" * 50)
+    results["nzbget"] = test_nzbget()
     results["sabnzbd"] = test_sabnzbd()
+
+    # Test torrent clients
+    print("\n" + "=" * 50)
+    print("TORRENT CLIENTS")
+    print("=" * 50)
+    results["qbittorrent"] = test_qbittorrent()
     results["transmission"] = test_transmission()
     results["deluge"] = test_deluge()
 

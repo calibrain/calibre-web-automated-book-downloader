@@ -2,13 +2,13 @@
 Deluge download client for Prowlarr integration.
 
 Uses the deluge-client library to communicate with Deluge's RPC daemon.
+Note: Deluge uses a custom binary RPC protocol over TCP (default port 58846,
+configurable via DELUGE_PORT), which requires the daemon to have
+"Allow Remote Connections" enabled.
 """
 
 import base64
-import hashlib
-import re
 from typing import Optional, Tuple
-from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -19,80 +19,12 @@ from cwa_book_downloader.release_sources.prowlarr.clients import (
     DownloadStatus,
     register_client,
 )
+from cwa_book_downloader.release_sources.prowlarr.clients.torrent_utils import (
+    extract_hash_from_magnet,
+    extract_info_hash_from_torrent,
+)
 
 logger = setup_logger(__name__)
-
-
-# Reuse the bencode functions for hash extraction
-def _bencode_decode(data: bytes) -> tuple:
-    """Simple bencode decoder. Returns (decoded_value, remaining_bytes)."""
-    if data[0:1] == b'd':
-        result = {}
-        data = data[1:]
-        while data[0:1] != b'e':
-            key, data = _bencode_decode(data)
-            value, data = _bencode_decode(data)
-            result[key] = value
-        return result, data[1:]
-    elif data[0:1] == b'l':
-        result = []
-        data = data[1:]
-        while data[0:1] != b'e':
-            value, data = _bencode_decode(data)
-            result.append(value)
-        return result, data[1:]
-    elif data[0:1] == b'i':
-        end = data.index(b'e')
-        return int(data[1:end]), data[end + 1:]
-    elif data[0:1].isdigit():
-        colon = data.index(b':')
-        length = int(data[:colon])
-        start = colon + 1
-        return data[start:start + length], data[start + length:]
-    else:
-        raise ValueError(f"Invalid bencode data: {data[:20]}")
-
-
-def _bencode_encode(data) -> bytes:
-    """Simple bencode encoder."""
-    if isinstance(data, dict):
-        result = b'd'
-        for key in sorted(data.keys()):
-            result += _bencode_encode(key)
-            result += _bencode_encode(data[key])
-        result += b'e'
-        return result
-    elif isinstance(data, list):
-        result = b'l'
-        for item in data:
-            result += _bencode_encode(item)
-        result += b'e'
-        return result
-    elif isinstance(data, int):
-        return f'i{data}e'.encode()
-    elif isinstance(data, bytes):
-        return f'{len(data)}:'.encode() + data
-    elif isinstance(data, str):
-        encoded = data.encode('utf-8')
-        return f'{len(encoded)}:'.encode() + encoded
-    else:
-        raise ValueError(f"Cannot bencode type: {type(data)}")
-
-
-def _extract_info_hash_from_torrent(torrent_data: bytes) -> Optional[str]:
-    """Extract info_hash from raw .torrent file data."""
-    try:
-        decoded, _ = _bencode_decode(torrent_data)
-        if b'info' not in decoded:
-            return None
-
-        info_dict = decoded[b'info']
-        info_bencoded = _bencode_encode(info_dict)
-
-        return hashlib.sha1(info_bencoded).hexdigest().lower()
-    except Exception as e:
-        logger.debug(f"Failed to parse torrent file: {e}")
-        return None
 
 
 @register_client("torrent")
@@ -107,9 +39,15 @@ class DelugeClient(DownloadClient):
         from deluge_client import DelugeRPCClient
 
         host = config.get("DELUGE_HOST", "localhost")
+        password = config.get("DELUGE_PASSWORD", "")
+
+        if not host:
+            raise ValueError("DELUGE_HOST is required")
+        if not password:
+            raise ValueError("DELUGE_PASSWORD is required")
+
         port = int(config.get("DELUGE_PORT", "58846"))
         username = config.get("DELUGE_USERNAME", "")
-        password = config.get("DELUGE_PASSWORD", "")
 
         self._client = DelugeRPCClient(
             host=host,
@@ -123,8 +61,14 @@ class DelugeClient(DownloadClient):
     def _ensure_connected(self):
         """Ensure we're connected to the Deluge daemon."""
         if not self._connected:
-            self._client.connect()
-            self._connected = True
+            logger.debug("Connecting to Deluge daemon...")
+            try:
+                self._client.connect()
+                self._connected = True
+                logger.debug("Connected to Deluge daemon")
+            except Exception as e:
+                logger.error(f"Failed to connect to Deluge daemon: {type(e).__name__}: {e}")
+                raise
 
     @staticmethod
     def is_configured() -> bool:
@@ -144,28 +88,6 @@ class DelugeClient(DownloadClient):
         except Exception as e:
             self._connected = False
             return False, f"Connection failed: {str(e)}"
-
-    def _extract_hash_from_magnet(self, magnet_url: str) -> Optional[str]:
-        """Extract info_hash from a magnet URL if possible."""
-        if not magnet_url.startswith("magnet:"):
-            return None
-
-        parsed = urlparse(magnet_url)
-        params = parse_qs(parsed.query)
-
-        xt_list = params.get("xt", [])
-        for xt in xt_list:
-            match = re.match(r"urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})", xt)
-            if match:
-                hash_value = match.group(1)
-                if len(hash_value) == 32:
-                    try:
-                        decoded = base64.b32decode(hash_value.upper())
-                        return decoded.hex().lower()
-                    except Exception:
-                        pass
-                return hash_value.lower()
-        return None
 
     def add_download(self, url: str, name: str, category: str = None) -> str:
         """
@@ -189,7 +111,7 @@ class DelugeClient(DownloadClient):
             category = category or self._category
 
             # Try to extract hash from magnet URL before adding
-            expected_hash = self._extract_hash_from_magnet(url)
+            expected_hash = extract_hash_from_magnet(url)
             if expected_hash:
                 logger.debug(f"Extracted hash from magnet: {expected_hash}")
 
@@ -205,7 +127,7 @@ class DelugeClient(DownloadClient):
                     resp = requests.get(url, timeout=30)
                     resp.raise_for_status()
                     torrent_data = resp.content
-                    expected_hash = _extract_info_hash_from_torrent(torrent_data)
+                    expected_hash = extract_info_hash_from_torrent(torrent_data)
                     if expected_hash:
                         logger.debug(f"Extracted hash from torrent file: {expected_hash}")
                     else:
@@ -330,11 +252,12 @@ class DelugeClient(DownloadClient):
 
         except Exception as e:
             self._connected = False
-            logger.error(f"Deluge get_status failed: {e}")
+            error_type = type(e).__name__
+            logger.error(f"Deluge get_status failed ({error_type}): {e}")
             return DownloadStatus(
                 progress=0,
                 state="error",
-                message=str(e),
+                message=f"{error_type}: {e}",
                 complete=False,
                 file_path=None,
             )
@@ -369,7 +292,8 @@ class DelugeClient(DownloadClient):
 
         except Exception as e:
             self._connected = False
-            logger.error(f"Deluge remove failed: {e}")
+            error_type = type(e).__name__
+            logger.error(f"Deluge remove failed ({error_type}): {e}")
             return False
 
     def get_download_path(self, download_id: str) -> Optional[str]:
@@ -404,7 +328,8 @@ class DelugeClient(DownloadClient):
 
         except Exception as e:
             self._connected = False
-            logger.debug(f"Deluge get_download_path failed: {e}")
+            error_type = type(e).__name__
+            logger.debug(f"Deluge get_download_path failed ({error_type}): {e}")
             return None
 
     def find_existing(self, url: str) -> Optional[Tuple[str, DownloadStatus]]:
@@ -421,7 +346,7 @@ class DelugeClient(DownloadClient):
             self._ensure_connected()
 
             # Try to extract hash from magnet URL
-            expected_hash = self._extract_hash_from_magnet(url)
+            expected_hash = extract_hash_from_magnet(url)
 
             # If not a magnet, try to fetch and parse the .torrent file
             if not expected_hash and not url.startswith("magnet:"):
@@ -429,7 +354,7 @@ class DelugeClient(DownloadClient):
                 try:
                     resp = requests.get(url, timeout=30)
                     resp.raise_for_status()
-                    expected_hash = _extract_info_hash_from_torrent(resp.content)
+                    expected_hash = extract_info_hash_from_torrent(resp.content)
                 except Exception as e:
                     logger.debug(f"Could not fetch torrent file: {e}")
                     return None
@@ -447,7 +372,7 @@ class DelugeClient(DownloadClient):
 
             if status:
                 full_status = self.get_status(expected_hash)
-                logger.info(f"Found existing torrent in Deluge: {expected_hash} (state: {full_status.state})")
+                logger.debug(f"Found existing torrent in Deluge: {expected_hash} (state: {full_status.state})")
                 return (expected_hash, full_status)
 
             return None

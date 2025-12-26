@@ -139,7 +139,6 @@ function App() {
     return { ongoing, completed, errored };
   }, [currentStatus]);
 
-  const activeCount = statusCounts.ongoing;
 
   // Compute visibility states
   const hasResults = books.length > 0;
@@ -606,10 +605,8 @@ function App() {
         isOpen={downloadsSidebarOpen}
         onClose={() => setDownloadsSidebarOpen(false)}
         status={currentStatus}
-        onRefresh={fetchStatus}
         onClearCompleted={handleClearCompleted}
         onCancel={handleCancel}
-        activeCount={activeCount}
       />
 
       <SettingsModal

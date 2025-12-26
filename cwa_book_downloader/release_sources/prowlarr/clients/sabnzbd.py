@@ -28,8 +28,16 @@ class SABnzbdClient(DownloadClient):
 
     def __init__(self):
         """Initialize SABnzbd client with settings from config."""
-        self.url = config.get("SABNZBD_URL", "").rstrip("/")
-        self.api_key = config.get("SABNZBD_API_KEY", "")
+        url = config.get("SABNZBD_URL", "")
+        if not url:
+            raise ValueError("SABNZBD_URL is required")
+
+        api_key = config.get("SABNZBD_API_KEY", "")
+        if not api_key:
+            raise ValueError("SABNZBD_API_KEY is required")
+
+        self.url = url.rstrip("/")
+        self.api_key = api_key
         self._category = config.get("SABNZBD_CATEGORY", "cwabd")
 
     @staticmethod
@@ -184,7 +192,7 @@ class SABnzbdClient(DownloadClient):
                                     + int(parts[2])
                                 )
                         except (ValueError, IndexError):
-                            pass
+                            pass  # ETA display is optional
 
                     # Parse speed - prefer kbpersec field (more reliable numeric value)
                     download_speed = None
@@ -194,7 +202,7 @@ class SABnzbdClient(DownloadClient):
                             kbpersec = float(kbpersec_str)
                             download_speed = int(kbpersec * 1024)  # Convert KB/s to bytes/s
                         except (ValueError, TypeError):
-                            pass
+                            pass  # Speed display is optional
 
                     # Fall back to human-readable speed field if kbpersec not available
                     if download_speed is None:
@@ -214,7 +222,7 @@ class SABnzbdClient(DownloadClient):
                                     else:
                                         download_speed = int(speed_val)
                             except (ValueError, IndexError):
-                                pass
+                                pass  # Speed display is optional
 
                     return DownloadStatus(
                         progress=percentage,
@@ -264,11 +272,12 @@ class SABnzbdClient(DownloadClient):
                 file_path=None,
             )
         except Exception as e:
-            logger.error(f"SABnzbd get_status failed: {e}")
+            error_type = type(e).__name__
+            logger.error(f"SABnzbd get_status failed ({error_type}): {e}")
             return DownloadStatus(
                 progress=0,
                 state="error",
-                message=str(e),
+                message=f"{error_type}: {e}",
                 complete=False,
                 file_path=None,
             )
@@ -315,7 +324,8 @@ class SABnzbdClient(DownloadClient):
 
             return False
         except Exception as e:
-            logger.error(f"SABnzbd remove failed: {e}")
+            error_type = type(e).__name__
+            logger.error(f"SABnzbd remove failed ({error_type}): {e}")
             return False
 
     def get_download_path(self, download_id: str) -> Optional[str]:
@@ -330,3 +340,69 @@ class SABnzbdClient(DownloadClient):
         """
         status = self.get_status(download_id)
         return status.file_path
+
+    def find_existing(self, url: str) -> Optional[Tuple[str, DownloadStatus]]:
+        """
+        Check if an NZB for this URL already exists in SABnzbd.
+
+        Note: Unlike torrents which have a unique info_hash, usenet NZBs don't have
+        a universal unique identifier. SABnzbd generates an nzo_id when adding,
+        but there's no way to derive it from the URL. This method searches by
+        NZB name extracted from the URL, which may not always be accurate.
+
+        Args:
+            url: NZB URL
+
+        Returns:
+            Tuple of (nzo_id, status) if found, None if not found.
+        """
+        try:
+            # Extract NZB name from URL (last path component without extension)
+            from urllib.parse import unquote, urlparse
+            parsed = urlparse(url)
+            path = unquote(parsed.path)
+
+            # Get filename from path
+            if "/" in path:
+                filename = path.rsplit("/", 1)[-1]
+            else:
+                filename = path
+
+            # Remove common NZB extensions
+            for ext in [".nzb", ".nzb.gz"]:
+                if filename.lower().endswith(ext):
+                    filename = filename[:-len(ext)]
+                    break
+
+            if not filename:
+                return None
+
+            # Search queue
+            queue_result = self._api_call("queue")
+            queue = queue_result.get("queue", {})
+            for slot in queue.get("slots", []):
+                slot_name = slot.get("filename", "")
+                if filename.lower() in slot_name.lower():
+                    nzo_id = slot.get("nzo_id")
+                    if nzo_id:
+                        status = self.get_status(nzo_id)
+                        logger.debug(f"Found existing NZB in SABnzbd queue: {nzo_id}")
+                        return (nzo_id, status)
+
+            # Search history
+            history_result = self._api_call("history", {"limit": 100})
+            history = history_result.get("history", {})
+            for slot in history.get("slots", []):
+                slot_name = slot.get("name", "")
+                if filename.lower() in slot_name.lower():
+                    nzo_id = slot.get("nzo_id")
+                    if nzo_id:
+                        status = self.get_status(nzo_id)
+                        logger.debug(f"Found existing NZB in SABnzbd history: {nzo_id}")
+                        return (nzo_id, status)
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Error checking for existing NZB: {e}")
+            return None

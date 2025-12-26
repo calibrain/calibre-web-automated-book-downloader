@@ -28,7 +28,11 @@ class NZBGetClient(DownloadClient):
 
     def __init__(self):
         """Initialize NZBGet client with settings from config."""
-        self.url = config.get("NZBGET_URL", "").rstrip("/")
+        url = config.get("NZBGET_URL", "")
+        if not url:
+            raise ValueError("NZBGET_URL is required")
+
+        self.url = url.rstrip("/")
         self.username = config.get("NZBGET_USERNAME", "nzbget")
         self.password = config.get("NZBGET_PASSWORD", "")
         self._category = config.get("NZBGET_CATEGORY", "Books")
@@ -56,8 +60,7 @@ class NZBGetClient(DownloadClient):
         """
         rpc_url = f"{self.url}/jsonrpc"
 
-        # NZBGet has a primitive JSON parser - 'id' MUST come before 'params'
-        # Using a list of tuples to preserve order, then converting to JSON manually
+        # Build JSON-RPC 2.0 request
         import json
         payload = json.dumps({
             "jsonrpc": "2.0",
@@ -252,11 +255,12 @@ class NZBGetClient(DownloadClient):
                 file_path=None,
             )
         except Exception as e:
-            logger.error(f"NZBGet get_status failed: {e}")
+            error_type = type(e).__name__
+            logger.error(f"NZBGet get_status failed ({error_type}): {e}")
             return DownloadStatus(
                 progress=0,
                 state="error",
-                message=str(e),
+                message=f"{error_type}: {e}",
                 complete=False,
                 file_path=None,
             )
@@ -282,7 +286,8 @@ class NZBGetClient(DownloadClient):
                 logger.info(f"Removed NZB from NZBGet: {download_id}")
             return bool(result)
         except Exception as e:
-            logger.error(f"NZBGet remove failed: {e}")
+            error_type = type(e).__name__
+            logger.error(f"NZBGet remove failed ({error_type}): {e}")
             return False
 
     def get_download_path(self, download_id: str) -> Optional[str]:

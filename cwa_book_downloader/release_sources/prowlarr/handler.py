@@ -1,8 +1,9 @@
 """
 Prowlarr download handler.
 
-Handles downloads from Prowlarr via external download clients
-(qBittorrent for torrents, NZBGet for usenet).
+Handles downloads from Prowlarr via external download clients.
+Supported torrent clients: qBittorrent, Transmission, Deluge.
+Supported usenet clients: NZBGet, SABnzbd.
 """
 
 import shutil
@@ -15,7 +16,11 @@ from cwa_book_downloader.core.logger import setup_logger
 from cwa_book_downloader.core.models import DownloadTask
 from cwa_book_downloader.release_sources import DownloadHandler, register_handler
 from cwa_book_downloader.release_sources.prowlarr.cache import get_release, remove_release
-from cwa_book_downloader.release_sources.prowlarr.clients import get_client, list_configured_clients
+from cwa_book_downloader.release_sources.prowlarr.clients import (
+    DownloadState,
+    get_client,
+    list_configured_clients,
+)
 
 logger = setup_logger(__name__)
 
@@ -36,7 +41,7 @@ def _determine_protocol(result: dict) -> str:
 
 @register_handler("prowlarr")
 class ProwlarrHandler(DownloadHandler):
-    """Handler for Prowlarr downloads via qBittorrent (torrents) or NZBGet (usenet)."""
+    """Handler for Prowlarr downloads via configured torrent or usenet client."""
 
     def download(
         self,
@@ -167,14 +172,14 @@ class ProwlarrHandler(DownloadHandler):
 
                 # Check for completion
                 if status.complete:
-                    if status.state == "error":
+                    if status.state == DownloadState.ERROR:
                         status_callback("error", status.message or "Download failed")
                         return None
                     # Download complete - break to handle file
                     break
 
                 # Check for error state
-                if status.state == "error":
+                if status.state == DownloadState.ERROR:
                     status_callback("error", status.message or "Download failed")
                     client.remove(download_id, delete_files=True)
                     return None
@@ -234,8 +239,8 @@ class ProwlarrHandler(DownloadHandler):
             status_callback("error", str(e))
             try:
                 client.remove(download_id, delete_files=True)
-            except Exception:
-                pass
+            except Exception as cleanup_error:
+                logger.error(f"Failed to cleanup download {download_id} after error: {cleanup_error}")
             return None
 
     def _handle_completed_file(

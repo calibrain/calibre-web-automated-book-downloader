@@ -2,6 +2,7 @@
 Download client infrastructure for Prowlarr integration.
 
 This module provides:
+- DownloadState: Enum of valid download states
 - DownloadStatus: Status dataclass for external download progress
 - DownloadClient: Abstract base class for download clients
 - Client registry and factory functions
@@ -9,34 +10,101 @@ This module provides:
 Clients register themselves via the @register_client decorator.
 """
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Type
+from enum import Enum
+from typing import Dict, List, Optional, Tuple, Type, Union
+
+_logger = logging.getLogger(__name__)
 
 
-@dataclass
+class DownloadState(Enum):
+    """Valid states for a download."""
+
+    DOWNLOADING = "downloading"
+    COMPLETE = "complete"
+    ERROR = "error"
+    SEEDING = "seeding"
+    PAUSED = "paused"
+    QUEUED = "queued"
+    CHECKING = "checking"
+    PROCESSING = "processing"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
 class DownloadStatus:
-    """Status of an external download."""
+    """Status of an external download (immutable)."""
 
     progress: float  # 0-100
-    state: str  # "downloading", "complete", "error", "seeding", "paused", "queued"
+    state: Union[DownloadState, str]  # Prefer DownloadState enum; strings auto-normalized
     message: Optional[str]  # Status message
     complete: bool  # True when download finished
     file_path: Optional[str]  # Path in client's download dir (when complete)
     download_speed: Optional[int] = None  # Bytes per second
     eta: Optional[int] = None  # Seconds remaining
 
+    def __post_init__(self):
+        """Validate and normalize state."""
+        # Normalize string states to enum
+        if isinstance(self.state, str):
+            try:
+                normalized_state = DownloadState(self.state)
+                object.__setattr__(self, 'state', normalized_state)
+            except ValueError:
+                # Unknown state string - keep as-is for backwards compatibility
+                _logger.warning(f"Unknown download state '{self.state}', keeping as string")
+
+        # Validate progress is in range
+        if not 0 <= self.progress <= 100:
+            _logger.debug(f"Progress {self.progress} out of range, clamping to [0, 100]")
+            object.__setattr__(self, 'progress', max(0, min(100, self.progress)))
+
+    @property
+    def state_value(self) -> str:
+        """Get the state as a string value (for JSON serialization)."""
+        if isinstance(self.state, DownloadState):
+            return self.state.value
+        return self.state
+
 
 class DownloadClient(ABC):
     """
     Base class for external download clients.
 
-    Subclasses implement protocol-specific download management
-    (e.g., qBittorrent for torrents, NZBGet for usenet).
+    Subclasses implement protocol-specific download management:
+    - Torrent clients: qBittorrent, Transmission, Deluge
+    - Usenet clients: NZBGet, SABnzbd
+
+    Subclasses must define:
+    - protocol: "torrent" or "usenet"
+    - name: Unique client identifier (e.g., "qbittorrent", "nzbget")
     """
 
-    protocol: str  # "torrent" or "usenet"
-    name: str  # "qbittorrent" or "nzbget"
+    # Class attributes that subclasses must define
+    protocol: str
+    name: str
+
+    def __init_subclass__(cls, **kwargs):
+        """Validate that subclasses define required class attributes."""
+        super().__init_subclass__(**kwargs)
+
+        # Skip validation for abstract subclasses
+        if ABC in cls.__bases__:
+            return
+
+        # Validate protocol attribute
+        if not hasattr(cls, 'protocol') or not cls.protocol:
+            raise TypeError(f"{cls.__name__} must define 'protocol' class attribute")
+        if cls.protocol not in ('torrent', 'usenet'):
+            raise TypeError(
+                f"{cls.__name__}.protocol must be 'torrent' or 'usenet', got '{cls.protocol}'"
+            )
+
+        # Validate name attribute
+        if not hasattr(cls, 'name') or not cls.name:
+            raise TypeError(f"{cls.__name__} must define 'name' class attribute")
 
     @staticmethod
     @abstractmethod

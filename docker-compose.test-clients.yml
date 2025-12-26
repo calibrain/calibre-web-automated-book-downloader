@@ -6,6 +6,14 @@
 #   # Access cwabd at http://localhost:8084
 #   # Configure clients in Settings > Prowlarr > Download Clients
 #
+# Web UIs:
+#   - cwabd:        http://localhost:8084
+#   - qBittorrent:  http://localhost:8080 (admin / adminadmin - check logs for temp password)
+#   - Transmission: http://localhost:9091 (admin / admin)
+#   - Deluge:       http://localhost:8112 (password: deluge)
+#   - NZBGet:       http://localhost:6789 (nzbget / tegbzn6789)
+#   - SABnzbd:      http://localhost:8085 (complete setup wizard for API key)
+#
 # Hot-reload: Python code changes are picked up automatically (source mounted)
 # Rebuild needed only for: requirements changes, frontend changes, Dockerfile changes
 
@@ -40,13 +48,36 @@ services:
       - ./.local/test-clients/downloads:/downloads
       # Mount source code for hot-reload (no rebuild needed for Python changes)
       - ./cwa_book_downloader:/app/cwa_book_downloader:ro
+      # Mount tests for running pytest in container
+      - ./tests:/app/tests:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      # Mount client configs for integration tests to read credentials
+      - ./.local/test-clients/qbittorrent/config:/qbittorrent-config:ro
+      - ./.local/test-clients/sabnzbd/config:/sabnzbd-config:ro
     depends_on:
+      - nzbget
       - sabnzbd
+      - qbittorrent
       - transmission
       - deluge
     restart: unless-stopped
 
   # ============ USENET CLIENTS ============
+
+  nzbget:
+    image: lscr.io/linuxserver/nzbget:latest
+    container_name: test-nzbget
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ./.local/test-clients/nzbget/config:/config
+      - ./.local/test-clients/downloads:/downloads
+      - ./.local/test-clients/nzbget/custom-cont-init.d:/custom-cont-init.d:ro
+    ports:
+      - "6789:6789"  # Web UI / JSON-RPC
+    restart: unless-stopped
 
   sabnzbd:
     image: lscr.io/linuxserver/sabnzbd:latest
@@ -63,6 +94,23 @@ services:
     restart: unless-stopped
 
   # ============ TORRENT CLIENTS ============
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: test-qbittorrent
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - WEBUI_PORT=8080
+    volumes:
+      - ./.local/test-clients/qbittorrent/config:/config
+      - ./.local/test-clients/downloads:/downloads
+    ports:
+      - "8080:8080"  # Web UI / API
+      - "6882:6881"
+      - "6882:6881/udp"
+    restart: unless-stopped
 
   transmission:
     image: lscr.io/linuxserver/transmission:latest

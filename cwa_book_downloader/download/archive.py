@@ -93,7 +93,7 @@ def _filter_book_files(extracted_files: List[Path]) -> Tuple[List[Path], List[Pa
 def extract_archive(
     archive_path: Path,
     output_dir: Path,
-) -> Tuple[List[Path], List[str]]:
+) -> Tuple[List[Path], List[str], List[Path]]:
     """
     Extract book files from an archive.
 
@@ -105,7 +105,10 @@ def extract_archive(
         output_dir: Directory to extract files to
 
     Returns:
-        Tuple of (extracted_book_file_paths, warnings)
+        Tuple of (book_files, warnings, rejected_ebook_files)
+        - book_files: Paths to extracted files matching SUPPORTED_FORMATS
+        - warnings: List of warning messages
+        - rejected_ebook_files: Ebook files that were rejected (format not enabled)
 
     Raises:
         ArchiveExtractionError: If extraction fails
@@ -297,8 +300,6 @@ def process_archive(
     Returns:
         ArchiveResult with success status, final paths, and status message
     """
-    # Import here to avoid circular import
-    from cwa_book_downloader.core.models import DownloadTask
     extract_dir = temp_dir / f"extract_{archive_id}"
 
     try:

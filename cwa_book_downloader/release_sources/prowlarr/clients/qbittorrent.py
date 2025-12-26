@@ -4,11 +4,8 @@ qBittorrent download client for Prowlarr integration.
 Uses the qbittorrent-api library to communicate with qBittorrent's Web API.
 """
 
-import hashlib
-import re
 import time
 from typing import Optional, Tuple
-from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -19,92 +16,12 @@ from cwa_book_downloader.release_sources.prowlarr.clients import (
     DownloadStatus,
     register_client,
 )
+from cwa_book_downloader.release_sources.prowlarr.clients.torrent_utils import (
+    extract_hash_from_magnet,
+    extract_info_hash_from_torrent,
+)
 
 logger = setup_logger(__name__)
-
-
-def _bencode_decode(data: bytes) -> tuple:
-    """Simple bencode decoder. Returns (decoded_value, remaining_bytes)."""
-    if data[0:1] == b'd':
-        # Dictionary
-        result = {}
-        data = data[1:]
-        while data[0:1] != b'e':
-            key, data = _bencode_decode(data)
-            value, data = _bencode_decode(data)
-            result[key] = value
-        return result, data[1:]
-    elif data[0:1] == b'l':
-        # List
-        result = []
-        data = data[1:]
-        while data[0:1] != b'e':
-            value, data = _bencode_decode(data)
-            result.append(value)
-        return result, data[1:]
-    elif data[0:1] == b'i':
-        # Integer
-        end = data.index(b'e')
-        return int(data[1:end]), data[end + 1:]
-    elif data[0:1].isdigit():
-        # String (byte string)
-        colon = data.index(b':')
-        length = int(data[:colon])
-        start = colon + 1
-        return data[start:start + length], data[start + length:]
-    else:
-        raise ValueError(f"Invalid bencode data: {data[:20]}")
-
-
-def _extract_info_hash_from_torrent(torrent_data: bytes) -> Optional[str]:
-    """Extract info_hash from raw .torrent file data."""
-    try:
-        decoded, _ = _bencode_decode(torrent_data)
-        if b'info' not in decoded:
-            return None
-
-        # Find the raw info dict bytes to hash
-        # We need to find where 'info' dict starts and ends in the original data
-        info_start = torrent_data.find(b'4:info') + 6
-        if info_start < 6:
-            return None
-
-        # Re-encode the info dict to get consistent bytes for hashing
-        info_dict = decoded[b'info']
-        info_bencoded = _bencode_encode(info_dict)
-
-        # SHA1 hash of the info dict is the info_hash
-        return hashlib.sha1(info_bencoded).hexdigest().lower()
-    except Exception as e:
-        logger.debug(f"Failed to parse torrent file: {e}")
-        return None
-
-
-def _bencode_encode(data) -> bytes:
-    """Simple bencode encoder."""
-    if isinstance(data, dict):
-        # Keys must be sorted
-        result = b'd'
-        for key in sorted(data.keys()):
-            result += _bencode_encode(key)
-            result += _bencode_encode(data[key])
-        result += b'e'
-        return result
-    elif isinstance(data, list):
-        result = b'l'
-        for item in data:
-            result += _bencode_encode(item)
-        result += b'e'
-        return result
-    elif isinstance(data, int):
-        return f'i{data}e'.encode()
-    elif isinstance(data, bytes):
-        return f'{len(data)}:'.encode() + data
-    elif isinstance(data, str):
-        encoded = data.encode('utf-8')
-        return f'{len(encoded)}:'.encode() + encoded
-    else:
-        raise ValueError(f"Cannot bencode type: {type(data)}")
 
 
 @register_client("torrent")
@@ -119,8 +36,12 @@ class QBittorrentClient(DownloadClient):
         # Lazy import to avoid dependency issues if not using torrents
         from qbittorrentapi import Client
 
+        url = config.get("QBITTORRENT_URL", "")
+        if not url:
+            raise ValueError("QBITTORRENT_URL is required")
+
         self._client = Client(
-            host=config.get("QBITTORRENT_URL", ""),
+            host=url,
             username=config.get("QBITTORRENT_USERNAME", ""),
             password=config.get("QBITTORRENT_PASSWORD", ""),
         )
@@ -142,34 +63,6 @@ class QBittorrentClient(DownloadClient):
         except Exception as e:
             return False, f"Connection failed: {str(e)}"
 
-    def _extract_hash_from_magnet(self, magnet_url: str) -> Optional[str]:
-        """Extract info_hash from a magnet URL if possible."""
-        if not magnet_url.startswith("magnet:"):
-            return None
-
-        # Parse the magnet URL
-        parsed = urlparse(magnet_url)
-        params = parse_qs(parsed.query)
-
-        # Get the xt (exact topic) parameter
-        xt_list = params.get("xt", [])
-        for xt in xt_list:
-            # Format: urn:btih:<hash>
-            match = re.match(r"urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})", xt)
-            if match:
-                hash_value = match.group(1)
-                # Convert base32 to hex if needed (32 chars = base32, 40 chars = hex)
-                if len(hash_value) == 32:
-                    import base64
-
-                    try:
-                        decoded = base64.b32decode(hash_value.upper())
-                        return decoded.hex().lower()
-                    except Exception:
-                        pass
-                return hash_value.lower()
-        return None
-
     def add_download(self, url: str, name: str, category: str = None) -> str:
         """
         Add torrent by URL (magnet or .torrent).
@@ -189,14 +82,17 @@ class QBittorrentClient(DownloadClient):
             # Use configured category if not explicitly provided
             category = category or self._category
 
-            # Ensure category exists
+            # Ensure category exists (may already exist, which is fine)
             try:
                 self._client.torrents_create_category(name=category)
-            except Exception:
-                pass  # Category may already exist
+            except Exception as e:
+                # Conflict409Error means category exists - that's expected
+                # Log other errors but continue since download may still work
+                if "Conflict" not in type(e).__name__ and "409" not in str(e):
+                    logger.debug(f"Could not create category '{category}': {type(e).__name__}: {e}")
 
             # Try to extract hash from magnet URL before adding
-            expected_hash = self._extract_hash_from_magnet(url)
+            expected_hash = extract_hash_from_magnet(url)
             if expected_hash:
                 logger.debug(f"Extracted hash from magnet: {expected_hash}")
 
@@ -212,7 +108,7 @@ class QBittorrentClient(DownloadClient):
                     resp = requests.get(url, timeout=30)
                     resp.raise_for_status()
                     torrent_data = resp.content
-                    expected_hash = _extract_info_hash_from_torrent(torrent_data)
+                    expected_hash = extract_info_hash_from_torrent(torrent_data)
                     if expected_hash:
                         logger.debug(f"Extracted hash from torrent file: {expected_hash}")
                     else:
@@ -335,11 +231,12 @@ class QBittorrentClient(DownloadClient):
                 eta=eta,
             )
         except Exception as e:
-            logger.error(f"qBittorrent get_status failed: {e}")
+            error_type = type(e).__name__
+            logger.error(f"qBittorrent get_status failed ({error_type}): {e}")
             return DownloadStatus(
                 progress=0,
                 state="error",
-                message=str(e),
+                message=f"{error_type}: {e}",
                 complete=False,
                 file_path=None,
             )
@@ -365,7 +262,8 @@ class QBittorrentClient(DownloadClient):
             )
             return True
         except Exception as e:
-            logger.error(f"qBittorrent remove failed: {e}")
+            error_type = type(e).__name__
+            logger.error(f"qBittorrent remove failed ({error_type}): {e}")
             return False
 
     def get_download_path(self, download_id: str) -> Optional[str]:
@@ -383,7 +281,9 @@ class QBittorrentClient(DownloadClient):
             if torrents:
                 return torrents[0].content_path
             return None
-        except Exception:
+        except Exception as e:
+            error_type = type(e).__name__
+            logger.debug(f"qBittorrent get_download_path failed ({error_type}): {e}")
             return None
 
     def find_existing(self, url: str) -> Optional[Tuple[str, DownloadStatus]]:
@@ -401,7 +301,7 @@ class QBittorrentClient(DownloadClient):
         """
         try:
             # Try to extract hash from magnet URL
-            expected_hash = self._extract_hash_from_magnet(url)
+            expected_hash = extract_hash_from_magnet(url)
 
             # If not a magnet, try to fetch and parse the .torrent file
             if not expected_hash and not url.startswith("magnet:"):
@@ -409,7 +309,7 @@ class QBittorrentClient(DownloadClient):
                 try:
                     resp = requests.get(url, timeout=30)
                     resp.raise_for_status()
-                    expected_hash = _extract_info_hash_from_torrent(resp.content)
+                    expected_hash = extract_info_hash_from_torrent(resp.content)
                 except Exception as e:
                     logger.debug(f"Could not fetch torrent file: {e}")
                     return None
@@ -422,7 +322,7 @@ class QBittorrentClient(DownloadClient):
             torrents = self._client.torrents_info(torrent_hashes=expected_hash)
             if torrents:
                 status = self.get_status(expected_hash)
-                logger.info(f"Found existing torrent in qBittorrent: {expected_hash} (state: {status.state})")
+                logger.debug(f"Found existing torrent in qBittorrent: {expected_hash} (state: {status.state})")
                 return (expected_hash, status)
 
             return None
