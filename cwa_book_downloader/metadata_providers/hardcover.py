@@ -624,17 +624,14 @@ class HardcoverProvider(MetadataProvider):
         )
 
 
-def _test_hardcover_connection() -> Dict[str, Any]:
-    """Test the Hardcover API connection."""
+def _test_hardcover_connection(current_values: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Test the Hardcover API connection using current form values."""
     from cwa_book_downloader.core.config import config as app_config
-    from cwa_book_downloader.core.settings_registry import save_config_file, load_config_file
-    from cwa_book_downloader.metadata_providers import get_provider_kwargs
 
-    # Refresh config to pick up any recently saved settings
-    app_config.refresh()
+    current_values = current_values or {}
 
-    kwargs = get_provider_kwargs("hardcover")
-    api_key = kwargs.get("api_key")
+    # Use current form values first, fall back to saved config
+    api_key = current_values.get("HARDCOVER_API_KEY") or app_config.get("HARDCOVER_API_KEY", "")
 
     # Debug: log key info
     key_len = len(api_key) if api_key else 0
@@ -644,7 +641,7 @@ def _test_hardcover_connection() -> Dict[str, Any]:
     if not api_key:
         # Clear any stored username since there's no key
         _save_connected_username(None)
-        return {"success": False, "message": "No API key configured. Save your key and try again."}
+        return {"success": False, "message": "API key is required"}
 
     if key_len < 100:
         return {"success": False, "message": f"API key seems too short ({key_len} chars). Expected 500+ chars."}

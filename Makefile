@@ -1,4 +1,4 @@
-.PHONY: help install dev build preview typecheck clean up down docker-build refresh
+.PHONY: help install dev build preview typecheck clean up down docker-build refresh restart
 
 # Frontend directory
 FRONTEND_DIR := src/frontend
@@ -21,6 +21,7 @@ help:
 	@echo "Backend (Docker):"
 	@echo "  up         - Start backend services"
 	@echo "  down       - Stop backend services"
+	@echo "  restart    - Restart backend services (no rebuild)"
 	@echo "  docker-build - Build Docker image"
 	@echo "  refresh    - Rebuild and restart backend services"
 
@@ -69,6 +70,11 @@ down:
 docker-build:
 	@echo "Building Docker image..."
 	docker compose -f $(COMPOSE_FILE) build
+
+# Restart backend services (no rebuild)
+restart:
+	@echo "Restarting backend services..."
+	docker compose -f $(COMPOSE_FILE) restart
 
 # Rebuild and restart backend services
 refresh:

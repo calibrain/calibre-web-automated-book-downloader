@@ -479,3 +479,8 @@ try:
     from cwa_book_downloader.metadata_providers import openlibrary  # noqa: F401, E402
 except ImportError:
     pass  # Open Library provider is optional
+
+try:
+    from cwa_book_downloader.metadata_providers import googlebooks  # noqa: F401, E402
+except ImportError:
+    pass  # Google Books provider is optional

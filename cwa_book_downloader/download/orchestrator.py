@@ -149,9 +149,10 @@ def process_directory(
     ingest_dir: Path,
     task: DownloadTask,
 ) -> Tuple[List[Path], Optional[str]]:
-    """Process a staged directory: find book files, filter by SUPPORTED_FORMATS, move to ingest.
+    """Process a staged directory: find book files, handle archives, move to ingest.
 
-    Similar to archive processing but for multi-file torrent/usenet downloads.
+    For multi-file torrent/usenet downloads. If book files exist, moves them directly.
+    If only archives exist, extracts them to find book files inside.
 
     Args:
         directory: Staged directory containing downloaded files
@@ -164,8 +165,40 @@ def process_directory(
     try:
         book_files, rejected_files = _find_book_files_in_directory(directory)
 
+        # Find archives in directory (ZIP/RAR)
+        archive_files = [f for f in directory.rglob("*") if f.is_file() and is_archive(f)]
+
         if not book_files:
-            # Clean up empty directory
+            # No direct book files - check for archives to extract
+            if archive_files:
+                logger.info(f"No book files found, extracting {len(archive_files)} archive(s)")
+                all_final_paths = []
+                all_errors = []
+
+                for archive in archive_files:
+                    result = process_archive(
+                        archive_path=archive,
+                        temp_dir=directory,
+                        ingest_dir=ingest_dir,
+                        archive_id=f"{task.task_id}_{archive.stem}",
+                        task=task,
+                    )
+                    if result.success:
+                        all_final_paths.extend(result.final_paths)
+                    elif result.error:
+                        all_errors.append(f"{archive.name}: {result.error}")
+
+                # Clean up directory after processing archives
+                shutil.rmtree(directory, ignore_errors=True)
+
+                if all_final_paths:
+                    return all_final_paths, None
+                elif all_errors:
+                    return [], "; ".join(all_errors)
+                else:
+                    return [], "No book files found in archives"
+
+            # No book files and no archives
             shutil.rmtree(directory, ignore_errors=True)
 
             if rejected_files:
@@ -180,6 +213,10 @@ def process_directory(
                 return [], f"Found {len(rejected_files)} file(s) but format not supported ({rejected_list}). Enable in Settings > Formats."
 
             return [], "No book files found in download"
+
+        # We have book files - use them directly, skip any archives
+        if archive_files:
+            logger.debug(f"Ignoring {len(archive_files)} archive(s) - already have {len(book_files)} book file(s)")
 
         logger.info(f"Found {len(book_files)} book file(s) in directory")
 
