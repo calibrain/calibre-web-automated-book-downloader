@@ -148,9 +148,10 @@ class HardcoverProvider(MetadataProvider):
             result = self.search_by_isbn(options.query)
             return [result] if result else []
 
-        # Build cache key from options (include fields for cache differentiation)
+        # Build cache key from options (include fields and settings for cache differentiation)
         fields_key = ":".join(f"{k}={v}" for k, v in sorted(options.fields.items()))
-        cache_key = f"{options.query}:{options.search_type.value}:{options.sort.value}:{options.limit}:{options.page}:{fields_key}"
+        exclude_compilations = app_config.get("HARDCOVER_EXCLUDE_COMPILATIONS", False)
+        cache_key = f"{options.query}:{options.search_type.value}:{options.sort.value}:{options.limit}:{options.page}:{fields_key}:excl_comp={exclude_compilations}"
         return self._search_cached(cache_key, options)
 
     @cacheable(ttl_key="METADATA_CACHE_SEARCH_TTL", ttl_default=300, key_prefix="hardcover:search")
@@ -275,12 +276,19 @@ class HardcoverProvider(MetadataProvider):
             else:
                 hits = results_obj if isinstance(results_obj, list) else []
 
+            # Check if we should exclude compilations
+            exclude_compilations = app_config.get("HARDCOVER_EXCLUDE_COMPILATIONS", False)
+
             # Parse the search results - each hit has a 'document' field
             books = []
             for hit in hits:
                 # Get the document from the hit
                 item = hit.get("document", hit) if isinstance(hit, dict) else hit
                 if isinstance(item, dict):
+                    # Filter out compilations if setting is enabled
+                    if exclude_compilations and item.get("compilation", False):
+                        continue
+
                     book = self._parse_search_result(item)
                     if book:
                         books.append(book)
@@ -537,16 +545,23 @@ class HardcoverProvider(MetadataProvider):
             if not book_id or not title:
                 return None
 
-            # Extract authors from various possible fields
+            # Extract authors - use contribution_types to filter author_names if available
             authors = []
-            if "author_names" in item:
-                authors = item["author_names"] if isinstance(item["author_names"], list) else [item["author_names"]]
-            elif "cached_contributors" in item:
-                for contrib in item.get("cached_contributors", []):
-                    if isinstance(contrib, dict) and contrib.get("name"):
-                        authors.append(contrib["name"])
-                    elif isinstance(contrib, str):
-                        authors.append(contrib)
+
+            author_names = item.get("author_names", [])
+            if isinstance(author_names, str):
+                author_names = [author_names]
+
+            contribution_types = item.get("contribution_types", [])
+
+            # If we have parallel arrays, filter to only "Author" contributions
+            if contribution_types and len(contribution_types) == len(author_names):
+                for name, contrib_type in zip(author_names, contribution_types):
+                    if contrib_type == "Author":
+                        authors.append(name)
+            elif author_names:
+                # No contribution_types or length mismatch - use all names as fallback
+                authors = author_names
 
             # Get cover URL
             cover_url = None
@@ -854,5 +869,11 @@ def hardcover_settings():
             options=_HARDCOVER_SORT_OPTIONS,
             default="relevance",
             env_supported=False,  # UI-only setting
+        ),
+        CheckboxField(
+            key="HARDCOVER_EXCLUDE_COMPILATIONS",
+            label="Exclude Compilations",
+            description="Filter out compilations, anthologies, and omnibus editions from search results",
+            default=False,
         ),
     ]

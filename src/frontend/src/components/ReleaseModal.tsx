@@ -1366,26 +1366,16 @@ export const ReleaseModal = ({
 
             {/* Release list content */}
             <div className="min-h-[200px]">
-              {!currentTabEnabled ? (
+              {sourcesLoading ? (
+                // Sources still loading - show skeleton instead of "Not Configured"
+                <ReleaseSkeleton />
+              ) : !currentTabEnabled ? (
                 <ConfigureSourceCTA
                   sourceName={allTabs.find((t) => t.name === activeTab)?.displayName || activeTab}
                 />
-              ) : currentTabLoading && filteredReleases.length === 0 ? (
-                // Initial loading - show full skeleton
-                <div className="relative min-h-[200px]">
-                  <ReleaseSkeleton />
-                  {/* Search status - bottom center */}
-                  {searchStatus && searchStatus.source === activeTab && (
-                    <div className="absolute inset-x-0 bottom-4 z-10 flex items-center justify-center pointer-events-none">
-                      <div className="flex items-center gap-2.5 px-4 py-2 rounded-xl bg-[var(--bg-soft)] border border-[var(--border-muted)] text-gray-500 dark:text-gray-400 text-sm shadow-sm">
-                        {searchStatus.phase !== 'complete' && searchStatus.phase !== 'error' && (
-                          <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                        )}
-                        {searchStatus.message}
-                      </div>
-                    </div>
-                  )}
-                </div>
+              ) : (currentTabLoading || (releasesBySource[activeTab] === undefined && !currentTabError)) && filteredReleases.length === 0 ? (
+                // Initial loading or about to start loading - show full skeleton
+                <ReleaseSkeleton />
               ) : currentTabError ? (
                 <ErrorState message={currentTabError} />
               ) : filteredReleases.length === 0 && !currentTabLoading ? (
@@ -1438,6 +1428,18 @@ export const ReleaseModal = ({
                 </>
               )}
             </div>
+
+            {/* Sticky search status indicator - stays at bottom of visible scroll area */}
+            {searchStatus && searchStatus.source === activeTab && currentTabLoading && (
+              <div className="sticky bottom-0 z-10 flex items-center justify-center pointer-events-none pb-4 pt-2">
+                <div className="flex items-center gap-2.5 px-4 py-2 rounded-xl bg-[var(--bg-soft)] border border-[var(--border-muted)] text-gray-500 dark:text-gray-400 text-sm shadow-lg pointer-events-auto">
+                  {searchStatus.phase !== 'complete' && searchStatus.phase !== 'error' && (
+                    <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  )}
+                  {searchStatus.message}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
