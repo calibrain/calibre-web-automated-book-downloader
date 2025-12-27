@@ -12,3 +12,6 @@ gevent-websocket
 psutil
 emoji
 rarfile
+qbittorrent-api
+transmission-rpc
+deluge-client

@@ -21,6 +21,7 @@ class SortOrder(str, Enum):
     RATING = "rating"          # Highest rated first
     NEWEST = "newest"          # Most recently published first
     OLDEST = "oldest"          # Oldest published first
+    SERIES_ORDER = "series_order"  # By series position (requires series field)
 
 
 # Display labels for sort options
@@ -30,6 +31,7 @@ SORT_LABELS: Dict[SortOrder, str] = {
     SortOrder.RATING: "Highest rated",
     SortOrder.NEWEST: "Newest",
     SortOrder.OLDEST: "Oldest",
+    SortOrder.SERIES_ORDER: "Series order",
 }
 
 
@@ -164,6 +166,11 @@ class BookMetadata:
 
     # Provider-specific display fields for cards/lists
     display_fields: List[DisplayField] = field(default_factory=list)
+
+    # Series info (if book is part of a series)
+    series_name: Optional[str] = None      # Name of the series
+    series_position: Optional[float] = None  # This book's position (e.g., 3, 1.5 for novellas)
+    series_count: Optional[int] = None     # Total books in the series
 
 
 class MetadataProvider(ABC):
@@ -479,3 +486,8 @@ try:
     from cwa_book_downloader.metadata_providers import openlibrary  # noqa: F401, E402
 except ImportError:
     pass  # Open Library provider is optional
+
+try:
+    from cwa_book_downloader.metadata_providers import googlebooks  # noqa: F401, E402
+except ImportError:
+    pass  # Google Books provider is optional

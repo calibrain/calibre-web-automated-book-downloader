@@ -523,7 +523,7 @@ def api_config() -> Union[Response, Tuple[Response, int]]:
 
         config = {
             "calibre_web_url": app_config.get("CALIBRE_WEB_URL", ""),
-            "debug": DEBUG,
+            "debug": app_config.get("DEBUG", False),
             "build_version": BUILD_VERSION,
             "release_version": RELEASE_VERSION,
             "book_languages": _SUPPORTED_BOOK_LANGUAGE,
@@ -1272,6 +1272,10 @@ def api_releases() -> Union[Response, Tuple[Response, int]]:
         # Accept title/author from frontend to avoid re-fetching metadata
         title_param = request.args.get('title', '').strip()
         author_param = request.args.get('author', '').strip()
+        expand_search = request.args.get('expand_search', '').lower() == 'true'
+        # Accept language codes for filtering (comma-separated)
+        languages_param = request.args.get('languages', '').strip()
+        languages = [lang.strip() for lang in languages_param.split(',') if lang.strip()] if languages_param else None
 
         if not provider or not book_id:
             return jsonify({"error": "Parameters 'provider' and 'book_id' are required"}), 400
@@ -1287,12 +1291,12 @@ def api_releases() -> Union[Response, Tuple[Response, int]]:
         if not book:
             return jsonify({"error": "Book not found in metadata provider"}), 404
 
-        # Override with frontend-provided title/author if available (these come from search results
-        # which may have more complete data than get_book returns)
+        # Override title from frontend if available (search results may have better data)
+        # Note: We intentionally DON'T override authors here - get_book() now returns
+        # filtered authors (primary authors only, excluding translators/narrators),
+        # which gives better release search results than the unfiltered search data
         if title_param:
             book.title = title_param
-        if author_param:
-            book.authors = [author_param] if author_param else []
 
         # Determine which release sources to search
         if source_filter:
@@ -1304,11 +1308,14 @@ def api_releases() -> Union[Response, Tuple[Response, int]]:
         # Search each source for releases
         all_releases = []
         errors = []
+        source_instances = {}  # Keep source instances for column config
 
         for source_name in sources_to_search:
             try:
                 source = get_source(source_name)
-                releases = source.search(book)
+                source_instances[source_name] = source
+                logger.debug(f"Searching {source_name} for '{book.title}' by {book.authors} (expand={expand_search})")
+                releases = source.search(book, expand_search=expand_search, languages=languages)
                 all_releases.extend(releases)
             except ValueError:
                 errors.append(f"Unknown source: {source_name}")
@@ -1320,11 +1327,11 @@ def api_releases() -> Union[Response, Tuple[Response, int]]:
         releases_data = [asdict(release) for release in all_releases]
 
         # Get column config from the first source searched
-        # (In the UI, releases are shown per-source tab anyway)
+        # Reuse the same instance to get any dynamic data (e.g., online_servers for IRC)
         column_config = None
-        if sources_to_search:
+        if sources_to_search and sources_to_search[0] in source_instances:
             try:
-                first_source = get_source(sources_to_search[0])
+                first_source = source_instances[sources_to_search[0]]
                 column_config = serialize_column_config(first_source.get_column_config())
             except Exception as e:
                 logger.warning(f"Failed to get column config: {e}")

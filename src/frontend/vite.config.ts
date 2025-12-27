@@ -21,7 +21,8 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
-      // Proxy debug endpoint (uses /api/debug so it's automatically proxied above)
+      // Note: Socket.IO connects directly to backend (port 8084) in dev mode
+      // to avoid Vite WebSocket proxy issues. No proxy needed here.
     },
   },
   build: {

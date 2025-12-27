@@ -1,10 +1,14 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { Book, Release, ReleaseSource, ReleasesResponse, Language, StatusData, ButtonStateInfo, ColumnSchema, ReleaseColumnConfig, LeadingCellConfig, ColumnColorHint } from '../types';
+import { Book, Release, ReleaseSource, ReleasesResponse, Language, StatusData, ButtonStateInfo, ColumnSchema, ReleaseColumnConfig, LeadingCellConfig, ColumnColorHint, SearchStatusData } from '../types';
 import { getReleases, getReleaseSources } from '../services/api';
+import { useSocket } from '../contexts/SocketContext';
 import { Dropdown } from './Dropdown';
+import { DropdownList } from './DropdownList';
 import { BookDownloadButton } from './BookDownloadButton';
 import { ReleaseCell } from './ReleaseCell';
 import { getFormatColor, getLanguageColor, getDownloadTypeColor, ColorStyle } from '../utils/colorMaps';
+import { LanguageMultiSelect } from './LanguageMultiSelect';
+import { LANGUAGE_OPTION_ALL, LANGUAGE_OPTION_DEFAULT, getLanguageFilterValues } from '../utils/languageFilters';
 
 // Module-level cache for release search results
 // Key format: `${provider}:${provider_id}:${source}`
@@ -14,24 +18,31 @@ const releaseCache = new Map<string, ReleasesResponse>();
 const getCacheKey = (provider: string, providerId: string, source: string): string =>
   `${provider}:${providerId}:${source}`;
 
-// Optional: Clear cache entries older than 5 minutes to prevent stale data
-const CACHE_TTL_MS = 5 * 60 * 1000;
+// Default cache TTL (5 minutes) - sources can override via column_config.cache_ttl_seconds
+const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
 const cacheTimestamps = new Map<string, number>();
 
 const getCachedReleases = (provider: string, providerId: string, source: string): ReleasesResponse | null => {
   const key = getCacheKey(provider, providerId, source);
   const timestamp = cacheTimestamps.get(key);
+  const cached = releaseCache.get(key);
 
-  // Check if cache entry exists and is not expired
-  if (timestamp && Date.now() - timestamp < CACHE_TTL_MS) {
-    return releaseCache.get(key) || null;
+  if (!timestamp || !cached) {
+    return null;
+  }
+
+  // Use source-specific TTL if available, otherwise default
+  const ttlSeconds = cached.column_config?.cache_ttl_seconds;
+  const ttlMs = ttlSeconds ? ttlSeconds * 1000 : DEFAULT_CACHE_TTL_MS;
+
+  // Check if cache entry is not expired
+  if (Date.now() - timestamp < ttlMs) {
+    return cached;
   }
 
   // Clear expired entry
-  if (timestamp) {
-    releaseCache.delete(key);
-    cacheTimestamps.delete(key);
-  }
+  releaseCache.delete(key);
+  cacheTimestamps.delete(key);
 
   return null;
 };
@@ -90,6 +101,7 @@ interface ReleaseModalProps {
   bookLanguages: Language[];
   currentStatus: StatusData;
   defaultReleaseSource?: string;  // Default tab to show (e.g., 'direct_download')
+  onSearchSeries?: (seriesName: string) => void;  // Callback to search for series
 }
 
 // Color map lookup for dynamic color hints
@@ -246,6 +258,7 @@ const ReleaseRow = ({
   columns,
   gridTemplate,
   leadingCell,
+  onlineServers,
 }: {
   release: Release;
   index: number;
@@ -254,6 +267,7 @@ const ReleaseRow = ({
   columns: ColumnSchema[];
   gridTemplate: string;
   leadingCell?: LeadingCellConfig;
+  onlineServers?: string[];
 }) => {
   const author = release.extra?.author as string | undefined;
 
@@ -315,7 +329,7 @@ const ReleaseRow = ({
 
         {/* Dynamic columns from schema */}
         {columns.map((col) => (
-          <ReleaseCell key={col.key} column={col} release={release} />
+          <ReleaseCell key={col.key} column={col} release={release} onlineServers={onlineServers} />
         ))}
 
         {/* Fixed: Action button */}
@@ -362,7 +376,7 @@ const ReleaseRow = ({
               {mobileColumns.map((col, idx) => (
                 <span key={col.key} className="flex items-center gap-1.5">
                   {idx > 0 && <span className="text-gray-300 dark:text-gray-600">·</span>}
-                  <ReleaseCell column={col} release={release} compact />
+                  <ReleaseCell column={col} release={release} compact onlineServers={onlineServers} />
                 </span>
               ))}
             </div>
@@ -500,32 +514,6 @@ const ConfigureSourceCTA = ({ sourceName }: { sourceName: string }) => (
   </div>
 );
 
-// Coming soon state component
-const ComingSoonState = ({ sourceName }: { sourceName: string }) => (
-  <div className="text-center py-12 px-4">
-    <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-blue-100 dark:bg-blue-900/30 mb-4">
-      <svg
-        className="w-7 h-7 text-blue-600 dark:text-blue-400"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-        strokeWidth={1.5}
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-        />
-      </svg>
-    </div>
-    <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">
-      {sourceName} Coming Soon
-    </h4>
-    <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs mx-auto">
-      Support for {sourceName} is currently in development and will be available in a future update.
-    </p>
-  </div>
-);
 
 // Error state component
 const ErrorState = ({ message }: { message: string }) => (
@@ -552,15 +540,6 @@ const ErrorState = ({ message }: { message: string }) => (
   </div>
 );
 
-// Sources that are coming soon (show "Coming Soon" message)
-const COMING_SOON_SOURCES: Record<string, string> = {
-  prowlarr: 'Prowlarr',
-};
-
-// Known sources that require configuration (show "Configure" CTA)
-const CONFIGURABLE_SOURCES: Record<string, string> = {
-  // Add sources here that are implemented but need configuration
-};
 
 export const ReleaseModal = ({
   book,
@@ -571,6 +550,7 @@ export const ReleaseModal = ({
   bookLanguages,
   currentStatus,
   defaultReleaseSource,
+  onSearchSeries,
 }: ReleaseModalProps) => {
   const [isClosing, setIsClosing] = useState(false);
 
@@ -590,12 +570,20 @@ export const ReleaseModal = ({
   const [releasesBySource, setReleasesBySource] = useState<Record<string, ReleasesResponse | null>>({});
   const [loadingBySource, setLoadingBySource] = useState<Record<string, boolean>>({});
   const [errorBySource, setErrorBySource] = useState<Record<string, string | null>>({});
+  const [expandedBySource, setExpandedBySource] = useState<Record<string, boolean>>({});
+
+  // Search status from WebSocket (for showing progress during slow searches like IRC)
+  const [searchStatus, setSearchStatus] = useState<SearchStatusData | null>(null);
+  const { socket } = useSocket();
+  const lastStatusTimeRef = useRef<number>(0);
+  const pendingStatusRef = useRef<SearchStatusData | null>(null);
+  const statusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Filters - initialized from config settings
   // Empty string means "show all supported formats" (filtered by supportedFormats)
   // A specific value means "show only that format"
   const [formatFilter, setFormatFilter] = useState<string>('');
-  const [languageFilter, setLanguageFilter] = useState<string>('');
+  const [languageFilter, setLanguageFilter] = useState<string[]>([LANGUAGE_OPTION_DEFAULT]);
 
   // Description expansion
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
@@ -638,9 +626,72 @@ export const ReleaseModal = ({
     setReleasesBySource({});
     setLoadingBySource({});
     setErrorBySource({});
+    setExpandedBySource({});
     setFormatFilter('');
-    setLanguageFilter('');
+    setLanguageFilter([LANGUAGE_OPTION_DEFAULT]);
+    setSearchStatus(null);
+    lastStatusTimeRef.current = 0;
+    pendingStatusRef.current = null;
+    if (statusTimeoutRef.current) {
+      clearTimeout(statusTimeoutRef.current);
+      statusTimeoutRef.current = null;
+    }
   }, [book?.id]);
+
+  // Set up WebSocket listener for search status updates
+  useEffect(() => {
+    if (!book || !socket) return;
+
+    const MIN_DISPLAY_TIME = 1500; // Minimum ms to show each status message
+
+    const handleSearchStatus = (data: SearchStatusData) => {
+      // Only handle status for the current active tab
+      if (data.source !== activeTab) return;
+
+      const now = Date.now();
+      const elapsed = now - lastStatusTimeRef.current;
+
+      // If enough time has passed, update immediately
+      if (elapsed >= MIN_DISPLAY_TIME) {
+        setSearchStatus(data);
+        lastStatusTimeRef.current = now;
+        pendingStatusRef.current = null;
+      } else {
+        // Queue the update for later
+        pendingStatusRef.current = data;
+
+        // Clear any existing timeout
+        if (statusTimeoutRef.current) {
+          clearTimeout(statusTimeoutRef.current);
+        }
+
+        // Schedule update after remaining time
+        statusTimeoutRef.current = setTimeout(() => {
+          if (pendingStatusRef.current) {
+            setSearchStatus(pendingStatusRef.current);
+            lastStatusTimeRef.current = Date.now();
+            pendingStatusRef.current = null;
+          }
+        }, MIN_DISPLAY_TIME - elapsed);
+      }
+    };
+
+    socket.on('search_status', handleSearchStatus);
+
+    return () => {
+      socket.off('search_status', handleSearchStatus);
+      if (statusTimeoutRef.current) {
+        clearTimeout(statusTimeoutRef.current);
+      }
+    };
+  }, [book, socket, activeTab]);
+
+  // Clear search status when loading finishes
+  useEffect(() => {
+    if (!loadingBySource[activeTab]) {
+      setSearchStatus(null);
+    }
+  }, [loadingBySource, activeTab]);
 
   // Check if description text overflows (needs "more" button)
   useEffect(() => {
@@ -681,17 +732,21 @@ export const ReleaseModal = ({
         setSourcesLoading(true);
         const sources = await getReleaseSources();
         setAvailableSources(sources);
-        // Set active tab: use defaultReleaseSource if available, otherwise first source
+        // Set active tab: prefer defaultReleaseSource if enabled, otherwise first enabled source
         if (sources.length > 0) {
-          const defaultSource = defaultReleaseSource && sources.some(s => s.name === defaultReleaseSource)
+          const enabledSources = sources.filter(s => s.enabled);
+          const defaultIsEnabled = defaultReleaseSource && enabledSources.some(s => s.name === defaultReleaseSource);
+          const defaultSource = defaultIsEnabled
             ? defaultReleaseSource
-            : sources[0].name;
+            : enabledSources.length > 0
+              ? enabledSources[0].name
+              : sources[0].name;  // Fallback to first source if none enabled
           setActiveTab(defaultSource);
         }
       } catch (err) {
         console.error('Failed to fetch release sources:', err);
         // Fallback: assume direct_download is available
-        setAvailableSources([{ name: 'direct_download', display_name: "Anna's Archive" }]);
+        setAvailableSources([{ name: 'direct_download', display_name: "Anna's Archive", enabled: true }]);
         setActiveTab('direct_download');
       } finally {
         setSourcesLoading(false);
@@ -702,6 +757,7 @@ export const ReleaseModal = ({
   }, [book, defaultReleaseSource]);
 
   // Fetch releases when active tab changes (with caching)
+  // Initial fetch always uses ISBN-first search; expansion is handled by handleExpandSearch
   useEffect(() => {
     if (!book || !activeTab || !book.provider || !book.provider_id) return;
 
@@ -725,7 +781,6 @@ export const ReleaseModal = ({
 
       try {
         const response = await getReleases(provider, bookId, activeTab, book.title, book.author);
-        // Store in module-level cache
         setCachedReleases(provider, bookId, activeTab, response);
         setReleasesBySource((prev) => ({ ...prev, [activeTab]: response }));
       } catch (err) {
@@ -739,46 +794,80 @@ export const ReleaseModal = ({
     fetchReleases();
   }, [book, activeTab, releasesBySource, loadingBySource, errorBySource]);
 
+  // Handler for expanding search (title+author instead of ISBN)
+  // Fetches additional results and merges with existing ISBN results
+  const handleExpandSearch = useCallback(async () => {
+    if (!activeTab || !book?.provider || !book?.provider_id) return;
+
+    const provider = book.provider;
+    const bookId = book.provider_id;
+
+    // Mark as loading and expanded
+    setLoadingBySource((prev) => ({ ...prev, [activeTab]: true }));
+    setExpandedBySource((prev) => ({ ...prev, [activeTab]: true }));
+
+    try {
+      // Fetch with expand_search=true (title+author search)
+      const expandedResponse = await getReleases(
+        provider, bookId, activeTab, book.title, book.author, true
+      );
+
+      // Merge with existing results, deduplicating by source_id
+      setReleasesBySource((prev) => {
+        const existing = prev[activeTab];
+        if (!existing) {
+          return { ...prev, [activeTab]: expandedResponse };
+        }
+
+        const seenIds = new Set(existing.releases.map(r => r.source_id));
+        const newReleases = expandedResponse.releases.filter(r => !seenIds.has(r.source_id));
+
+        return {
+          ...prev,
+          [activeTab]: {
+            ...existing,
+            releases: [...existing.releases, ...newReleases],
+          },
+        };
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to expand search';
+      setErrorBySource((prev) => ({ ...prev, [activeTab]: message }));
+    } finally {
+      setLoadingBySource((prev) => ({ ...prev, [activeTab]: false }));
+    }
+  }, [activeTab, book]);
+
   // Build list of tabs to show
-  // Status: 'available' = working, 'coming_soon' = in development, 'not_configured' = needs setup
-  // Order: 1) Default source, 2) Other configured sources, 3) Unconfigured sources, 4) Coming soon
+  // All sources come from backend with their enabled status
+  // Order: 1) Default source, 2) Other enabled sources, 3) Disabled sources
   const allTabs = useMemo(() => {
-    type TabInfo = { name: string; displayName: string; status: 'available' | 'coming_soon' | 'not_configured' };
+    type TabInfo = { name: string; displayName: string; enabled: boolean };
 
-    const configuredTabs: TabInfo[] = [];
-    const unconfiguredTabs: TabInfo[] = [];
-    const comingSoonTabs: TabInfo[] = [];
+    const enabledTabs: TabInfo[] = [];
+    const disabledTabs: TabInfo[] = [];
 
-    // Add available/configured sources
+    // Separate sources by enabled status
     availableSources.forEach((src) => {
-      configuredTabs.push({ name: src.name, displayName: src.display_name, status: 'available' });
-    });
-
-    // Add configurable but not configured sources
-    Object.entries(CONFIGURABLE_SOURCES).forEach(([name, displayName]) => {
-      if (!availableSources.find((s) => s.name === name)) {
-        unconfiguredTabs.push({ name, displayName, status: 'not_configured' });
+      const tab = { name: src.name, displayName: src.display_name, enabled: src.enabled };
+      if (src.enabled) {
+        enabledTabs.push(tab);
+      } else {
+        disabledTabs.push(tab);
       }
     });
 
-    // Add coming soon sources
-    Object.entries(COMING_SOON_SOURCES).forEach(([name, displayName]) => {
-      if (!availableSources.find((s) => s.name === name)) {
-        comingSoonTabs.push({ name, displayName, status: 'coming_soon' });
-      }
-    });
-
-    // Sort configured tabs so default source appears first
+    // Sort enabled tabs so default source appears first
     if (defaultReleaseSource) {
-      configuredTabs.sort((a, b) => {
+      enabledTabs.sort((a, b) => {
         if (a.name === defaultReleaseSource) return -1;
         if (b.name === defaultReleaseSource) return 1;
         return 0;
       });
     }
 
-    // Combine in order: configured (with default first), unconfigured, coming soon
-    return [...configuredTabs, ...unconfiguredTabs, ...comingSoonTabs];
+    // Combine: enabled sources first (with default first), then disabled
+    return [...enabledTabs, ...disabledTabs];
   }, [availableSources, defaultReleaseSource]);
 
   // Update tab indicator position when active tab changes
@@ -816,19 +905,6 @@ export const ReleaseModal = ({
     return Array.from(formats).sort();
   }, [releasesBySource, activeTab, supportedFormats]);
 
-  // Get unique languages from current releases for filter dropdown
-  const availableLanguages = useMemo(() => {
-    const releases = releasesBySource[activeTab]?.releases || [];
-    const languages = new Set<string>();
-
-    releases.forEach((r) => {
-      // Check for language in release extra data or other fields
-      const lang = r.extra?.language as string | undefined;
-      if (lang) languages.add(lang.toLowerCase());
-    });
-    return Array.from(languages).sort();
-  }, [releasesBySource, activeTab]);
-
   // Build select options for format filter
   const formatOptions = useMemo(() => {
     const options = [{ value: '', label: 'All Formats' }];
@@ -838,24 +914,15 @@ export const ReleaseModal = ({
     return options;
   }, [availableFormats]);
 
-  // Build select options for language filter
-  const languageOptions = useMemo(() => {
-    const defaultLabel = defaultLanguages.length > 0 ? 'Default Lang' : 'All Lang';
-    const options = [{ value: '', label: defaultLabel }];
-    availableLanguages.forEach((lang) => {
-      const langInfo = bookLanguages.find(
-        (l) => l.code.toLowerCase() === lang.toLowerCase()
-      );
-      options.push({ value: lang, label: langInfo?.language || lang.toUpperCase() });
-    });
-    return options;
-  }, [availableLanguages, bookLanguages, defaultLanguages.length]);
+  // Resolve language filter to actual language codes for filtering
+  const resolvedLanguageCodes = useMemo(() => {
+    return getLanguageFilterValues(languageFilter, bookLanguages, defaultLanguages);
+  }, [languageFilter, bookLanguages, defaultLanguages]);
 
   // Filter releases based on settings and user selection
   const filteredReleases = useMemo(() => {
     const releases = releasesBySource[activeTab]?.releases || [];
     const supportedLower = supportedFormats.map((f) => f.toLowerCase());
-    const defaultLangLower = defaultLanguages.map((l) => l.toLowerCase());
 
     return releases.filter((r) => {
       // Format filtering: always filter by supported formats
@@ -870,24 +937,20 @@ export const ReleaseModal = ({
         }
       }
 
-      // Language filtering (if release has language info)
+      // Language filtering using resolved language codes
+      // null or includes 'all' means show all languages
+      // Otherwise filter to the specific language codes
       const releaseLang = r.extra?.language as string | undefined;
-      if (releaseLang && languageFilter) {
-        if (releaseLang.toLowerCase() !== languageFilter.toLowerCase()) {
-          return false;
-        }
-      } else if (releaseLang && !languageFilter && defaultLangLower.length > 0) {
-        // If no user filter but we have default languages, filter to those
-        // Skip this filter if defaultLanguages is empty or contains special "any" value
-        const hasAnyLanguage = defaultLangLower.some((l) => l === '' || l === 'any');
-        if (!hasAnyLanguage && !defaultLangLower.includes(releaseLang.toLowerCase())) {
+      if (releaseLang && resolvedLanguageCodes && !resolvedLanguageCodes.includes(LANGUAGE_OPTION_ALL)) {
+        const releaseLangLower = releaseLang.toLowerCase();
+        if (!resolvedLanguageCodes.some(code => code.toLowerCase() === releaseLangLower)) {
           return false;
         }
       }
 
       return true;
     });
-  }, [releasesBySource, activeTab, formatFilter, languageFilter, supportedFormats, defaultLanguages]);
+  }, [releasesBySource, activeTab, formatFilter, resolvedLanguageCodes, supportedFormats]);
 
   // Get column config from response or use default
   const columnConfig = useMemo((): ReleaseColumnConfig => {
@@ -955,7 +1018,7 @@ export const ReleaseModal = ({
 
   const currentTabLoading = loadingBySource[activeTab] ?? false;
   const currentTabError = errorBySource[activeTab] ?? null;
-  const currentTabStatus = allTabs.find((t) => t.name === activeTab)?.status ?? 'not_configured';
+  const currentTabEnabled = allTabs.find((t) => t.name === activeTab)?.enabled ?? false;
 
   return (
     <div
@@ -1035,10 +1098,10 @@ export const ReleaseModal = ({
                 <img
                   src={book.preview}
                   alt="Book cover"
-                  className="w-20 h-[120px] rounded-lg shadow-md object-cover object-top flex-shrink-0"
+                  className={`rounded-lg shadow-md object-cover object-top flex-shrink-0 ${book.series_name ? 'w-24 h-[144px]' : 'w-20 h-[120px]'}`}
                 />
               ) : (
-                <div className="w-20 h-[120px] rounded-lg border border-dashed border-[var(--border-muted)] bg-[var(--bg)]/60 flex items-center justify-center text-[10px] text-gray-500 flex-shrink-0">
+                <div className={`rounded-lg border border-dashed border-[var(--border-muted)] bg-[var(--bg)]/60 flex items-center justify-center text-[10px] text-gray-500 flex-shrink-0 ${book.series_name ? 'w-24 h-[144px]' : 'w-20 h-[120px]'}`}>
                   No cover
                 </div>
               )}
@@ -1071,6 +1134,34 @@ export const ReleaseModal = ({
                     <span>{book.display_fields.find(f => f.icon === 'book')?.value} pages</span>
                   )}
                 </div>
+
+                {/* Series info */}
+                {book.series_name && (
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <span>
+                      {book.series_position != null ? (
+                        <>#{Number.isInteger(book.series_position) ? book.series_position : book.series_position}{book.series_count ? ` of ${book.series_count}` : ''} in {book.series_name}</>
+                      ) : (
+                        <>Part of {book.series_name}</>
+                      )}
+                    </span>
+                    {onSearchSeries && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSearchSeries(book.series_name!);
+                          handleClose();
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 rounded-full hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                        </svg>
+                        View series
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {/* Description */}
                 {book.description && (
@@ -1163,13 +1254,16 @@ export const ReleaseModal = ({
                   </div>
 
                   {/* Filter funnel button - stays fixed */}
-                  {(availableFormats.length > 0 || availableLanguages.length > 0) && (
+                  {(availableFormats.length > 0 || bookLanguages.length > 0) && (
                     <Dropdown
                       align="right"
                       widthClassName="w-auto flex-shrink-0"
-                      panelClassName="w-48"
+                      panelClassName="w-56"
+                      noScrollLimit
                       renderTrigger={({ isOpen, toggle }) => {
-                        const hasActiveFilter = formatFilter !== '' || languageFilter !== '';
+                        // Active filter: format is set, or language is not just default
+                        const hasLanguageFilter = !(languageFilter.length === 1 && languageFilter[0] === LANGUAGE_OPTION_DEFAULT);
+                        const hasActiveFilter = formatFilter !== '' || hasLanguageFilter;
                         return (
                           <button
                             type="button"
@@ -1191,53 +1285,76 @@ export const ReleaseModal = ({
                         );
                       }}
                     >
-                      {() => (
-                        <div className="p-3 space-y-3">
+                      {({ close }) => (
+                        <div className="p-4 space-y-4">
                           {availableFormats.length > 0 && (
-                            <div>
-                              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                                Format
-                              </label>
-                              <select
-                                value={formatFilter}
-                                onChange={(e) => setFormatFilter(e.target.value)}
-                                className="w-full px-2.5 py-1.5 text-sm rounded-md border focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-                                style={{
-                                  background: 'var(--bg-soft)',
-                                  color: 'var(--text)',
-                                  borderColor: 'var(--border-muted)',
-                                }}
-                              >
-                                {formatOptions.map((opt) => (
-                                  <option key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
+                            <DropdownList
+                              label="Format"
+                              options={formatOptions}
+                              value={formatFilter}
+                              onChange={(val) => setFormatFilter(typeof val === 'string' ? val : val[0] ?? '')}
+                              placeholder="All Formats"
+                            />
                           )}
-                          {availableLanguages.length > 0 && (
-                            <div>
-                              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                                Language
-                              </label>
-                              <select
-                                value={languageFilter}
-                                onChange={(e) => setLanguageFilter(e.target.value)}
-                                className="w-full px-2.5 py-1.5 text-sm rounded-md border focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-                                style={{
-                                  background: 'var(--bg-soft)',
-                                  color: 'var(--text)',
-                                  borderColor: 'var(--border-muted)',
-                                }}
-                              >
-                                {languageOptions.map((opt) => (
-                                  <option key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
+                          <LanguageMultiSelect
+                            label="Language"
+                            options={bookLanguages}
+                            value={languageFilter}
+                            onChange={setLanguageFilter}
+                            defaultLanguageCodes={defaultLanguages}
+                          />
+                          {/* Apply button - for AA, re-fetches with language filter; for others, just closes */}
+                          {activeTab === 'direct_download' && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                close();
+                                if (!book?.provider || !book?.provider_id) return;
+
+                                const provider = book.provider;
+                                const bookId = book.provider_id;
+
+                                // Clear cache and state
+                                const key = getCacheKey(provider, bookId, activeTab);
+                                releaseCache.delete(key);
+                                cacheTimestamps.delete(key);
+                                setExpandedBySource((prev) => {
+                                  const next = { ...prev };
+                                  delete next[activeTab];
+                                  return next;
+                                });
+                                setErrorBySource((prev) => {
+                                  const next = { ...prev };
+                                  delete next[activeTab];
+                                  return next;
+                                });
+
+                                // Fetch with language filter
+                                setLoadingBySource((prev) => ({ ...prev, [activeTab]: true }));
+                                try {
+                                  // Resolve language codes for the API call
+                                  const langCodes = getLanguageFilterValues(languageFilter, bookLanguages, defaultLanguages);
+                                  // Don't pass languages if "All" is selected or null
+                                  const languagesParam = (langCodes === null || langCodes?.includes(LANGUAGE_OPTION_ALL))
+                                    ? undefined
+                                    : langCodes;
+
+                                  const response = await getReleases(
+                                    provider, bookId, activeTab, book.title, book.author, false, languagesParam
+                                  );
+                                  setCachedReleases(provider, bookId, activeTab, response);
+                                  setReleasesBySource((prev) => ({ ...prev, [activeTab]: response }));
+                                } catch (err) {
+                                  const message = err instanceof Error ? err.message : 'Failed to fetch releases';
+                                  setErrorBySource((prev) => ({ ...prev, [activeTab]: message }));
+                                } finally {
+                                  setLoadingBySource((prev) => ({ ...prev, [activeTab]: false }));
+                                }
+                              }}
+                              className="w-full px-3 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors"
+                            >
+                              Apply
+                            </button>
                           )}
                         </div>
                       )}
@@ -1249,19 +1366,29 @@ export const ReleaseModal = ({
 
             {/* Release list content */}
             <div className="min-h-[200px]">
-              {currentTabStatus === 'coming_soon' ? (
-                <ComingSoonState
-                  sourceName={allTabs.find((t) => t.name === activeTab)?.displayName || activeTab}
-                />
-              ) : currentTabStatus === 'not_configured' ? (
+              {!currentTabEnabled ? (
                 <ConfigureSourceCTA
                   sourceName={allTabs.find((t) => t.name === activeTab)?.displayName || activeTab}
                 />
-              ) : currentTabLoading ? (
-                <ReleaseSkeleton />
+              ) : currentTabLoading && filteredReleases.length === 0 ? (
+                // Initial loading - show full skeleton
+                <div className="relative min-h-[200px]">
+                  <ReleaseSkeleton />
+                  {/* Search status - bottom center */}
+                  {searchStatus && searchStatus.source === activeTab && (
+                    <div className="absolute inset-x-0 bottom-4 z-10 flex items-center justify-center pointer-events-none">
+                      <div className="flex items-center gap-2.5 px-4 py-2 rounded-xl bg-[var(--bg-soft)] border border-[var(--border-muted)] text-gray-500 dark:text-gray-400 text-sm shadow-sm">
+                        {searchStatus.phase !== 'complete' && searchStatus.phase !== 'error' && (
+                          <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        )}
+                        {searchStatus.message}
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : currentTabError ? (
                 <ErrorState message={currentTabError} />
-              ) : filteredReleases.length === 0 ? (
+              ) : filteredReleases.length === 0 && !currentTabLoading ? (
                 <EmptyState
                   message={
                     formatFilter
@@ -1270,20 +1397,45 @@ export const ReleaseModal = ({
                   }
                 />
               ) : (
-                <div className="divide-y divide-gray-200/60 dark:divide-gray-800/60">
-                  {filteredReleases.map((release, index) => (
-                    <ReleaseRow
-                      key={`${release.source}-${release.source_id}`}
-                      release={release}
-                      index={index}
-                      onDownload={() => handleDownload(release)}
-                      buttonState={getButtonState(release.source_id)}
-                      columns={columnConfig.columns}
-                      gridTemplate={columnConfig.grid_template}
-                      leadingCell={columnConfig.leading_cell}
-                    />
-                  ))}
-                </div>
+                <>
+                  <div className="divide-y divide-gray-200/60 dark:divide-gray-800/60">
+                    {filteredReleases.map((release, index) => (
+                      <ReleaseRow
+                        key={`${release.source}-${release.source_id}`}
+                        release={release}
+                        index={index}
+                        onDownload={() => handleDownload(release)}
+                        buttonState={getButtonState(release.source_id)}
+                        columns={columnConfig.columns}
+                        gridTemplate={columnConfig.grid_template}
+                        leadingCell={columnConfig.leading_cell}
+                        onlineServers={columnConfig.online_servers}
+                      />
+                    ))}
+                  </div>
+                  {/* Expand search button or loading indicator */}
+                  {activeTab === 'direct_download' && !expandedBySource[activeTab] && !currentTabLoading && (
+                    <div
+                      className="py-3 text-center animate-slide-up will-change-transform"
+                      style={{
+                        animationDelay: `${filteredReleases.length * 30}ms`,
+                        animationFillMode: 'both',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={handleExpandSearch}
+                        className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 rounded-full hover-action transition-all duration-200"
+                      >
+                        Expand search
+                      </button>
+                    </div>
+                  )}
+                  {/* Expanding search - show skeleton below existing results */}
+                  {currentTabLoading && filteredReleases.length > 0 && (
+                    <ReleaseSkeleton />
+                  )}
+                </>
               )}
             </div>
           </div>

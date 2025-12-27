@@ -10,6 +10,8 @@ interface DropdownProps {
   panelClassName?: string;
   disabled?: boolean;
   renderTrigger?: (props: { isOpen: boolean; toggle: () => void }) => ReactNode;
+  /** Disable max-height and overflow scrolling (for panels with nested dropdowns) */
+  noScrollLimit?: boolean;
 }
 
 export const Dropdown = ({
@@ -22,6 +24,7 @@ export const Dropdown = ({
   panelClassName = '',
   disabled = false,
   renderTrigger,
+  noScrollLimit = false,
 }: DropdownProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -89,7 +92,7 @@ export const Dropdown = ({
   return (
     <div className={`relative ${widthClassName}`} ref={containerRef}>
       {label && (
-        <label className="block text-sm mb-1 opacity-80" onClick={toggleOpen}>
+        <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5" onClick={toggleOpen}>
           {label}
         </label>
       )}
@@ -100,7 +103,7 @@ export const Dropdown = ({
           type="button"
           onClick={toggleOpen}
           disabled={disabled}
-          className={`w-full px-3 py-2 rounded-md border flex items-center justify-between text-left focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 ${buttonClassName}`}
+          className={`w-full px-2.5 py-1.5 text-sm rounded-md border flex items-center justify-between text-left focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 ${buttonClassName}`}
           style={{
             background: 'var(--bg-soft)',
             color: 'var(--text)',
@@ -133,7 +136,7 @@ export const Dropdown = ({
             borderColor: 'var(--border-muted)',
           }}
         >
-          <div className="max-h-64 overflow-auto">
+          <div className={noScrollLimit ? '' : 'max-h-64 overflow-auto'}>
             {children({ close })}
           </div>
         </div>

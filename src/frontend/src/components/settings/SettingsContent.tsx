@@ -47,6 +47,14 @@ function isFieldVisible(
 
   const currentValue = values[showWhen.field];
 
+  // Handle notEmpty condition - show when field has any non-empty value
+  if (showWhen.notEmpty) {
+    if (Array.isArray(currentValue)) {
+      return currentValue.length > 0;
+    }
+    return currentValue !== undefined && currentValue !== null && currentValue !== '';
+  }
+
   // Handle array of allowed values or single value
   return Array.isArray(showWhen.value)
     ? showWhen.value.includes(currentValue as string)

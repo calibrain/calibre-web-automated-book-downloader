@@ -20,6 +20,7 @@ This ensures:
 - Single point of control for what enters the ingest folder
 """
 
+import hashlib
 import os
 import random
 import shutil
@@ -71,7 +72,9 @@ def get_staging_path(task_id: str, extension: str) -> Path:
         Path in staging directory for this download
     """
     staging_dir = get_staging_dir()
-    return staging_dir / f"{task_id}.{extension.lstrip('.')}"
+    # Hash task_id in case it contains invalid filename chars (e.g., Prowlarr URLs)
+    safe_id = hashlib.md5(task_id.encode()).hexdigest()[:16]
+    return staging_dir / f"{safe_id}.{extension.lstrip('.')}"
 
 
 def stage_file(source_path: Path, task_id: str, copy: bool = False) -> Path:
@@ -89,7 +92,13 @@ def stage_file(source_path: Path, task_id: str, copy: bool = False) -> Path:
         Path to the staged file
     """
     staging_dir = get_staging_dir()
-    staged_path = staging_dir / f"{task_id}{source_path.suffix}"
+    # Stage with original filename, add counter suffix if collision
+    staged_path = staging_dir / source_path.name
+    if staged_path.exists():
+        counter = 1
+        while staged_path.exists():
+            staged_path = staging_dir / f"{source_path.stem}_{counter}{source_path.suffix}"
+            counter += 1
 
     if copy:
         shutil.copy2(str(source_path), str(staged_path))
@@ -99,6 +108,162 @@ def stage_file(source_path: Path, task_id: str, copy: bool = False) -> Path:
         logger.debug(f"Moved to staging: {source_path} -> {staged_path}")
 
     return staged_path
+
+
+def _get_supported_formats() -> List[str]:
+    """Get current supported formats from config singleton."""
+    formats = config.get("SUPPORTED_FORMATS", ["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"])
+    # Handle both list (from MultiSelectField) and comma-separated string (legacy/env)
+    if isinstance(formats, str):
+        return [fmt.strip().lower() for fmt in formats.split(",") if fmt.strip()]
+    return [fmt.lower() for fmt in formats]
+
+
+def _find_book_files_in_directory(directory: Path) -> Tuple[List[Path], List[Path]]:
+    """Find all book files in a directory matching SUPPORTED_FORMATS.
+
+    Args:
+        directory: Directory to search recursively
+
+    Returns:
+        Tuple of (matching book files, rejected files with unsupported extensions)
+    """
+    book_files = []
+    rejected_files = []
+    supported_formats = _get_supported_formats()
+    supported_exts = {f".{fmt}" for fmt in supported_formats}
+
+    for file_path in directory.rglob("*"):
+        if file_path.is_file():
+            if file_path.suffix.lower() in supported_exts:
+                book_files.append(file_path)
+            elif file_path.suffix.lower() in {'.pdf', '.epub', '.mobi', '.azw', '.azw3', '.fb2', '.djvu', '.cbz', '.cbr', '.doc', '.docx', '.rtf', '.txt'}:
+                # Track ebook-like files that were rejected due to format settings
+                rejected_files.append(file_path)
+
+    return book_files, rejected_files
+
+
+def process_directory(
+    directory: Path,
+    ingest_dir: Path,
+    task: DownloadTask,
+) -> Tuple[List[Path], Optional[str]]:
+    """Process a staged directory: find book files, handle archives, move to ingest.
+
+    For multi-file torrent/usenet downloads. If book files exist, moves them directly.
+    If only archives exist, extracts them to find book files inside.
+
+    Args:
+        directory: Staged directory containing downloaded files
+        ingest_dir: Final destination directory for book files
+        task: Download task for filename generation
+
+    Returns:
+        Tuple of (list of final paths, error message if failed)
+    """
+    try:
+        book_files, rejected_files = _find_book_files_in_directory(directory)
+
+        # Find archives in directory (ZIP/RAR)
+        archive_files = [f for f in directory.rglob("*") if f.is_file() and is_archive(f)]
+
+        if not book_files:
+            # No direct book files - check for archives to extract
+            if archive_files:
+                logger.info(f"No book files found, extracting {len(archive_files)} archive(s)")
+                all_final_paths = []
+                all_errors = []
+
+                for archive in archive_files:
+                    result = process_archive(
+                        archive_path=archive,
+                        temp_dir=directory,
+                        ingest_dir=ingest_dir,
+                        archive_id=f"{task.task_id}_{archive.stem}",
+                        task=task,
+                    )
+                    if result.success:
+                        all_final_paths.extend(result.final_paths)
+                    elif result.error:
+                        all_errors.append(f"{archive.name}: {result.error}")
+
+                # Clean up directory after processing archives
+                shutil.rmtree(directory, ignore_errors=True)
+
+                if all_final_paths:
+                    return all_final_paths, None
+                elif all_errors:
+                    return [], "; ".join(all_errors)
+                else:
+                    return [], "No book files found in archives"
+
+            # No book files and no archives
+            shutil.rmtree(directory, ignore_errors=True)
+
+            if rejected_files:
+                # Files were found but didn't match supported formats
+                rejected_exts = sorted(set(f.suffix.lower() for f in rejected_files))
+                rejected_list = ", ".join(rejected_exts)
+                supported_formats = _get_supported_formats()
+                logger.warning(
+                    f"Found {len(rejected_files)} file(s) but none match supported formats. "
+                    f"Rejected formats: {rejected_list}. Supported: {', '.join(sorted(supported_formats))}"
+                )
+                return [], f"Found {len(rejected_files)} file(s) but format not supported ({rejected_list}). Enable in Settings > Formats."
+
+            return [], "No book files found in download"
+
+        # We have book files - use them directly, skip any archives
+        if archive_files:
+            logger.debug(f"Ignoring {len(archive_files)} archive(s) - already have {len(book_files)} book file(s)")
+
+        logger.info(f"Found {len(book_files)} book file(s) in directory")
+
+        if rejected_files:
+            rejected_exts = sorted(set(f.suffix.lower() for f in rejected_files))
+            logger.debug(f"Also found {len(rejected_files)} file(s) with unsupported formats: {', '.join(rejected_exts)}")
+
+        # Move each book file to ingest
+        final_paths = []
+        for book_file in book_files:
+            # For multi-file downloads (book packs, series), always preserve original filenames
+            # since metadata title only applies to the searched book, not the whole pack.
+            # For single files, respect USE_BOOK_TITLE setting.
+            if len(book_files) == 1 and config.USE_BOOK_TITLE:
+                # Update task format from actual file if not already set
+                # (Prowlarr releases may not know the format until download completes)
+                if not task.format:
+                    task.format = book_file.suffix.lower().lstrip('.')
+                filename = task.get_filename() or book_file.name
+            else:
+                filename = book_file.name
+
+            final_path = ingest_dir / filename
+
+            # Handle duplicates
+            if final_path.exists():
+                base = final_path.stem
+                ext = final_path.suffix
+                counter = 1
+                while final_path.exists():
+                    final_path = ingest_dir / f"{base}_{counter}{ext}"
+                    counter += 1
+
+            shutil.move(str(book_file), str(final_path))
+            final_paths.append(final_path)
+            logger.debug(f"Moved to ingest: {final_path.name}")
+
+        # Clean up the now-empty directory
+        shutil.rmtree(directory, ignore_errors=True)
+
+        return final_paths, None
+
+    except Exception as e:
+        logger.error(f"Error processing directory: {e}")
+        shutil.rmtree(directory, ignore_errors=True)
+        return [], str(e)
+
 
 # WebSocket manager (initialized by app.py)
 try:
@@ -222,8 +387,9 @@ def queue_release(release_data: dict, priority: int = 0) -> bool:
         source = release_data.get('source', 'direct_download')
         extra = release_data.get('extra', {})
 
-        # Get author, preview, and content_type from top-level (preferred) or extra (fallback)
+        # Get author, year, preview, and content_type from top-level (preferred) or extra (fallback)
         author = release_data.get('author') or extra.get('author')
+        year = release_data.get('year') or extra.get('year')
         preview = release_data.get('preview') or extra.get('preview')
         content_type = release_data.get('content_type') or extra.get('content_type')
 
@@ -233,6 +399,7 @@ def queue_release(release_data: dict, priority: int = 0) -> bool:
             source=source,
             title=release_data.get('title', 'Unknown'),
             author=author,
+            year=year,
             format=release_data.get('format'),
             size=release_data.get('size'),
             preview=preview,
@@ -419,7 +586,10 @@ def _download_task(task_id: str, cancel_flag: Event) -> Optional[str]:
         # Check cancellation before post-processing
         if cancel_flag.is_set():
             logger.info(f"Download cancelled before post-processing: {task_id}")
-            temp_file.unlink(missing_ok=True)
+            if temp_file.is_dir():
+                shutil.rmtree(temp_file, ignore_errors=True)
+            else:
+                temp_file.unlink(missing_ok=True)
             return None
 
         # Post-processing: archive extraction or direct move to ingest
@@ -471,6 +641,7 @@ def _post_process_download(
             temp_dir=TMP_DIR,
             ingest_dir=ingest_dir,
             archive_id=task.task_id,
+            task=task,
         )
 
         if result.success:
@@ -478,6 +649,33 @@ def _post_process_download(
             return str(result.final_paths[0])
         else:
             status_callback("error", result.error)
+            return None
+
+    # Handle directory (multi-file torrent/usenet downloads)
+    if temp_file.is_dir():
+        logger.info(f"Directory detected, processing: {temp_file.name}")
+        status_callback("resolving", "Processing download folder...")
+
+        final_paths, error = process_directory(
+            directory=temp_file,
+            ingest_dir=ingest_dir,
+            task=task,
+        )
+
+        if error:
+            status_callback("error", error)
+            return None
+
+        if final_paths:
+            formats = [p.suffix.lstrip(".").upper() for p in final_paths]
+            if len(formats) == 1:
+                message = f"Downloaded: {formats[0]}"
+            else:
+                message = f"Downloaded: {len(formats)} files ({', '.join(formats)})"
+            status_callback("complete", message)
+            return str(final_paths[0])
+        else:
+            status_callback("error", "No book files found")
             return None
 
     # Non-archive: run custom script if configured, then move to ingest
@@ -491,10 +689,13 @@ def _post_process_download(
         temp_file.unlink(missing_ok=True)
         return None
 
-    # Generate filename and move to ingest
-    filename = task.get_filename()
-    if not filename:
-        filename = f"{task.task_id}.{task.format or 'bin'}"
+    # Generate filename: use formatted name if USE_BOOK_TITLE, else preserve original
+    if config.USE_BOOK_TITLE:
+        filename = task.get_filename()
+        if not filename:
+            filename = temp_file.name
+    else:
+        filename = temp_file.name
 
     final_path = ingest_dir / filename
 
@@ -509,7 +710,7 @@ def _post_process_download(
         logger.info(f"File already exists, saving as: {final_path.name}")
 
     # Use intermediate .crdownload file for atomic move
-    intermediate_path = ingest_dir / f"{task.task_id}.crdownload"
+    intermediate_path = ingest_dir / f"{temp_file.stem}.crdownload"
 
     try:
         shutil.move(str(temp_file), str(intermediate_path))

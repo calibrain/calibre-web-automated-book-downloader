@@ -92,6 +92,7 @@ class HardcoverProvider(MetadataProvider):
         SortOrder.RATING,
         SortOrder.NEWEST,
         SortOrder.OLDEST,
+        SortOrder.SERIES_ORDER,
     ]
     search_fields = [
         TextSearchField(
@@ -103,6 +104,11 @@ class HardcoverProvider(MetadataProvider):
             key="title",
             label="Title",
             description="Search by book title",
+        ),
+        TextSearchField(
+            key="series",
+            label="Series",
+            description="Search by series name",
         ),
     ]
 
@@ -162,29 +168,43 @@ class HardcoverProvider(MetadataProvider):
         # Field-first search: when a specific field has a value, search that field
         author_value = options.fields.get("author", "").strip()
         title_value = options.fields.get("title", "").strip()
+        series_value = options.fields.get("series", "").strip()
 
-        logger.debug(f"Field-first search check: author_value='{author_value}', title_value='{title_value}'")
+        logger.debug(f"Field-first search check: author='{author_value}', title='{title_value}', series='{series_value}'")
 
         # Determine what to search and which fields to target
         # Note: Hardcover API requires 'weights' when using 'fields' parameter
-        if author_value and not title_value:
+        if series_value and not author_value and not title_value:
+            # Series-only search: search series_names field
+            query = series_value
+            search_fields = "series_names"
+            search_weights = "1"
+            logger.debug(f"Series-only search: query='{query}', fields='{search_fields}'")
+        elif author_value and not title_value and not series_value:
             # Author-only search: search author_names field with author query
             query = author_value
             search_fields = "author_names"
             search_weights = "1"
             logger.debug(f"Author-only search: query='{query}', fields='{search_fields}'")
-        elif title_value and not author_value:
+        elif title_value and not author_value and not series_value:
             # Title-only search: search title fields with title query
             query = title_value
             search_fields = "title,alternative_titles"
             search_weights = "5,1"
             logger.debug(f"Title-only search: query='{query}', fields='{search_fields}'")
-        elif author_value and title_value:
-            # Both provided: combine into query, search both fields
+        elif author_value and title_value and not series_value:
+            # Author + Title: combine into query, search both fields
             query = f"{title_value} {author_value}"
             search_fields = "title,alternative_titles,author_names"
             search_weights = "5,1,3"
-            logger.debug(f"Combined search: query='{query}', fields='{search_fields}'")
+            logger.debug(f"Combined title+author search: query='{query}', fields='{search_fields}'")
+        elif series_value:
+            # Series with other fields: include series_names in search
+            parts = [p for p in [series_value, title_value, author_value] if p]
+            query = " ".join(parts)
+            search_fields = "series_names,title,alternative_titles,author_names"
+            search_weights = "5,3,1,2"
+            logger.debug(f"Combined search with series: query='{query}', fields='{search_fields}'")
         else:
             # No custom fields: use general query with all default fields
             query = options.query
@@ -265,12 +285,55 @@ class HardcoverProvider(MetadataProvider):
                     if book:
                         books.append(book)
 
+            # If series order sort is selected and series field is provided,
+            # filter to exact matches and sort by position
+            if options.sort == SortOrder.SERIES_ORDER and series_value and books:
+                books = self._apply_series_ordering(books, series_value)
+
             logger.info(f"Hardcover search '{query}' (fields={search_fields}) returned {len(books)} results")
             return books
 
         except Exception as e:
             logger.error(f"Hardcover search error: {e}")
             return []
+
+    def _apply_series_ordering(self, books: List[BookMetadata], series_name: str) -> List[BookMetadata]:
+        """Filter books to exact series match and sort by series position.
+
+        Args:
+            books: List of books from search results.
+            series_name: The series name to match.
+
+        Returns:
+            Filtered and sorted list of books.
+        """
+        series_name_lower = series_name.lower()
+        books_with_position = []
+
+        for book in books:
+            # Fetch full book details to get series info
+            full_book = self.get_book(book.provider_id)
+            if not full_book or not full_book.series_name:
+                continue
+
+            # Exact match on series name
+            if full_book.series_name.lower() != series_name_lower:
+                continue
+
+            # Merge series info into the search result book
+            book.series_name = full_book.series_name
+            book.series_position = full_book.series_position
+            book.series_count = full_book.series_count
+            # Also grab description if search didn't have it
+            if not book.description and full_book.description:
+                book.description = full_book.description
+            books_with_position.append(book)
+
+        # Sort by series position (books without position go last)
+        books_with_position.sort(key=lambda b: (b.series_position is None, b.series_position or 0))
+
+        logger.debug(f"Series ordering: filtered {len(books)} -> {len(books_with_position)} books for '{series_name}'")
+        return books_with_position
 
     @cacheable(ttl_key="METADATA_CACHE_BOOK_TTL", ttl_default=600, key_prefix="hardcover:book")
     def get_book(self, book_id: str) -> Optional[BookMetadata]:
@@ -287,7 +350,9 @@ class HardcoverProvider(MetadataProvider):
             return None
 
         # Query for specific book by ID
-        # Note: API has max depth of 3, so use cached_* fields instead of nested relationships
+        # Use contributions with filter to get only primary authors (not translators/narrators)
+        # Also include cached_contributors as fallback if contributions is empty
+        # Include featured_book_series for series info
         graphql_query = """
         query GetBook($id: Int!) {
             books(where: {id: {_eq: $id}}, limit: 1) {
@@ -299,11 +364,23 @@ class HardcoverProvider(MetadataProvider):
                 description
                 pages
                 cached_image
-                cached_contributors
                 cached_tags
+                cached_contributors
+                contributions(where: {contribution: {_eq: "Author"}}) {
+                    author {
+                        name
+                    }
+                }
                 default_physical_edition {
                     isbn_10
                     isbn_13
+                }
+                featured_book_series {
+                    position
+                    series {
+                        name
+                        primary_books_count
+                    }
                 }
             }
         }
@@ -346,7 +423,7 @@ class HardcoverProvider(MetadataProvider):
         clean_isbn = isbn.replace("-", "").strip()
 
         # Search for editions with matching ISBN
-        # Note: API has max depth of 3, so use cached_* fields instead of nested relationships
+        # Use contributions with filter to get only primary authors (not translators/narrators)
         graphql_query = """
         query SearchByISBN($isbn: String!) {
             editions(
@@ -369,8 +446,12 @@ class HardcoverProvider(MetadataProvider):
                     description
                     pages
                     cached_image
-                    cached_contributors
                     cached_tags
+                    contributions(where: {contribution: {_eq: "Author"}}) {
+                        author {
+                            name
+                        }
+                    }
                 }
             }
         }
@@ -536,20 +617,33 @@ class HardcoverProvider(MetadataProvider):
         Returns:
             BookMetadata object.
         """
-        # Extract authors from cached_contributors (json array) or contributions relationship
+        # Extract authors - try contributions first (filtered), fall back to cached_contributors
         authors = []
-        if book.get("cached_contributors"):
-            for contrib in book["cached_contributors"]:
-                if isinstance(contrib, dict) and contrib.get("name"):
-                    authors.append(contrib["name"])
+        contributions = book.get("contributions") or []
+        cached_contributors = book.get("cached_contributors") or []
+
+        logger.debug(f"_parse_book [{book.get('id')}]: contributions={contributions}, cached_contributors={cached_contributors}")
+
+        # Try contributions first (filtered to "Author" role only - cleaner data)
+        for contrib in contributions:
+            author = contrib.get("author", {})
+            if author and author.get("name"):
+                authors.append(author["name"])
+
+        # Fallback to cached_contributors if no authors found
+        if not authors:
+            for contrib in cached_contributors:
+                if isinstance(contrib, dict):
+                    # Handle nested structure: {"author": {"name": "..."}, "contribution": ...}
+                    if contrib.get("author", {}).get("name"):
+                        authors.append(contrib["author"]["name"])
+                    # Handle flat structure: {"name": "..."}
+                    elif contrib.get("name"):
+                        authors.append(contrib["name"])
                 elif isinstance(contrib, str):
                     authors.append(contrib)
-        elif book.get("contributions"):
-            # Fallback for contributions relationship (if used)
-            for contrib in book["contributions"]:
-                author = contrib.get("author", {})
-                if author and author.get("name"):
-                    authors.append(author["name"])
+
+        logger.debug(f"_parse_book [{book.get('id')}]: final authors={authors}")
 
         # Get cover URL from cached_image (jsonb) or image relationship
         cover_url = None
@@ -608,6 +702,18 @@ class HardcoverProvider(MetadataProvider):
         description = book.get("description")
         full_description = _combine_headline_description(headline, description)
 
+        # Extract series info from featured_book_series
+        series_name = None
+        series_position = None
+        series_count = None
+        featured_series = book.get("featured_book_series")
+        if featured_series:
+            series_position = featured_series.get("position")
+            series_data = featured_series.get("series")
+            if series_data:
+                series_name = series_data.get("name")
+                series_count = series_data.get("primary_books_count")
+
         return BookMetadata(
             provider="hardcover",
             provider_id=str(book["id"]),
@@ -621,20 +727,20 @@ class HardcoverProvider(MetadataProvider):
             publish_year=publish_year,
             genres=genres,
             source_url=source_url,
+            series_name=series_name,
+            series_position=series_position,
+            series_count=series_count,
         )
 
 
-def _test_hardcover_connection() -> Dict[str, Any]:
-    """Test the Hardcover API connection."""
+def _test_hardcover_connection(current_values: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Test the Hardcover API connection using current form values."""
     from cwa_book_downloader.core.config import config as app_config
-    from cwa_book_downloader.core.settings_registry import save_config_file, load_config_file
-    from cwa_book_downloader.metadata_providers import get_provider_kwargs
 
-    # Refresh config to pick up any recently saved settings
-    app_config.refresh()
+    current_values = current_values or {}
 
-    kwargs = get_provider_kwargs("hardcover")
-    api_key = kwargs.get("api_key")
+    # Use current form values first, fall back to saved config
+    api_key = current_values.get("HARDCOVER_API_KEY") or app_config.get("HARDCOVER_API_KEY", "")
 
     # Debug: log key info
     key_len = len(api_key) if api_key else 0
@@ -644,7 +750,7 @@ def _test_hardcover_connection() -> Dict[str, Any]:
     if not api_key:
         # Clear any stored username since there's no key
         _save_connected_username(None)
-        return {"success": False, "message": "No API key configured. Save your key and try again."}
+        return {"success": False, "message": "API key is required"}
 
     if key_len < 100:
         return {"success": False, "message": f"API key seems too short ({key_len} chars). Expected 500+ chars."}

@@ -142,6 +142,8 @@ export const downloadRelease = async (release: {
   source: string;
   source_id: string;
   title: string;
+  author?: string;   // Author from metadata provider
+  year?: string;     // Year from metadata provider
   format?: string;
   size?: string;
   size_bytes?: number;
@@ -151,7 +153,6 @@ export const downloadRelease = async (release: {
   seeders?: number;
   extra?: Record<string, unknown>;
   preview?: string;  // Book cover from metadata provider
-  author?: string;   // Author from metadata provider
 }): Promise<void> => {
   await fetchJSON(`${API_BASE}/releases/download`, {
     method: 'POST',
@@ -232,7 +233,9 @@ export const getReleases = async (
   bookId: string,
   source?: string,
   title?: string,
-  author?: string
+  author?: string,
+  expandSearch?: boolean,
+  languages?: string[]
 ): Promise<ReleasesResponse> => {
   const params = new URLSearchParams({
     provider,
@@ -246,6 +249,12 @@ export const getReleases = async (
   }
   if (author) {
     params.set('author', author);
+  }
+  if (expandSearch) {
+    params.set('expand_search', 'true');
+  }
+  if (languages && languages.length > 0) {
+    params.set('languages', languages.join(','));
   }
   return fetchJSON<ReleasesResponse>(`${API_BASE}/releases?${params.toString()}`);
 };

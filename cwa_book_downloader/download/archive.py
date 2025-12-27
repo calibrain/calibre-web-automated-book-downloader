@@ -8,8 +8,19 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from cwa_book_downloader.core.logger import setup_logger
+from cwa_book_downloader.core.config import config
+from cwa_book_downloader.core.models import build_filename
 
 logger = setup_logger(__name__)
+
+
+def _get_supported_formats() -> List[str]:
+    """Get current supported formats from config singleton."""
+    formats = config.get("SUPPORTED_FORMATS", ["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"])
+    # Handle both list (from MultiSelectField) and comma-separated string (legacy/env)
+    if isinstance(formats, str):
+        return [fmt.strip().lower() for fmt in formats.split(",") if fmt.strip()]
+    return [fmt.lower() for fmt in formats]
 
 # Check for rarfile availability at module load
 try:
@@ -19,12 +30,6 @@ try:
 except ImportError:
     RAR_AVAILABLE = False
     logger.warning("rarfile not installed - RAR extraction disabled")
-
-# Book file extensions that should be kept after extraction
-BOOK_EXTENSIONS = frozenset({
-    "epub", "mobi", "azw", "azw3", "pdf", "fb2", "djvu",
-    "cbz", "cbr", "txt", "rtf", "doc", "docx", "lit", "pdb",
-})
 
 
 class ArchiveExtractionError(Exception):
@@ -52,34 +57,44 @@ def is_archive(file_path: Path) -> bool:
 
 
 def _is_book_file(file_path: Path) -> bool:
-    """Check if file is a recognized book format."""
+    """Check if file matches user's SUPPORTED_FORMATS setting."""
     ext = file_path.suffix.lower().lstrip(".")
-    return ext in BOOK_EXTENSIONS
+    supported_formats = _get_supported_formats()
+    return ext in supported_formats
 
 
-def _filter_book_files(extracted_files: List[Path]) -> Tuple[List[Path], List[Path]]:
+def _filter_book_files(extracted_files: List[Path]) -> Tuple[List[Path], List[Path], List[Path]]:
     """
     Filter extracted files to only book formats.
 
     Returns:
-        Tuple of (book_files, non_book_files)
+        Tuple of (book_files, rejected_ebook_files, non_book_files)
+        - book_files: Match SUPPORTED_FORMATS
+        - rejected_ebook_files: Ebook formats not in SUPPORTED_FORMATS
+        - non_book_files: Non-ebook files (images, html, etc)
     """
+    # All known ebook extensions (superset of what user might enable)
+    ALL_EBOOK_EXTENSIONS = {'.pdf', '.epub', '.mobi', '.azw', '.azw3', '.fb2', '.djvu', '.cbz', '.cbr', '.doc', '.docx', '.rtf', '.txt'}
+
     book_files = []
+    rejected_ebook_files = []
     non_book_files = []
 
     for file_path in extracted_files:
         if _is_book_file(file_path):
             book_files.append(file_path)
+        elif file_path.suffix.lower() in ALL_EBOOK_EXTENSIONS:
+            rejected_ebook_files.append(file_path)
         else:
             non_book_files.append(file_path)
 
-    return book_files, non_book_files
+    return book_files, rejected_ebook_files, non_book_files
 
 
 def extract_archive(
     archive_path: Path,
     output_dir: Path,
-) -> Tuple[List[Path], List[str]]:
+) -> Tuple[List[Path], List[str], List[Path]]:
     """
     Extract book files from an archive.
 
@@ -91,7 +106,10 @@ def extract_archive(
         output_dir: Directory to extract files to
 
     Returns:
-        Tuple of (extracted_book_file_paths, warnings)
+        Tuple of (book_files, warnings, rejected_ebook_files)
+        - book_files: Paths to extracted files matching SUPPORTED_FORMATS
+        - warnings: List of warning messages
+        - rejected_ebook_files: Ebook files that were rejected (format not enabled)
 
     Raises:
         ArchiveExtractionError: If extraction fails
@@ -108,8 +126,21 @@ def extract_archive(
         raise ArchiveExtractionError(f"Unsupported archive format: {suffix}")
 
     # Filter to only book files, delete non-book files
-    book_files, non_book_files = _filter_book_files(extracted_files)
+    book_files, rejected_ebook_files, non_book_files = _filter_book_files(extracted_files)
 
+    # Delete rejected ebook files (valid formats but not enabled by user)
+    for rejected_file in rejected_ebook_files:
+        try:
+            rejected_file.unlink()
+            logger.debug(f"Deleted rejected ebook file: {rejected_file.name}")
+        except OSError as e:
+            logger.warning(f"Failed to delete rejected ebook file {rejected_file}: {e}")
+
+    if rejected_ebook_files:
+        rejected_exts = sorted(set(f.suffix.lower() for f in rejected_ebook_files))
+        warnings.append(f"Skipped {len(rejected_ebook_files)} ebook(s) with unsupported format: {', '.join(rejected_exts)}")
+
+    # Delete non-book files (images, html, etc)
     for non_book_file in non_book_files:
         try:
             non_book_file.unlink()
@@ -120,7 +151,7 @@ def extract_archive(
     if non_book_files:
         warnings.append(f"Skipped {len(non_book_files)} non-book file(s)")
 
-    return book_files, warnings
+    return book_files, warnings, rejected_ebook_files
 
 
 def _extract_zip(
@@ -253,6 +284,7 @@ def process_archive(
     temp_dir: Path,
     ingest_dir: Path,
     archive_id: str,
+    task: Optional["DownloadTask"] = None,
 ) -> ArchiveResult:
     """
     Process an archive file: extract, filter to book files, move to ingest.
@@ -264,6 +296,7 @@ def process_archive(
         temp_dir: Base temp directory for extraction (e.g., TMP_DIR)
         ingest_dir: Final destination directory for book files
         archive_id: Unique identifier for temp directory naming
+        task: Optional download task for filename generation
 
     Returns:
         ArchiveResult with success status, final paths, and status message
@@ -276,12 +309,29 @@ def process_archive(
         os.makedirs(ingest_dir, exist_ok=True)
 
         # Extract to temp directory (filters to book files only)
-        extracted_files, warnings = extract_archive(archive_path, extract_dir)
+        extracted_files, warnings, rejected_ebook_files = extract_archive(archive_path, extract_dir)
 
         if not extracted_files:
             # Clean up and return error
             shutil.rmtree(extract_dir, ignore_errors=True)
             archive_path.unlink(missing_ok=True)
+
+            if rejected_ebook_files:
+                # Found ebooks but they weren't in supported formats
+                rejected_exts = sorted(set(f.suffix.lower() for f in rejected_ebook_files))
+                rejected_list = ", ".join(rejected_exts)
+                supported_formats = _get_supported_formats()
+                logger.warning(
+                    f"Found {len(rejected_ebook_files)} ebook(s) in archive but format not supported. "
+                    f"Rejected: {rejected_list}. Supported: {', '.join(sorted(supported_formats))}"
+                )
+                return ArchiveResult(
+                    success=False,
+                    final_paths=[],
+                    message="",
+                    error=f"Found {len(rejected_ebook_files)} ebook(s) but format not supported ({rejected_list}). Enable in Settings > Formats.",
+                )
+
             return ArchiveResult(
                 success=False,
                 final_paths=[],
@@ -297,7 +347,18 @@ def process_archive(
         # Move book files to ingest folder
         final_paths = []
         for extracted_file in extracted_files:
-            final_path = ingest_dir / extracted_file.name
+            # For multi-file archives (book packs, series), always preserve original filenames
+            # since metadata title only applies to the searched book, not the whole pack.
+            # For single files, respect USE_BOOK_TITLE setting.
+            if len(extracted_files) == 1 and config.USE_BOOK_TITLE and task:
+                # Use the extracted file's actual extension, not the archive's extension
+                # (task.download_path points to the archive, so we must use build_filename directly)
+                extracted_format = extracted_file.suffix.lower().lstrip('.')
+                filename = build_filename(task.title, task.author, task.year, extracted_format)
+            else:
+                filename = extracted_file.name
+
+            final_path = ingest_dir / filename
             final_path = _handle_duplicate_filename(final_path)
             shutil.move(str(extracted_file), str(final_path))
             final_paths.append(final_path)

@@ -19,7 +19,8 @@ export interface SelectOption {
 // Conditional visibility configuration
 export interface ShowWhenCondition {
   field: string; // The field key to check
-  value: string | string[]; // The value(s) that make this field visible
+  value?: string | string[]; // The value(s) that make this field visible
+  notEmpty?: boolean; // If true, show when field has any non-empty value
 }
 
 // Conditional disable configuration

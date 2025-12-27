@@ -1,5 +1,6 @@
 """Environment variable parsing. No local dependencies - import first."""
 
+import json
 import os
 import shutil
 from pathlib import Path
@@ -7,6 +8,34 @@ from pathlib import Path
 
 def string_to_bool(s: str) -> bool:
     return s.lower() in ["true", "yes", "1", "y"]
+
+
+def _read_debug_from_config() -> bool:
+    """
+    Read DEBUG setting directly from config JSON file.
+
+    This is called at import time before the config singleton is available.
+    Priority: ENV var > config file > default (False)
+    """
+    # Check env var first (takes priority)
+    env_debug = os.environ.get("DEBUG")
+    if env_debug is not None:
+        return string_to_bool(env_debug)
+
+    # Try to read from config file
+    config_dir = Path(os.getenv("CONFIG_DIR", "/config"))
+    config_file = config_dir / "plugins" / "advanced.json"
+
+    if config_file.exists():
+        try:
+            with open(config_file, "r") as f:
+                config = json.load(f)
+                if "DEBUG" in config:
+                    return bool(config["DEBUG"])
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    return False
 
 
 # Authentication and session settings
@@ -55,7 +84,7 @@ _BOOK_LANGUAGE = os.getenv("BOOK_LANGUAGE", "en").lower()
 _CUSTOM_SCRIPT = os.getenv("CUSTOM_SCRIPT", "").strip()
 FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = int(os.getenv("FLASK_PORT", "8084"))
-DEBUG = string_to_bool(os.getenv("DEBUG", "false"))
+DEBUG = _read_debug_from_config()
 # Debug: skip specific download sources for testing fallback chains
 # Comma-separated values: aa-fast, aa-slow-nowait, aa-slow-wait, libgen, zlib, welib
 _DEBUG_SKIP_SOURCES_RAW = os.getenv("DEBUG_SKIP_SOURCES", "").strip().lower()
@@ -70,11 +99,8 @@ _LEGACY_ALLOW_USE_WELIB = string_to_bool(os.getenv("ALLOW_USE_WELIB", "true"))
 BUILD_VERSION = os.getenv("BUILD_VERSION", "N/A")
 RELEASE_VERSION = os.getenv("RELEASE_VERSION", "N/A")
 
-# If debug is true, we want to log everything
-if DEBUG:
-    LOG_LEVEL = "DEBUG"
-else:
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+# Log level is derived from DEBUG - no separate LOG_LEVEL setting
+LOG_LEVEL = "DEBUG" if DEBUG else "INFO"
 ENABLE_LOGGING = string_to_bool(os.getenv("ENABLE_LOGGING", "true"))
 MAIN_LOOP_SLEEP_TIME = int(os.getenv("MAIN_LOOP_SLEEP_TIME", "5"))
 MAX_CONCURRENT_DOWNLOADS = int(os.getenv("MAX_CONCURRENT_DOWNLOADS", "3"))

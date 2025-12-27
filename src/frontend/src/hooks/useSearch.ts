@@ -88,10 +88,14 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
     if (searchMode === 'universal') {
       const params = new URLSearchParams(query);
       const searchQuery = params.get('query') || '';
-      const sort = params.get('sort') || 'relevance';
       // Use explicitly passed fieldValues if provided, otherwise fall back to state
       const effectiveFieldValues = fieldValues ?? searchFieldValues;
       const hasFieldValues = Object.values(effectiveFieldValues).some(v => v !== '' && v !== false);
+
+      // Auto-set sort to series_order when searching by series field
+      const seriesValue = effectiveFieldValues.series;
+      const hasSeriesSearch = typeof seriesValue === 'string' && seriesValue.trim() !== '';
+      const sort = hasSeriesSearch ? 'series_order' : (params.get('sort') || 'relevance');
 
       // Debug logging
       console.log('[useSearch] Universal mode search:', {
@@ -109,6 +113,11 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
         setBooks([]);
         setLastSearchQuery('');
         return;
+      }
+
+      // Update UI sort dropdown to reflect series_order when searching by series
+      if (hasSeriesSearch) {
+        setAdvancedFilters(prev => ({ ...prev, sort: 'series_order' }));
       }
 
       setIsSearching(true);

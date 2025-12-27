@@ -41,6 +41,10 @@ export interface Book {
   genres?: string[];
   source_url?: string;         // Link to book on provider's site
   display_fields?: DisplayField[];  // Provider-specific display data
+  // Series info (if book is part of a series)
+  series_name?: string;        // Name of the series
+  series_position?: number;    // This book's position (e.g., 3, 1.5 for novellas)
+  series_count?: number;       // Total books in the series
 }
 
 // Status response types
@@ -184,6 +188,7 @@ export const isMetadataBook = (book: Book): book is Book & {
 export interface ReleaseSource {
   name: string;           // e.g., 'direct_download', 'prowlarr'
   display_name: string;   // e.g., 'Direct Download', 'Prowlarr'
+  enabled: boolean;       // Whether the source is available for use
 }
 
 // Column schema types for plugin-driven release list UI
@@ -221,6 +226,8 @@ export interface ReleaseColumnConfig {
   columns: ColumnSchema[];
   grid_template: string;             // CSS grid-template-columns for dynamic section
   leading_cell?: LeadingCellConfig;  // Defaults to thumbnail from extra.preview
+  online_servers?: string[];         // For IRC: list of currently online server nicks
+  cache_ttl_seconds?: number;        // How long to cache results (default: 300 = 5 min)
 }
 
 // A downloadable release from any source
@@ -258,4 +265,13 @@ export interface ReleasesResponse {
   sources_searched: string[];
   errors?: string[];
   column_config?: ReleaseColumnConfig | null;  // Plugin-driven column configuration
+}
+
+// Search status update from WebSocket (for ReleaseModal loading state)
+export interface SearchStatusData {
+  source: string;      // Release source name (e.g., 'irc', 'direct_download')
+  provider: string;    // Metadata provider (may be empty)
+  book_id: string;     // Book ID (may be empty)
+  message: string;     // Human-readable status message
+  phase: 'connecting' | 'searching' | 'downloading' | 'parsing' | 'complete' | 'error';
 }

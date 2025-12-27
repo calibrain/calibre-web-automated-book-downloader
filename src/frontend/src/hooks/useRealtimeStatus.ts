@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
 import { StatusData } from '../types';
 import { getStatus } from '../services/api';
+import { useSocket } from '../contexts/SocketContext';
 
 interface UseRealtimeStatusOptions {
-  wsUrl: string;
   pollInterval?: number;
-  reconnectAttempts?: number;
 }
 
 interface UseRealtimeStatusReturn {
@@ -19,26 +17,18 @@ interface UseRealtimeStatusReturn {
 
 /**
  * Hook for real-time status updates with WebSocket and polling fallback
- * 
- * This hook attempts to connect via WebSocket first. If WebSocket connection
- * fails or disconnects, it automatically falls back to polling. It will
- * periodically retry WebSocket connections.
+ *
+ * Uses shared socket from SocketContext. Falls back to polling if socket
+ * is not connected.
  */
 export const useRealtimeStatus = ({
-  wsUrl,
-  pollInterval = 2000, // Reduced from 5s for better UX when WebSocket unavailable
-  reconnectAttempts = 3,
-}: UseRealtimeStatusOptions): UseRealtimeStatusReturn => {
+  pollInterval = 2000,
+}: UseRealtimeStatusOptions = {}): UseRealtimeStatusReturn => {
+  const { socket, connected } = useSocket();
   const [status, setStatus] = useState<StatusData>({});
-  const [connected, setConnected] = useState(false);
-  const [isUsingWebSocket, setIsUsingWebSocket] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
-  const socketRef = useRef<Socket | null>(null);
+
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const reconnectAttemptsRef = useRef(0);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isConnectingRef = useRef(false);
 
   // Polling function
   const pollStatus = useCallback(async () => {
@@ -55,14 +45,9 @@ export const useRealtimeStatus = ({
   // Start polling
   const startPolling = useCallback(() => {
     if (pollIntervalRef.current) return;
-    
+
     console.log('Starting polling fallback');
-    setIsUsingWebSocket(false);
-    
-    // Poll immediately
     pollStatus();
-    
-    // Then poll at intervals
     pollIntervalRef.current = setInterval(pollStatus, pollInterval);
   }, [pollStatus, pollInterval]);
 
@@ -75,198 +60,86 @@ export const useRealtimeStatus = ({
     }
   }, []);
 
-  // Attempt to reconnect WebSocket
-  const attemptReconnect = useCallback(() => {
-    if (reconnectAttemptsRef.current >= reconnectAttempts) {
-      console.log('Max reconnect attempts reached, using polling permanently');
+  // Set up socket event listeners
+  useEffect(() => {
+    if (!socket) {
+      startPolling();
       return;
     }
 
-    reconnectAttemptsRef.current += 1;
-    const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
-    
-    console.log(`Attempting WebSocket reconnect ${reconnectAttemptsRef.current}/${reconnectAttempts} in ${delay}ms`);
-    
-    reconnectTimeoutRef.current = setTimeout(() => {
-      if (!isConnectingRef.current && !socketRef.current?.connected) {
-        initializeWebSocket();
-      }
-    }, delay);
-  }, [reconnectAttempts]);
+    // Listen for status updates
+    const handleStatusUpdate = (data: StatusData) => {
+      console.debug('[WS] status_update received', Object.keys(data));
+      setStatus(data);
+      setError(null);
+    };
 
-  // Initialize WebSocket connection
-  const initializeWebSocket = useCallback(() => {
-    if (isConnectingRef.current || socketRef.current?.connected) {
-      return;
-    }
+    // Listen for download progress
+    const handleDownloadProgress = (data: { book_id: string; progress: number; status: string }) => {
+      console.debug('[WS] download_progress:', data.book_id, `${data.progress.toFixed(1)}%`);
+      setStatus(prev => {
+        const newStatus = { ...prev };
 
-    isConnectingRef.current = true;
-    console.log('Initializing WebSocket connection to:', wsUrl);
-
-    try {
-      const socket = io(wsUrl, {
-        // Try websocket first, fall back to polling if needed
-        transports: ['websocket', 'polling'],
-        // Explicitly set the path to match backend
-        path: '/socket.io',
-        // Connection timeout
-        timeout: 10000,
-        // Reconnection settings
-        reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        // Upgrade settings for reverse proxies
-        upgrade: true,
-        rememberUpgrade: true,
-        // Force new connection instead of reusing
-        forceNew: false,
-        // Enable multiplexing
-        multiplex: true,
-        // Auto-connect
-        autoConnect: true,
-      });
-
-      socketRef.current = socket;
-
-      socket.on('connect', () => {
-        console.log('✅ WebSocket connected successfully via', socket.io.engine.transport.name);
-        setConnected(true);
-        setIsUsingWebSocket(true);
-        setError(null);
-        reconnectAttemptsRef.current = 0;
-        isConnectingRef.current = false;
-        
-        // Stop polling when WebSocket connects
-        stopPolling();
-        
-        // Request initial status via WebSocket
-        socket.emit('request_status');
-      });
-
-      socket.on('disconnect', (reason: string) => {
-        console.log('WebSocket disconnected. Reason:', reason);
-        setConnected(false);
-        setIsUsingWebSocket(false);
-        isConnectingRef.current = false;
-        
-        // Start polling as fallback
-        startPolling();
-        
-        // Attempt to reconnect WebSocket for most disconnect reasons
-        // 'io server disconnect' = server initiated disconnect
-        // 'transport close' = network error or server unreachable
-        // 'transport error' = transport failed (like websocket failed to connect)
-        if (reason !== 'io client disconnect') {
-          console.log('Attempting to reconnect WebSocket after disconnect:', reason);
-          attemptReconnect();
+        if (newStatus.downloading?.[data.book_id]) {
+          newStatus.downloading = {
+            ...newStatus.downloading,
+            [data.book_id]: {
+              ...newStatus.downloading[data.book_id],
+              progress: data.progress,
+            },
+          };
         }
-      });
 
-      socket.on('connect_error', (err: Error) => {
-        console.error('WebSocket connection error:', err.message);
-        setError(`WebSocket error: ${err.message}`);
-        setConnected(false);
-        setIsUsingWebSocket(false);
-        isConnectingRef.current = false;
-        
-        // Start polling immediately on connection error
-        startPolling();
-        
-        // Attempt to reconnect WebSocket
-        attemptReconnect();
+        return newStatus;
       });
+    };
 
-      // Listen for status updates (full status refresh)
-      socket.on('status_update', (data: StatusData) => {
-        console.debug('[WS] status_update received', Object.keys(data));
-        setStatus(data);
-        setError(null);
-      });
+    socket.on('status_update', handleStatusUpdate);
+    socket.on('download_progress', handleDownloadProgress);
 
-      // Listen for real-time progress updates (incremental)
-      socket.on('download_progress', (data: { book_id: string; progress: number; status: string }) => {
-        console.debug('[WS] download_progress:', data.book_id, `${data.progress.toFixed(1)}%`);
-        setStatus(prev => {
-          const newStatus = { ...prev };
-          
-          // Update progress in downloading state
-          if (newStatus.downloading?.[data.book_id]) {
-            newStatus.downloading = {
-              ...newStatus.downloading,
-              [data.book_id]: {
-                ...newStatus.downloading[data.book_id],
-                progress: data.progress,
-              },
-            };
-          }
-          // Also check resolving state in case status update hasn't arrived yet
-          else if (newStatus.resolving?.[data.book_id]) {
-            // Book is resolving - progress will apply when it moves to downloading
-          }
-          
-          return newStatus;
-        });
-      });
-
-      socket.on('error', (err: Error) => {
-        console.error('WebSocket error:', err);
-        setError('WebSocket error occurred');
-      });
-
-    } catch (err) {
-      console.error('Failed to initialize WebSocket:', err);
-      setError('Failed to initialize WebSocket');
-      isConnectingRef.current = false;
+    // Request initial status when socket connects
+    if (connected) {
+      stopPolling();
+      socket.emit('request_status');
+    } else {
       startPolling();
     }
-  }, [wsUrl, stopPolling, startPolling, attemptReconnect]);
+
+    return () => {
+      socket.off('status_update', handleStatusUpdate);
+      socket.off('download_progress', handleDownloadProgress);
+    };
+  }, [socket, connected, startPolling, stopPolling]);
+
+  // Handle connection state changes
+  useEffect(() => {
+    if (connected) {
+      stopPolling();
+    } else {
+      startPolling();
+    }
+  }, [connected, startPolling, stopPolling]);
 
   // Force refresh function
   const forceRefresh = useCallback(async () => {
-    if (socketRef.current?.connected) {
-      // Request update via WebSocket
-      socketRef.current.emit('request_status');
+    if (socket?.connected) {
+      socket.emit('request_status');
     } else {
-      // Poll immediately
       await pollStatus();
     }
-  }, [pollStatus]);
+  }, [socket, pollStatus]);
 
-  // Initialize on mount
+  // Cleanup polling on unmount
   useEffect(() => {
-    // Try WebSocket first
-    initializeWebSocket();
-    
-    // If WebSocket doesn't connect within 3 seconds, start polling
-    const fallbackTimeout = setTimeout(() => {
-      if (!socketRef.current?.connected) {
-        console.log('WebSocket connection timeout, starting polling');
-        startPolling();
-      }
-    }, 3000);
-
-    // Cleanup
     return () => {
-      clearTimeout(fallbackTimeout);
-      
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      
       stopPolling();
-      
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
     };
-  }, [initializeWebSocket, startPolling, stopPolling]);
+  }, [stopPolling]);
 
   return {
     status,
     connected,
-    isUsingWebSocket,
+    isUsingWebSocket: connected,
     error,
     forceRefresh,
   };
