@@ -310,7 +310,12 @@ class ProwlarrSource(ReleaseSource):
             logger.warning(f"Invalid PROWLARR_INDEXERS format: {selected} ({e})")
             return None
 
-    def search(self, book: BookMetadata) -> List[Release]:
+    def search(
+        self,
+        book: BookMetadata,
+        expand_search: bool = False,
+        languages: Optional[List[str]] = None
+    ) -> List[Release]:
         """
         Search Prowlarr for releases matching the book.
 
@@ -319,6 +324,8 @@ class ProwlarrSource(ReleaseSource):
 
         Args:
             book: Book metadata to search for
+            expand_search: Ignored - Prowlarr always uses title+author search
+            languages: Ignored - Prowlarr doesn't support language filtering
 
         Returns:
             List of Release objects
@@ -395,7 +402,9 @@ class ProwlarrSource(ReleaseSource):
             return []
 
     def is_available(self) -> bool:
-        """Check if Prowlarr is configured."""
+        """Check if Prowlarr is enabled and configured."""
+        if not config.get("PROWLARR_ENABLED", False):
+            return False
         url = config.get("PROWLARR_URL", "")
         api_key = config.get("PROWLARR_API_KEY", "")
         return bool(url and api_key)

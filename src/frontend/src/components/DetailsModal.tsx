@@ -7,10 +7,11 @@ interface DetailsModalProps {
   onClose: () => void;
   onDownload: (book: Book) => Promise<void>;
   onFindDownloads?: (book: Book) => void;  // For Universal mode
+  onSearchSeries?: (seriesName: string) => void;  // Callback to search for series
   buttonState: ButtonStateInfo;
 }
 
-export const DetailsModal = ({ book, onClose, onDownload, onFindDownloads, buttonState }: DetailsModalProps) => {
+export const DetailsModal = ({ book, onClose, onDownload, onFindDownloads, onSearchSeries, buttonState }: DetailsModalProps) => {
   const [isQueuing, setIsQueuing] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
 
@@ -255,6 +256,37 @@ export const DetailsModal = ({ book, onClose, onDownload, onFindDownloads, butto
                   <div className={`${infoCardClass} space-y-1`} style={infoCardStyle}>
                     <p className={infoLabelClass}>ISBN</p>
                     <p className={infoValueClass}>{book.isbn_13 || book.isbn_10}</p>
+                  </div>
+                )}
+
+                {/* Series info - Universal mode only */}
+                {isMetadata && book.series_name && (
+                  <div className={`${infoCardClass} space-y-1`} style={infoCardStyle}>
+                    <p className={infoLabelClass}>Series</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className={infoValueClass}>
+                        {book.series_position != null ? (
+                          <>#{Number.isInteger(book.series_position) ? book.series_position : book.series_position}{book.series_count ? ` of ${book.series_count}` : ''} in {book.series_name}</>
+                        ) : (
+                          book.series_name
+                        )}
+                      </p>
+                      {onSearchSeries && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSearchSeries(book.series_name!);
+                            handleClose();
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 rounded-full hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors flex-shrink-0"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                          </svg>
+                          View series
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
 

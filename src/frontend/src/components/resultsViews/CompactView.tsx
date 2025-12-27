@@ -16,9 +16,10 @@ interface CompactViewProps {
   buttonState: ButtonStateInfo;
   showDetailsButton?: boolean;
   animationDelay?: number;
+  showSeriesPosition?: boolean;
 }
 
-export const CompactView = ({ book, onDetails, onDownload, onGetReleases, buttonState, showDetailsButton = false, animationDelay = 0 }: CompactViewProps) => {
+export const CompactView = ({ book, onDetails, onDownload, onGetReleases, buttonState, showDetailsButton = false, animationDelay = 0, showSeriesPosition = false }: CompactViewProps) => {
   const { searchMode } = useSearchMode();
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [isLoadingReleases, setIsLoadingReleases] = useState(false);
@@ -58,6 +59,12 @@ export const CompactView = ({ book, onDetails, onDownload, onGetReleases, button
       onMouseLeave={() => setIsHovered(false)}
     >
       <div className="relative w-[120px] h-full flex-shrink-0">
+        {/* Series position badge */}
+        {showSeriesPosition && book.series_position != null && (
+          <div className="absolute top-2 left-2 z-10 px-2 py-1 text-xs font-bold text-white bg-emerald-600 rounded-md shadow-lg">
+            #{book.series_position}
+          </div>
+        )}
         {book.preview && !imageError ? (
           <>
             {!imageLoaded && (

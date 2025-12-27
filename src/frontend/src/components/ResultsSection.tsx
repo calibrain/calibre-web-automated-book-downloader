@@ -166,7 +166,7 @@ export const ResultsSection = ({
         </div>
       </div>
       {viewMode === 'list' ? (
-        <ListView books={books} onDetails={onDetails} onDownload={onDownload} onGetReleases={onGetReleases} getButtonState={getButtonState} getUniversalButtonState={getUniversalButtonState} />
+        <ListView books={books} onDetails={onDetails} onDownload={onDownload} onGetReleases={onGetReleases} getButtonState={getButtonState} getUniversalButtonState={getUniversalButtonState} showSeriesPosition={sortValue === 'series_order'} />
       ) : (
         <div
           id="results-grid"
@@ -189,6 +189,7 @@ export const ResultsSection = ({
                 onGetReleases={onGetReleases}
                 buttonState={buttonState}
                 animationDelay={animationDelay}
+                showSeriesPosition={sortValue === 'series_order'}
               />
             ) : (
               <CompactView
@@ -200,6 +201,7 @@ export const ResultsSection = ({
                 buttonState={buttonState}
                 showDetailsButton={!isDesktop}
                 animationDelay={animationDelay}
+                showSeriesPosition={sortValue === 'series_order'}
               />
             );
           })}

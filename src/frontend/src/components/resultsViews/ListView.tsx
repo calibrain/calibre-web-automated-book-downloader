@@ -12,6 +12,7 @@ interface ListViewProps {
   onGetReleases: (book: Book) => Promise<void>;
   getButtonState: (bookId: string) => ButtonStateInfo;
   getUniversalButtonState: (bookId: string) => ButtonStateInfo;
+  showSeriesPosition?: boolean;
 }
 
 const ListViewThumbnail = ({ preview, title }: { preview?: string; title?: string }) => {
@@ -47,7 +48,7 @@ const ListViewThumbnail = ({ preview, title }: { preview?: string; title?: strin
   );
 };
 
-export const ListView = ({ books, onDetails, onDownload, onGetReleases, getButtonState, getUniversalButtonState }: ListViewProps) => {
+export const ListView = ({ books, onDetails, onDownload, onGetReleases, getButtonState, getUniversalButtonState, showSeriesPosition = false }: ListViewProps) => {
   const { searchMode } = useSearchMode();
   const [detailsLoadingId, setDetailsLoadingId] = useState<string | null>(null);
   const [releasesLoadingId, setReleasesLoadingId] = useState<string | null>(null);
@@ -120,8 +121,13 @@ export const ListView = ({ books, onDetails, onDownload, onGetReleases, getButto
 
                 {/* Title and Author */}
                 <div className="min-w-0 flex flex-col justify-center sm:pl-3">
-                  <h3 className="font-semibold text-xs min-[400px]:text-sm sm:text-base leading-tight line-clamp-1 sm:line-clamp-2" title={book.title || 'Untitled'}>
-                    {book.title || 'Untitled'}
+                  <h3 className="font-semibold text-xs min-[400px]:text-sm sm:text-base leading-tight line-clamp-1 sm:line-clamp-2 flex items-center gap-2" title={book.title || 'Untitled'}>
+                    {showSeriesPosition && book.series_position != null && (
+                      <span className="inline-flex mr-1.5 px-1.5 py-0.5 text-[10px] sm:text-xs font-bold text-white bg-emerald-600 rounded flex-shrink-0">
+                        #{book.series_position}
+                      </span>
+                    )}
+                    <span className="truncate">{book.title || 'Untitled'}</span>
                   </h3>
                   <p className="text-[10px] min-[400px]:text-xs sm:text-sm text-gray-600 dark:text-gray-300 truncate">
                     {book.author || 'Unknown author'}

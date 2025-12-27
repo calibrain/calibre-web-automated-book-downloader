@@ -15,9 +15,10 @@ interface CardViewProps {
   onGetReleases: (book: Book) => Promise<void>;
   buttonState: ButtonStateInfo;
   animationDelay?: number;
+  showSeriesPosition?: boolean;
 }
 
-export const CardView = ({ book, onDetails, onDownload, onGetReleases, buttonState, animationDelay = 0 }: CardViewProps) => {
+export const CardView = ({ book, onDetails, onDownload, onGetReleases, buttonState, animationDelay = 0, showSeriesPosition = false }: CardViewProps) => {
   const { searchMode } = useSearchMode();
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [isLoadingReleases, setIsLoadingReleases] = useState(false);
@@ -57,6 +58,12 @@ export const CardView = ({ book, onDetails, onDownload, onGetReleases, buttonSta
       onMouseLeave={() => setIsHovered(false)}
     >
       <div className="relative w-full sm:w-full max-sm:w-[120px] max-sm:h-full max-sm:flex-shrink-0 group" style={{ aspectRatio: '2/3' }}>
+        {/* Series position badge */}
+        {showSeriesPosition && book.series_position != null && (
+          <div className="absolute top-2 left-2 z-10 px-2 py-1 text-xs font-bold text-white bg-emerald-600 rounded-md shadow-lg">
+            #{book.series_position}
+          </div>
+        )}
         {book.preview && !imageError ? (
           <>
             {!imageLoaded && (

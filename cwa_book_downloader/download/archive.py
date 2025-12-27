@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple
 
 from cwa_book_downloader.core.logger import setup_logger
 from cwa_book_downloader.core.config import config
+from cwa_book_downloader.core.models import build_filename
 
 logger = setup_logger(__name__)
 
@@ -350,11 +351,10 @@ def process_archive(
             # since metadata title only applies to the searched book, not the whole pack.
             # For single files, respect USE_BOOK_TITLE setting.
             if len(extracted_files) == 1 and config.USE_BOOK_TITLE and task:
-                # Update task format from actual file if not already set
-                # (Prowlarr releases may not know the format until download completes)
-                if not task.format:
-                    task.format = extracted_file.suffix.lower().lstrip('.')
-                filename = task.get_filename() or extracted_file.name
+                # Use the extracted file's actual extension, not the archive's extension
+                # (task.download_path points to the archive, so we must use build_filename directly)
+                extracted_format = extracted_file.suffix.lower().lstrip('.')
+                filename = build_filename(task.title, task.author, task.year, extracted_format)
             else:
                 filename = extracted_file.name
 

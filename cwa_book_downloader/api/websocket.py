@@ -157,6 +157,38 @@ class WebSocketManager:
         except Exception as e:
             logger.error(f"Error broadcasting notification: {e}")
 
+    def broadcast_search_status(
+        self,
+        source: str,
+        provider: str,
+        book_id: str,
+        message: str,
+        phase: str = 'searching'
+    ):
+        """Broadcast search status update for a release source search.
+
+        Args:
+            source: Release source name (e.g., 'irc', 'direct_download')
+            provider: Metadata provider name (e.g., 'hardcover')
+            book_id: Book ID from the metadata provider
+            message: Human-readable status message
+            phase: Search phase ('connecting', 'searching', 'downloading', 'parsing', 'complete', 'error')
+        """
+        if not self.is_enabled():
+            return
+
+        try:
+            data = {
+                'source': source,
+                'provider': provider,
+                'book_id': book_id,
+                'message': message,
+                'phase': phase,
+            }
+            self.socketio.emit('search_status', data)
+        except Exception as e:
+            logger.error(f"Error broadcasting search status: {e}")
+
 
 # Global WebSocket manager instance
 ws_manager = WebSocketManager()

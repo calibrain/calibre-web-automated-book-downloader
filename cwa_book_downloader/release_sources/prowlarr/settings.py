@@ -11,6 +11,7 @@ from typing import Any, Dict, List
 from cwa_book_downloader.core.settings_registry import (
     register_group,
     register_settings,
+    CheckboxField,
     HeadingField,
     TextField,
     PasswordField,
@@ -272,7 +273,6 @@ register_group(
 @register_settings(
     name="prowlarr_config",
     display_name="Configuration",
-    icon="settings",
     order=41,
     group="prowlarr",
 )
@@ -286,18 +286,26 @@ def prowlarr_config_settings():
             link_url="https://prowlarr.com",
             link_text="prowlarr.com",
         ),
+        CheckboxField(
+            key="PROWLARR_ENABLED",
+            label="Enable Prowlarr source",
+            default=False,
+            description="Enable searching for books via Prowlarr indexers",
+        ),
         TextField(
             key="PROWLARR_URL",
             label="Prowlarr URL",
             description="Base URL of your Prowlarr instance",
             placeholder="http://prowlarr:9696",
             required=True,
+            show_when={"field": "PROWLARR_ENABLED", "value": True},
         ),
         PasswordField(
             key="PROWLARR_API_KEY",
             label="API Key",
             description="Found in Prowlarr: Settings > General > API Key",
             required=True,
+            show_when={"field": "PROWLARR_ENABLED", "value": True},
         ),
         ActionButton(
             key="test_prowlarr",
@@ -305,6 +313,7 @@ def prowlarr_config_settings():
             description="Verify your Prowlarr configuration",
             style="primary",
             callback=_test_prowlarr_connection,
+            show_when={"field": "PROWLARR_ENABLED", "value": True},
         ),
         MultiSelectField(
             key="PROWLARR_INDEXERS",
@@ -322,7 +331,6 @@ def prowlarr_config_settings():
 @register_settings(
     name="prowlarr_clients",
     display_name="Download Clients",
-    icon="download",
     order=42,
     group="prowlarr",
 )

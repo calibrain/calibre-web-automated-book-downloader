@@ -33,20 +33,14 @@ import './styles.css';
 function App() {
   const { toasts, showToast, removeToast } = useToast();
 
-  // WebSocket URL based on current location
-  const wsUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'http://localhost:8084'
-    : window.location.origin;
-
   // Realtime status with WebSocket and polling fallback
+  // Socket connection is managed by SocketProvider in main.tsx
   const {
     status: currentStatus,
     isUsingWebSocket,
     forceRefresh: fetchStatus
   } = useRealtimeStatus({
-    wsUrl,
     pollInterval: 5000,
-    reconnectAttempts: 3,
   });
 
   // Download tracking for universal mode
@@ -364,6 +358,9 @@ function App() {
         setSelectedBook({
           ...metadataBook,
           description: fullBook.description || metadataBook.description,
+          series_name: fullBook.series_name,
+          series_position: fullBook.series_position,
+          series_count: fullBook.series_count,
         });
       } catch (error) {
         console.error('Failed to load book description, using search data:', error);
@@ -426,6 +423,9 @@ function App() {
         setReleaseBook({
           ...book,
           description: fullBook.description || book.description,
+          series_name: fullBook.series_name,
+          series_position: fullBook.series_position,
+          series_count: fullBook.series_count,
         });
       } catch (error) {
         console.error('Failed to load book description, using search data:', error);
@@ -473,6 +473,30 @@ function App() {
       : [bookLanguages[0]?.code || 'en'];
 
   const searchMode = config?.search_mode || 'direct';
+
+  // Handle "View Series" - trigger search with series field and series order sort
+  const handleSearchSeries = useCallback((seriesName: string) => {
+    // Clear UI state
+    setSearchInput('');
+    setSelectedBook(null);
+    setReleaseBook(null);
+    clearTracking();
+
+    // Set sort to series_order (but don't show advanced panel or persist series value)
+    const newFilters = { ...advancedFilters, sort: 'series_order' };
+    setAdvancedFilters(newFilters);
+
+    // Trigger search with series field (passed directly, not persisted in UI)
+    const query = buildSearchQuery({
+      searchInput: '',
+      showAdvanced: true,
+      advancedFilters: newFilters,
+      bookLanguages,
+      defaultLanguage: defaultLanguageCodes,
+      searchMode,
+    });
+    handleSearch(query, config, { ...searchFieldValues, series: seriesName });
+  }, [setSearchInput, clearTracking, searchFieldValues, advancedFilters, setAdvancedFilters, bookLanguages, defaultLanguageCodes, searchMode, config, handleSearch]);
 
   const mainAppContent = (
     <SearchModeProvider searchMode={searchMode}>
@@ -575,6 +599,7 @@ function App() {
             onClose={() => setSelectedBook(null)}
             onDownload={handleDownload}
             onFindDownloads={handleFindDownloads}
+            onSearchSeries={handleSearchSeries}
             buttonState={getButtonState(selectedBook.id)}
           />
         )}
@@ -589,6 +614,7 @@ function App() {
             bookLanguages={bookLanguages}
             currentStatus={currentStatus}
             defaultReleaseSource={config?.default_release_source}
+            onSearchSeries={handleSearchSeries}
           />
         )}
 

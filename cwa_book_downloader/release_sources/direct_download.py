@@ -966,38 +966,55 @@ class DirectDownloadSource(ReleaseSource):
             grid_template="minmax(0,2fr) 60px 80px 80px"
         )
 
-    def search(self, book: BookMetadata) -> List[Release]:
+    def search(
+        self,
+        book: BookMetadata,
+        expand_search: bool = False,
+        languages: Optional[List[str]] = None
+    ) -> List[Release]:
         """
         Search for releases using the book's metadata.
 
-        Uses an ISBN-first strategy:
+        Args:
+            book: Book metadata from provider
+            expand_search: If True, skip ISBN and use title+author search directly.
+                          Useful when ISBN search returns few results.
+            languages: Optional list of language codes to filter by.
+                      If provided, overrides book.language and default settings.
+
+        Default behavior (expand_search=False):
         1. If ISBN available, try ISBN search first (most precise)
         2. If no results or no ISBN, fall back to title+author search
 
-        This approach maximizes accuracy while ensuring we find results.
+        Expanded search (expand_search=True):
+        - Skip ISBN, go straight to title+author search (finds more editions)
         """
-        # Try ISBN search first if available
-        isbn = book.isbn_13 or book.isbn_10
-        if isbn:
-            logger.debug(f"Searching direct downloads by ISBN: {isbn}")
-            filters = SearchFilters(isbn=[isbn])
-            if book.language:
-                filters.lang = [book.language]
+        # Determine language filter: explicit languages param > book.language > default
+        lang_filter = languages if languages else ([book.language] if book.language else None)
 
-            try:
-                book_infos = search_books(isbn, filters)
-                if book_infos:
-                    logger.info(f"Found {len(book_infos)} releases via ISBN search")
-                    return [_book_info_to_release(bi) for bi in book_infos]
-                logger.debug(f"No results from ISBN search, falling back to title+author")
-            except SearchUnavailable:
-                logger.warning("Direct download search unavailable during ISBN search")
-                raise  # Service unreachable - no point trying title search
-            except Exception as e:
-                logger.warning(f"ISBN search failed, falling back to title+author: {e}")
-                # Fall through to title search
+        # Expanded search skips ISBN and goes straight to title+author
+        if not expand_search:
+            # Try ISBN search first if available
+            isbn = book.isbn_13 or book.isbn_10
+            if isbn:
+                logger.debug(f"Searching direct downloads by ISBN: {isbn}")
+                filters = SearchFilters(isbn=[isbn])
+                if lang_filter:
+                    filters.lang = lang_filter
 
-        # Fallback to title + author search
+                try:
+                    book_infos = search_books(isbn, filters)
+                    if book_infos:
+                        logger.info(f"Found {len(book_infos)} releases via ISBN search")
+                        return [_book_info_to_release(bi) for bi in book_infos]
+                    logger.debug("No results from ISBN search, falling back to title+author")
+                except SearchUnavailable:
+                    logger.warning("Direct download search unavailable during ISBN search")
+                    raise
+                except Exception as e:
+                    logger.warning(f"ISBN search failed, falling back to title+author: {e}")
+
+        # Title + author search (fallback or expanded mode)
         query_parts = []
         if book.title:
             query_parts.append(book.title)
@@ -1011,8 +1028,8 @@ class DirectDownloadSource(ReleaseSource):
 
         logger.debug(f"Searching direct downloads by title+author: {query}")
         filters = SearchFilters()
-        if book.language:
-            filters.lang = [book.language]
+        if lang_filter:
+            filters.lang = lang_filter
 
         try:
             book_infos = search_books(query, filters)
@@ -1020,10 +1037,10 @@ class DirectDownloadSource(ReleaseSource):
             return [_book_info_to_release(bi) for bi in book_infos]
         except SearchUnavailable:
             logger.warning("Direct download search unavailable")
-            raise  # Re-raise so the API endpoint can report the error
+            raise
         except Exception as e:
             logger.error(f"Error searching direct download source: {e}")
-            raise  # Re-raise so the API endpoint can report the error
+            raise
 
     def search_raw(self, query: str, filters: SearchFilters) -> List[BookInfo]:
         """

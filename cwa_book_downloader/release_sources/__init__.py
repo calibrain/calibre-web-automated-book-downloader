@@ -115,6 +115,8 @@ class ReleaseColumnConfig:
     columns: List[ColumnSchema]
     grid_template: str = "minmax(0,2fr) 60px 80px 80px"  # CSS grid-template-columns
     leading_cell: Optional[LeadingCellConfig] = None     # Defaults to thumbnail mode if None
+    online_servers: Optional[List[str]] = None           # For IRC: list of currently online server nicks
+    cache_ttl_seconds: Optional[int] = None              # How long to cache results (default: 5 min)
 
 
 def serialize_column_config(config: ReleaseColumnConfig) -> Dict[str, Any]:
@@ -151,6 +153,14 @@ def serialize_column_config(config: ReleaseColumnConfig) -> Dict[str, Any]:
             } if config.leading_cell.color_hint else None,
             "uppercase": config.leading_cell.uppercase,
         }
+
+    # Include online_servers if provided (e.g., for IRC source)
+    if config.online_servers is not None:
+        result["online_servers"] = config.online_servers
+
+    # Include cache TTL if specified (sources can request longer caching)
+    if config.cache_ttl_seconds is not None:
+        result["cache_ttl_seconds"] = config.cache_ttl_seconds
 
     return result
 
@@ -198,8 +208,22 @@ class ReleaseSource(ABC):
     display_name: str                # "Direct Download", "Prowlarr"
 
     @abstractmethod
-    def search(self, book: BookMetadata) -> List[Release]:
-        """Search for releases of a book."""
+    def search(
+        self,
+        book: BookMetadata,
+        expand_search: bool = False,
+        languages: Optional[List[str]] = None
+    ) -> List[Release]:
+        """Search for releases of a book.
+
+        Args:
+            book: Book metadata from provider
+            expand_search: If True, use broader search (e.g., title+author instead of ISBN).
+                          Not all sources support this - they may ignore it.
+            languages: Optional list of language codes to filter by.
+                      If provided, overrides book.language and default settings.
+                      Not all sources support this - they may ignore it.
+        """
         pass
 
     @abstractmethod
@@ -315,11 +339,23 @@ def get_handler(name: str) -> DownloadHandler:
 
 
 def list_available_sources() -> List[dict]:
-    """For frontend - list sources that are configured."""
+    """For frontend - list all registered sources with their status.
+
+    Returns all sources (not just available ones) so the frontend can show
+    appropriate UI for disabled/unconfigured sources instead of hiding them.
+
+    Each source includes:
+    - name: Source identifier (e.g., 'prowlarr')
+    - display_name: Human-readable name (e.g., 'Prowlarr')
+    - enabled: Whether the source is available for use
+    """
     return [
-        {"name": name, "display_name": src().display_name}
+        {
+            "name": name,
+            "display_name": src().display_name,
+            "enabled": src().is_available(),
+        }
         for name, src in _SOURCES.items()
-        if src().is_available()
     ]
 
 
@@ -338,3 +374,4 @@ def get_source_display_name(name: str) -> str:
 # These must be imported AFTER the base classes and registry are defined
 from cwa_book_downloader.release_sources import direct_download  # noqa: F401, E402
 from cwa_book_downloader.release_sources import prowlarr  # noqa: F401, E402
+from cwa_book_downloader.release_sources import irc  # noqa: F401, E402

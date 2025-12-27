@@ -24,6 +24,10 @@ export interface MetadataBookData {
     value: string;
     icon?: string;
   }>;
+  // Series info
+  series_name?: string;
+  series_position?: number;
+  series_count?: number;
 }
 
 /**
@@ -48,6 +52,9 @@ export function transformMetadataToBook(data: MetadataBookData): Book {
     genres: data.genres,
     source_url: data.source_url,
     display_fields: data.display_fields,
+    series_name: data.series_name,
+    series_position: data.series_position,
+    series_count: data.series_count,
     info: {
       ...(data.isbn_13 && { ISBN: data.isbn_13 }),
       ...(data.isbn_10 && !data.isbn_13 && { ISBN: data.isbn_10 }),

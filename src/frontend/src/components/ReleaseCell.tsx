@@ -5,6 +5,7 @@ interface ReleaseCellProps {
   column: ColumnSchema;
   release: Release;
   compact?: boolean;  // When true, renders badges as plain text (for mobile info lines)
+  onlineServers?: string[];  // For IRC: list of online server nicks to show status indicator
 }
 
 /**
@@ -54,7 +55,7 @@ const getColorStyle = (value: string, colorHint?: ColumnColorHint | null): Color
  * Renders different column types (text, badge, size, number, seeders) based on schema.
  * When compact=true, badges render as plain text for use in mobile info lines.
  */
-export const ReleaseCell = ({ column, release, compact = false }: ReleaseCellProps) => {
+export const ReleaseCell = ({ column, release, compact = false, onlineServers }: ReleaseCellProps) => {
   const rawValue = getNestedValue(release as unknown as Record<string, unknown>, column.key);
   const value = rawValue !== undefined && rawValue !== null
     ? String(rawValue)
@@ -152,15 +153,38 @@ export const ReleaseCell = ({ column, release, compact = false }: ReleaseCellPro
       );
 
     case 'text':
-    default:
+    default: {
+      // Check if this is a server column with online status data
+      const isServerColumn = column.key === 'extra.server' && onlineServers !== undefined;
+      const isOnline = isServerColumn && onlineServers?.includes(value);
+
       if (compact) {
+        if (isServerColumn) {
+          return (
+            <span className="inline-flex items-center gap-1">
+              <span
+                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isOnline ? 'bg-emerald-500' : 'bg-gray-400'}`}
+                title={isOnline ? 'Online' : 'Offline'}
+              />
+              {displayValue}
+            </span>
+          );
+        }
         return <span>{displayValue}</span>;
       }
+
       return (
         <div className={`flex items-center ${alignClass} text-xs text-gray-600 dark:text-gray-300 truncate`}>
+          {isServerColumn && (
+            <span
+              className={`w-2 h-2 rounded-full mr-1.5 flex-shrink-0 ${isOnline ? 'bg-emerald-500' : 'bg-gray-400'}`}
+              title={isOnline ? 'Online' : 'Offline'}
+            />
+          )}
           {displayValue}
         </div>
       );
+    }
   }
 };
 

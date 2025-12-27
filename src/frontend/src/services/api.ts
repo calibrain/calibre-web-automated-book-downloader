@@ -233,7 +233,9 @@ export const getReleases = async (
   bookId: string,
   source?: string,
   title?: string,
-  author?: string
+  author?: string,
+  expandSearch?: boolean,
+  languages?: string[]
 ): Promise<ReleasesResponse> => {
   const params = new URLSearchParams({
     provider,
@@ -247,6 +249,12 @@ export const getReleases = async (
   }
   if (author) {
     params.set('author', author);
+  }
+  if (expandSearch) {
+    params.set('expand_search', 'true');
+  }
+  if (languages && languages.length > 0) {
+    params.set('languages', languages.join(','));
   }
   return fetchJSON<ReleasesResponse>(`${API_BASE}/releases?${params.toString()}`);
 };
