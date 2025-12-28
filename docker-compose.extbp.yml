@@ -5,8 +5,8 @@ services:
     environment:
       TZ: America/New_York
       EXT_BYPASSER_URL: http://flaresolverr:8191
-      # UID: 1000
-      # GID: 100
+      # PUID: 1000
+      # PGID: 1000
       # CWA_DB_PATH: /auth/app.db
     ports:
       - 8084:8084
@@ -15,6 +15,10 @@ services:
       - /tmp/data/calibre-web/ingest:/cwa-book-ingest
       - /path/to/config:/config
       # - /cwa/config/path/app.db:/auth/app.db:ro
+      # Download client volume - required for Prowlarr/torrent/usenet integration
+      # IMPORTANT: Both sides of this mount must match your download client's volume mount exactly.
+      # Example: if qBittorrent has "/mnt/storage/downloads:/data/torrents", use the same here:
+      # - /mnt/storage/downloads:/data/torrents
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest

@@ -60,7 +60,13 @@ export const CardView = ({ book, onDetails, onDownload, onGetReleases, buttonSta
       <div className="relative w-full sm:w-full max-sm:w-[120px] max-sm:h-full max-sm:flex-shrink-0 group" style={{ aspectRatio: '2/3' }}>
         {/* Series position badge */}
         {showSeriesPosition && book.series_position != null && (
-          <div className="absolute top-2 left-2 z-10 px-2 py-1 text-xs font-bold text-white bg-emerald-600 rounded-md shadow-lg">
+          <div
+            className="absolute top-2 left-2 z-10 px-2 py-1 text-xs font-bold text-white bg-emerald-600 rounded-md border border-emerald-700"
+            style={{
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3)',
+              textShadow: '0 1px 2px rgba(0, 0, 0, 0.3)',
+            }}
+          >
             #{book.series_position}
           </div>
         )}

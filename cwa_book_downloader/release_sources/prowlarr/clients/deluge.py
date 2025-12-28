@@ -8,9 +8,7 @@ configurable via DELUGE_PORT), which requires the daemon to have
 """
 
 import base64
-from typing import Optional, Tuple
-
-import requests
+from typing import Any, Optional, Tuple
 
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.core.logger import setup_logger
@@ -20,11 +18,15 @@ from cwa_book_downloader.release_sources.prowlarr.clients import (
     register_client,
 )
 from cwa_book_downloader.release_sources.prowlarr.clients.torrent_utils import (
-    extract_hash_from_magnet,
-    extract_info_hash_from_torrent,
+    extract_torrent_info,
 )
 
 logger = setup_logger(__name__)
+
+
+def _decode(value: Any) -> Any:
+    """Decode bytes to string if needed (Deluge returns bytes for strings)."""
+    return value.decode('utf-8') if isinstance(value, bytes) else value
 
 
 @register_client("torrent")
@@ -107,40 +109,15 @@ class DelugeClient(DownloadClient):
         try:
             self._ensure_connected()
 
-            # Use configured category if not explicitly provided
             category = category or self._category
 
-            # Try to extract hash from magnet URL before adding
-            expected_hash = extract_hash_from_magnet(url)
-            if expected_hash:
-                logger.debug(f"Extracted hash from magnet: {expected_hash}")
+            torrent_info = extract_torrent_info(url)
+            if not torrent_info.is_magnet and not torrent_info.torrent_data:
+                raise Exception("Failed to fetch torrent file")
 
-            is_magnet = url.startswith("magnet:")
-            logger.debug(f"Adding torrent - URL type: {'magnet' if is_magnet else 'torrent file'}")
-
-            torrent_data = None
-
-            # For non-magnet URLs, fetch the .torrent file
-            if not is_magnet:
-                logger.debug(f"Fetching torrent file from: {url[:80]}...")
-                try:
-                    resp = requests.get(url, timeout=30)
-                    resp.raise_for_status()
-                    torrent_data = resp.content
-                    expected_hash = extract_info_hash_from_torrent(torrent_data)
-                    if expected_hash:
-                        logger.debug(f"Extracted hash from torrent file: {expected_hash}")
-                    else:
-                        logger.warning("Could not extract hash from torrent file")
-                except Exception as e:
-                    logger.warning(f"Failed to fetch torrent file: {e}")
-                    raise
-
-            # Add options
             options = {}
 
-            # Add the torrent
-            if is_magnet:
+            if torrent_info.is_magnet:
                 # Add magnet link
                 torrent_id = self._client.call(
                     'core.add_torrent_magnet',
@@ -148,8 +125,7 @@ class DelugeClient(DownloadClient):
                     options,
                 )
             else:
-                # Add from torrent file content (base64 encoded)
-                filedump = base64.b64encode(torrent_data).decode('ascii')
+                filedump = base64.b64encode(torrent_info.torrent_data).decode('ascii')
                 torrent_id = self._client.call(
                     'core.add_torrent_file',
                     f"{name}.torrent",
@@ -158,9 +134,7 @@ class DelugeClient(DownloadClient):
                 )
 
             if torrent_id:
-                # Deluge returns bytes, decode to string
-                if isinstance(torrent_id, bytes):
-                    torrent_id = torrent_id.decode('utf-8')
+                torrent_id = _decode(torrent_id)
                 logger.info(f"Added torrent to Deluge: {torrent_id}")
                 return torrent_id.lower()
 
@@ -192,13 +166,7 @@ class DelugeClient(DownloadClient):
             )
 
             if not status:
-                return DownloadStatus(
-                    progress=0,
-                    state="error",
-                    message="Torrent not found",
-                    complete=False,
-                    file_path=None,
-                )
+                return DownloadStatus.error("Torrent not found")
 
             # Deluge states: Downloading, Seeding, Paused, Checking, Queued, Error, Moving
             state_map = {
@@ -212,10 +180,7 @@ class DelugeClient(DownloadClient):
                 'Allocating': ('downloading', 'Allocating space'),
             }
 
-            deluge_state = status.get(b'state', b'Unknown')
-            if isinstance(deluge_state, bytes):
-                deluge_state = deluge_state.decode('utf-8')
-
+            deluge_state = _decode(status.get(b'state', b'Unknown'))
             state, message = state_map.get(deluge_state, ('unknown', deluge_state))
             progress = status.get(b'progress', 0)
             complete = progress >= 100
@@ -223,20 +188,14 @@ class DelugeClient(DownloadClient):
             if complete:
                 message = "Download complete"
 
-            # Get ETA if available and reasonable
             eta = status.get(b'eta')
-            if eta and eta > 604800:  # More than 1 week
+            if eta and eta > 604800:
                 eta = None
 
-            # Build file path for completed downloads
             file_path = None
             if complete:
-                save_path = status.get(b'save_path', b'')
-                name = status.get(b'name', b'')
-                if isinstance(save_path, bytes):
-                    save_path = save_path.decode('utf-8')
-                if isinstance(name, bytes):
-                    name = name.decode('utf-8')
+                save_path = _decode(status.get(b'save_path', b''))
+                name = _decode(status.get(b'name', b''))
                 if save_path and name:
                     file_path = f"{save_path}/{name}"
 
@@ -254,13 +213,7 @@ class DelugeClient(DownloadClient):
             self._connected = False
             error_type = type(e).__name__
             logger.error(f"Deluge get_status failed ({error_type}): {e}")
-            return DownloadStatus(
-                progress=0,
-                state="error",
-                message=f"{error_type}: {e}",
-                complete=False,
-                file_path=None,
-            )
+            return DownloadStatus.error(f"{error_type}: {e}")
 
     def remove(self, download_id: str, delete_files: bool = False) -> bool:
         """
@@ -316,12 +269,8 @@ class DelugeClient(DownloadClient):
             )
 
             if status:
-                save_path = status.get(b'save_path', b'')
-                name = status.get(b'name', b'')
-                if isinstance(save_path, bytes):
-                    save_path = save_path.decode('utf-8')
-                if isinstance(name, bytes):
-                    name = name.decode('utf-8')
+                save_path = _decode(status.get(b'save_path', b''))
+                name = _decode(status.get(b'name', b''))
                 if save_path and name:
                     return f"{save_path}/{name}"
             return None
@@ -333,50 +282,25 @@ class DelugeClient(DownloadClient):
             return None
 
     def find_existing(self, url: str) -> Optional[Tuple[str, DownloadStatus]]:
-        """
-        Check if a torrent for this URL already exists in Deluge.
-
-        Args:
-            url: Magnet link or .torrent URL
-
-        Returns:
-            Tuple of (info_hash, status) if found, None if not found.
-        """
+        """Check if a torrent for this URL already exists in Deluge."""
         try:
             self._ensure_connected()
 
-            # Try to extract hash from magnet URL
-            expected_hash = extract_hash_from_magnet(url)
-
-            # If not a magnet, try to fetch and parse the .torrent file
-            if not expected_hash and not url.startswith("magnet:"):
-                logger.debug(f"Fetching torrent file to check for existing: {url[:80]}...")
-                try:
-                    resp = requests.get(url, timeout=30)
-                    resp.raise_for_status()
-                    expected_hash = extract_info_hash_from_torrent(resp.content)
-                except Exception as e:
-                    logger.debug(f"Could not fetch torrent file: {e}")
-                    return None
-
-            if not expected_hash:
-                logger.debug("Could not extract hash from URL")
+            torrent_info = extract_torrent_info(url)
+            if not torrent_info.info_hash:
                 return None
 
-            # Check if this torrent exists in Deluge
             status = self._client.call(
                 'core.get_torrent_status',
-                expected_hash,
+                torrent_info.info_hash,
                 ['state'],
             )
 
             if status:
-                full_status = self.get_status(expected_hash)
-                logger.debug(f"Found existing torrent in Deluge: {expected_hash} (state: {full_status.state})")
-                return (expected_hash, full_status)
+                full_status = self.get_status(torrent_info.info_hash)
+                return (torrent_info.info_hash, full_status)
 
             return None
-
         except Exception as e:
             self._connected = False
             logger.debug(f"Error checking for existing torrent: {e}")

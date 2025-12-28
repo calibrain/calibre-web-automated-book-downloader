@@ -21,22 +21,12 @@ from cwa_book_downloader.release_sources.prowlarr.clients import (
     get_client,
     list_configured_clients,
 )
+from cwa_book_downloader.release_sources.prowlarr.utils import get_protocol, get_unique_path
 
 logger = setup_logger(__name__)
 
 # How often to poll the download client for status (seconds)
 POLL_INTERVAL = 2
-
-
-def _determine_protocol(result: dict) -> str:
-    """Determine download protocol from Prowlarr result."""
-    # Prowlarr provides protocol directly - just use it
-    protocol = result.get("protocol", "").lower()
-    if protocol == "torrent":
-        return "torrent"
-    if protocol == "usenet":
-        return "usenet"
-    return "unknown"
 
 
 @register_handler("prowlarr")
@@ -76,7 +66,7 @@ class ProwlarrHandler(DownloadHandler):
                 return None
 
             # Determine protocol
-            protocol = _determine_protocol(prowlarr_result)
+            protocol = get_protocol(prowlarr_result)
             if protocol == "unknown":
                 status_callback("error", "Could not determine download protocol")
                 return None
@@ -102,7 +92,7 @@ class ProwlarrHandler(DownloadHandler):
                 # If already complete, skip straight to file handling
                 if existing_status.complete:
                     logger.info(f"Existing download is complete, copying file directly")
-                    status_callback("processing", "Found existing download, copying to library...")
+                    status_callback("resolving", "Found existing download, copying to library...")
 
                     source_path = client.get_download_path(download_id)
                     if not source_path:
@@ -256,7 +246,7 @@ class ProwlarrHandler(DownloadHandler):
         The orchestrator will find and filter book files.
         """
         try:
-            status_callback("processing", "Staging file...")
+            status_callback("resolving", "Staging file...")
 
             # Torrents: copy to preserve seeding. Usenet: configurable.
             if protocol == "torrent":
@@ -270,12 +260,7 @@ class ProwlarrHandler(DownloadHandler):
             if source_path.is_dir():
                 # Multi-file download: stage entire directory
                 # Orchestrator will extract book files
-                staged_path = staging_dir / source_path.name
-                if staged_path.exists():
-                    counter = 1
-                    while staged_path.exists():
-                        staged_path = staging_dir / f"{source_path.name}_{counter}"
-                        counter += 1
+                staged_path = get_unique_path(staging_dir, source_path.name)
 
                 if use_copy:
                     shutil.copytree(str(source_path), str(staged_path))
@@ -284,12 +269,7 @@ class ProwlarrHandler(DownloadHandler):
                 logger.debug(f"Staged directory: {staged_path.name}")
             else:
                 # Single file download
-                staged_path = staging_dir / source_path.name
-                if staged_path.exists():
-                    counter = 1
-                    while staged_path.exists():
-                        staged_path = staging_dir / f"{source_path.stem}_{counter}{source_path.suffix}"
-                        counter += 1
+                staged_path = get_unique_path(staging_dir, source_path.stem, source_path.suffix)
 
                 if use_copy:
                     shutil.copy2(str(source_path), str(staged_path))

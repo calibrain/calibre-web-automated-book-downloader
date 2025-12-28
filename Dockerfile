@@ -47,7 +47,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DEFAULT_TIMEOUT=100 \
     NAME=Calibre-Web-Automated-Book-Downloader \
     PYTHONPATH=/app \
-    # UID/GID will be handled by entrypoint script, but TZ/Locale are still needed
+    # PUID/PGID will be handled by entrypoint script, but TZ/Locale are still needed
     LANG=en_US.UTF-8 \
     LANGUAGE=en_US:en \
     LC_ALL=en_US.UTF-8

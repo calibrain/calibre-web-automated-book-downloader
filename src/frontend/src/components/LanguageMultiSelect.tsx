@@ -1,6 +1,5 @@
 import { Language } from '../types';
 import {
-  formatDefaultLanguageLabel,
   LANGUAGE_OPTION_ALL,
   LANGUAGE_OPTION_DEFAULT,
   normalizeLanguageSelection,
@@ -24,28 +23,40 @@ export const LanguageMultiSelect = ({
   label,
   placeholder,
 }: LanguageMultiSelectProps) => {
-  const defaultLabel = formatDefaultLanguageLabel(defaultLanguageCodes, options);
   const defaultCodeSet = new Set(defaultLanguageCodes);
-  const nonDefaultLanguages = options.filter(lang => !defaultCodeSet.has(lang.code));
-  const selectableValues = [LANGUAGE_OPTION_DEFAULT, ...nonDefaultLanguages.map(lang => lang.code)];
 
+  // Get default languages with their full info
+  const defaultLanguages = options.filter(lang => defaultCodeSet.has(lang.code));
+  const nonDefaultLanguages = options.filter(lang => !defaultCodeSet.has(lang.code));
+
+  // All selectable values (individual language codes, not LANGUAGE_OPTION_DEFAULT)
+  const selectableValues = [...defaultLanguageCodes, ...nonDefaultLanguages.map(lang => lang.code)];
+
+  // Build option list: All, then defaults (marked), then others
   const optionList: DropdownListOption[] = [
     {
       value: LANGUAGE_OPTION_ALL,
       label: 'All languages',
     },
-    {
-      value: LANGUAGE_OPTION_DEFAULT,
-      label: defaultLabel,
-    },
+    // Each default language as a separate option
+    ...defaultLanguages.map(lang => ({
+      value: lang.code,
+      label: `${lang.language} (default)`,
+    })),
+    // Non-default languages
     ...nonDefaultLanguages.map(lang => ({
       value: lang.code,
       label: lang.language,
     })),
   ];
 
+  // Expand LANGUAGE_OPTION_DEFAULT to individual default codes for comparison
+  const expandedValue = value.flatMap(v =>
+    v === LANGUAGE_OPTION_DEFAULT ? defaultLanguageCodes : [v]
+  );
+
   const includesAllSelection = value.includes(LANGUAGE_OPTION_ALL);
-  const effectiveValue = includesAllSelection ? selectableValues : value;
+  const effectiveValue = includesAllSelection ? selectableValues : expandedValue;
   const selectedSet = new Set(effectiveValue);
   const isAllSelected = selectableValues.every(code => selectedSet.has(code));
   const displayedValue = isAllSelected ? [LANGUAGE_OPTION_ALL, ...effectiveValue] : effectiveValue;
@@ -57,11 +68,8 @@ export const LanguageMultiSelect = ({
 
     const labels: string[] = [];
 
-    if (selectedSet.has(LANGUAGE_OPTION_DEFAULT)) {
-      labels.push(defaultLabel);
-    }
-
-    nonDefaultLanguages.forEach(lang => {
+    // Check each language
+    options.forEach(lang => {
       if (selectedSet.has(lang.code)) {
         labels.push(lang.language);
       }

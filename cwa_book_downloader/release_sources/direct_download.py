@@ -7,7 +7,7 @@ import re
 import time
 from pathlib import Path
 from threading import Event
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 from bs4 import BeautifulSoup, NavigableString, Tag
@@ -36,7 +36,7 @@ from cwa_book_downloader.release_sources import (
 logger = setup_logger(__name__)
 
 _aa_slow_rotation = itertools.count()
-_url_source_types: dict[str, str] = {}
+_url_source_types: Dict[str, str] = {}
 
 if DEBUG_SKIP_SOURCES:
     logger.warning("DEBUG_SKIP_SOURCES active: skipping sources %s", DEBUG_SKIP_SOURCES)
@@ -67,20 +67,23 @@ _MD5_URL_TEMPLATES = {
     "welib": "https://welib.org/md5/{md5}",
 }
 
-def _get_source_priority() -> list[dict]:
+def _get_source_priority() -> List[Dict]:
     """Get the current source priority configuration."""
     return config.get("SOURCE_PRIORITY") or []
 
 
 def _is_source_enabled(source_id: str) -> bool:
-    """Check if a source is enabled in the priority config."""
+    """Check if a source is enabled in the priority config.
+
+    Returns False for unknown sources.
+    """
     for item in _get_source_priority():
         if item["id"] == source_id:
             return item.get("enabled", True)
-    return False  # Unknown sources are disabled
+    return False
 
 
-def _get_enabled_source_order() -> list[str]:
+def _get_enabled_source_order() -> List[str]:
     """Get ordered list of enabled source IDs."""
     return [
         item["id"]
@@ -92,13 +95,12 @@ def _get_enabled_source_order() -> list[str]:
 def _get_source_position(source_id: str) -> int:
     """Get the position of a source in the priority list (lower = higher priority).
 
-    Returns a high number if source not found or disabled.
+    Returns 999 if source not found or disabled.
     """
-    priority = _get_source_priority()
-    for i, item in enumerate(priority):
+    for i, item in enumerate(_get_source_priority()):
         if item["id"] == source_id and item.get("enabled", True):
             return i
-    return 999  # Not found or disabled
+    return 999
 
 
 class SearchUnavailable(Exception):
@@ -267,10 +269,10 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     data = soup.find_all("div", {"class": "main-inner"})[0].find_next("div")
     divs = list(data.children)
 
-    slow_urls_no_waitlist: list[str] = []
-    slow_urls_with_waitlist: list[str] = []
+    slow_urls_no_waitlist: List[str] = []
+    slow_urls_with_waitlist: List[str] = []
 
-    def _append_unique(lst: list[str], href: str) -> None:
+    def _append_unique(lst: List[str], href: str) -> None:
         if href and href not in lst:
             lst.append(href)
 
@@ -472,7 +474,7 @@ def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
     }
 
 
-def _get_source_info(link: str) -> tuple[str, str]:
+def _get_source_info(link: str) -> Tuple[str, str]:
     """Get source label and friendly name for a download link.
 
     Args:
@@ -504,7 +506,7 @@ def _friendly_source_name(link: str) -> str:
     return _get_source_info(link)[1]
 
 
-def _fetch_aa_page_urls(book_info: BookInfo, urls_by_source: dict[str, list[str]]) -> None:
+def _fetch_aa_page_urls(book_info: BookInfo, urls_by_source: Dict[str, List[str]]) -> None:
     """Fetch and parse AA page, populating urls_by_source dict.
 
     Groups existing book_info.download_urls by source type. If book_info
@@ -539,9 +541,9 @@ def _get_urls_for_source(
     selector: network.AAMirrorSelector,
     cancel_flag: Optional[Event],
     status_callback: Optional[Callable[[str, Optional[str]], None]],
-    urls_by_source: dict[str, list[str]],
+    urls_by_source: Dict[str, List[str]],
     aa_page_fetched: bool
-) -> list[str]:
+) -> List[str]:
     """Get URLs for a specific source, fetching lazily if needed."""
     # AA Fast - generate URL dynamically
     if source_id == "aa-fast":
@@ -628,7 +630,7 @@ def _try_download_url(
         return None
 
 
-def _get_download_urls_from_welib(book_id: str, selector: Optional[network.AAMirrorSelector] = None, cancel_flag: Optional[Event] = None) -> list[str]:
+def _get_download_urls_from_welib(book_id: str, selector: Optional[network.AAMirrorSelector] = None, cancel_flag: Optional[Event] = None) -> List[str]:
     """Get download URLs from welib.org (bypasser required)."""
     if not _is_source_enabled("welib"):
         return []
@@ -925,6 +927,16 @@ class DirectDownloadSource(ReleaseSource):
     name = "direct_download"
     display_name = "Anna's Archive"
 
+    def __init__(self):
+        # Tracks which search method was used in the last search() call
+        # "isbn" = ISBN search returned results, "title_author" = title+author was used
+        self._last_search_type: str = "title_author"
+
+    @property
+    def last_search_type(self) -> str:
+        """Returns the search type used in the last search() call."""
+        return self._last_search_type
+
     @classmethod
     def get_column_config(cls) -> ReleaseColumnConfig:
         """Column configuration for Direct Download source.
@@ -975,81 +987,76 @@ class DirectDownloadSource(ReleaseSource):
         """
         Search for releases using the book's metadata.
 
+        Priority: ISBN search first (most precise), then title+author fallback.
+        For non-English languages, uses localized titles from book.titles_by_language.
+
         Args:
             book: Book metadata from provider
-            expand_search: If True, skip ISBN and use title+author search directly.
-                          Useful when ISBN search returns few results.
-            languages: Optional list of language codes to filter by.
-                      If provided, overrides book.language and default settings.
-
-        Default behavior (expand_search=False):
-        1. If ISBN available, try ISBN search first (most precise)
-        2. If no results or no ISBN, fall back to title+author search
-
-        Expanded search (expand_search=True):
-        - Skip ISBN, go straight to title+author search (finds more editions)
+            expand_search: If True, skip ISBN and use title+author directly
+            languages: Language codes to filter by (overrides book.language/config)
         """
-        # Determine language filter: explicit languages param > book.language > default
-        lang_filter = languages if languages else ([book.language] if book.language else None)
+        # Language filter: explicit param > book.language > config default
+        lang_filter = languages or ([book.language] if book.language else config.BOOK_LANGUAGE)
 
-        # Expanded search skips ISBN and goes straight to title+author
+        # Reset search type tracking
+        self._last_search_type = "title_author"
+
+        # ISBN search first (unless expand_search requested)
         if not expand_search:
-            # Try ISBN search first if available
             isbn = book.isbn_13 or book.isbn_10
             if isbn:
-                logger.debug(f"Searching direct downloads by ISBN: {isbn}")
+                logger.debug(f"Searching by ISBN: {isbn}")
                 filters = SearchFilters(isbn=[isbn])
                 if lang_filter:
                     filters.lang = lang_filter
-
                 try:
-                    book_infos = search_books(isbn, filters)
-                    if book_infos:
-                        logger.info(f"Found {len(book_infos)} releases via ISBN search")
-                        return [_book_info_to_release(bi) for bi in book_infos]
-                    logger.debug("No results from ISBN search, falling back to title+author")
+                    results = search_books(isbn, filters)
+                    if results:
+                        logger.info(f"Found {len(results)} releases via ISBN")
+                        self._last_search_type = "isbn"
+                        return [_book_info_to_release(bi) for bi in results]
+                    logger.debug("No ISBN results, falling back to title+author")
                 except SearchUnavailable:
-                    logger.warning("Direct download search unavailable during ISBN search")
                     raise
                 except Exception as e:
-                    logger.warning(f"ISBN search failed, falling back to title+author: {e}")
+                    logger.warning(f"ISBN search failed: {e}")
 
-        # Title + author search (fallback or expanded mode)
-        query_parts = []
-        if book.title:
-            query_parts.append(book.title)
-        if book.authors:
-            query_parts.append(book.authors[0])  # Use first author
+        # Title + author fallback
+        author = book.authors[0] if book.authors else ""
 
-        query = " ".join(query_parts)
-        if not query.strip():
-            logger.warning("No search query available for book")
-            return []
+        # Group languages by localized title to avoid duplicate searches
+        if lang_filter and book.titles_by_language:
+            title_to_langs: Dict[str, List[str]] = {}
+            for lang in lang_filter:
+                title = book.titles_by_language.get(lang, book.title)
+                title_to_langs.setdefault(title, []).append(lang)
+            searches = list(title_to_langs.items())
+        else:
+            searches = [(book.title, lang_filter)]
 
-        logger.debug(f"Searching direct downloads by title+author: {query}")
-        filters = SearchFilters()
-        if lang_filter:
-            filters.lang = lang_filter
+        # Execute searches with deduplication
+        seen_ids: set = set()
+        all_results: List[BookInfo] = []
 
-        try:
-            book_infos = search_books(query, filters)
-            logger.info(f"Found {len(book_infos)} releases via title+author search")
-            return [_book_info_to_release(bi) for bi in book_infos]
-        except SearchUnavailable:
-            logger.warning("Direct download search unavailable")
-            raise
-        except Exception as e:
-            logger.error(f"Error searching direct download source: {e}")
-            raise
+        for title, langs in searches:
+            query = f"{title} {author}".strip()
+            if not query:
+                continue
 
-    def search_raw(self, query: str, filters: SearchFilters) -> List[BookInfo]:
-        """
-        Raw search using existing query format - for backward compatibility.
+            logger.debug(f"Searching: query='{query}', langs={langs}")
+            filters = SearchFilters(lang=langs) if langs else SearchFilters()
+            try:
+                for bi in search_books(query, filters):
+                    if bi.id not in seen_ids:
+                        seen_ids.add(bi.id)
+                        all_results.append(bi)
+            except SearchUnavailable:
+                raise
+            except Exception as e:
+                logger.error(f"Search error: {e}")
 
-        This is used by the existing "Direct Download Only" mode which doesn't
-        go through the metadata provider layer.
-        """
-        return search_books(query, filters)
+        logger.info(f"Found {len(all_results)} releases via title+author")
+        return [_book_info_to_release(bi) for bi in all_results]
 
     def is_available(self) -> bool:
         """Direct download is always available."""
@@ -1092,6 +1099,7 @@ class DirectDownloadHandler(DownloadHandler):
             # Check for cancellation before starting
             if cancel_flag.is_set():
                 logger.info(f"Download cancelled before starting: {task.task_id}")
+                status_callback("cancelled", "Cancelled")
                 return None
 
             # Create BookInfo from task data - NO AA page fetch here
@@ -1116,6 +1124,7 @@ class DirectDownloadHandler(DownloadHandler):
         except Exception as e:
             if cancel_flag.is_set():
                 logger.info(f"Download cancelled during error handling: {task.task_id}")
+                status_callback("cancelled", "Cancelled")
             else:
                 logger.error(f"Error downloading book: {e}")
                 status_callback("error", str(e))
@@ -1145,6 +1154,7 @@ class DirectDownloadHandler(DownloadHandler):
             # Check cancellation before download
             if cancel_flag.is_set():
                 logger.info(f"Download cancelled before download call: {book_info.id}")
+                status_callback("cancelled", "Cancelled")
                 return None
 
             # Execute download via _download_book (handles cascade and bypass)
@@ -1162,6 +1172,7 @@ class DirectDownloadHandler(DownloadHandler):
                 logger.info(f"Download cancelled during download: {book_info.id}")
                 if book_path.exists():
                     book_path.unlink()
+                status_callback("cancelled", "Cancelled")
                 return None
 
             if not success_url:
@@ -1174,6 +1185,7 @@ class DirectDownloadHandler(DownloadHandler):
         except Exception as e:
             if cancel_flag.is_set():
                 logger.info(f"Download cancelled during error handling: {book_info.id}")
+                status_callback("cancelled", "Cancelled")
             else:
                 logger.error(f"Error downloading book: {e}")
             return None

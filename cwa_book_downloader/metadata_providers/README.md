@@ -64,7 +64,7 @@ class MetadataSearchOptions:
     search_type: SearchType = SearchType.GENERAL  # GENERAL, TITLE, AUTHOR, ISBN
     language: str = None                          # ISO 639-1 code (e.g., "en")
     sort: SortOrder = SortOrder.RELEVANCE
-    limit: int = 20
+    limit: int = 40
     page: int = 1
 ```
 

@@ -92,7 +92,7 @@ Environment variables work for initial setup and Docker deployments. They serve 
 | `FLASK_PORT` | Web interface port | `8084` |
 | `INGEST_DIR` | Book download directory | `/cwa-book-ingest` |
 | `TZ` | Container timezone | `UTC` |
-| `UID` / `GID` | Runtime user/group ID | `1000` / `100` |
+| `PUID` / `PGID` | Runtime user/group ID (also supports legacy `UID`/`GID`) | `1000` / `1000` |
 | `SEARCH_MODE` | `direct` or `universal` | `direct` |
 
 Some of the additional options available in Settings:

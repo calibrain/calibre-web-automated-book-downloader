@@ -6,8 +6,6 @@ Uses the transmission-rpc library to communicate with Transmission's RPC API.
 
 from typing import Optional, Tuple
 
-import requests
-
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.core.logger import setup_logger
 from cwa_book_downloader.release_sources.prowlarr.clients import (
@@ -16,8 +14,7 @@ from cwa_book_downloader.release_sources.prowlarr.clients import (
     register_client,
 )
 from cwa_book_downloader.release_sources.prowlarr.clients.torrent_utils import (
-    extract_hash_from_magnet,
-    extract_info_hash_from_torrent,
+    extract_torrent_info,
     parse_transmission_url,
 )
 
@@ -86,59 +83,23 @@ class TransmissionClient(DownloadClient):
             Exception: If adding fails.
         """
         try:
-            # Use configured category if not explicitly provided
             category = category or self._category
 
-            # Try to extract hash from magnet URL before adding
-            expected_hash = extract_hash_from_magnet(url)
-            if expected_hash:
-                logger.debug(f"Extracted hash from magnet: {expected_hash}")
+            torrent_info = extract_torrent_info(url)
 
-            is_magnet = url.startswith("magnet:")
-            logger.debug(f"Adding torrent - URL type: {'magnet' if is_magnet else 'torrent file'}")
-
-            torrent_data = None
-
-            # For non-magnet URLs, fetch the .torrent file to extract the hash
-            if not is_magnet and not expected_hash:
-                logger.debug(f"Fetching torrent file from: {url[:80]}...")
-                try:
-                    resp = requests.get(url, timeout=30)
-                    resp.raise_for_status()
-                    torrent_data = resp.content
-                    expected_hash = extract_info_hash_from_torrent(torrent_data)
-                    if expected_hash:
-                        logger.debug(f"Extracted hash from torrent file: {expected_hash}")
-                    else:
-                        logger.warning("Could not extract hash from torrent file")
-                except Exception as e:
-                    logger.warning(f"Failed to fetch torrent file: {e}")
-
-            logger.debug(f"Expected hash: {expected_hash}")
-
-            # Add the torrent
-            if torrent_data:
-                # Add from torrent file content (pass raw bytes, library handles encoding)
+            if torrent_info.torrent_data:
                 torrent = self._client.add_torrent(
-                    torrent=torrent_data,
+                    torrent=torrent_info.torrent_data,
                     labels=[category],
                 )
             else:
-                # Add from URL or magnet
                 torrent = self._client.add_torrent(
                     torrent=url,
                     labels=[category],
                 )
 
-            # Get the hash from the returned torrent
             torrent_hash = torrent.hashString.lower()
             logger.info(f"Added torrent to Transmission: {torrent_hash}")
-
-            # Verify hash matches if we extracted one
-            if expected_hash and torrent_hash != expected_hash:
-                logger.warning(
-                    f"Hash mismatch: expected {expected_hash}, got {torrent_hash}"
-                )
 
             return torrent_hash
 
@@ -215,24 +176,11 @@ class TransmissionClient(DownloadClient):
             )
 
         except KeyError:
-            # Torrent not found
-            return DownloadStatus(
-                progress=0,
-                state="error",
-                message="Torrent not found",
-                complete=False,
-                file_path=None,
-            )
+            return DownloadStatus.error("Torrent not found")
         except Exception as e:
             error_type = type(e).__name__
             logger.error(f"Transmission get_status failed ({error_type}): {e}")
-            return DownloadStatus(
-                progress=0,
-                state="error",
-                message=f"{error_type}: {e}",
-                complete=False,
-                file_path=None,
-            )
+            return DownloadStatus.error(f"{error_type}: {e}")
 
     def remove(self, download_id: str, delete_files: bool = False) -> bool:
         """
@@ -281,44 +229,18 @@ class TransmissionClient(DownloadClient):
             return None
 
     def find_existing(self, url: str) -> Optional[Tuple[str, DownloadStatus]]:
-        """
-        Check if a torrent for this URL already exists in Transmission.
-
-        Args:
-            url: Magnet link or .torrent URL
-
-        Returns:
-            Tuple of (info_hash, status) if found, None if not found.
-        """
+        """Check if a torrent for this URL already exists in Transmission."""
         try:
-            # Try to extract hash from magnet URL
-            expected_hash = extract_hash_from_magnet(url)
-
-            # If not a magnet, try to fetch and parse the .torrent file
-            if not expected_hash and not url.startswith("magnet:"):
-                logger.debug(f"Fetching torrent file to check for existing: {url[:80]}...")
-                try:
-                    resp = requests.get(url, timeout=30)
-                    resp.raise_for_status()
-                    expected_hash = extract_info_hash_from_torrent(resp.content)
-                except Exception as e:
-                    logger.debug(f"Could not fetch torrent file: {e}")
-                    return None
-
-            if not expected_hash:
-                logger.debug("Could not extract hash from URL")
+            torrent_info = extract_torrent_info(url)
+            if not torrent_info.info_hash:
                 return None
 
-            # Check if this torrent exists in Transmission
             try:
-                torrent = self._client.get_torrent(expected_hash)
-                status = self.get_status(expected_hash)
-                logger.debug(f"Found existing torrent in Transmission: {expected_hash} (state: {status.state})")
-                return (expected_hash, status)
+                self._client.get_torrent(torrent_info.info_hash)
+                status = self.get_status(torrent_info.info_hash)
+                return (torrent_info.info_hash, status)
             except KeyError:
-                # Torrent not found
                 return None
-
         except Exception as e:
             logger.debug(f"Error checking for existing torrent: {e}")
             return None

@@ -321,7 +321,7 @@ def prowlarr_config_settings():
             description="Select which indexers to search. 📚 = has book categories. Leave empty to search all.",
             options=_get_indexer_options,
             default=[],
-            show_when={"field": "PROWLARR_URL", "notEmpty": True},
+            show_when={"field": "PROWLARR_ENABLED", "value": True},
         ),
     ]
 

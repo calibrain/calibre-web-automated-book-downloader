@@ -45,6 +45,17 @@ class DownloadStatus:
     download_speed: Optional[int] = None  # Bytes per second
     eta: Optional[int] = None  # Seconds remaining
 
+    @classmethod
+    def error(cls, message: str) -> "DownloadStatus":
+        """Create an error status."""
+        return cls(
+            progress=0,
+            state=DownloadState.ERROR,
+            message=message,
+            complete=False,
+            file_path=None,
+        )
+
     def __post_init__(self):
         """Validate and normalize state."""
         # Normalize string states to enum

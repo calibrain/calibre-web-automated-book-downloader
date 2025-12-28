@@ -97,8 +97,8 @@ def serialize_search_field(search_field: SearchField) -> Dict[str, Any]:
         "key": search_field.key,
         "label": search_field.label,
         "type": _get_field_type_name(search_field),
-        "placeholder": search_field.placeholder if hasattr(search_field, 'placeholder') else "",
-        "description": search_field.description if hasattr(search_field, 'description') else "",
+        "placeholder": getattr(search_field, 'placeholder', ''),
+        "description": getattr(search_field, 'description', ''),
     }
 
     # Add type-specific properties
@@ -125,7 +125,7 @@ class MetadataSearchOptions:
     search_type: SearchType = SearchType.GENERAL
     language: Optional[str] = None  # ISO 639-1 code (e.g., "en", "fr")
     sort: SortOrder = SortOrder.RELEVANCE
-    limit: int = 20
+    limit: int = 40
     page: int = 1
     fields: Dict[str, Any] = field(default_factory=dict)  # Custom search field values
 
@@ -171,6 +171,19 @@ class BookMetadata:
     series_name: Optional[str] = None      # Name of the series
     series_position: Optional[float] = None  # This book's position (e.g., 3, 1.5 for novellas)
     series_count: Optional[int] = None     # Total books in the series
+
+    # Alternative titles by language (for localized searches)
+    # Maps language code (e.g., "de", "German") to localized title
+    titles_by_language: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class SearchResult:
+    """Result from a metadata search with pagination info."""
+    books: List[BookMetadata]
+    page: int = 1
+    total_found: int = 0  # Total matching results (if known)
+    has_more: bool = False  # True if more results available
 
 
 class MetadataProvider(ABC):
@@ -223,6 +236,28 @@ class MetadataProvider(ABC):
     def is_available(self) -> bool:
         """Check if this provider is configured and available."""
         pass
+
+    def search_paginated(self, options: MetadataSearchOptions) -> SearchResult:
+        """Search for books and return results with pagination info.
+
+        Default implementation calls search() and estimates has_more.
+        Providers should override this to return accurate pagination info.
+
+        Args:
+            options: Search options including query, type, language, sort, pagination.
+
+        Returns:
+            SearchResult with books and pagination info.
+        """
+        books = self.search(options)
+        # Heuristic: if we got exactly limit results, there might be more
+        has_more = len(books) >= options.limit
+        return SearchResult(
+            books=books,
+            page=options.page,
+            total_found=0,  # Unknown without provider-specific implementation
+            has_more=has_more
+        )
 
 
 # Provider registry
@@ -367,6 +402,13 @@ def get_configured_provider() -> Optional[MetadataProvider]:
     return get_provider(metadata_provider, **kwargs)
 
 
+def _get_configured_provider_name() -> str:
+    """Get the currently configured metadata provider name from config."""
+    from cwa_book_downloader.core.config import config as app_config
+    app_config.refresh()
+    return app_config.get("METADATA_PROVIDER", "")
+
+
 def get_provider_sort_options(provider_name: Optional[str] = None) -> List[Dict[str, str]]:
     """Get sort options for a metadata provider.
 
@@ -379,9 +421,7 @@ def get_provider_sort_options(provider_name: Optional[str] = None) -> List[Dict[
         List of sort option dicts, or default [relevance] if provider not found.
     """
     if provider_name is None:
-        from cwa_book_downloader.core.config import config as app_config
-        app_config.refresh()
-        provider_name = app_config.get("METADATA_PROVIDER", "")
+        provider_name = _get_configured_provider_name()
 
     if provider_name and provider_name in _PROVIDERS:
         provider_class = _PROVIDERS[provider_name]
@@ -407,9 +447,7 @@ def get_provider_search_fields(provider_name: Optional[str] = None) -> List[Dict
         List of search field dicts, or empty list if provider not found.
     """
     if provider_name is None:
-        from cwa_book_downloader.core.config import config as app_config
-        app_config.refresh()
-        provider_name = app_config.get("METADATA_PROVIDER", "")
+        provider_name = _get_configured_provider_name()
 
     if provider_name and provider_name in _PROVIDERS:
         provider_class = _PROVIDERS[provider_name]
@@ -434,8 +472,7 @@ def get_provider_default_sort(provider_name: Optional[str] = None) -> str:
     from cwa_book_downloader.core.config import config as app_config
 
     if provider_name is None:
-        app_config.refresh()
-        provider_name = app_config.get("METADATA_PROVIDER", "")
+        provider_name = _get_configured_provider_name()
 
     if not provider_name:
         return "relevance"

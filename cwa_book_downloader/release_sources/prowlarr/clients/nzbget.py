@@ -247,23 +247,11 @@ class NZBGetClient(DownloadClient):
                         )
 
             # Not found in queue or history
-            return DownloadStatus(
-                progress=0,
-                state="error",
-                message="Download not found",
-                complete=False,
-                file_path=None,
-            )
+            return DownloadStatus.error("Download not found")
         except Exception as e:
             error_type = type(e).__name__
             logger.error(f"NZBGet get_status failed ({error_type}): {e}")
-            return DownloadStatus(
-                progress=0,
-                state="error",
-                message=f"{error_type}: {e}",
-                complete=False,
-                file_path=None,
-            )
+            return DownloadStatus.error(f"{error_type}: {e}")
 
     def remove(self, download_id: str, delete_files: bool = False) -> bool:
         """

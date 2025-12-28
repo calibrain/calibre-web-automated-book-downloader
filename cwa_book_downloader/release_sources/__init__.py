@@ -343,30 +343,22 @@ def list_available_sources() -> List[dict]:
 
     Returns all sources (not just available ones) so the frontend can show
     appropriate UI for disabled/unconfigured sources instead of hiding them.
-
-    Each source includes:
-    - name: Source identifier (e.g., 'prowlarr')
-    - display_name: Human-readable name (e.g., 'Prowlarr')
-    - enabled: Whether the source is available for use
     """
-    return [
-        {
+    result = []
+    for name, src_class in _SOURCES.items():
+        instance = src_class()
+        result.append({
             "name": name,
-            "display_name": src().display_name,
-            "enabled": src().is_available(),
-        }
-        for name, src in _SOURCES.items()
-    ]
+            "display_name": instance.display_name,
+            "enabled": instance.is_available(),
+        })
+    return result
 
 
 def get_source_display_name(name: str) -> str:
-    """Get display name for a source by its identifier.
-
-    Falls back to title-cased name if source not found.
-    """
+    """Get display name for a source by its identifier."""
     if name in _SOURCES:
         return _SOURCES[name]().display_name
-    # Fallback: convert snake_case to Title Case
     return name.replace('_', ' ').title()
 
 

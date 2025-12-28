@@ -15,3 +15,7 @@ services:
       - ./.local/ingest:/cwa-book-ingest
       - ./.local/log:/var/log/cwa-book-downloader
       - ./.local/tmp:/tmp/cwa-book-downloader
+      # Download client volume - required for Prowlarr/torrent/usenet integration
+      # IMPORTANT: Both sides of this mount must match your download client's volume mount exactly.
+      # Example: if qBittorrent has "/mnt/storage/downloads:/data/torrents", use the same here:
+      # - /mnt/storage/downloads:/data/torrents

@@ -7,8 +7,6 @@ Uses the qbittorrent-api library to communicate with qBittorrent's Web API.
 import time
 from typing import Optional, Tuple
 
-import requests
-
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.core.logger import setup_logger
 from cwa_book_downloader.release_sources.prowlarr.clients import (
@@ -17,8 +15,7 @@ from cwa_book_downloader.release_sources.prowlarr.clients import (
     register_client,
 )
 from cwa_book_downloader.release_sources.prowlarr.clients.torrent_utils import (
-    extract_hash_from_magnet,
-    extract_info_hash_from_torrent,
+    extract_torrent_info,
 )
 
 logger = setup_logger(__name__)
@@ -91,32 +88,9 @@ class QBittorrentClient(DownloadClient):
                 if "Conflict" not in type(e).__name__ and "409" not in str(e):
                     logger.debug(f"Could not create category '{category}': {type(e).__name__}: {e}")
 
-            # Try to extract hash from magnet URL before adding
-            expected_hash = extract_hash_from_magnet(url)
-            if expected_hash:
-                logger.debug(f"Extracted hash from magnet: {expected_hash}")
-
-            is_magnet = url.startswith("magnet:")
-            logger.debug(f"Adding torrent - URL type: {'magnet' if is_magnet else 'torrent file'}")
-
-            torrent_data = None
-
-            # For non-magnet URLs, fetch the .torrent file to extract the hash
-            if not is_magnet and not expected_hash:
-                logger.debug(f"Fetching torrent file from: {url[:80]}...")
-                try:
-                    resp = requests.get(url, timeout=30)
-                    resp.raise_for_status()
-                    torrent_data = resp.content
-                    expected_hash = extract_info_hash_from_torrent(torrent_data)
-                    if expected_hash:
-                        logger.debug(f"Extracted hash from torrent file: {expected_hash}")
-                    else:
-                        logger.warning("Could not extract hash from torrent file")
-                except Exception as e:
-                    logger.warning(f"Failed to fetch torrent file: {e}")
-
-            logger.debug(f"Expected hash: {expected_hash}")
+            torrent_info = extract_torrent_info(url)
+            expected_hash = torrent_info.info_hash
+            torrent_data = torrent_info.torrent_data
 
             # Add the torrent - use file content if we have it, otherwise URL
             if torrent_data:
@@ -177,13 +151,7 @@ class QBittorrentClient(DownloadClient):
         try:
             torrents = self._client.torrents_info(torrent_hashes=download_id)
             if not torrents:
-                return DownloadStatus(
-                    progress=0,
-                    state="error",
-                    message="Torrent not found",
-                    complete=False,
-                    file_path=None,
-                )
+                return DownloadStatus.error("Torrent not found")
 
             torrent = torrents[0]
 
@@ -233,13 +201,7 @@ class QBittorrentClient(DownloadClient):
         except Exception as e:
             error_type = type(e).__name__
             logger.error(f"qBittorrent get_status failed ({error_type}): {e}")
-            return DownloadStatus(
-                progress=0,
-                state="error",
-                message=f"{error_type}: {e}",
-                complete=False,
-                file_path=None,
-            )
+            return DownloadStatus.error(f"{error_type}: {e}")
 
     def remove(self, download_id: str, delete_files: bool = False) -> bool:
         """
@@ -287,46 +249,18 @@ class QBittorrentClient(DownloadClient):
             return None
 
     def find_existing(self, url: str) -> Optional[Tuple[str, DownloadStatus]]:
-        """
-        Check if a torrent for this URL already exists in qBittorrent.
-
-        Extracts the info_hash from the magnet link or .torrent file and
-        checks if qBittorrent already has this torrent.
-
-        Args:
-            url: Magnet link or .torrent URL
-
-        Returns:
-            Tuple of (info_hash, status) if found, None if not found.
-        """
+        """Check if a torrent for this URL already exists in qBittorrent."""
         try:
-            # Try to extract hash from magnet URL
-            expected_hash = extract_hash_from_magnet(url)
-
-            # If not a magnet, try to fetch and parse the .torrent file
-            if not expected_hash and not url.startswith("magnet:"):
-                logger.debug(f"Fetching torrent file to check for existing: {url[:80]}...")
-                try:
-                    resp = requests.get(url, timeout=30)
-                    resp.raise_for_status()
-                    expected_hash = extract_info_hash_from_torrent(resp.content)
-                except Exception as e:
-                    logger.debug(f"Could not fetch torrent file: {e}")
-                    return None
-
-            if not expected_hash:
-                logger.debug("Could not extract hash from URL")
+            torrent_info = extract_torrent_info(url)
+            if not torrent_info.info_hash:
                 return None
 
-            # Check if this torrent exists in qBittorrent
-            torrents = self._client.torrents_info(torrent_hashes=expected_hash)
+            torrents = self._client.torrents_info(torrent_hashes=torrent_info.info_hash)
             if torrents:
-                status = self.get_status(expected_hash)
-                logger.debug(f"Found existing torrent in qBittorrent: {expected_hash} (state: {status.state})")
-                return (expected_hash, status)
+                status = self.get_status(torrent_info.info_hash)
+                return (torrent_info.info_hash, status)
 
             return None
-
         except Exception as e:
             logger.debug(f"Error checking for existing torrent: {e}")
             return None

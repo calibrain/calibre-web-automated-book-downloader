@@ -248,6 +248,11 @@ export interface Release {
   extra?: Record<string, unknown>; // Source-specific metadata
 }
 
+// Search info returned by release sources
+export interface SourceSearchInfo {
+  search_type: 'isbn' | 'title_author';
+}
+
 // Response from /api/releases endpoint
 export interface ReleasesResponse {
   releases: Release[];
@@ -265,6 +270,7 @@ export interface ReleasesResponse {
   sources_searched: string[];
   errors?: string[];
   column_config?: ReleaseColumnConfig | null;  // Plugin-driven column configuration
+  search_info?: Record<string, SourceSearchInfo>;  // Per-source search metadata
 }
 
 // Search status update from WebSocket (for ReleaseModal loading state)

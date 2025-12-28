@@ -85,6 +85,11 @@ function App() {
     handleSortChange,
     searchFieldValues,
     updateSearchFieldValue,
+    // Pagination (universal mode)
+    hasMore,
+    isLoadingMore,
+    loadMore,
+    totalFound,
   } = useSearch({
     showToast,
     setIsAuthenticated,
@@ -591,6 +596,10 @@ function App() {
           sortValue={advancedFilters.sort}
           onSortChange={(value) => handleSortChange(value, config)}
           metadataSortOptions={config?.metadata_sort_options}
+          hasMore={hasMore}
+          isLoadingMore={isLoadingMore}
+          onLoadMore={() => loadMore(config)}
+          totalFound={totalFound}
         />
 
         {selectedBook && (
