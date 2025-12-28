@@ -123,7 +123,13 @@ export const ListView = ({ books, onDetails, onDownload, onGetReleases, getButto
                 <div className="min-w-0 flex flex-col justify-center sm:pl-3">
                   <h3 className="font-semibold text-xs min-[400px]:text-sm sm:text-base leading-tight line-clamp-1 sm:line-clamp-2 flex items-center gap-2" title={book.title || 'Untitled'}>
                     {showSeriesPosition && book.series_position != null && (
-                      <span className="inline-flex mr-1.5 px-1.5 py-0.5 text-[10px] sm:text-xs font-bold text-white bg-emerald-600 rounded flex-shrink-0">
+                      <span
+                        className="inline-flex mr-1.5 px-1.5 py-0.5 text-[10px] sm:text-xs font-bold text-white bg-emerald-600 rounded border border-emerald-700 flex-shrink-0"
+                        style={{
+                          boxShadow: '0 1px 4px rgba(0, 0, 0, 0.3)',
+                          textShadow: '0 1px 2px rgba(0, 0, 0, 0.3)',
+                        }}
+                      >
                         #{book.series_position}
                       </span>
                     )}

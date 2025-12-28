@@ -807,9 +807,15 @@ export const ReleaseModal = ({
     setExpandedBySource((prev) => ({ ...prev, [activeTab]: true }));
 
     try {
+      // Resolve language codes for the API call (same logic as Apply button)
+      const langCodes = getLanguageFilterValues(languageFilter, bookLanguages, defaultLanguages);
+      const languagesParam = (langCodes === null || langCodes?.includes(LANGUAGE_OPTION_ALL))
+        ? undefined
+        : langCodes;
+
       // Fetch with expand_search=true (title+author search)
       const expandedResponse = await getReleases(
-        provider, bookId, activeTab, book.title, book.author, true
+        provider, bookId, activeTab, book.title, book.author, true, languagesParam
       );
 
       // Merge with existing results, deduplicating by source_id
@@ -836,7 +842,7 @@ export const ReleaseModal = ({
     } finally {
       setLoadingBySource((prev) => ({ ...prev, [activeTab]: false }));
     }
-  }, [activeTab, book]);
+  }, [activeTab, book, languageFilter, bookLanguages, defaultLanguages]);
 
   // Build list of tabs to show
   // All sources come from backend with their enabled status
@@ -1403,8 +1409,11 @@ export const ReleaseModal = ({
                       />
                     ))}
                   </div>
-                  {/* Expand search button or loading indicator */}
-                  {activeTab === 'direct_download' && !expandedBySource[activeTab] && !currentTabLoading && (
+                  {/* Expand search button - only show if ISBN search was used (otherwise we already did title+author) */}
+                  {activeTab === 'direct_download' &&
+                   releasesBySource[activeTab]?.search_info?.direct_download?.search_type === 'isbn' &&
+                   !expandedBySource[activeTab] &&
+                   !currentTabLoading && (
                     <div
                       className="py-3 text-center animate-slide-up will-change-transform"
                       style={{

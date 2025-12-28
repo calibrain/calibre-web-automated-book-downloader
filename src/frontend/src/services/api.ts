@@ -78,23 +78,31 @@ interface MetadataSearchResponse {
   books: MetadataBookData[];
   provider: string;
   query: string;
+  page?: number;
+  total_found?: number;
+  has_more?: boolean;
+}
+
+// Metadata search result with pagination info
+export interface MetadataSearchResult {
+  books: Book[];
+  page: number;
+  totalFound: number;
+  hasMore: boolean;
 }
 
 // Search metadata providers and normalize to Book format
 export const searchMetadata = async (
   query: string,
-  limit: number = 20,
+  limit: number = 40,
   sort: string = 'relevance',
-  fields: Record<string, string | number | boolean> = {}
-): Promise<Book[]> => {
+  fields: Record<string, string | number | boolean> = {},
+  page: number = 1
+): Promise<MetadataSearchResult> => {
   const hasFields = Object.values(fields).some(v => v !== '' && v !== false);
 
-  // Debug logging
-  console.log('[api.searchMetadata] Called with:', { query, limit, sort, fields, hasFields });
-
   if (!query && !hasFields) {
-    console.log('[api.searchMetadata] Early return: no query and no fields');
-    return [];
+    return { books: [], page: 1, totalFound: 0, hasMore: false };
   }
 
   const params = new URLSearchParams();
@@ -103,6 +111,7 @@ export const searchMetadata = async (
   }
   params.set('limit', String(limit));
   params.set('sort', sort);
+  params.set('page', String(page));
 
   // Add custom search field values
   Object.entries(fields).forEach(([key, value]) => {
@@ -111,13 +120,14 @@ export const searchMetadata = async (
     }
   });
 
-  const requestUrl = `${API.metadataSearch}?${params.toString()}`;
-  console.log('[api.searchMetadata] Request URL:', requestUrl);
+  const response = await fetchJSON<MetadataSearchResponse>(`${API.metadataSearch}?${params.toString()}`);
 
-  const response = await fetchJSON<MetadataSearchResponse>(requestUrl);
-  console.log('[api.searchMetadata] Response:', response);
-
-  return response.books.map(transformMetadataToBook);
+  return {
+    books: response.books.map(transformMetadataToBook),
+    page: response.page || page,
+    totalFound: response.total_found || 0,
+    hasMore: response.has_more || false,
+  };
 };
 
 export const getBookInfo = async (id: string): Promise<Book> => {

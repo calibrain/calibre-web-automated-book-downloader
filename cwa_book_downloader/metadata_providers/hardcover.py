@@ -19,6 +19,7 @@ from cwa_book_downloader.metadata_providers import (
     DisplayField,
     MetadataProvider,
     MetadataSearchOptions,
+    SearchResult,
     SearchType,
     SortOrder,
     register_provider,
@@ -29,6 +30,7 @@ from cwa_book_downloader.metadata_providers import (
 logger = setup_logger(__name__)
 
 HARDCOVER_API_URL = "https://api.hardcover.app/v1/graphql"
+HARDCOVER_PAGE_SIZE = 25  # Hardcover API returns max 25 results per page
 
 
 # Mapping from abstract sort order to Hardcover sort parameter
@@ -51,26 +53,45 @@ SEARCH_TYPE_FIELDS: Dict[SearchType, str] = {
 
 
 def _combine_headline_description(headline: Optional[str], description: Optional[str]) -> Optional[str]:
-    """Combine headline (tagline) and description into a single description.
-
-    Hardcover stores a short 'headline' (tagline/promotional text) separately
-    from the main description. This combines them for display.
-
-    Args:
-        headline: Short promotional text or tagline.
-        description: Full book synopsis/description.
-
-    Returns:
-        Combined description with headline as the first line, or just one if only one exists.
-    """
+    """Combine headline (tagline) and description into a single description."""
     if headline and description:
-        # Add headline as first paragraph, followed by description
         return f"{headline}\n\n{description}"
-    elif headline:
-        return headline
-    elif description:
-        return description
+    return headline or description
+
+
+def _extract_cover_url(data: Dict, *keys: str) -> Optional[str]:
+    """Extract cover URL from data dict, trying multiple keys.
+
+    Handles both string URLs and dict with 'url' key.
+    """
+    for key in keys:
+        value = data.get(key)
+        if value:
+            if isinstance(value, str):
+                return value
+            if isinstance(value, dict):
+                return value.get("url")
     return None
+
+
+def _extract_publish_year(data: Dict) -> Optional[int]:
+    """Extract publish year from release_year or release_date fields."""
+    if data.get("release_year"):
+        try:
+            return int(data["release_year"])
+        except (ValueError, TypeError):
+            pass
+    if data.get("release_date"):
+        try:
+            return int(str(data["release_date"])[:4])
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def _build_source_url(slug: str) -> Optional[str]:
+    """Build Hardcover source URL from book slug."""
+    return f"https://hardcover.app/books/{slug}" if slug else None
 
 
 @register_provider_kwargs("hardcover")
@@ -139,14 +160,26 @@ class HardcoverProvider(MetadataProvider):
         Returns:
             List of BookMetadata objects.
         """
+        return self.search_paginated(options).books
+
+    def search_paginated(self, options: MetadataSearchOptions) -> SearchResult:
+        """Search for books with pagination info.
+
+        Args:
+            options: Search options (query, type, sort, pagination, fields).
+
+        Returns:
+            SearchResult with books and pagination info.
+        """
         if not self.api_key:
             logger.warning("Hardcover API key not configured")
-            return []
+            return SearchResult(books=[], page=options.page, total_found=0, has_more=False)
 
         # Handle ISBN search separately
         if options.search_type == SearchType.ISBN:
             result = self.search_by_isbn(options.query)
-            return [result] if result else []
+            books = [result] if result else []
+            return SearchResult(books=books, page=1, total_found=len(books), has_more=False)
 
         # Build cache key from options (include fields and settings for cache differentiation)
         fields_key = ":".join(f"{k}={v}" for k, v in sorted(options.fields.items()))
@@ -155,7 +188,7 @@ class HardcoverProvider(MetadataProvider):
         return self._search_cached(cache_key, options)
 
     @cacheable(ttl_key="METADATA_CACHE_SEARCH_TTL", ttl_default=300, key_prefix="hardcover:search")
-    def _search_cached(self, cache_key: str, options: MetadataSearchOptions) -> List[BookMetadata]:
+    def _search_cached(self, cache_key: str, options: MetadataSearchOptions) -> SearchResult:
         """Cached search implementation.
 
         Args:
@@ -163,55 +196,30 @@ class HardcoverProvider(MetadataProvider):
             options: Search options.
 
         Returns:
-            List of BookMetadata objects.
+            SearchResult with books and pagination info.
         """
         # Determine query and fields based on custom search fields
-        # Field-first search: when a specific field has a value, search that field
+        # Note: Hardcover API requires 'weights' when using 'fields' parameter
         author_value = options.fields.get("author", "").strip()
         title_value = options.fields.get("title", "").strip()
         series_value = options.fields.get("series", "").strip()
 
-        logger.debug(f"Field-first search check: author='{author_value}', title='{title_value}', series='{series_value}'")
-
-        # Determine what to search and which fields to target
-        # Note: Hardcover API requires 'weights' when using 'fields' parameter
         if series_value and not author_value and not title_value:
-            # Series-only search: search series_names field
-            query = series_value
-            search_fields = "series_names"
-            search_weights = "1"
-            logger.debug(f"Series-only search: query='{query}', fields='{search_fields}'")
+            query, search_fields, search_weights = series_value, "series_names", "1"
         elif author_value and not title_value and not series_value:
-            # Author-only search: search author_names field with author query
-            query = author_value
-            search_fields = "author_names"
-            search_weights = "1"
-            logger.debug(f"Author-only search: query='{query}', fields='{search_fields}'")
+            query, search_fields, search_weights = author_value, "author_names", "1"
         elif title_value and not author_value and not series_value:
-            # Title-only search: search title fields with title query
-            query = title_value
-            search_fields = "title,alternative_titles"
-            search_weights = "5,1"
-            logger.debug(f"Title-only search: query='{query}', fields='{search_fields}'")
+            query, search_fields, search_weights = title_value, "title,alternative_titles", "5,1"
         elif author_value and title_value and not series_value:
-            # Author + Title: combine into query, search both fields
             query = f"{title_value} {author_value}"
-            search_fields = "title,alternative_titles,author_names"
-            search_weights = "5,1,3"
-            logger.debug(f"Combined title+author search: query='{query}', fields='{search_fields}'")
+            search_fields, search_weights = "title,alternative_titles,author_names", "5,1,3"
         elif series_value:
-            # Series with other fields: include series_names in search
-            parts = [p for p in [series_value, title_value, author_value] if p]
-            query = " ".join(parts)
-            search_fields = "series_names,title,alternative_titles,author_names"
-            search_weights = "5,3,1,2"
-            logger.debug(f"Combined search with series: query='{query}', fields='{search_fields}'")
+            query = " ".join(p for p in [series_value, title_value, author_value] if p)
+            search_fields, search_weights = "series_names,title,alternative_titles,author_names", "5,3,1,2"
         else:
-            # No custom fields: use general query with all default fields
-            query = options.query
-            search_fields = None
-            search_weights = None
-            logger.debug(f"General search: query='{query}', no field restriction")
+            query, search_fields, search_weights = options.query, None, None
+
+        logger.debug(f"Search: query='{query}', fields={search_fields}, weights={search_weights}")
 
         # Build GraphQL query with optional fields/weights parameters
         if search_fields:
@@ -265,33 +273,30 @@ class HardcoverProvider(MetadataProvider):
             result = self._execute_query(graphql_query, variables)
             if not result:
                 logger.debug("Hardcover search: No result from API")
-                return []
+                return SearchResult(books=[], page=options.page, total_found=0, has_more=False)
 
-            search_data = result.get("search", {})
-
-            # Results is a Typesense response object with hits array
-            results_obj = search_data.get("results", {})
+            # Extract hits from Typesense response
+            results_obj = result.get("search", {}).get("results", {})
             if isinstance(results_obj, dict):
                 hits = results_obj.get("hits", [])
+                found_count = results_obj.get("found", 0)
             else:
-                hits = results_obj if isinstance(results_obj, list) else []
+                hits, found_count = (results_obj if isinstance(results_obj, list) else []), 0
 
-            # Check if we should exclude compilations
+            logger.debug(f"Hardcover API returned {len(hits)} hits (found: {found_count})")
+
+            # Parse hits, filtering compilations if enabled
             exclude_compilations = app_config.get("HARDCOVER_EXCLUDE_COMPILATIONS", False)
-
-            # Parse the search results - each hit has a 'document' field
             books = []
             for hit in hits:
-                # Get the document from the hit
                 item = hit.get("document", hit) if isinstance(hit, dict) else hit
-                if isinstance(item, dict):
-                    # Filter out compilations if setting is enabled
-                    if exclude_compilations and item.get("compilation", False):
-                        continue
-
-                    book = self._parse_search_result(item)
-                    if book:
-                        books.append(book)
+                if not isinstance(item, dict):
+                    continue
+                if exclude_compilations and item.get("compilation"):
+                    continue
+                book = self._parse_search_result(item)
+                if book:
+                    books.append(book)
 
             # If series order sort is selected and series field is provided,
             # filter to exact matches and sort by position
@@ -299,11 +304,21 @@ class HardcoverProvider(MetadataProvider):
                 books = self._apply_series_ordering(books, series_value)
 
             logger.info(f"Hardcover search '{query}' (fields={search_fields}) returned {len(books)} results")
-            return books
+
+            # Calculate if there are more results
+            results_so_far = (options.page - 1) * HARDCOVER_PAGE_SIZE + len(hits)
+            has_more = results_so_far < found_count
+
+            return SearchResult(
+                books=books,
+                page=options.page,
+                total_found=found_count,
+                has_more=has_more
+            )
 
         except Exception as e:
             logger.error(f"Hardcover search error: {e}")
-            return []
+            return SearchResult(books=[], page=options.page, total_found=0, has_more=False)
 
     def _apply_series_ordering(self, books: List[BookMetadata], series_name: str) -> List[BookMetadata]:
         """Filter books to exact series match and sort by series position.
@@ -361,6 +376,7 @@ class HardcoverProvider(MetadataProvider):
         # Use contributions with filter to get only primary authors (not translators/narrators)
         # Also include cached_contributors as fallback if contributions is empty
         # Include featured_book_series for series info
+        # Include editions with titles and languages for localized search support
         graphql_query = """
         query GetBook($id: Int!) {
             books(where: {id: {_eq: $id}}, limit: 1) {
@@ -388,6 +404,14 @@ class HardcoverProvider(MetadataProvider):
                     series {
                         name
                         primary_books_count
+                    }
+                }
+                editions(limit: 20, order_by: {users_count: desc}) {
+                    title
+                    language {
+                        language
+                        code2
+                        code3
                     }
                 }
             }
@@ -563,26 +587,9 @@ class HardcoverProvider(MetadataProvider):
                 # No contribution_types or length mismatch - use all names as fallback
                 authors = author_names
 
-            # Get cover URL
-            cover_url = None
-            if "image" in item and item["image"]:
-                cover_url = item["image"] if isinstance(item["image"], str) else item["image"].get("url")
-
-            # Extract year - prefer release_year if available, fall back to release_date
-            publish_year = None
-            if "release_year" in item and item["release_year"]:
-                try:
-                    publish_year = int(item["release_year"])
-                except (ValueError, TypeError):
-                    pass
-            elif "release_date" in item and item["release_date"]:
-                try:
-                    publish_year = int(str(item["release_date"])[:4])
-                except (ValueError, TypeError):
-                    pass
-
-            slug = item.get("slug", "")
-            source_url = f"https://hardcover.app/books/{slug}" if slug else None
+            cover_url = _extract_cover_url(item, "image")
+            publish_year = _extract_publish_year(item)
+            source_url = _build_source_url(item.get("slug", ""))
 
             # Build display fields from Hardcover-specific data
             display_fields = []
@@ -660,25 +667,8 @@ class HardcoverProvider(MetadataProvider):
 
         logger.debug(f"_parse_book [{book.get('id')}]: final authors={authors}")
 
-        # Get cover URL from cached_image (jsonb) or image relationship
-        cover_url = None
-        if book.get("cached_image"):
-            cached = book["cached_image"]
-            if isinstance(cached, dict):
-                cover_url = cached.get("url")
-            elif isinstance(cached, str):
-                cover_url = cached
-        elif book.get("image"):
-            img = book["image"]
-            cover_url = img if isinstance(img, str) else img.get("url")
-
-        # Extract year from release_date
-        publish_year = None
-        if book.get("release_date"):
-            try:
-                publish_year = int(str(book["release_date"])[:4])
-            except (ValueError, TypeError):
-                pass
+        cover_url = _extract_cover_url(book, "cached_image", "image")
+        publish_year = _extract_publish_year(book)
 
         # Extract genres from cached_tags
         genres = []
@@ -709,8 +699,7 @@ class HardcoverProvider(MetadataProvider):
                     if isbn_10 and isbn_13:
                         break
 
-        slug = book.get("slug", "")
-        source_url = f"https://hardcover.app/books/{slug}" if slug else None
+        source_url = _build_source_url(book.get("slug", ""))
 
         # Combine headline and description if both present
         headline = book.get("headline")
@@ -729,6 +718,33 @@ class HardcoverProvider(MetadataProvider):
                 series_name = series_data.get("name")
                 series_count = series_data.get("primary_books_count")
 
+        # Extract titles by language from editions
+        # This allows searching with localized titles when language filter is active
+        titles_by_language: Dict[str, str] = {}
+        editions = book.get("editions", [])
+        for edition in editions:
+            edition_title = edition.get("title")
+            lang_data = edition.get("language")
+            if edition_title and lang_data:
+                # Store by various language identifiers for flexible matching
+                # Language name (e.g., "German", "English")
+                lang_name = lang_data.get("language")
+                # 2-letter code (e.g., "de", "en")
+                code2 = lang_data.get("code2")
+                # 3-letter code (e.g., "deu", "eng")
+                code3 = lang_data.get("code3")
+
+                # Store with all available keys (first title wins for each language)
+                if lang_name and lang_name not in titles_by_language:
+                    titles_by_language[lang_name] = edition_title
+                if code2 and code2 not in titles_by_language:
+                    titles_by_language[code2] = edition_title
+                if code3 and code3 not in titles_by_language:
+                    titles_by_language[code3] = edition_title
+
+        if titles_by_language:
+            logger.debug(f"_parse_book [{book.get('id')}]: titles_by_language={titles_by_language}")
+
         return BookMetadata(
             provider="hardcover",
             provider_id=str(book["id"]),
@@ -745,6 +761,7 @@ class HardcoverProvider(MetadataProvider):
             series_name=series_name,
             series_position=series_position,
             series_count=series_count,
+            titles_by_language=titles_by_language,
         )
 
 
