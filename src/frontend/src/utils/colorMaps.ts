@@ -65,4 +65,39 @@ export function getDownloadTypeColor(downloadType?: string): ColorStyle {
   return DOWNLOAD_TYPE_COLORS[downloadType.toLowerCase()] || DEFAULT_DOWNLOAD_TYPE_COLOR;
 }
 
+/**
+ * Color hint type for dynamic column coloring.
+ */
+interface ColumnColorHint {
+  type: 'static' | 'map';
+  value: string;
+}
+
+/**
+ * Get the color style for a value based on a color hint.
+ * Supports both static color classes and dynamic map lookups.
+ */
+export function getColorStyleFromHint(value: string, colorHint?: ColumnColorHint | null): ColorStyle {
+  if (!colorHint) return FALLBACK_COLOR;
+
+  if (colorHint.type === 'static') {
+    return { bg: colorHint.value, text: 'text-gray-700 dark:text-gray-300' };
+  }
+
+  if (colorHint.type === 'map') {
+    switch (colorHint.value) {
+      case 'format':
+        return getFormatColor(value);
+      case 'language':
+        return getLanguageColor(value);
+      case 'download_type':
+        return getDownloadTypeColor(value);
+      default:
+        return FALLBACK_COLOR;
+    }
+  }
+
+  return FALLBACK_COLOR;
+}
+
 export type { ColorStyle };

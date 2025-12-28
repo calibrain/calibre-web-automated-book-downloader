@@ -211,11 +211,9 @@ def cacheable(
             # Check cache
             cached = _metadata_cache.get(key)
             if cached is not None:
-                logger.debug(f"Cache hit: {key}")
                 return cached
 
             # Execute function and cache result
-            logger.debug(f"Cache miss: {key}")
             result = func(*args, **kwargs)
 
             # Only cache non-None results

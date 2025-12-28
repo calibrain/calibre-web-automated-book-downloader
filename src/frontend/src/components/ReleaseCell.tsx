@@ -1,5 +1,6 @@
-import { ColumnSchema, ColumnColorHint, Release } from '../types';
-import { getFormatColor, getLanguageColor, getDownloadTypeColor, ColorStyle } from '../utils/colorMaps';
+import { ColumnSchema, Release } from '../types';
+import { getColorStyleFromHint } from '../utils/colorMaps';
+import { getNestedValue } from '../utils/objectHelpers';
 
 interface ReleaseCellProps {
   column: ColumnSchema;
@@ -7,48 +8,6 @@ interface ReleaseCellProps {
   compact?: boolean;  // When true, renders badges as plain text (for mobile info lines)
   onlineServers?: string[];  // For IRC: list of online server nicks to show status indicator
 }
-
-/**
- * Get a nested value from an object using dot-notation path.
- * e.g., getNestedValue(obj, "extra.language") returns obj.extra.language
- */
-const getNestedValue = (obj: Record<string, unknown>, path: string): unknown => {
-  return path.split('.').reduce((current, key) => {
-    if (current && typeof current === 'object') {
-      return (current as Record<string, unknown>)[key];
-    }
-    return undefined;
-  }, obj as unknown);
-};
-
-const DEFAULT_COLOR_STYLE: ColorStyle = { bg: 'bg-gray-500/20', text: 'text-gray-700 dark:text-gray-300' };
-
-/**
- * Get the color style for a value based on the color hint.
- */
-const getColorStyle = (value: string, colorHint?: ColumnColorHint | null): ColorStyle => {
-  if (!colorHint) return DEFAULT_COLOR_STYLE;
-
-  if (colorHint.type === 'static') {
-    // For static hints, assume it's a bg class and pair with default text
-    return { bg: colorHint.value, text: 'text-gray-700 dark:text-gray-300' };
-  }
-
-  if (colorHint.type === 'map') {
-    switch (colorHint.value) {
-      case 'format':
-        return getFormatColor(value);
-      case 'language':
-        return getLanguageColor(value);
-      case 'download_type':
-        return getDownloadTypeColor(value);
-      default:
-        return DEFAULT_COLOR_STYLE;
-    }
-  }
-
-  return DEFAULT_COLOR_STYLE;
-};
 
 /**
  * Generic cell renderer for release list columns.
@@ -77,7 +36,7 @@ export const ReleaseCell = ({ column, release, compact = false, onlineServers }:
       if (compact) {
         return <span>{displayValue}</span>;
       }
-      const colorStyle = getColorStyle(value, column.color_hint);
+      const colorStyle = getColorStyleFromHint(value, column.color_hint);
       return (
         <div className={`flex items-center ${alignClass}`}>
           {value !== column.fallback ? (

@@ -481,8 +481,7 @@ def _book_info_to_dict(book: BookInfo) -> Dict[str, Any]:
 
     Transforms external preview URLs to local proxy URLs when cover caching is enabled.
     """
-    import base64
-    from cwa_book_downloader.config.env import is_covers_cache_enabled
+    from cwa_book_downloader.core.utils import transform_cover_url
 
     result = {
         key: value for key, value in book.__dict__.items()
@@ -490,11 +489,8 @@ def _book_info_to_dict(book: BookInfo) -> Dict[str, Any]:
     }
 
     # Transform external preview URLs to local proxy URLs
-    # Skip if already a local URL (starts with /)
-    if result.get('preview') and is_covers_cache_enabled() and not result['preview'].startswith('/'):
-        original_url = result['preview']
-        encoded_url = base64.urlsafe_b64encode(original_url.encode()).decode()
-        result['preview'] = f"/api/covers/{book.id}?url={encoded_url}"
+    if result.get('preview'):
+        result['preview'] = transform_cover_url(result['preview'], book.id)
 
     return result
 
@@ -506,16 +502,10 @@ def _task_to_dict(task: DownloadTask) -> Dict[str, Any]:
     maintaining compatibility with the previous BookInfo-based format.
     Transforms external preview URLs to local proxy URLs when cover caching is enabled.
     """
-    import base64
-    from cwa_book_downloader.config.env import is_covers_cache_enabled
-
-    preview = task.preview
+    from cwa_book_downloader.core.utils import transform_cover_url
 
     # Transform external preview URLs to local proxy URLs
-    # Skip if already a local URL (starts with /)
-    if preview and is_covers_cache_enabled() and not preview.startswith('/'):
-        encoded_url = base64.urlsafe_b64encode(preview.encode()).decode()
-        preview = f"/api/covers/{task.task_id}?url={encoded_url}"
+    preview = transform_cover_url(task.preview, task.task_id)
 
     return {
         'id': task.task_id,
@@ -561,9 +551,11 @@ def _download_task(task_id: str, cancel_flag: Event) -> Optional[str]:
             logger.error(f"Task not found in queue: {task_id}")
             return None
 
-        # Create callbacks that update the orchestrator's tracking
-        progress_callback = lambda progress: update_download_progress(task_id, progress)
-        status_callback = lambda status, message=None: update_download_status(task_id, status, message)
+        def progress_callback(progress: float) -> None:
+            update_download_progress(task_id, progress)
+
+        def status_callback(status: str, message: Optional[str] = None) -> None:
+            update_download_status(task_id, status, message)
 
         # Get the download handler based on the task's source
         handler = get_handler(task.source)
@@ -852,7 +844,7 @@ def reorder_queue(book_priorities: Dict[str, int]) -> bool:
     """
     return book_queue.reorder_queue(book_priorities)
 
-def get_queue_order() -> List[Dict[str, any]]:
+def get_queue_order() -> List[Dict[str, Any]]:
     """Get current queue order for display."""
     return book_queue.get_queue_order()
 

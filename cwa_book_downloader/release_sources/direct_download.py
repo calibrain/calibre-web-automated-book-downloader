@@ -7,7 +7,7 @@ import re
 import time
 from pathlib import Path
 from threading import Event
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 from bs4 import BeautifulSoup, NavigableString, Tag
@@ -36,7 +36,7 @@ from cwa_book_downloader.release_sources import (
 logger = setup_logger(__name__)
 
 _aa_slow_rotation = itertools.count()
-_url_source_types: dict[str, str] = {}
+_url_source_types: Dict[str, str] = {}
 
 if DEBUG_SKIP_SOURCES:
     logger.warning("DEBUG_SKIP_SOURCES active: skipping sources %s", DEBUG_SKIP_SOURCES)
@@ -67,20 +67,23 @@ _MD5_URL_TEMPLATES = {
     "welib": "https://welib.org/md5/{md5}",
 }
 
-def _get_source_priority() -> list[dict]:
+def _get_source_priority() -> List[Dict]:
     """Get the current source priority configuration."""
     return config.get("SOURCE_PRIORITY") or []
 
 
 def _is_source_enabled(source_id: str) -> bool:
-    """Check if a source is enabled in the priority config."""
+    """Check if a source is enabled in the priority config.
+
+    Returns False for unknown sources.
+    """
     for item in _get_source_priority():
         if item["id"] == source_id:
             return item.get("enabled", True)
-    return False  # Unknown sources are disabled
+    return False
 
 
-def _get_enabled_source_order() -> list[str]:
+def _get_enabled_source_order() -> List[str]:
     """Get ordered list of enabled source IDs."""
     return [
         item["id"]
@@ -92,13 +95,12 @@ def _get_enabled_source_order() -> list[str]:
 def _get_source_position(source_id: str) -> int:
     """Get the position of a source in the priority list (lower = higher priority).
 
-    Returns a high number if source not found or disabled.
+    Returns 999 if source not found or disabled.
     """
-    priority = _get_source_priority()
-    for i, item in enumerate(priority):
+    for i, item in enumerate(_get_source_priority()):
         if item["id"] == source_id and item.get("enabled", True):
             return i
-    return 999  # Not found or disabled
+    return 999
 
 
 class SearchUnavailable(Exception):
@@ -267,10 +269,10 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     data = soup.find_all("div", {"class": "main-inner"})[0].find_next("div")
     divs = list(data.children)
 
-    slow_urls_no_waitlist: list[str] = []
-    slow_urls_with_waitlist: list[str] = []
+    slow_urls_no_waitlist: List[str] = []
+    slow_urls_with_waitlist: List[str] = []
 
-    def _append_unique(lst: list[str], href: str) -> None:
+    def _append_unique(lst: List[str], href: str) -> None:
         if href and href not in lst:
             lst.append(href)
 
@@ -472,7 +474,7 @@ def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
     }
 
 
-def _get_source_info(link: str) -> tuple[str, str]:
+def _get_source_info(link: str) -> Tuple[str, str]:
     """Get source label and friendly name for a download link.
 
     Args:
@@ -504,7 +506,7 @@ def _friendly_source_name(link: str) -> str:
     return _get_source_info(link)[1]
 
 
-def _fetch_aa_page_urls(book_info: BookInfo, urls_by_source: dict[str, list[str]]) -> None:
+def _fetch_aa_page_urls(book_info: BookInfo, urls_by_source: Dict[str, List[str]]) -> None:
     """Fetch and parse AA page, populating urls_by_source dict.
 
     Groups existing book_info.download_urls by source type. If book_info
@@ -539,9 +541,9 @@ def _get_urls_for_source(
     selector: network.AAMirrorSelector,
     cancel_flag: Optional[Event],
     status_callback: Optional[Callable[[str, Optional[str]], None]],
-    urls_by_source: dict[str, list[str]],
+    urls_by_source: Dict[str, List[str]],
     aa_page_fetched: bool
-) -> list[str]:
+) -> List[str]:
     """Get URLs for a specific source, fetching lazily if needed."""
     # AA Fast - generate URL dynamically
     if source_id == "aa-fast":
@@ -628,7 +630,7 @@ def _try_download_url(
         return None
 
 
-def _get_download_urls_from_welib(book_id: str, selector: Optional[network.AAMirrorSelector] = None, cancel_flag: Optional[Event] = None) -> list[str]:
+def _get_download_urls_from_welib(book_id: str, selector: Optional[network.AAMirrorSelector] = None, cancel_flag: Optional[Event] = None) -> List[str]:
     """Get download URLs from welib.org (bypasser required)."""
     if not _is_source_enabled("welib"):
         return []
@@ -1097,6 +1099,7 @@ class DirectDownloadHandler(DownloadHandler):
             # Check for cancellation before starting
             if cancel_flag.is_set():
                 logger.info(f"Download cancelled before starting: {task.task_id}")
+                status_callback("cancelled", "Cancelled")
                 return None
 
             # Create BookInfo from task data - NO AA page fetch here
@@ -1121,6 +1124,7 @@ class DirectDownloadHandler(DownloadHandler):
         except Exception as e:
             if cancel_flag.is_set():
                 logger.info(f"Download cancelled during error handling: {task.task_id}")
+                status_callback("cancelled", "Cancelled")
             else:
                 logger.error(f"Error downloading book: {e}")
                 status_callback("error", str(e))
@@ -1150,6 +1154,7 @@ class DirectDownloadHandler(DownloadHandler):
             # Check cancellation before download
             if cancel_flag.is_set():
                 logger.info(f"Download cancelled before download call: {book_info.id}")
+                status_callback("cancelled", "Cancelled")
                 return None
 
             # Execute download via _download_book (handles cascade and bypass)
@@ -1167,6 +1172,7 @@ class DirectDownloadHandler(DownloadHandler):
                 logger.info(f"Download cancelled during download: {book_info.id}")
                 if book_path.exists():
                     book_path.unlink()
+                status_callback("cancelled", "Cancelled")
                 return None
 
             if not success_url:
@@ -1179,6 +1185,7 @@ class DirectDownloadHandler(DownloadHandler):
         except Exception as e:
             if cancel_flag.is_set():
                 logger.info(f"Download cancelled during error handling: {book_info.id}")
+                status_callback("cancelled", "Cancelled")
             else:
                 logger.error(f"Error downloading book: {e}")
             return None

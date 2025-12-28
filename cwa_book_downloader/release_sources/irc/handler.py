@@ -47,14 +47,22 @@ class IRCDownloadHandler(DownloadHandler):
         logger.info(f"IRC download: {download_request[:60]}...")
 
         nick = config.get("IRC_NICK") or None
-
         client = None
+
+        def check_cancelled() -> bool:
+            """Check if cancelled and handle cleanup."""
+            if not cancel_flag.is_set():
+                return False
+            if client:
+                client.disconnect()
+            status_callback("cancelled", "Cancelled")
+            return True
 
         try:
             # Phase 1: Connect to IRC
             status_callback("resolving", "Connecting to IRC...")
 
-            if cancel_flag.is_set():
+            if check_cancelled():
                 return None
 
             client = IRCClient(nick=nick)
@@ -64,8 +72,7 @@ class IRCDownloadHandler(DownloadHandler):
             # Phase 2: Send download request
             status_callback("resolving", "Requesting file from bot...")
 
-            if cancel_flag.is_set():
-                client.disconnect()
+            if check_cancelled():
                 return None
 
             # Send the full request line to the channel
@@ -81,8 +88,7 @@ class IRCDownloadHandler(DownloadHandler):
                 client.disconnect()
                 return None
 
-            if cancel_flag.is_set():
-                client.disconnect()
+            if check_cancelled():
                 return None
 
             # Phase 4: Download via DCC
@@ -108,6 +114,7 @@ class IRCDownloadHandler(DownloadHandler):
             if cancel_flag.is_set():
                 # Clean up partial download
                 staging_path.unlink(missing_ok=True)
+                status_callback("cancelled", "Cancelled")
                 return None
 
             logger.info(f"Download complete: {staging_path}")

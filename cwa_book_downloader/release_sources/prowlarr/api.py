@@ -190,19 +190,13 @@ class ProwlarrClient:
         if not query:
             return []
 
-        # Build query string with repeated params for arrays
-        query_parts = [f"query={requests.utils.quote(query)}", f"limit={limit}"]
-
+        params = {"query": query, "limit": limit}
         if indexer_ids:
-            for idx_id in indexer_ids:
-                query_parts.append(f"indexerIds={idx_id}")
-
+            params["indexerIds"] = indexer_ids
         if categories:
-            for cat_id in categories:
-                query_parts.append(f"categories={cat_id}")
+            params["categories"] = categories
 
-        query_string = "&".join(query_parts)
-        endpoint = f"/api/v1/search?{query_string}"
+        endpoint = f"/api/v1/search?{urlencode(params, doseq=True)}"
 
         try:
             results = self._request("GET", endpoint)

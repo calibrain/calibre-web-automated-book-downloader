@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { Book, Release, ReleaseSource, ReleasesResponse, Language, StatusData, ButtonStateInfo, ColumnSchema, ReleaseColumnConfig, LeadingCellConfig, ColumnColorHint, SearchStatusData } from '../types';
+import { Book, Release, ReleaseSource, ReleasesResponse, Language, StatusData, ButtonStateInfo, ColumnSchema, ReleaseColumnConfig, LeadingCellConfig, SearchStatusData } from '../types';
 import { getReleases, getReleaseSources } from '../services/api';
 import { useSocket } from '../contexts/SocketContext';
 import { Dropdown } from './Dropdown';
 import { DropdownList } from './DropdownList';
 import { BookDownloadButton } from './BookDownloadButton';
 import { ReleaseCell } from './ReleaseCell';
-import { getFormatColor, getLanguageColor, getDownloadTypeColor, ColorStyle } from '../utils/colorMaps';
+import { getColorStyleFromHint } from '../utils/colorMaps';
+import { getNestedValue } from '../utils/objectHelpers';
 import { LanguageMultiSelect } from './LanguageMultiSelect';
 import { LANGUAGE_OPTION_ALL, LANGUAGE_OPTION_DEFAULT, getLanguageFilterValues } from '../utils/languageFilters';
 
@@ -15,14 +16,15 @@ import { LANGUAGE_OPTION_ALL, LANGUAGE_OPTION_DEFAULT, getLanguageFilterValues }
 // This persists across modal open/close cycles
 const releaseCache = new Map<string, ReleasesResponse>();
 
-const getCacheKey = (provider: string, providerId: string, source: string): string =>
-  `${provider}:${providerId}:${source}`;
+function getCacheKey(provider: string, providerId: string, source: string): string {
+  return `${provider}:${providerId}:${source}`;
+}
 
 // Default cache TTL (5 minutes) - sources can override via column_config.cache_ttl_seconds
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
 const cacheTimestamps = new Map<string, number>();
 
-const getCachedReleases = (provider: string, providerId: string, source: string): ReleasesResponse | null => {
+function getCachedReleases(provider: string, providerId: string, source: string): ReleasesResponse | null {
   const key = getCacheKey(provider, providerId, source);
   const timestamp = cacheTimestamps.get(key);
   const cached = releaseCache.get(key);
@@ -45,13 +47,13 @@ const getCachedReleases = (provider: string, providerId: string, source: string)
   cacheTimestamps.delete(key);
 
   return null;
-};
+}
 
-const setCachedReleases = (provider: string, providerId: string, source: string, data: ReleasesResponse): void => {
+function setCachedReleases(provider: string, providerId: string, source: string, data: ReleasesResponse): void {
   const key = getCacheKey(provider, providerId, source);
   releaseCache.set(key, data);
   cacheTimestamps.set(key, Date.now());
-};
+}
 
 // Default column configuration (fallback when backend doesn't provide one)
 const DEFAULT_COLUMN_CONFIG: ReleaseColumnConfig = {
@@ -104,40 +106,9 @@ interface ReleaseModalProps {
   onSearchSeries?: (seriesName: string) => void;  // Callback to search for series
 }
 
-// Color map lookup for dynamic color hints
-const COLOR_MAP_HANDLERS: Record<string, (value: string) => ColorStyle> = {
-  format: getFormatColor,
-  language: getLanguageColor,
-  download_type: getDownloadTypeColor,
-};
-
-const DEFAULT_COLOR_STYLE: ColorStyle = { bg: 'bg-gray-500/20', text: 'text-gray-700 dark:text-gray-300' };
-
-// Helper to get color style based on color hint
-function getLeadingCellColor(value: string, colorHint?: ColumnColorHint): ColorStyle {
-  if (!colorHint) return DEFAULT_COLOR_STYLE;
-
-  if (colorHint.type === 'map') {
-    const handler = COLOR_MAP_HANDLERS[colorHint.value];
-    return handler ? handler(value) : DEFAULT_COLOR_STYLE;
-  }
-
-  // Static color hint - assume it's a bg class
-  return { bg: colorHint.value, text: 'text-gray-700 dark:text-gray-300' };
-}
-
-// Helper to get nested value from object using dot notation path
-function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-  return path.split('.').reduce((current, key) => {
-    if (current && typeof current === 'object') {
-      return (current as Record<string, unknown>)[key];
-    }
-    return undefined;
-  }, obj as unknown);
-}
 
 // 5-star rating display with partial fill support
-const StarRating = ({ rating, maxRating = 5 }: { rating: number; maxRating?: number }) => {
+function StarRating({ rating, maxRating = 5 }: { rating: number; maxRating?: number }) {
   // Normalize rating to 0-5 scale if needed
   const normalizedRating = Math.min(Math.max(rating, 0), maxRating);
 
@@ -170,7 +141,7 @@ const StarRating = ({ rating, maxRating = 5 }: { rating: number; maxRating?: num
       })}
     </div>
   );
-};
+}
 
 // Thumbnail component for release rows
 const ReleaseThumbnail = ({ preview, title }: { preview?: string; title?: string }) => {
@@ -231,7 +202,7 @@ const LeadingCell = ({
   if (cellType === 'badge' && config?.key) {
     const value = getNestedValue(release as unknown as Record<string, unknown>, config.key);
     const displayValue = value ? String(value) : '';
-    const colorStyle = getLeadingCellColor(displayValue, config.color_hint);
+    const colorStyle = getColorStyleFromHint(displayValue, config.color_hint);
     const text = config.uppercase ? displayValue.toUpperCase() : displayValue;
 
     return (
@@ -396,149 +367,159 @@ const ReleaseRow = ({
 };
 
 // Shimmer block with wave animation - same as DownloadsSidebar
-const ShimmerBlock = ({ className }: { className: string }) => (
-  <div
-    className={`rounded bg-gray-200 dark:bg-gray-800 relative overflow-hidden ${className}`}
-  >
+function ShimmerBlock({ className }: { className: string }) {
+  return (
     <div
-      className="absolute inset-0 dark:opacity-50"
-      style={{
-        background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.4) 50%, transparent 100%)',
-        backgroundSize: '200% 100%',
-        animation: 'wave 2s ease-in-out infinite',
-      }}
-    />
-  </div>
-);
+      className={`rounded bg-gray-200 dark:bg-gray-800 relative overflow-hidden ${className}`}
+    >
+      <div
+        className="absolute inset-0 dark:opacity-50"
+        style={{
+          background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.4) 50%, transparent 100%)',
+          backgroundSize: '200% 100%',
+          animation: 'wave 2s ease-in-out infinite',
+        }}
+      />
+    </div>
+  );
+}
 
 // Loading skeleton for releases - matches ReleaseRow layout
-const ReleaseSkeleton = () => (
-  <div className="divide-y divide-gray-200/60 dark:divide-gray-800/60">
-    {[1, 2, 3, 4, 5].map((i) => (
-      <div
-        key={i}
-        className="px-5 py-2"
-        style={{
-          opacity: 1 - (i - 1) * 0.15, // Fade out lower rows
-        }}
-      >
-        <div className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_minmax(0,2fr)_60px_80px_80px_auto] items-center gap-2 sm:gap-3">
-          {/* Thumbnail skeleton */}
-          <ShimmerBlock className="w-7 h-10 sm:w-10 sm:h-14" />
+function ReleaseSkeleton() {
+  return (
+    <div className="divide-y divide-gray-200/60 dark:divide-gray-800/60">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <div
+          key={i}
+          className="px-5 py-2"
+          style={{
+            opacity: 1 - (i - 1) * 0.15, // Fade out lower rows
+          }}
+        >
+          <div className="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_minmax(0,2fr)_60px_80px_80px_auto] items-center gap-2 sm:gap-3">
+            {/* Thumbnail skeleton */}
+            <ShimmerBlock className="w-7 h-10 sm:w-10 sm:h-14" />
 
-          {/* Title and author skeleton */}
-          <div className="min-w-0 space-y-1.5">
-            <ShimmerBlock className="h-4 w-3/4" />
-            <ShimmerBlock className="h-3 w-1/2" />
-          </div>
-
-          {/* Language badge skeleton - desktop */}
-          <div className="hidden sm:flex justify-center">
-            <ShimmerBlock className="w-8 h-5" />
-          </div>
-
-          {/* Format badge skeleton - desktop */}
-          <div className="hidden sm:flex justify-center">
-            <ShimmerBlock className="w-12 h-5" />
-          </div>
-
-          {/* Size skeleton - desktop */}
-          <div className="hidden sm:flex justify-center">
-            <ShimmerBlock className="w-14 h-4" />
-          </div>
-
-          {/* Mobile info + action skeleton */}
-          <div className="flex items-center gap-2">
-            {/* Mobile: format + size inline */}
-            <div className="flex sm:hidden flex-col items-end gap-1">
-              <ShimmerBlock className="w-10 h-3" />
-              <ShimmerBlock className="w-14 h-3" />
+            {/* Title and author skeleton */}
+            <div className="min-w-0 space-y-1.5">
+              <ShimmerBlock className="h-4 w-3/4" />
+              <ShimmerBlock className="h-3 w-1/2" />
             </div>
 
-            {/* Action button skeleton */}
-            <ShimmerBlock className="w-8 h-8 !rounded-full" />
+            {/* Language badge skeleton - desktop */}
+            <div className="hidden sm:flex justify-center">
+              <ShimmerBlock className="w-8 h-5" />
+            </div>
+
+            {/* Format badge skeleton - desktop */}
+            <div className="hidden sm:flex justify-center">
+              <ShimmerBlock className="w-12 h-5" />
+            </div>
+
+            {/* Size skeleton - desktop */}
+            <div className="hidden sm:flex justify-center">
+              <ShimmerBlock className="w-14 h-4" />
+            </div>
+
+            {/* Mobile info + action skeleton */}
+            <div className="flex items-center gap-2">
+              {/* Mobile: format + size inline */}
+              <div className="flex sm:hidden flex-col items-end gap-1">
+                <ShimmerBlock className="w-10 h-3" />
+                <ShimmerBlock className="w-14 h-3" />
+              </div>
+
+              {/* Action button skeleton */}
+              <ShimmerBlock className="w-8 h-8 !rounded-full" />
+            </div>
           </div>
         </div>
-      </div>
-    ))}
-  </div>
-);
+      ))}
+    </div>
+  );
+}
 
 // Empty state component
-const EmptyState = ({ message }: { message: string }) => (
-  <div className="text-center py-12 px-4">
-    <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-gray-100 dark:bg-gray-800 mb-4">
-      <svg
-        className="w-7 h-7 text-gray-400"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-        strokeWidth={1.5}
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
-        />
-      </svg>
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div className="text-center py-12 px-4">
+      <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-gray-100 dark:bg-gray-800 mb-4">
+        <svg
+          className="w-7 h-7 text-gray-400"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          strokeWidth={1.5}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+          />
+        </svg>
+      </div>
+      <p className="text-sm text-gray-500 dark:text-gray-400">{message}</p>
     </div>
-    <p className="text-sm text-gray-500 dark:text-gray-400">{message}</p>
-  </div>
-);
+  );
+}
 
 // Configure source CTA
-const ConfigureSourceCTA = ({ sourceName }: { sourceName: string }) => (
-  <div className="text-center py-12 px-4">
-    <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-amber-100 dark:bg-amber-900/30 mb-4">
-      <svg
-        className="w-7 h-7 text-amber-600 dark:text-amber-400"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-        strokeWidth={1.5}
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
-        />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-      </svg>
+function ConfigureSourceCTA({ sourceName }: { sourceName: string }) {
+  return (
+    <div className="text-center py-12 px-4">
+      <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-amber-100 dark:bg-amber-900/30 mb-4">
+        <svg
+          className="w-7 h-7 text-amber-600 dark:text-amber-400"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          strokeWidth={1.5}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"
+          />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+        </svg>
+      </div>
+      <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">
+        {sourceName} Not Configured
+      </h4>
+      <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs mx-auto">
+        Configure {sourceName} in Settings to enable searching this source.
+      </p>
     </div>
-    <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">
-      {sourceName} Not Configured
-    </h4>
-    <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs mx-auto">
-      Configure {sourceName} in Settings to enable searching this source.
-    </p>
-  </div>
-);
+  );
+}
 
 
 // Error state component
-const ErrorState = ({ message }: { message: string }) => (
-  <div className="text-center py-12 px-4">
-    <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/30 mb-4">
-      <svg
-        className="w-7 h-7 text-red-600 dark:text-red-400"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-        strokeWidth={1.5}
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
-        />
-      </svg>
+function ErrorState({ message }: { message: string }) {
+  return (
+    <div className="text-center py-12 px-4">
+      <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-red-100 dark:bg-red-900/30 mb-4">
+        <svg
+          className="w-7 h-7 text-red-600 dark:text-red-400"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          strokeWidth={1.5}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
+          />
+        </svg>
+      </div>
+      <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">
+        Error Loading Releases
+      </h4>
+      <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs mx-auto">{message}</p>
     </div>
-    <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">
-      Error Loading Releases
-    </h4>
-    <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs mx-auto">{message}</p>
-  </div>
-);
+  );
+}
 
 
 export const ReleaseModal = ({
@@ -736,11 +717,15 @@ export const ReleaseModal = ({
         if (sources.length > 0) {
           const enabledSources = sources.filter(s => s.enabled);
           const defaultIsEnabled = defaultReleaseSource && enabledSources.some(s => s.name === defaultReleaseSource);
-          const defaultSource = defaultIsEnabled
-            ? defaultReleaseSource
-            : enabledSources.length > 0
-              ? enabledSources[0].name
-              : sources[0].name;  // Fallback to first source if none enabled
+
+          let defaultSource: string;
+          if (defaultIsEnabled) {
+            defaultSource = defaultReleaseSource;
+          } else if (enabledSources.length > 0) {
+            defaultSource = enabledSources[0].name;
+          } else {
+            defaultSource = sources[0].name;  // Fallback to first source if none enabled
+          }
           setActiveTab(defaultSource);
         }
       } catch (err) {
@@ -967,6 +952,18 @@ export const ReleaseModal = ({
     return DEFAULT_COLUMN_CONFIG;
   }, [releasesBySource, activeTab]);
 
+  // Pre-compute display field lookups to avoid repeated .find() calls in JSX
+  const displayFields = useMemo(() => {
+    if (!book?.display_fields) return null;
+
+    const starField = book.display_fields.find(f => f.icon === 'star');
+    const ratingsField = book.display_fields.find(f => f.icon === 'ratings');
+    const usersField = book.display_fields.find(f => f.icon === 'users');
+    const pagesField = book.display_fields.find(f => f.icon === 'book');
+
+    return { starField, ratingsField, usersField, pagesField };
+  }, [book?.display_fields]);
+
   // Get button state for a release based on its source_id
   const getButtonState = useCallback(
     (releaseId: string): ButtonStateInfo => {
@@ -1025,6 +1022,7 @@ export const ReleaseModal = ({
   const currentTabLoading = loadingBySource[activeTab] ?? false;
   const currentTabError = errorBySource[activeTab] ?? null;
   const currentTabEnabled = allTabs.find((t) => t.name === activeTab)?.enabled ?? false;
+  const isInitialLoading = currentTabLoading || (releasesBySource[activeTab] === undefined && !currentTabError);
 
   return (
     <div
@@ -1115,29 +1113,25 @@ export const ReleaseModal = ({
                 {/* Metadata row */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
                   {book.year && <span>{book.year}</span>}
-                  {book.display_fields?.find(f => f.icon === 'star') && (() => {
-                    const starField = book.display_fields!.find(f => f.icon === 'star')!;
-                    const ratingsField = book.display_fields?.find(f => f.icon === 'ratings');
-                    return (
-                      <span className="flex items-center gap-1.5">
-                        <StarRating rating={parseFloat(starField.value || '0')} />
-                        <span>{starField.value}</span>
-                        {ratingsField && (
-                          <span className="text-gray-400 dark:text-gray-500">({ratingsField.value})</span>
-                        )}
-                      </span>
-                    );
-                  })()}
-                  {book.display_fields?.find(f => f.icon === 'users') && (
+                  {displayFields?.starField && (
+                    <span className="flex items-center gap-1.5">
+                      <StarRating rating={parseFloat(displayFields.starField.value || '0')} />
+                      <span>{displayFields.starField.value}</span>
+                      {displayFields.ratingsField && (
+                        <span className="text-gray-400 dark:text-gray-500">({displayFields.ratingsField.value})</span>
+                      )}
+                    </span>
+                  )}
+                  {displayFields?.usersField && (
                     <span className="flex items-center gap-1">
                       <svg className="h-3.5 w-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" />
                       </svg>
-                      {book.display_fields.find(f => f.icon === 'users')?.value} readers
+                      {displayFields.usersField.value} readers
                     </span>
                   )}
-                  {book.display_fields?.find(f => f.icon === 'book') && (
-                    <span>{book.display_fields.find(f => f.icon === 'book')?.value} pages</span>
+                  {displayFields?.pagesField && (
+                    <span>{displayFields.pagesField.value} pages</span>
                   )}
                 </div>
 
@@ -1373,14 +1367,12 @@ export const ReleaseModal = ({
             {/* Release list content */}
             <div className="min-h-[200px]">
               {sourcesLoading ? (
-                // Sources still loading - show skeleton instead of "Not Configured"
                 <ReleaseSkeleton />
               ) : !currentTabEnabled ? (
                 <ConfigureSourceCTA
                   sourceName={allTabs.find((t) => t.name === activeTab)?.displayName || activeTab}
                 />
-              ) : (currentTabLoading || (releasesBySource[activeTab] === undefined && !currentTabError)) && filteredReleases.length === 0 ? (
-                // Initial loading or about to start loading - show full skeleton
+              ) : isInitialLoading && filteredReleases.length === 0 ? (
                 <ReleaseSkeleton />
               ) : currentTabError ? (
                 <ErrorState message={currentTabError} />

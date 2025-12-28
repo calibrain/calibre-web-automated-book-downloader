@@ -136,7 +136,7 @@ def html_get_page(
 
         try:
             if use_bypasser_now and USE_CF_BYPASS:
-                logger.info(f"GET (bypasser): {current_url}")
+                logger.debug(f"GET (bypasser): {current_url}")
                 try:
                     result = get_bypassed_page(current_url, selector, cancel_flag)
                     return result or ""
@@ -144,7 +144,7 @@ def html_get_page(
                     logger.warning(f"Bypasser error: {type(e).__name__}: {e}")
                     return ""
 
-            logger.info(f"GET: {current_url}")
+            logger.debug(f"GET: {current_url}")
             # Try with CF cookies/UA if available (from previous bypass)
             cookies = {}
             headers = {}

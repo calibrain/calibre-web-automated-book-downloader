@@ -188,13 +188,17 @@ if [ "$DEBUG" = "true" ] && [ "$USING_EXTERNAL_BYPASSER" != "true" ]; then
     echo "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"
 fi
 
-# Hacky way to verify /tmp has at least 1MB of space and is writable/readable
+# Verify /tmp has at least 1MB of space and is writable/readable
 echo "Verifying /tmp has enough space"
 rm -f /tmp/test.cwa-bd
-for i in {1..150000}; do printf "%04d\n" $i; done > /tmp/test.cwa-bd
-sum=$(python3 -c "print(sum(int(l.strip()) for l in open('/tmp/test.cwa-bd').readlines()))")
-[ "$sum" == 11250075000 ] && echo "Success: /tmp is writable" || (echo "Failure: /tmp is not writable" && exit 1)
-rm /tmp/test.cwa-bd
+if dd if=/dev/zero of=/tmp/test.cwa-bd bs=1M count=1 2>/dev/null && \
+   [ "$(wc -c < /tmp/test.cwa-bd)" -eq 1048576 ]; then
+    rm -f /tmp/test.cwa-bd
+    echo "Success: /tmp is writable and readable"
+else
+    echo "Failure: /tmp is not writable or has insufficient space"
+    exit 1
+fi
 
 echo "Running command: '$command' as '$USERNAME' (debug=$is_debug)"
 

@@ -13,12 +13,72 @@ See BEP-3: http://bittorrent.org/beps/bep_0003.html
 import base64
 import hashlib
 import re
+from dataclasses import dataclass
 from typing import Optional, Tuple
 from urllib.parse import parse_qs, urlparse
+
+import requests
 
 from cwa_book_downloader.core.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+
+@dataclass
+class TorrentInfo:
+    """Parsed information from a torrent URL."""
+
+    info_hash: Optional[str]
+    """40-character lowercase hex info_hash, or None if extraction failed."""
+
+    torrent_data: Optional[bytes]
+    """Raw .torrent file content, only populated for .torrent URLs."""
+
+    is_magnet: bool
+    """True if the URL was a magnet link."""
+
+
+def extract_torrent_info(url: str, fetch_torrent: bool = True) -> TorrentInfo:
+    """
+    Extract torrent info_hash and optionally fetch torrent file content.
+
+    Handles both magnet links and .torrent file URLs. For magnet links,
+    extracts the hash directly. For .torrent URLs, optionally fetches
+    the file and parses it to extract the hash.
+
+    Args:
+        url: Magnet link or .torrent URL
+        fetch_torrent: If True, fetch .torrent URLs to extract hash.
+                      Set to False if you only need the hash from magnets.
+
+    Returns:
+        TorrentInfo with extracted hash and optional torrent data.
+    """
+    is_magnet = url.startswith("magnet:")
+
+    # Try to extract hash from magnet URL
+    if is_magnet:
+        info_hash = extract_hash_from_magnet(url)
+        return TorrentInfo(info_hash=info_hash, torrent_data=None, is_magnet=True)
+
+    # Not a magnet - try to fetch and parse the .torrent file
+    if not fetch_torrent:
+        return TorrentInfo(info_hash=None, torrent_data=None, is_magnet=False)
+
+    try:
+        logger.debug(f"Fetching torrent file from: {url[:80]}...")
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        torrent_data = resp.content
+        info_hash = extract_info_hash_from_torrent(torrent_data)
+        if info_hash:
+            logger.debug(f"Extracted hash from torrent file: {info_hash}")
+        else:
+            logger.warning("Could not extract hash from torrent file")
+        return TorrentInfo(info_hash=info_hash, torrent_data=torrent_data, is_magnet=False)
+    except Exception as e:
+        logger.debug(f"Could not fetch torrent file: {e}")
+        return TorrentInfo(info_hash=None, torrent_data=None, is_magnet=False)
 
 
 def parse_transmission_url(url: str) -> Tuple[str, int, str]:

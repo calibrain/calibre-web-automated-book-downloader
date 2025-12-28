@@ -219,21 +219,12 @@ class HardcoverProvider(MetadataProvider):
         else:
             query, search_fields, search_weights = options.query, None, None
 
-        logger.debug(f"Search: query='{query}', fields={search_fields}, weights={search_weights}")
 
-        # Build GraphQL query with optional fields/weights parameters
+        # Build GraphQL query - include fields/weights parameters only when needed
         if search_fields:
             graphql_query = """
             query SearchBooks($query: String!, $limit: Int!, $page: Int!, $sort: String, $fields: String, $weights: String) {
-                search(
-                    query: $query,
-                    query_type: "Book",
-                    per_page: $limit,
-                    page: $page,
-                    sort: $sort,
-                    fields: $fields,
-                    weights: $weights
-                ) {
+                search(query: $query, query_type: "Book", per_page: $limit, page: $page, sort: $sort, fields: $fields, weights: $weights) {
                     results
                 }
             }
@@ -241,13 +232,7 @@ class HardcoverProvider(MetadataProvider):
         else:
             graphql_query = """
             query SearchBooks($query: String!, $limit: Int!, $page: Int!, $sort: String) {
-                search(
-                    query: $query,
-                    query_type: "Book",
-                    per_page: $limit,
-                    page: $page,
-                    sort: $sort
-                ) {
+                search(query: $query, query_type: "Book", per_page: $limit, page: $page, sort: $sort) {
                     results
                 }
             }
@@ -267,7 +252,6 @@ class HardcoverProvider(MetadataProvider):
             variables["fields"] = search_fields
             variables["weights"] = search_weights
 
-        logger.debug(f"GraphQL variables: {variables}")
 
         try:
             result = self._execute_query(graphql_query, variables)
@@ -281,9 +265,8 @@ class HardcoverProvider(MetadataProvider):
                 hits = results_obj.get("hits", [])
                 found_count = results_obj.get("found", 0)
             else:
-                hits, found_count = (results_obj if isinstance(results_obj, list) else []), 0
-
-            logger.debug(f"Hardcover API returned {len(hits)} hits (found: {found_count})")
+                hits = results_obj if isinstance(results_obj, list) else []
+                found_count = 0
 
             # Parse hits, filtering compilations if enabled
             exclude_compilations = app_config.get("HARDCOVER_EXCLUDE_COMPILATIONS", False)
@@ -644,8 +627,6 @@ class HardcoverProvider(MetadataProvider):
         contributions = book.get("contributions") or []
         cached_contributors = book.get("cached_contributors") or []
 
-        logger.debug(f"_parse_book [{book.get('id')}]: contributions={contributions}, cached_contributors={cached_contributors}")
-
         # Try contributions first (filtered to "Author" role only - cleaner data)
         for contrib in contributions:
             author = contrib.get("author", {})
@@ -664,8 +645,6 @@ class HardcoverProvider(MetadataProvider):
                         authors.append(contrib["name"])
                 elif isinstance(contrib, str):
                     authors.append(contrib)
-
-        logger.debug(f"_parse_book [{book.get('id')}]: final authors={authors}")
 
         cover_url = _extract_cover_url(book, "cached_image", "image")
         publish_year = _extract_publish_year(book)
@@ -742,9 +721,6 @@ class HardcoverProvider(MetadataProvider):
                 if code3 and code3 not in titles_by_language:
                     titles_by_language[code3] = edition_title
 
-        if titles_by_language:
-            logger.debug(f"_parse_book [{book.get('id')}]: titles_by_language={titles_by_language}")
-
         return BookMetadata(
             provider="hardcover",
             provider_id=str(book["id"]),
@@ -765,7 +741,7 @@ class HardcoverProvider(MetadataProvider):
         )
 
 
-def _test_hardcover_connection(current_values: Dict[str, Any] = None) -> Dict[str, Any]:
+def _test_hardcover_connection(current_values: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Test the Hardcover API connection using current form values."""
     from cwa_book_downloader.core.config import config as app_config
 
@@ -774,10 +750,8 @@ def _test_hardcover_connection(current_values: Dict[str, Any] = None) -> Dict[st
     # Use current form values first, fall back to saved config
     api_key = current_values.get("HARDCOVER_API_KEY") or app_config.get("HARDCOVER_API_KEY", "")
 
-    # Debug: log key info
     key_len = len(api_key) if api_key else 0
-    key_preview = f"{api_key[:10]}...{api_key[-10:]}" if key_len > 20 else "(too short)"
-    logger.info(f"Hardcover test: key length={key_len}, preview={key_preview}")
+    logger.debug(f"Hardcover test: key length={key_len}")
 
     if not api_key:
         # Clear any stored username since there's no key

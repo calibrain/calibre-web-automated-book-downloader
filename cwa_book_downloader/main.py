@@ -100,35 +100,32 @@ def cleanup_old_lockouts() -> None:
 def is_account_locked(username: str) -> bool:
     """Check if an account is currently locked due to failed login attempts."""
     cleanup_old_lockouts()
-    
+
     if username not in failed_login_attempts:
         return False
-    
+
     lockout_until = failed_login_attempts[username].get('lockout_until')
-    if lockout_until and datetime.now() < lockout_until:
-        return True
-    
-    return False
+    return lockout_until is not None and datetime.now() < lockout_until
 
 def record_failed_login(username: str, ip_address: str) -> bool:
-    """
-    Record a failed login attempt and lock account if threshold is reached.
+    """Record a failed login attempt and lock account if threshold is reached.
+
     Returns True if account is now locked, False otherwise.
     """
     if username not in failed_login_attempts:
         failed_login_attempts[username] = {'count': 0}
-    
+
     failed_login_attempts[username]['count'] += 1
     count = failed_login_attempts[username]['count']
-    
+
     logger.warning(f"Failed login attempt {count}/{MAX_LOGIN_ATTEMPTS} for user '{username}' from IP {ip_address}")
-    
+
     if count >= MAX_LOGIN_ATTEMPTS:
         lockout_until = datetime.now() + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
         failed_login_attempts[username]['lockout_until'] = lockout_until
         logger.warning(f"Account locked for user '{username}' until {lockout_until.strftime('%Y-%m-%d %H:%M:%S')} due to {count} failed login attempts")
         return True
-    
+
     return False
 
 def clear_failed_logins(username: str) -> None:
@@ -139,16 +136,12 @@ def clear_failed_logins(username: str) -> None:
 
 
 def get_auth_mode() -> str:
-    """
-    Determine which authentication mode is active.
+    """Determine which authentication mode is active.
 
     Priority order:
     1. Built-in credentials (if configured) -> "builtin"
     2. CWA database (if CWA_DB_PATH is set and exists) -> "cwa"
     3. No auth required -> "none"
-
-    Returns:
-        str: "builtin", "cwa", or "none"
     """
     from cwa_book_downloader.core.settings_registry import load_config_file
 
@@ -848,9 +841,7 @@ def internal_error(error: Exception) -> Union[Response, Tuple[Response, int]]:
     return jsonify({"error": "Internal server error"}), 500
 
 def _failed_login_response(username: str, ip_address: str) -> Tuple[Response, int]:
-    """
-    Handle a failed login attempt by recording it and returning the appropriate response.
-    """
+    """Handle a failed login attempt by recording it and returning the appropriate response."""
     is_now_locked = record_failed_login(username, ip_address)
 
     if is_now_locked:
@@ -1172,15 +1163,11 @@ def api_metadata_search() -> Union[Response, Tuple[Response, int]]:
         books_data = [asdict(book) for book in search_result.books]
 
         # Transform cover_url to local proxy URLs when caching is enabled
-        from cwa_book_downloader.config.env import is_covers_cache_enabled
-        if is_covers_cache_enabled():
-            import base64
-            for book_dict in books_data:
-                if book_dict.get('cover_url'):
-                    # Encode original URL in the proxy request itself - no need for persistent mapping
-                    cache_id = f"{book_dict['provider']}_{book_dict['provider_id']}"
-                    encoded_url = base64.urlsafe_b64encode(book_dict['cover_url'].encode()).decode()
-                    book_dict['cover_url'] = f"/api/covers/{cache_id}?url={encoded_url}"
+        from cwa_book_downloader.core.utils import transform_cover_url
+        for book_dict in books_data:
+            if book_dict.get('cover_url'):
+                cache_id = f"{book_dict['provider']}_{book_dict['provider_id']}"
+                book_dict['cover_url'] = transform_cover_url(book_dict['cover_url'], cache_id)
 
         return jsonify({
             "books": books_data,
@@ -1233,12 +1220,10 @@ def api_metadata_book(provider: str, book_id: str) -> Union[Response, Tuple[Resp
         book_dict = asdict(book)
 
         # Transform cover_url to local proxy URL when caching is enabled
-        from cwa_book_downloader.config.env import is_covers_cache_enabled
-        if is_covers_cache_enabled() and book_dict.get('cover_url'):
-            import base64
+        from cwa_book_downloader.core.utils import transform_cover_url
+        if book_dict.get('cover_url'):
             cache_id = f"{provider}_{book_id}"
-            encoded_url = base64.urlsafe_b64encode(book_dict['cover_url'].encode()).decode()
-            book_dict['cover_url'] = f"/api/covers/{cache_id}?url={encoded_url}"
+            book_dict['cover_url'] = transform_cover_url(book_dict['cover_url'], cache_id)
 
         return jsonify(book_dict)
     except ValueError as e:
@@ -1346,12 +1331,10 @@ def api_releases() -> Union[Response, Tuple[Response, int]]:
 
         # Convert book to dict and transform cover_url
         book_dict = asdict(book)
-        from cwa_book_downloader.config.env import is_covers_cache_enabled
-        if is_covers_cache_enabled() and book_dict.get('cover_url'):
-            import base64
+        from cwa_book_downloader.core.utils import transform_cover_url
+        if book_dict.get('cover_url'):
             cache_id = f"{provider}_{book_id}"
-            encoded_url = base64.urlsafe_b64encode(book_dict['cover_url'].encode()).decode()
-            book_dict['cover_url'] = f"/api/covers/{cache_id}?url={encoded_url}"
+            book_dict['cover_url'] = transform_cover_url(book_dict['cover_url'], cache_id)
 
         # Get search info from direct_download source (if it was searched)
         search_info = {}

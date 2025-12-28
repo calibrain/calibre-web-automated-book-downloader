@@ -83,17 +83,27 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
   }, []);
 
   const updateSearchFieldValue = useCallback((key: string, value: string | number | boolean) => {
-    console.log('[useSearch] updateSearchFieldValue:', key, '=', value);
-    setSearchFieldValues(prev => {
-      const next = { ...prev, [key]: value };
-      console.log('[useSearch] searchFieldValues updated:', next);
-      return next;
-    });
+    setSearchFieldValues(prev => ({ ...prev, [key]: value }));
   }, []);
 
   const resetSortFilter = useCallback(() => {
     setAdvancedFilters(prev => ({ ...prev, sort: '' }));
   }, []);
+
+  // Helper to handle authentication and other errors consistently
+  const handleSearchError = useCallback((error: unknown, context: string) => {
+    if (error instanceof AuthenticationError) {
+      setIsAuthenticated(false);
+      if (authRequired) {
+        navigate('/login', { replace: true });
+      }
+      return;
+    }
+
+    console.error(`${context}:`, error);
+    const message = error instanceof Error ? error.message : context;
+    showToast(message, 'error');
+  }, [setIsAuthenticated, authRequired, navigate, showToast]);
 
   const handleSearch = useCallback(async (
     query: string,
@@ -114,17 +124,6 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
       const seriesValue = effectiveFieldValues.series;
       const hasSeriesSearch = typeof seriesValue === 'string' && seriesValue.trim() !== '';
       const sort = hasSeriesSearch ? 'series_order' : (params.get('sort') || 'relevance');
-
-      // Debug logging
-      console.log('[useSearch] Universal mode search:', {
-        query,
-        searchQuery,
-        sort,
-        searchFieldValues,
-        fieldValues,
-        effectiveFieldValues,
-        hasFieldValues,
-      });
 
       if (!searchQuery && !hasFieldValues) {
         setBooks([]);
@@ -154,7 +153,6 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
           setBooks(result.books);
           setHasMore(result.hasMore);
           setTotalFound(result.totalFound);
-          setCurrentPage(1);
           // Store params for loadMore
           lastSearchParamsRef.current = { query: searchQuery, sort, fieldValues: effectiveFieldValues };
         } else {
@@ -164,16 +162,7 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
           showToast('No results found', 'error');
         }
       } catch (error) {
-        if (error instanceof AuthenticationError) {
-          setIsAuthenticated(false);
-          if (authRequired) {
-            navigate('/login', { replace: true });
-          }
-        } else {
-          console.error('Search failed:', error);
-          const message = error instanceof Error ? error.message : 'Search failed';
-          showToast(message, 'error');
-        }
+        handleSearchError(error, 'Search failed');
       } finally {
         setIsSearching(false);
       }
@@ -199,10 +188,7 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
       }
     } catch (error) {
       if (error instanceof AuthenticationError) {
-        setIsAuthenticated(false);
-        if (authRequired) {
-          navigate('/login', { replace: true });
-        }
+        handleSearchError(error, 'Search failed');
       } else {
         console.error('Search failed:', error);
         const message = error instanceof Error ? error.message : 'Search failed';
@@ -214,7 +200,7 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
     } finally {
       setIsSearching(false);
     }
-  }, [showToast, setIsAuthenticated, authRequired, navigate, searchFieldValues]);
+  }, [showToast, setIsAuthenticated, authRequired, navigate, searchFieldValues, handleSearchError]);
 
   const handleResetSearch = useCallback((config: AppConfig | null) => {
     setBooks([]);
@@ -266,20 +252,11 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
         setHasMore(false);
       }
     } catch (error) {
-      if (error instanceof AuthenticationError) {
-        setIsAuthenticated(false);
-        if (authRequired) {
-          navigate('/login', { replace: true });
-        }
-      } else {
-        console.error('Load more failed:', error);
-        const message = error instanceof Error ? error.message : 'Failed to load more results';
-        showToast(message, 'error');
-      }
+      handleSearchError(error, 'Failed to load more results');
     } finally {
       setIsLoadingMore(false);
     }
-  }, [currentPage, hasMore, isLoadingMore, showToast, setIsAuthenticated, authRequired, navigate]);
+  }, [currentPage, hasMore, isLoadingMore, handleSearchError]);
 
   const handleSortChange = useCallback((value: string, config: AppConfig | null) => {
     updateAdvancedFilters({ sort: value });

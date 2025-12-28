@@ -25,6 +25,7 @@ from cwa_book_downloader.release_sources import (
 )
 from cwa_book_downloader.release_sources.prowlarr.api import ProwlarrClient
 from cwa_book_downloader.release_sources.prowlarr.cache import cache_release
+from cwa_book_downloader.release_sources.prowlarr.utils import get_protocol_display
 
 logger = setup_logger(__name__)
 
@@ -90,31 +91,6 @@ def _extract_format(title: str) -> Optional[str]:
     return None
 
 
-def _get_protocol(result: dict) -> str:
-    """
-    Get protocol from Prowlarr result.
-
-    Uses the protocol field directly if available, otherwise infers from URL.
-    Returns user-friendly labels: "torrent" or "nzb".
-    """
-    # Prowlarr provides protocol directly - use it
-    protocol = result.get("protocol", "").lower()
-    if protocol == "usenet":
-        return "nzb"
-    if protocol == "torrent":
-        return "torrent"
-
-    # Fallback: infer from download URL
-    download_url = result.get("downloadUrl") or result.get("magnetUrl") or ""
-    url_lower = download_url.lower()
-    if url_lower.startswith("magnet:") or ".torrent" in url_lower:
-        return "torrent"
-    if ".nzb" in url_lower:
-        return "nzb"
-
-    return "unknown"
-
-
 def _extract_language(title: str) -> Optional[str]:
     """
     Extract language from release title.
@@ -164,7 +140,7 @@ def _prowlarr_result_to_release(result: dict) -> Release:
     download_url = result.get("downloadUrl") or result.get("magnetUrl")
     info_url = result.get("infoUrl") or result.get("guid")
     indexer = result.get("indexer", "Unknown")
-    protocol = _get_protocol(result)
+    protocol = get_protocol_display(result)
     seeders = result.get("seeders")
     leechers = result.get("leechers")
     # Format peers display string: "seeders / leechers"
