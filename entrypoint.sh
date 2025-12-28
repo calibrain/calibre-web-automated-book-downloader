@@ -126,6 +126,7 @@ change_ownership /var/log/cwa-book-downloader
 change_ownership /tmp/cwa-book-downloader
 
 # Test write to all folders
+make_writable ${CONFIG_DIR:-/config}
 make_writable /cwa-book-ingest
 
 # Always run Gunicorn (even when DEBUG=true) to ensure Socket.IO WebSocket
