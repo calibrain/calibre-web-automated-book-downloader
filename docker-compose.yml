@@ -4,8 +4,8 @@ services:
     container_name: calibre-web-automated-book-downloader
     environment:
       TZ: America/New_York
-      # UID: 1000
-      # GID: 100
+      # PUID: 1000
+      # PGID: 1000
       # CWA_DB_PATH: /auth/app.db
     ports:
       - 8084:8084
@@ -13,3 +13,7 @@ services:
     volumes:
       - /tmp/data/calibre-web/ingest:/cwa-book-ingest # This is where the books will be downloaded and ingested by your book management application
       - /path/to/config:/config # Configuration files and database
+      # Download client volume - required for Prowlarr/torrent/usenet integration
+      # IMPORTANT: Both sides of this mount must match your download client's volume mount exactly.
+      # Example: if qBittorrent has "/mnt/storage/downloads:/data/torrents", use the same here:
+      # - /mnt/storage/downloads:/data/torrents

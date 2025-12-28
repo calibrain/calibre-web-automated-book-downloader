@@ -28,30 +28,53 @@ if [ "$TZ" ]; then
     ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 fi
 
-# Set UID if not set
-if [ -z "$UID" ]; then
-    UID=1000
+# Determine user ID with proper precedence:
+# 1. PUID (LinuxServer.io standard - recommended)
+# 2. UID (legacy, for backward compatibility with existing installs)
+# 3. Default to 1000
+#
+# Note: $UID is a bash builtin that's always set. We use `printenv` to detect
+# if UID was explicitly set as an environment variable (e.g., via docker-compose).
+if [ -n "$PUID" ]; then
+    RUN_UID="$PUID"
+    echo "Using PUID=$RUN_UID"
+elif printenv UID >/dev/null 2>&1; then
+    RUN_UID="$(printenv UID)"
+    echo "Using UID=$RUN_UID (legacy - consider migrating to PUID)"
+else
+    RUN_UID=1000
+    echo "Using default UID=$RUN_UID"
 fi
 
-# Set GID if not set
-if [ -z "$GID" ]; then
-    GID=100
+# Determine group ID with proper precedence:
+# 1. PGID (LinuxServer.io standard - recommended)
+# 2. GID (legacy, for backward compatibility with existing installs)
+# 3. Default to 1000
+if [ -n "$PGID" ]; then
+    RUN_GID="$PGID"
+    echo "Using PGID=$RUN_GID"
+elif [ -n "$GID" ]; then
+    RUN_GID="$GID"
+    echo "Using GID=$RUN_GID (legacy - consider migrating to PGID)"
+else
+    RUN_GID=1000
+    echo "Using default GID=$RUN_GID"
 fi
 
-if ! getent group "$GID" >/dev/null; then
-    echo "Adding group $GID with name appuser"
-    groupadd -g "$GID" appuser
+if ! getent group "$RUN_GID" >/dev/null; then
+    echo "Adding group $RUN_GID with name appuser"
+    groupadd -g "$RUN_GID" appuser
 fi
 
 # Create user if it doesn't exist
-if ! id -u "$UID" >/dev/null 2>&1; then
-    echo "Adding user $UID with name appuser"
-    useradd -u "$UID" -g "$GID" -d /app -s /sbin/nologin appuser
+if ! id -u "$RUN_UID" >/dev/null 2>&1; then
+    echo "Adding user $RUN_UID with name appuser"
+    useradd -u "$RUN_UID" -g "$RUN_GID" -d /app -s /sbin/nologin appuser
 fi
 
 # Get username for the UID (whether we just created it or it existed)
-USERNAME=$(getent passwd "$UID" | cut -d: -f1)
-echo "Username for UID $UID is $USERNAME"
+USERNAME=$(getent passwd "$RUN_UID" | cut -d: -f1)
+echo "Username for UID $RUN_UID is $USERNAME"
 
 test_write() {
     folder=$1
@@ -93,9 +116,9 @@ make_writable() {
 change_ownership() {
   folder=$1
   mkdir -p $folder
-  echo "Changing ownership of $folder to $USERNAME:$GID"
-  chown -R "${UID}" "${folder}" || echo "Failed to change user ownership for ${folder}, continuing..."
-  chown -R ":${GID}" "${folder}" || echo "Failed to change group ownership for ${folder}, continuing..."
+  echo "Changing ownership of $folder to $USERNAME:$RUN_GID"
+  chown -R "${RUN_UID}" "${folder}" || echo "Failed to change user ownership for ${folder}, continuing..."
+  chown -R ":${RUN_GID}" "${folder}" || echo "Failed to change group ownership for ${folder}, continuing..."
 }
 
 change_ownership /app
