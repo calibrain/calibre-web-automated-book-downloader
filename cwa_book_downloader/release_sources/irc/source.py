@@ -109,6 +109,7 @@ class IRCReleaseSource(ReleaseSource):
             leading_cell=LeadingCellConfig(type=LeadingCellType.NONE),
             online_servers=list(self._online_servers) if self._online_servers else None,
             cache_ttl_seconds=1800,  # 30 minutes - IRC searches are slow, cache longer
+            supported_filters=["format"],  # IRC has no language metadata
         )
 
     def search(
@@ -211,9 +212,37 @@ class IRCReleaseSource(ReleaseSource):
 
         return ' '.join(parts)
 
+    # Format priority for sorting (lower = higher priority)
+    FORMAT_PRIORITY = {
+        'epub': 0,
+        'mobi': 1,
+        'azw3': 2,
+        'azw': 3,
+        'fb2': 4,
+        'djvu': 5,
+        'pdf': 6,
+        'cbr': 7,
+        'cbz': 8,
+        'doc': 9,
+        'docx': 10,
+        'rtf': 11,
+        'txt': 12,
+        'html': 13,
+        'htm': 14,
+        'rar': 15,
+        'zip': 16,
+    }
+
     def _convert_to_releases(self, results: List[SearchResult]) -> List[Release]:
-        """Convert parsed results to Release objects."""
+        """Convert parsed results to Release objects.
+
+        Results are sorted by:
+        1. Online status (online servers first)
+        2. Format priority (epub > mobi > azw3 > ...)
+        3. Server name (alphabetically)
+        """
         releases = []
+        online_servers = self._online_servers or set()
 
         for result in results:
             release = Release(
@@ -232,6 +261,20 @@ class IRCReleaseSource(ReleaseSource):
                 },
             )
             releases.append(release)
+
+        # Tiered sort: online first, then by format priority, then by server name
+        def sort_key(release: Release) -> tuple:
+            server = release.extra.get("server", "")
+            is_online = server in online_servers
+            fmt = release.format.lower() if release.format else ""
+            format_priority = self.FORMAT_PRIORITY.get(fmt, 99)
+            return (
+                0 if is_online else 1,  # Online first
+                format_priority,         # Then by format
+                server.lower(),          # Then alphabetically by server
+            )
+
+        releases.sort(key=sort_key)
 
         return releases
 

@@ -250,6 +250,7 @@ class ProwlarrSource(ReleaseSource):
             ],
             grid_template="minmax(0,2fr) minmax(80px,1fr) 60px 70px 70px 80px",
             leading_cell=LeadingCellConfig(type=LeadingCellType.NONE),  # No leading cell for Prowlarr
+            supported_filters=["format"],  # Prowlarr has unreliable language metadata
         )
 
     def _get_client(self) -> Optional[ProwlarrClient]:

@@ -35,7 +35,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from cwa_book_downloader.release_sources import direct_download
 from cwa_book_downloader.release_sources.direct_download import SearchUnavailable
 from cwa_book_downloader.core.config import config
-from cwa_book_downloader.config.env import TMP_DIR, DOWNLOAD_PATHS, INGEST_DIR
+from cwa_book_downloader.config.env import TMP_DIR
+from cwa_book_downloader.core.utils import get_ingest_dir
 from cwa_book_downloader.download.archive import is_archive, process_archive
 from cwa_book_downloader.release_sources import get_handler, get_source_display_name
 from cwa_book_downloader.core.logger import setup_logger
@@ -332,8 +333,7 @@ def queue_book(book_id: str, priority: int = 0, source: str = "direct_download")
         bool: True if book was successfully queued
     """
     try:
-        # Fetch book info for display purposes
-        book_info = direct_download.get_book_info(book_id)
+        book_info = direct_download.get_book_info(book_id, fetch_download_count=False)
         if not book_info:
             logger.warning(f"Could not fetch book info for {book_id}")
             return False
@@ -618,8 +618,9 @@ def _post_process_download(
     """
     # Route to content-type-specific ingest directory if configured
     content_type = task.content_type.lower() if task.content_type else None
-    ingest_dir = DOWNLOAD_PATHS.get(content_type, INGEST_DIR)
-    if content_type and ingest_dir != INGEST_DIR:
+    default_ingest_dir = get_ingest_dir()
+    ingest_dir = get_ingest_dir(content_type)
+    if content_type and ingest_dir != default_ingest_dir:
         logger.debug(f"Routing content type '{content_type}' to {ingest_dir}")
     os.makedirs(ingest_dir, exist_ok=True)
 

@@ -228,6 +228,7 @@ export interface ReleaseColumnConfig {
   leading_cell?: LeadingCellConfig;  // Defaults to thumbnail from extra.preview
   online_servers?: string[];         // For IRC: list of currently online server nicks
   cache_ttl_seconds?: number;        // How long to cache results (default: 300 = 5 min)
+  supported_filters?: string[];      // Which filters this source supports: ["format", "language"]
 }
 
 // A downloadable release from any source

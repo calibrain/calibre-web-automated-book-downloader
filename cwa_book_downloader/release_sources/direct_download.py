@@ -14,8 +14,9 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 
 from cwa_book_downloader.download import http as downloader
 from cwa_book_downloader.download import network
-from cwa_book_downloader.config.env import DEBUG_SKIP_SOURCES, DOWNLOAD_PATHS, TMP_DIR
+from cwa_book_downloader.config.env import DEBUG_SKIP_SOURCES, TMP_DIR
 from cwa_book_downloader.core.config import config
+from cwa_book_downloader.core.utils import CONTENT_TYPES
 from cwa_book_downloader.core.logger import setup_logger
 from cwa_book_downloader.core.models import BookInfo, SearchFilters, DownloadTask
 from cwa_book_downloader.metadata_providers import BookMetadata
@@ -202,11 +203,13 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
     return books
 
 
-def get_book_info(book_id: str) -> BookInfo:
+def get_book_info(book_id: str, fetch_download_count: bool = True) -> BookInfo:
     """Get detailed information for a specific book.
 
     Args:
         book_id: Book identifier (MD5 hash)
+        fetch_download_count: Whether to fetch download count from summary API.
+            Only needed for display in DetailsModal, not for downloads.
 
     Returns:
         BookInfo: Detailed book information including download URLs
@@ -220,7 +223,7 @@ def get_book_info(book_id: str) -> BookInfo:
 
     soup = BeautifulSoup(html, "html.parser")
 
-    return _parse_book_info_page(soup, book_id)
+    return _parse_book_info_page(soup, book_id, fetch_download_count)
 
 
 def _parse_search_result_row(row: Tag) -> Optional[BookInfo]:
@@ -249,7 +252,7 @@ def _parse_search_result_row(row: Tag) -> Optional[BookInfo]:
         return None
 
 
-def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
+def _parse_book_info_page(soup: BeautifulSoup, book_id: str, fetch_download_count: bool = True) -> BookInfo:
     """Parse the book info page HTML into a BookInfo object."""
     data = soup.select_one("body > main > div:nth-of-type(1)")
 
@@ -332,7 +335,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
                 # Preserve original case but uppercase the unit (e.g., "5.2 mb" -> "5.2 MB")
                 size = re.sub(r'(kb|mb|gb|tb)', lambda m: m.group(1).upper(), f.strip(), flags=re.IGNORECASE)
             if content == "":
-                for ct in DOWNLOAD_PATHS.keys():
+                for ct in CONTENT_TYPES:
                     if ct in f.strip().lower():
                         content = ct
                         break
@@ -366,16 +369,16 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
     # Extract additional metadata
     info = _extract_book_metadata(original_divs[-6])
 
-    # Fetch download count from the summary API (loaded async on the page)
-    try:
-        summary_url = f"{network.get_aa_base_url()}/dyn/md5/summary/{book_id}"
-        summary_response = downloader.html_get_page(summary_url, selector=network.AAMirrorSelector())
-        if summary_response:
-            summary_data = json.loads(summary_response)
-            if "downloads_total" in summary_data:
-                info["Downloads"] = [str(summary_data["downloads_total"])]
-    except Exception as e:
-        logger.debug(f"Failed to fetch download count for {book_id}: {e}")
+    if fetch_download_count:
+        try:
+            summary_url = f"{network.get_aa_base_url()}/dyn/md5/summary/{book_id}"
+            summary_response = downloader.html_get_page(summary_url, selector=network.AAMirrorSelector())
+            if summary_response:
+                summary_data = json.loads(summary_response)
+                if "downloads_total" in summary_data:
+                    info["Downloads"] = [str(summary_data["downloads_total"])]
+        except Exception as e:
+            logger.debug(f"Failed to fetch download count for {book_id}: {e}")
 
     book_info.info = info
 
@@ -539,7 +542,7 @@ def _fetch_aa_page_urls(book_info: BookInfo, urls_by_source: Dict[str, List[str]
 
     # Otherwise fetch the page fresh
     try:
-        fresh_book_info = get_book_info(book_info.id)
+        fresh_book_info = get_book_info(book_info.id, fetch_download_count=False)
         for url in fresh_book_info.download_urls:
             source_type = _url_source_types.get(url)
             if source_type:
@@ -991,7 +994,8 @@ class DirectDownloadSource(ReleaseSource):
                     hide_mobile=False,  # Size shown on mobile
                 ),
             ],
-            grid_template="minmax(0,2fr) 60px 80px 80px"
+            grid_template="minmax(0,2fr) 60px 80px 80px",
+            supported_filters=["format", "language"],  # AA has reliable language metadata
         )
 
     def search(

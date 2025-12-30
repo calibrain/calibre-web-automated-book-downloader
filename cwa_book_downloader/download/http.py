@@ -11,6 +11,7 @@ import requests
 from tqdm import tqdm
 
 from cwa_book_downloader.download import network
+from cwa_book_downloader.download.network import get_proxies
 from cwa_book_downloader.core.config import config as app_config
 from cwa_book_downloader.core.logger import setup_logger
 
@@ -89,31 +90,6 @@ logger = setup_logger(__name__)
 REQUEST_TIMEOUT = (5, 10)  # (connect, read)
 MAX_DOWNLOAD_RETRIES = 2
 MAX_RESUME_ATTEMPTS = 3
-
-
-def _get_proxies() -> dict:
-    """Get current proxy configuration from config singleton."""
-    proxy_mode = app_config.get("PROXY_MODE", "none")
-
-    if proxy_mode == "socks5":
-        socks_proxy = app_config.get("SOCKS5_PROXY", "")
-        if socks_proxy:
-            return {"http": socks_proxy, "https": socks_proxy}
-    elif proxy_mode == "http":
-        proxies = {}
-        http_proxy = app_config.get("HTTP_PROXY", "")
-        https_proxy = app_config.get("HTTPS_PROXY", "")
-        if http_proxy:
-            proxies["http"] = http_proxy
-        if https_proxy:
-            proxies["https"] = https_proxy
-        elif http_proxy:
-            # Fallback: use HTTP proxy for HTTPS if HTTPS proxy not specified
-            proxies["https"] = http_proxy
-        return proxies
-
-    return {}
-
 
 RETRYABLE_CODES = (429, 500, 502, 503, 504)
 CONNECTION_ERRORS = (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
@@ -213,7 +189,7 @@ def html_get_page(
                 stored_ua = get_cf_user_agent_for_domain(hostname)
                 if stored_ua:
                     headers['User-Agent'] = stored_ua
-            response = requests.get(current_url, proxies=_get_proxies(), timeout=REQUEST_TIMEOUT, cookies=cookies, headers=headers)
+            response = requests.get(current_url, proxies=get_proxies(), timeout=REQUEST_TIMEOUT, cookies=cookies, headers=headers)
             response.raise_for_status()
             time.sleep(1)
             return response.text
@@ -309,7 +285,7 @@ def download_url(
                     logger.debug(f"No stored UA available for {hostname}")
                 if cookies:
                     logger.debug(f"Using {len(cookies)} cookies for {hostname}: {list(cookies.keys())}")
-            response = requests.get(current_url, stream=True, proxies=_get_proxies(), timeout=REQUEST_TIMEOUT, cookies=cookies, headers=headers)
+            response = requests.get(current_url, stream=True, proxies=get_proxies(), timeout=REQUEST_TIMEOUT, cookies=cookies, headers=headers)
             response.raise_for_status()
 
             if status_callback:
@@ -426,7 +402,7 @@ def _try_resume(
                 if stored_ua:
                     resume_headers['User-Agent'] = stored_ua
             response = requests.get(
-                url, stream=True, proxies=_get_proxies(), timeout=REQUEST_TIMEOUT,
+                url, stream=True, proxies=get_proxies(), timeout=REQUEST_TIMEOUT,
                 headers=resume_headers, cookies=cookies
             )
             

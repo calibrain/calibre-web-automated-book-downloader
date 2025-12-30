@@ -18,7 +18,7 @@ from cwa_book_downloader.core.config import config as app_config
 from datetime import datetime, timedelta
 
 
-def _get_proxies() -> dict:
+def get_proxies() -> dict:
     """Get current proxy configuration from config singleton."""
     proxy_mode = app_config.get("PROXY_MODE", "none")
 
@@ -367,7 +367,7 @@ class DoHResolver:
             response = self.session.get(
                 self.base_url,
                 params=params,
-                proxies=_get_proxies(),
+                proxies=get_proxies(),
                 timeout=10  # Increased from 5s to handle slow network conditions
             )
             response.raise_for_status()
@@ -848,7 +848,7 @@ def _initialize_aa_state() -> None:
             logger.info(f"AA_BASE_URL: auto, checking available urls {_aa_urls}")
             for i, url in enumerate(_aa_urls):
                 try:
-                    response = requests.get(url, proxies=_get_proxies(), timeout=3)
+                    response = requests.get(url, proxies=get_proxies(), timeout=3)
                     if response.status_code == 200:
                         _current_aa_url_index = i
                         AA_BASE_URL = url

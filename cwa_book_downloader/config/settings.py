@@ -61,14 +61,6 @@ if env.USING_EXTERNAL_BYPASSER and env.USE_CF_BYPASS:
         "or consider using the internal bypasser which integrates with the app's DNS system."
     )
 
-# Proxy settings
-PROXIES = {}
-if env.HTTP_PROXY:
-    PROXIES["http"] = env.HTTP_PROXY
-if env.HTTPS_PROXY:
-    PROXIES["https"] = env.HTTPS_PROXY
-logger.debug(f"PROXIES: {PROXIES}")
-
 # Anna's Archive settings
 AA_BASE_URL = env._AA_BASE_URL
 AA_AVAILABLE_URLS = ["https://annas-archive.org", "https://annas-archive.se", "https://annas-archive.li"]
@@ -97,8 +89,7 @@ if CUSTOM_SCRIPT:
 
 # Debugging settings
 if not env.USING_EXTERNAL_BYPASSER:
-    # Virtual display settings for debugging internal cloudflare bypasser
-    VIRTUAL_SCREEN_SIZE = (1024, 768)
+    # Recording directory for debugging internal cloudflare bypasser
     RECORDING_DIR = env.LOG_DIR / "recording"
 
 
