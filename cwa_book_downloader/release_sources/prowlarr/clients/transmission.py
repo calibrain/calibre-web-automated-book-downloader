@@ -146,7 +146,7 @@ class TransmissionClient(DownloadClient):
             complete = progress >= 100 and status_value == "seeding"
 
             if complete:
-                message = "Download complete"
+                message = "Complete"
 
             # Get ETA if available and reasonable (less than 1 week)
             eta = None

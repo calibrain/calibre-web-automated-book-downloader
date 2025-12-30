@@ -139,7 +139,9 @@ class HardcoverProvider(MetadataProvider):
         Args:
             api_key: Hardcover API key. If not provided, uses config singleton.
         """
-        self.api_key = api_key or app_config.get("HARDCOVER_API_KEY", "")
+        raw_key = api_key or app_config.get("HARDCOVER_API_KEY", "")
+        # Strip "Bearer " prefix if user pasted the full auth header from Hardcover
+        self.api_key = raw_key.removeprefix("Bearer ").strip() if raw_key else ""
         self.session = requests.Session()
         if self.api_key:
             self.session.headers.update({
@@ -748,7 +750,9 @@ def _test_hardcover_connection(current_values: Optional[Dict[str, Any]] = None) 
     current_values = current_values or {}
 
     # Use current form values first, fall back to saved config
-    api_key = current_values.get("HARDCOVER_API_KEY") or app_config.get("HARDCOVER_API_KEY", "")
+    raw_key = current_values.get("HARDCOVER_API_KEY") or app_config.get("HARDCOVER_API_KEY", "")
+    # Strip "Bearer " prefix if user pasted the full auth header from Hardcover
+    api_key = raw_key.removeprefix("Bearer ").strip() if raw_key else ""
 
     key_len = len(api_key) if api_key else 0
     logger.debug(f"Hardcover test: key length={key_len}")

@@ -14,7 +14,8 @@ import pytest
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.core.settings_registry import save_config_file
 from cwa_book_downloader.core.models import DownloadTask
-from cwa_book_downloader.release_sources.prowlarr.handler import ProwlarrHandler, _determine_protocol
+from cwa_book_downloader.release_sources.prowlarr.handler import ProwlarrHandler
+from cwa_book_downloader.release_sources.prowlarr.utils import get_protocol
 from cwa_book_downloader.release_sources.prowlarr.cache import cache_release, get_release, remove_release, _cache
 
 
@@ -72,28 +73,28 @@ class ProgressRecorder:
         return [s[0] for s in self.status_updates]
 
 
-class TestDetermineProtocol:
-    """Tests for the _determine_protocol function."""
+class TestGetProtocol:
+    """Tests for the get_protocol function."""
 
-    def test_determine_protocol_torrent(self):
+    def test_get_protocol_torrent(self):
         """Test detecting torrent protocol."""
         result = {"protocol": "torrent"}
-        assert _determine_protocol(result) == "torrent"
+        assert get_protocol(result) == "torrent"
 
-    def test_determine_protocol_usenet(self):
+    def test_get_protocol_usenet(self):
         """Test detecting usenet protocol."""
         result = {"protocol": "usenet"}
-        assert _determine_protocol(result) == "usenet"
+        assert get_protocol(result) == "usenet"
 
-    def test_determine_protocol_unknown(self):
+    def test_get_protocol_unknown(self):
         """Test unknown protocol."""
         result = {"protocol": "ftp"}
-        assert _determine_protocol(result) == "unknown"
+        assert get_protocol(result) == "unknown"
 
-    def test_determine_protocol_empty(self):
+    def test_get_protocol_empty(self):
         """Test empty protocol."""
         result = {}
-        assert _determine_protocol(result) == "unknown"
+        assert get_protocol(result) == "unknown"
 
 
 @pytest.mark.integration

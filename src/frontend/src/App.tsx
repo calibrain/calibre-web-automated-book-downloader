@@ -111,6 +111,14 @@ function App() {
   const [downloadsSidebarOpen, setDownloadsSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [configBannerOpen, setConfigBannerOpen] = useState(false);
+  const [featureNoticeDismissed, setFeatureNoticeDismissed] = useState(() => {
+    return localStorage.getItem('cwa-bd-prowlarr-irc-notice-dismissed') === 'true';
+  });
+
+  const handleDismissFeatureNotice = useCallback(() => {
+    localStorage.setItem('cwa-bd-prowlarr-irc-notice-dismissed', 'true');
+    setFeatureNoticeDismissed(true);
+  }, []);
 
   // URL-based search: parse URL params for automatic search on page load
   const urlSearchEnabled = isAuthenticated && config !== null;
@@ -565,7 +573,7 @@ function App() {
         }}
       />
 
-      <main className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-6">
+      <main className="relative w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-6">
         <SearchSection
           onSearch={(query) => handleSearch(query, config, searchFieldValues)}
           isLoading={isSearching}
@@ -584,6 +592,18 @@ function App() {
           searchFieldValues={searchFieldValues}
           onSearchFieldChange={updateSearchFieldValue}
         />
+
+        {isInitialState && !featureNoticeDismissed && (
+          <div className="absolute bottom-4 left-0 right-0 text-center text-sm text-gray-500 dark:text-gray-400">
+            <span>We've added Prowlarr and IRC support for more download options. Check Settings to configure.</span>
+            <button
+              onClick={handleDismissFeatureNotice}
+              className="ml-2 text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         <ResultsSection
           books={books}

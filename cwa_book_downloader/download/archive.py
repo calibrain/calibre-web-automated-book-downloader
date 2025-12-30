@@ -368,12 +368,12 @@ def process_archive(
         shutil.rmtree(extract_dir, ignore_errors=True)
         archive_path.unlink(missing_ok=True)
 
-        # Build success message with extracted formats
+        # Build success message with format info
         formats = [p.suffix.lstrip(".").upper() for p in final_paths]
         if len(formats) == 1:
-            message = f"Extracted: {formats[0]}"
+            message = f"Complete ({formats[0]})"
         else:
-            message = f"Extracted: {len(formats)} files ({', '.join(formats)})"
+            message = f"Complete ({len(formats)} files)"
 
         return ArchiveResult(
             success=True,

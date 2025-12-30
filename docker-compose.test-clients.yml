@@ -106,6 +106,7 @@ services:
     volumes:
       - ./.local/test-clients/qbittorrent/config:/config
       - ./.local/test-clients/downloads:/downloads
+      - ./.local/test-clients/qbittorrent/custom-cont-init.d:/custom-cont-init.d:ro
     ports:
       - "8080:8080"  # Web UI / API
       - "6882:6881"

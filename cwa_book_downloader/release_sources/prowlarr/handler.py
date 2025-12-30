@@ -82,7 +82,7 @@ class ProwlarrHandler(DownloadHandler):
                 return None
 
             # Check if this download already exists in the client
-            status_callback("resolving", f"Checking {client.name}...")
+            status_callback("resolving", f"Checking {client.name}")
             existing = client.find_existing(download_url)
 
             if existing:
@@ -92,7 +92,7 @@ class ProwlarrHandler(DownloadHandler):
                 # If already complete, skip straight to file handling
                 if existing_status.complete:
                     logger.info(f"Existing download is complete, copying file directly")
-                    status_callback("resolving", "Found existing download, copying to library...")
+                    status_callback("resolving", "Found existing download, copying to library")
 
                     source_path = client.get_download_path(download_id)
                     if not source_path:
@@ -112,10 +112,10 @@ class ProwlarrHandler(DownloadHandler):
 
                 # Existing but still downloading - join the progress polling
                 logger.info(f"Existing download in progress, joining poll loop")
-                status_callback("downloading", f"Resuming existing download...")
+                status_callback("downloading", "Resuming existing download")
             else:
                 # No existing download - add new
-                status_callback("resolving", f"Sending to {client.name}...")
+                status_callback("resolving", f"Sending to {client.name}")
                 try:
                     download_id = client.add_download(
                         url=download_url,
@@ -246,7 +246,7 @@ class ProwlarrHandler(DownloadHandler):
         The orchestrator will find and filter book files.
         """
         try:
-            status_callback("resolving", "Staging file...")
+            status_callback("resolving", "Staging file")
 
             # Torrents: copy to preserve seeding. Usenet: configurable.
             if protocol == "torrent":

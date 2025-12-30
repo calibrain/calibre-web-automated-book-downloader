@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Book, ButtonStateInfo, isMetadataBook } from '../types';
-import { BookDownloadButton } from './BookDownloadButton';
 
 interface DetailsModalProps {
   book: Book | null;
@@ -79,7 +78,8 @@ export const DetailsModal = ({ book, onClose, onDownload, onFindDownloads, onSea
 
   // Build metadata grid based on mode
   // Universal mode: Year, Genres (no language, no publisher - often blank from providers)
-  // Direct Download mode: Year, Language, Format, Size
+  // Direct Download mode: Year, Language, Format, Size, Downloads
+  const downloadCount = book.info?.Downloads?.[0];
   const metadata = isMetadata
     ? [
         { label: 'Year', value: book.year || '-' },
@@ -92,6 +92,7 @@ export const DetailsModal = ({ book, onClose, onDownload, onFindDownloads, onSea
         { label: 'Language', value: book.language || '-' },
         { label: 'Format', value: book.format || '-' },
         { label: 'Size', value: book.size || '-' },
+        ...(downloadCount ? [{ label: 'Downloads', value: Number(downloadCount).toLocaleString() }] : []),
       ];
 
   // Extract rating and readers from display_fields for dedicated boxes (Universal mode)
@@ -109,7 +110,7 @@ export const DetailsModal = ({ book, onClose, onDownload, onFindDownloads, onSea
     book.info && Object.keys(book.info).length > 0
       ? Object.entries(book.info).filter(([key]) => {
           const normalized = key.toLowerCase();
-          return normalized !== 'language' && normalized !== 'year';
+          return normalized !== 'language' && normalized !== 'year' && normalized !== 'downloads';
         })
       : [];
   const extendedInfoEntries = [[publisherInfo.label, publisherInfo.value], ...additionalInfo];
@@ -309,15 +310,15 @@ export const DetailsModal = ({ book, onClose, onDownload, onFindDownloads, onSea
 
           <footer className="border-t border-[var(--border-muted)] bg-[var(--bg-soft)] px-5 py-4">
             <div className="flex items-center justify-between gap-4">
-              {/* Source link - Universal mode only */}
-              {isMetadata && book.source_url ? (
+              {/* Source link - shown for both Universal and Direct Download modes */}
+              {book.source_url && (
                 <a
                   href={book.source_url}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-muted)] bg-[var(--bg)] px-3 py-2 text-xs font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-200"
                 >
-                  View on {providerDisplay}
+                  View on {isMetadata ? providerDisplay : "Anna's Archive"}
                   <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path
                       strokeLinecap="round"
@@ -327,25 +328,19 @@ export const DetailsModal = ({ book, onClose, onDownload, onFindDownloads, onSea
                     />
                   </svg>
                 </a>
-              ) : (
-                <div />
               )}
-              {isMetadata ? (
-                <button
-                  onClick={() => onFindDownloads?.(book)}
-                  className="rounded-full bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-                >
-                  Find Downloads
-                </button>
-              ) : (
-                <BookDownloadButton
-                  buttonState={buttonState}
-                  onDownload={handleDownload}
-                  size="md"
-                  className="rounded-full px-6 py-2.5 text-sm font-medium"
-                  ariaLabel={`Download ${book.title || 'book'}`}
-                />
-              )}
+              {/* Action button - Find Downloads (Universal) or Download (Direct) */}
+              <button
+                onClick={isMetadata ? () => onFindDownloads?.(book) : handleDownload}
+                disabled={!isMetadata && buttonState.state !== 'download'}
+                className={`ml-auto rounded-full px-6 py-2.5 text-sm font-medium text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                  isMetadata
+                    ? 'bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500'
+                    : 'bg-sky-700 hover:bg-sky-800 focus:ring-sky-500'
+                }`}
+              >
+                {isMetadata ? 'Find Downloads' : buttonState.text}
+              </button>
             </div>
           </footer>
         </div>

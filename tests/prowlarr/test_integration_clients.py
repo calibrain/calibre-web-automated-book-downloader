@@ -40,37 +40,14 @@ def _setup_transmission_config():
 
 def _setup_qbittorrent_config():
     """Set up qBittorrent configuration via config files and refresh config."""
-    # qBittorrent generates a temporary password on startup - try to extract it
-    password = _get_qbittorrent_temp_password()
     save_config_file("prowlarr_clients", {
         "PROWLARR_TORRENT_CLIENT": "qbittorrent",
         "QBITTORRENT_URL": "http://qbittorrent:8080",
         "QBITTORRENT_USERNAME": "admin",
-        "QBITTORRENT_PASSWORD": password or "adminadmin",
+        "QBITTORRENT_PASSWORD": "admin123",
         "QBITTORRENT_CATEGORY": "test",
     })
     config.refresh()
-
-
-def _get_qbittorrent_temp_password():
-    """Extract qBittorrent's temporary password from container logs."""
-    import re
-    # Try mounted config path (from docker-compose volumes)
-    log_paths = [
-        "/qbittorrent-config/qBittorrent/logs/qbittorrent.log",
-        "/config/qBittorrent/logs/qbittorrent.log",
-    ]
-    for log_path in log_paths:
-        try:
-            with open(log_path, "r") as f:
-                content = f.read()
-                # Look for: "temporary password is provided for this session: XXXXXX"
-                match = re.search(r"temporary password[^:]*:\s*(\S+)", content)
-                if match:
-                    return match.group(1)
-        except Exception:
-            continue
-    return None
 
 
 def _setup_deluge_config():

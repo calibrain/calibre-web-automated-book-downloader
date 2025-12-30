@@ -131,6 +131,7 @@ class BookInfo:
     status_message: Optional[str] = None  # Detailed status message for UI display
     added_time: Optional[float] = None  # Timestamp when added to queue
     source: str = "direct_download"  # Release source handler to use for downloads
+    source_url: Optional[str] = None  # Link to source page (e.g., Anna's Archive)
 
     def get_filename(self, fallback_url: Optional[str] = None) -> str:
         """Build sanitized filename: 'Author - Title (Year).format'

@@ -214,6 +214,67 @@ def _reset_pyautogui_display_state():
     except Exception as e:
         logger.warning(f"Error resetting pyautogui display state: {e}")
 
+
+def _cleanup_orphan_processes() -> int:
+    """Kill any orphan Chrome, ChromeDriver, Xvfb, and ffmpeg processes.
+
+    This should be called at startup before initializing the bypasser to ensure
+    no zombie processes from previous crashes are consuming memory or interfering.
+
+    Safety: Only runs in Docker mode to avoid killing user's browser processes
+    on development machines.
+
+    Returns:
+        Number of processes killed.
+    """
+    # Safety: only cleanup in Docker mode to avoid killing user's browser
+    if not env.DOCKERMODE:
+        return 0
+
+    processes_to_kill = ["chrome", "chromedriver", "Xvfb", "ffmpeg"]
+    total_killed = 0
+
+    logger.debug("Checking for orphan processes...")
+    logger.log_resource_usage()
+
+    for proc_name in processes_to_kill:
+        try:
+            # Use pgrep to find processes, then kill them
+            result = subprocess.run(
+                ["pgrep", "-f", proc_name],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                count = len(pids)
+                if count > 0:
+                    logger.info(f"Found {count} orphan {proc_name} process(es), killing...")
+                    kill_result = subprocess.run(
+                        ["pkill", "-9", "-f", proc_name],
+                        capture_output=True,
+                        timeout=5
+                    )
+                    if kill_result.returncode == 0:
+                        total_killed += count
+                    else:
+                        logger.warning(f"pkill for {proc_name} returned {kill_result.returncode}, processes may not have been killed")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Timeout while checking for {proc_name} processes")
+        except Exception as e:
+            logger.debug(f"Error checking for {proc_name} processes: {e}")
+
+    if total_killed > 0:
+        # Give processes time to fully terminate
+        time.sleep(1)
+        logger.info(f"Cleaned up {total_killed} orphan process(es)")
+        logger.log_resource_usage()
+    else:
+        logger.debug("No orphan processes found")
+
+    return total_killed
+
 def _get_page_info(sb) -> tuple[str, str, str]:
     """Extract page title, body text, and current URL safely."""
     try:
@@ -310,168 +371,319 @@ def _is_bypassed(sb, escape_emojis: bool = True) -> bool:
         logger.warning(f"Error checking bypass status: {e}")
         return False
 
-def _bypass_method_1(sb) -> bool:
-    """Original bypass method using uc_gui_click_captcha"""
+def _simulate_human_behavior(sb) -> None:
+    """Simulate human-like behavior before bypass attempt."""
     try:
-        logger.debug("Attempting bypass method 1: uc_gui_click_captcha")
-        sb.uc_gui_click_captcha()
-        time.sleep(3)
-        return _is_bypassed(sb)
-    except Exception as e:
-        logger.debug(f"Method 1 failed on first try: {e}")
-        try:
-            time.sleep(5)
-            sb.wait_for_element_visible('body', timeout=10)
-            sb.uc_gui_click_captcha()
-            time.sleep(3)
-            return _is_bypassed(sb)
-        except Exception as e2:
-            logger.debug(f"Method 1 failed on second try: {e2}")
-            try:
-                time.sleep(app_config.DEFAULT_SLEEP)
-                sb.uc_gui_click_captcha()
-                time.sleep(5)
-                return _is_bypassed(sb)
-            except Exception as e3:
-                logger.debug(f"Method 1 completely failed: {e3}")
-                return False
+        # Random short wait (human reaction time)
+        time.sleep(random.uniform(0.5, 1.5))
 
-def _bypass_method_2(sb) -> bool:
-    """Alternative bypass method using longer waits and manual interaction"""
-    try:
-        logger.debug("Attempting bypass method 2: wait and reload")
-        # Wait longer for page to load completely
-        time.sleep(10)
-        
-        # Try refreshing the page
-        sb.refresh()
-        time.sleep(8)
-        
-        # Check if bypass worked after refresh
-        if _is_bypassed(sb):
-            return True
-            
-        # Try clicking on the page center (sometimes helps trigger bypass)
+        # Maybe scroll a bit (30% chance)
+        if random.random() < 0.3:
+            sb.scroll_down(random.randint(20, 50))
+            time.sleep(random.uniform(0.2, 0.5))
+            sb.scroll_up(random.randint(10, 30))
+            time.sleep(random.uniform(0.2, 0.4))
+
+        # Brief mouse jiggle via PyAutoGUI
         try:
-            sb.click_if_visible("body", timeout=5)
-            time.sleep(5)
-        except Exception:
-            pass
-            
+            import pyautogui
+            x, y = pyautogui.position()
+            pyautogui.moveTo(
+                x + random.randint(-10, 10),
+                y + random.randint(-10, 10),
+                duration=random.uniform(0.05, 0.15)
+            )
+        except Exception as e:
+            logger.debug(f"Mouse jiggle failed (non-critical): {e}")
+    except Exception as e:
+        logger.debug(f"Human simulation failed (non-critical): {e}")
+
+
+def _bypass_method_handle_captcha(sb) -> bool:
+    """Method 2: Use uc_gui_handle_captcha() - TAB+SPACEBAR approach, stealthier than click."""
+    try:
+        logger.debug("Attempting bypass: uc_gui_handle_captcha (TAB+SPACEBAR)")
+        _simulate_human_behavior(sb)
+        sb.uc_gui_handle_captcha()
+        time.sleep(random.uniform(3, 5))
         return _is_bypassed(sb)
     except Exception as e:
-        logger.debug(f"Method 2 failed: {e}")
+        logger.debug(f"uc_gui_handle_captcha failed: {e}")
         return False
 
-def _bypass_method_3(sb) -> bool:
-    """Third bypass method using user-agent rotation and stealth mode"""
+
+def _bypass_method_click_captcha(sb) -> bool:
+    """Method 3: Use uc_gui_click_captcha() - direct click via PyAutoGUI."""
     try:
-        logger.debug("Attempting bypass method 3: stealth approach")
-        # Wait a random amount to appear more human
-        wait_time = random.uniform(8, 15)
-        time.sleep(wait_time)
-        
-        # Try to scroll the page (human-like behavior)
+        logger.debug("Attempting bypass: uc_gui_click_captcha (direct click)")
+        _simulate_human_behavior(sb)
+        sb.uc_gui_click_captcha()
+        time.sleep(random.uniform(3, 5))
+
+        if _is_bypassed(sb):
+            return True
+
+        # Retry once with longer wait
+        logger.debug("First click attempt failed, retrying...")
+        time.sleep(random.uniform(4, 6))
+        sb.uc_gui_click_captcha()
+        time.sleep(random.uniform(3, 5))
+        return _is_bypassed(sb)
+    except Exception as e:
+        logger.debug(f"uc_gui_click_captcha failed: {e}")
+        return False
+
+
+def _bypass_method_humanlike(sb) -> bool:
+    """Method 4: Human-like behavior with scroll, wait, and reload."""
+    try:
+        logger.debug("Attempting bypass: human-like interaction")
+
+        # Extended human-like wait
+        time.sleep(random.uniform(6, 10))
+
+        # Scroll behavior
         try:
             sb.scroll_to_bottom()
-            time.sleep(2)
+            time.sleep(random.uniform(1, 2))
             sb.scroll_to_top()
-            time.sleep(3)
-        except Exception:
-            pass
-            
-        # Check if this helped
+            time.sleep(random.uniform(2, 3))
+        except Exception as e:
+            logger.debug(f"Scroll behavior failed (non-critical): {e}")
+
         if _is_bypassed(sb):
             return True
-            
-        # Try the original captcha click as last resort
-        try:
-            sb.uc_gui_click_captcha()
-            time.sleep(5)
-        except Exception:
-            pass
-            
-        return _is_bypassed(sb)
-    except Exception as e:
-        logger.debug(f"Method 3 failed: {e}")
-        return False
 
-def _bypass_ddos_guard_method_1(sb) -> bool:
-    """DDOS-Guard bypass: Use SeleniumBase's captcha handling (most reliable)"""
-    try:
-        logger.debug("Attempting DDOS-Guard bypass: SeleniumBase uc_gui methods")
-        time.sleep(random.uniform(2, 4))
-        
-        # SeleniumBase's uc_gui_click_captcha often works for DDOS-Guard too
+        # Try refresh
+        logger.debug("Trying page refresh...")
+        sb.refresh()
+        time.sleep(random.uniform(5, 8))
+
+        if _is_bypassed(sb):
+            return True
+
+        # Final captcha click attempt
         try:
             sb.uc_gui_click_captcha()
             time.sleep(random.uniform(3, 5))
+        except Exception as e:
+            logger.debug(f"Final captcha click failed (non-critical): {e}")
+
+        return _is_bypassed(sb)
+    except Exception as e:
+        logger.debug(f"Human-like method failed: {e}")
+        return False
+
+
+def _bypass_method_cdp_solve(sb) -> bool:
+    """Method 5: CDP Mode with solve_captcha() - WebDriver disconnected, no PyAutoGUI.
+
+    CDP Mode completely disconnects WebDriver during interaction, making detection
+    much harder. The solve_captcha() method auto-detects challenge type.
+    """
+    try:
+        logger.debug("Attempting bypass: CDP Mode solve_captcha")
+        current_url = sb.get_current_url()
+
+        # Activate CDP mode - this disconnects WebDriver
+        sb.activate_cdp_mode(current_url)
+        time.sleep(random.uniform(1, 2))
+
+        # Try CDP solve_captcha (auto-detects challenge type)
+        try:
+            sb.cdp.solve_captcha()
+            time.sleep(random.uniform(3, 5))
+
+            # Reconnect WebDriver to check result
+            sb.reconnect()
+            time.sleep(random.uniform(1, 2))
+
             if _is_bypassed(sb):
                 return True
         except Exception as e:
-            logger.debug(f"uc_gui_click_captcha failed: {e}")
-        
-        # Fallback: Try clicking visible checkbox-like elements
-        checkbox_patterns = [
-            "//input[@type='checkbox']",
-            "//*[contains(@class, 'checkbox')]",
-            "//*[contains(@class, 'cb-')]",
-        ]
-        for pattern in checkbox_patterns:
+            logger.debug(f"CDP solve_captcha failed: {e}")
+            # Make sure we reconnect on failure
             try:
-                elements = sb.find_elements(f"xpath:{pattern}")
-                for elem in elements:
-                    if elem.is_displayed():
-                        logger.debug(f"Clicking element with pattern: {pattern}")
-                        elem.click()
-                        time.sleep(random.uniform(3, 5))
-                        if _is_bypassed(sb):
-                            return True
-            except Exception:
-                continue
-        
+                sb.reconnect()
+            except Exception as reconnect_e:
+                logger.debug(f"Reconnect after CDP solve failure failed: {reconnect_e}")
+
         return False
     except Exception as e:
-        logger.debug(f"DDOS-Guard method 1 failed: {e}")
+        logger.debug(f"CDP Mode solve failed: {e}")
+        # Ensure WebDriver is reconnected
+        try:
+            sb.reconnect()
+        except Exception as reconnect_e:
+            logger.debug(f"Reconnect after CDP Mode solve failed: {reconnect_e}")
         return False
 
-def _bypass_ddos_guard_method_2(sb) -> bool:
-    """DDOS-Guard bypass: Use pyautogui to click estimated checkbox location"""
+
+def _bypass_method_cdp_click(sb) -> bool:
+    """CDP Mode with native clicking - no PyAutoGUI dependency.
+
+    Uses sb.cdp.click() which is native CDP clicking added in SeleniumBase 4.45.6.
+    This doesn't require PyAutoGUI at all.
+    """
     try:
-        logger.debug("Attempting DDOS-Guard bypass: pyautogui coordinate click")
-        time.sleep(random.uniform(2, 4))
-        
-        import pyautogui
-        window_size = sb.get_window_size()
-        width = window_size.get("width", 1920)
-        height = window_size.get("height", 1080)
-        
-        # DDOS-Guard checkbox is typically around 35% from left, 55% from top
-        checkbox_x = int(width * 0.35) + random.randint(-5, 5)
-        checkbox_y = int(height * 0.55) + random.randint(-5, 5)
-        
-        logger.debug(f"Clicking at coordinates: ({checkbox_x}, {checkbox_y})")
-        pyautogui.moveTo(checkbox_x, checkbox_y, duration=random.uniform(0.3, 0.7))
-        time.sleep(random.uniform(0.1, 0.3))
-        pyautogui.click()
-        time.sleep(random.uniform(3, 5))
-        
+        logger.debug("Attempting bypass: CDP Mode native click")
+        current_url = sb.get_current_url()
+
+        # Activate CDP mode
+        sb.activate_cdp_mode(current_url)
+        time.sleep(random.uniform(1, 2))
+
+        # Common captcha/challenge selectors to try
+        selectors = [
+            "#turnstile-widget div",      # Cloudflare Turnstile (parent above shadow-root)
+            "#cf-turnstile div",          # Alternative CF Turnstile
+            "iframe[src*='challenges']",  # CF challenge iframe
+            "input[type='checkbox']",     # Generic checkbox (DDOS-Guard)
+            "[class*='checkbox']",        # Class-based checkbox
+            "#challenge-running",         # CF challenge indicator
+        ]
+
+        for selector in selectors:
+            try:
+                # Check if element exists and is visible
+                if sb.cdp.is_element_visible(selector):
+                    logger.debug(f"CDP clicking: {selector}")
+                    sb.cdp.click(selector)
+                    time.sleep(random.uniform(2, 4))
+
+                    # Reconnect and check
+                    sb.reconnect()
+                    time.sleep(random.uniform(1, 2))
+
+                    if _is_bypassed(sb):
+                        return True
+
+                    # Re-enter CDP mode for next attempt
+                    sb.activate_cdp_mode(sb.get_current_url())
+                    time.sleep(random.uniform(0.5, 1))
+            except Exception as e:
+                logger.debug(f"CDP click on '{selector}' failed: {e}")
+                continue
+
+        # Final reconnect
+        try:
+            sb.reconnect()
+        except Exception as e:
+            logger.debug(f"Final reconnect in CDP click failed: {e}")
+
         return _is_bypassed(sb)
-    except ImportError:
-        logger.debug("pyautogui not available")
-        return False
     except Exception as e:
-        logger.debug(f"DDOS-Guard method 2 failed: {e}")
+        logger.debug(f"CDP Mode click failed: {e}")
+        try:
+            sb.reconnect()
+        except Exception as reconnect_e:
+            logger.debug(f"Reconnect after CDP Mode click failed: {reconnect_e}")
         return False
+
+
+def _bypass_method_cdp_gui_click(sb) -> bool:
+    """CDP Mode with PyAutoGUI-based clicking - uses actual mouse movement.
+
+    For advanced protections (Kasada, DataDome, Akamai), the docs recommend
+    using gui_* methods with actual mouse movements instead of CDP clicks.
+    This is the most human-like approach in CDP mode.
+    """
+    try:
+        logger.debug("Attempting bypass: CDP Mode gui_click (mouse-based)")
+        current_url = sb.get_current_url()
+
+        # Activate CDP mode
+        sb.activate_cdp_mode(current_url)
+        time.sleep(random.uniform(1, 2))
+
+        # Try the dedicated CDP captcha method first
+        try:
+            logger.debug("Trying cdp.gui_click_captcha()")
+            sb.cdp.gui_click_captcha()
+            time.sleep(random.uniform(3, 5))
+
+            sb.reconnect()
+            time.sleep(random.uniform(1, 2))
+
+            if _is_bypassed(sb):
+                return True
+
+            sb.activate_cdp_mode(sb.get_current_url())
+            time.sleep(random.uniform(0.5, 1))
+        except Exception as e:
+            logger.debug(f"cdp.gui_click_captcha() failed: {e}")
+
+        # Turnstile selectors - use parent above shadow-root as per docs
+        selectors = [
+            "#turnstile-widget div",      # Cloudflare Turnstile
+            "#cf-turnstile div",          # Alternative CF Turnstile
+            "#challenge-stage div",       # CF challenge stage
+            "input[type='checkbox']",     # Generic checkbox
+            "[class*='cb-i']",            # DDOS-Guard checkbox
+        ]
+
+        for selector in selectors:
+            try:
+                if sb.cdp.is_element_visible(selector):
+                    logger.debug(f"CDP gui_click_element: {selector}")
+                    sb.cdp.gui_click_element(selector)
+                    time.sleep(random.uniform(3, 5))
+
+                    sb.reconnect()
+                    time.sleep(random.uniform(1, 2))
+
+                    if _is_bypassed(sb):
+                        return True
+
+                    sb.activate_cdp_mode(sb.get_current_url())
+                    time.sleep(random.uniform(0.5, 1))
+            except Exception as e:
+                logger.debug(f"CDP gui_click on '{selector}' failed: {e}")
+                continue
+
+        # Final reconnect
+        try:
+            sb.reconnect()
+        except Exception as e:
+            logger.debug(f"Final reconnect in CDP gui_click failed: {e}")
+
+        return _is_bypassed(sb)
+    except Exception as e:
+        logger.debug(f"CDP Mode gui_click failed: {e}")
+        try:
+            sb.reconnect()
+        except Exception as reconnect_e:
+            logger.debug(f"Reconnect after CDP Mode gui_click failed: {reconnect_e}")
+        return False
+
 
 def _bypass(sb, max_retries: Optional[int] = None, cancel_flag: Optional[Event] = None) -> bool:
-    """Bypass function with strategies for Cloudflare and DDOS-Guard protection.
+    """Bypass function with unified strategies for Cloudflare and DDOS-Guard protection.
+
+    Uses a unified method order that works for both protection types.
+    Prioritizes CDP Mode (stealthier) with UC Mode PyAutoGUI fallbacks:
+
+    1. CDP Mode solve - WebDriver disconnected, uses cdp.solve_captcha()
+    2. CDP Mode click - Native CDP clicking, no PyAutoGUI (4.45.6+)
+    3. CDP Mode gui_click - CDP with PyAutoGUI mouse movement (most human-like)
+    4. uc_gui_handle_captcha() - TAB+SPACEBAR via PyAutoGUI (UC Mode fallback)
+    5. uc_gui_click_captcha() - Direct click via PyAutoGUI (UC Mode fallback)
+    6. Human-like interaction - Scroll, wait, reload, retry
 
     Returns True if bypass succeeded, False otherwise.
     """
     max_retries = max_retries if max_retries is not None else app_config.MAX_RETRY
-    cloudflare_methods = [_bypass_method_1, _bypass_method_2, _bypass_method_3]
-    ddos_guard_methods = [_bypass_ddos_guard_method_1, _bypass_ddos_guard_method_2]
+
+    # Unified method order - works for both Cloudflare and DDOS-Guard
+    # Prioritizes CDP Mode (stealthier), falls back to UC Mode PyAutoGUI methods
+    methods = [
+        _bypass_method_cdp_solve,        # CDP Mode, WebDriver disconnected
+        _bypass_method_cdp_click,        # CDP native click, no PyAutoGUI
+        _bypass_method_cdp_gui_click,    # CDP with PyAutoGUI (most human-like)
+        _bypass_method_handle_captcha,   # TAB+SPACEBAR via PyAutoGUI (UC Mode)
+        _bypass_method_click_captcha,    # Direct click via PyAutoGUI (UC Mode)
+        _bypass_method_humanlike,        # Last resort with scroll/refresh
+    ]
 
     for try_count in range(max_retries):
         # Check for cancellation before each attempt
@@ -480,31 +692,29 @@ def _bypass(sb, max_retries: Optional[int] = None, cancel_flag: Optional[Event] 
             raise BypassCancelledException("Bypass cancelled")
 
         if _is_bypassed(sb):
+            if try_count == 0:
+                logger.info("Page already bypassed (no challenge or auto-solved by uc_open_with_reconnect)")
             return True
 
+        # Log challenge type for debugging (but don't branch on it)
         challenge_type = _detect_challenge_type(sb)
-        logger.info(f"Detected challenge type: {challenge_type}")
-
-        if challenge_type == "ddos_guard":
-            methods = ddos_guard_methods
-        elif challenge_type == "cloudflare":
-            methods = cloudflare_methods
-        else:
-            methods = cloudflare_methods + ddos_guard_methods
+        logger.info(f"Challenge detected: {challenge_type}")
 
         method = methods[try_count % len(methods)]
         logger.info(f"Bypass attempt {try_count + 1}/{max_retries} using {method.__name__}")
 
-        # Progressive backoff with cancellation checks
-        wait_time = min(app_config.DEFAULT_SLEEP * try_count, 15)
-        if wait_time > 0:
-            logger.info(f"Waiting {wait_time}s before trying...")
+        # Progressive backoff with cancellation checks (randomized)
+        if try_count > 0:
+            wait_time = min(random.uniform(2, 4) * try_count, 12)
+            logger.info(f"Waiting {wait_time:.1f}s before trying...")
             # Check cancellation during wait (check every second)
             for _ in range(int(wait_time)):
                 if cancel_flag and cancel_flag.is_set():
                     logger.info("Bypass cancelled during wait")
                     raise BypassCancelledException("Bypass cancelled")
                 time.sleep(1)
+            # Sleep remaining fractional second
+            time.sleep(wait_time - int(wait_time))
 
         try:
             if method(sb):
@@ -693,7 +903,7 @@ def _init_driver():
     # Build Chrome args dynamically to pick up current DNS settings from network module
     chromium_args = _get_chromium_args()
     logger.debug(f"Initializing Chrome driver with args: {chromium_args}")
-    driver = Driver(uc=True, headless=False, size=f"{VIRTUAL_SCREEN_SIZE[0]},{VIRTUAL_SCREEN_SIZE[1]}", chromium_arg=chromium_args)
+    driver = Driver(uc=True, headless=False, incognito=True, size=f"{VIRTUAL_SCREEN_SIZE[0]},{VIRTUAL_SCREEN_SIZE[1]}", chromium_arg=chromium_args)
     driver.set_page_load_timeout(60)
     DRIVER = driver
     time.sleep(app_config.DEFAULT_SLEEP)
@@ -704,7 +914,7 @@ def _ensure_display_initialized():
     global DISPLAY
     if DISPLAY["xvfb"] is not None:
         return
-    if not (env.DOCKERMODE and env.USE_CF_BYPASS):
+    if not (env.DOCKERMODE and app_config.get("USE_CF_BYPASS", True)):
         return
     
     from pyvirtualdisplay import Display
@@ -941,14 +1151,17 @@ def warmup():
         logger.debug("Bypasser warmup skipped - not in Docker mode")
         return
 
-    if not env.USE_CF_BYPASS:
+    if not app_config.get("USE_CF_BYPASS", True):
         logger.debug("Bypasser warmup skipped - CF bypass disabled")
         return
 
     if app_config.get("AA_DONATOR_KEY", ""):
         logger.debug("Bypasser warmup skipped - AA donator key set (fast downloads available)")
         return
-    
+
+    # Clean up any orphan processes from previous crashes before starting fresh
+    _cleanup_orphan_processes()
+
     with LOCKED:
         if is_warmed_up():
             logger.debug("Bypasser already fully warmed up")
@@ -1003,7 +1216,9 @@ _init_cleanup_thread()
 
 # Register for DNS rotation notifications so Chrome can restart with new DNS settings
 # Only register if using the internal Chrome bypasser (not external FlareSolverr)
-if env.USE_CF_BYPASS and not env.USING_EXTERNAL_BYPASSER:
+# Note: This module is only imported when internal bypasser is selected, so this check
+# is redundant but kept for safety. Use app_config for consistency with other modules.
+if app_config.get("USE_CF_BYPASS", True) and not app_config.get("USING_EXTERNAL_BYPASSER", False):
     network.register_dns_rotation_callback(_on_dns_rotation)
 
 

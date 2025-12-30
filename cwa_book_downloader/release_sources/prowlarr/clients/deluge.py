@@ -186,7 +186,7 @@ class DelugeClient(DownloadClient):
             complete = progress >= 100
 
             if complete:
-                message = "Download complete"
+                message = "Complete"
 
             eta = status.get(b'eta')
             if eta and eta > 604800:
