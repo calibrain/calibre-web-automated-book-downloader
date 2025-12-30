@@ -50,6 +50,7 @@ def _on_save_security(values: Dict[str, Any]) -> Dict[str, Any]:
     - If new password is provided, validate confirmation and hash it
     - If password fields are empty, preserve existing hash
     - Never store raw passwords
+    - Ensure username is present if password is set
 
     Returns:
         Dict with processed values to save and any validation errors.
@@ -63,6 +64,13 @@ def _on_save_security(values: Dict[str, Any]) -> Dict[str, Any]:
 
     # If password is provided, validate and hash it
     if password:
+        if not values.get("BUILTIN_USERNAME"):
+            return {
+                "error": True,
+                "message": "Username cannot be empty",
+                "values": values
+            }
+
         if password != password_confirm:
             return {
                 "error": True,
