@@ -10,9 +10,9 @@ import pytest
 from cwa_book_downloader.release_sources.prowlarr.source import (
     _parse_size,
     _extract_format,
-    _get_protocol,
     _extract_language,
 )
+from cwa_book_downloader.release_sources.prowlarr.utils import get_protocol_display
 
 
 class TestParseSize:
@@ -116,51 +116,51 @@ class TestExtractFormat:
         assert _extract_format("Literal Translation") is None
 
 
-class TestGetProtocol:
-    """Tests for the _get_protocol function."""
+class TestGetProtocolDisplay:
+    """Tests for the get_protocol_display function."""
 
     def test_get_protocol_from_protocol_field_torrent(self):
         """Test extracting torrent protocol from protocol field."""
         result = {"protocol": "torrent", "downloadUrl": "https://example.com"}
-        assert _get_protocol(result) == "torrent"
+        assert get_protocol_display(result) == "torrent"
 
     def test_get_protocol_from_protocol_field_usenet(self):
         """Test extracting usenet protocol from protocol field."""
         result = {"protocol": "usenet", "downloadUrl": "https://example.com"}
-        assert _get_protocol(result) == "nzb"
+        assert get_protocol_display(result) == "nzb"
 
     def test_get_protocol_from_magnet_url(self):
         """Test inferring torrent from magnet URL."""
         result = {"downloadUrl": "magnet:?xt=urn:btih:abc123"}
-        assert _get_protocol(result) == "torrent"
+        assert get_protocol_display(result) == "torrent"
 
     def test_get_protocol_from_torrent_url(self):
         """Test inferring torrent from .torrent URL."""
         result = {"downloadUrl": "https://example.com/file.torrent"}
-        assert _get_protocol(result) == "torrent"
+        assert get_protocol_display(result) == "torrent"
 
     def test_get_protocol_from_nzb_url(self):
         """Test inferring NZB from .nzb URL."""
         result = {"downloadUrl": "https://example.com/file.nzb"}
-        assert _get_protocol(result) == "nzb"
+        assert get_protocol_display(result) == "nzb"
 
     def test_get_protocol_fallback_to_magnet_url(self):
         """Test fallback to magnetUrl field."""
         result = {"magnetUrl": "magnet:?xt=urn:btih:abc123"}
-        assert _get_protocol(result) == "torrent"
+        assert get_protocol_display(result) == "torrent"
 
     def test_get_protocol_unknown(self):
         """Test unknown protocol for unclear URLs."""
         result = {"downloadUrl": "https://example.com/download"}
-        assert _get_protocol(result) == "unknown"
+        assert get_protocol_display(result) == "unknown"
 
     def test_get_protocol_case_insensitive(self):
         """Test protocol detection is case insensitive."""
         result = {"protocol": "TORRENT"}
-        assert _get_protocol(result) == "torrent"
+        assert get_protocol_display(result) == "torrent"
 
         result = {"protocol": "Usenet"}
-        assert _get_protocol(result) == "nzb"
+        assert get_protocol_display(result) == "nzb"
 
 
 class TestExtractLanguage:
