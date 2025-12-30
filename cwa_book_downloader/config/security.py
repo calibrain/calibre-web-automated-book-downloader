@@ -62,11 +62,15 @@ def _on_save_security(values: Dict[str, Any]) -> Dict[str, Any]:
     values.pop("BUILTIN_PASSWORD", None)
     values.pop("BUILTIN_PASSWORD_CONFIRM", None)
 
-    # Determine if we have a password (either new or existing)
-    has_password = False
-    
     # If password is provided, validate and hash it
     if password:
+        if not values.get("BUILTIN_USERNAME"):
+            return {
+                "error": True,
+                "message": "Username cannot be empty",
+                "values": values
+            }
+
         if password != password_confirm:
             return {
                 "error": True,
@@ -83,23 +87,13 @@ def _on_save_security(values: Dict[str, Any]) -> Dict[str, Any]:
 
         # Hash the password
         values["BUILTIN_PASSWORD_HASH"] = generate_password_hash(password)
-        has_password = True
         logger.info("Password hash updated")
 
-    # If no new password provided, check if we have an existing hash
-    else:
+    # If no password provided but username is being set, preserve existing hash
+    elif "BUILTIN_USERNAME" in values:
         existing = load_config_file("security")
         if "BUILTIN_PASSWORD_HASH" in existing:
             values["BUILTIN_PASSWORD_HASH"] = existing["BUILTIN_PASSWORD_HASH"]
-            has_password = True
-
-    # Ensure username is present if we have a password
-    username = values.get("BUILTIN_USERNAME", "").strip()
-    if has_password and not username:
-        values["BUILTIN_USERNAME"] = "admin"
-        logger.info("Username was empty, defaulted to 'admin'")
-    elif "BUILTIN_USERNAME" in values:
-         values["BUILTIN_USERNAME"] = username
 
     return {"error": False, "values": values}
 
