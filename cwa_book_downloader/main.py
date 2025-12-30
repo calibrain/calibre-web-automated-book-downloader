@@ -139,10 +139,9 @@ def get_auth_mode() -> str:
     """Determine which authentication mode is active.
 
     Priority: 
-    1. Explicit CWA
-    2. Built-in
-    3. Implicit CWA (fallback)
-    4. No auth required -> "none"
+    1. CWA (if enabled in settings and DB path exists)
+    2. Built-in credentials (if configured)
+    3. No auth required or error -> "none"
     """
     from cwa_book_downloader.core.settings_registry import load_config_file
 
@@ -154,13 +153,8 @@ def get_auth_mode() -> str:
         # 2. Check for built-in credentials
         if security_config.get("BUILTIN_USERNAME") and security_config.get("BUILTIN_PASSWORD_HASH"):
             return "builtin"
-        # 3. Implicit CWA fallback (config loaded but empty)
-        if CWA_DB_PATH and os.path.isfile(CWA_DB_PATH):
-            return "cwa"
     except Exception:
-        # Error fallback: use CWA if available
-        if CWA_DB_PATH and os.path.isfile(CWA_DB_PATH):
-            return "cwa"
+        pass
 
     return "none"
 
