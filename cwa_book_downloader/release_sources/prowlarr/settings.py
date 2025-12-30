@@ -115,8 +115,8 @@ def _test_qbittorrent_connection(current_values: Dict[str, Any] = None) -> Dict[
 
         client = Client(host=url, username=username, password=password)
         client.auth_log_in()
-        version = client.app.version
-        return {"success": True, "message": f"Connected to qBittorrent {version}"}
+        api_version = client.app.web_api_version
+        return {"success": True, "message": f"Connected to qBittorrent (API v{api_version})"}
     except ImportError:
         return {"success": False, "message": "qbittorrent-api package not installed"}
     except Exception as e:

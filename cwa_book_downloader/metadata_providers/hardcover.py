@@ -1,6 +1,7 @@
 """Hardcover.app metadata provider. Requires API key."""
 
 import requests
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from cwa_book_downloader.core.cache import cacheable
@@ -186,7 +187,8 @@ class HardcoverProvider(MetadataProvider):
         # Build cache key from options (include fields and settings for cache differentiation)
         fields_key = ":".join(f"{k}={v}" for k, v in sorted(options.fields.items()))
         exclude_compilations = app_config.get("HARDCOVER_EXCLUDE_COMPILATIONS", False)
-        cache_key = f"{options.query}:{options.search_type.value}:{options.sort.value}:{options.limit}:{options.page}:{fields_key}:excl_comp={exclude_compilations}"
+        exclude_unreleased = app_config.get("HARDCOVER_EXCLUDE_UNRELEASED", False)
+        cache_key = f"{options.query}:{options.search_type.value}:{options.sort.value}:{options.limit}:{options.page}:{fields_key}:excl_comp={exclude_compilations}:excl_unrel={exclude_unreleased}"
         return self._search_cached(cache_key, options)
 
     @cacheable(ttl_key="METADATA_CACHE_SEARCH_TTL", ttl_default=300, key_prefix="hardcover:search")
@@ -270,8 +272,10 @@ class HardcoverProvider(MetadataProvider):
                 hits = results_obj if isinstance(results_obj, list) else []
                 found_count = 0
 
-            # Parse hits, filtering compilations if enabled
+            # Parse hits, filtering compilations and unreleased books if enabled
             exclude_compilations = app_config.get("HARDCOVER_EXCLUDE_COMPILATIONS", False)
+            exclude_unreleased = app_config.get("HARDCOVER_EXCLUDE_UNRELEASED", False)
+            current_year = datetime.now().year
             books = []
             for hit in hits:
                 item = hit.get("document", hit) if isinstance(hit, dict) else hit
@@ -279,6 +283,10 @@ class HardcoverProvider(MetadataProvider):
                     continue
                 if exclude_compilations and item.get("compilation"):
                     continue
+                if exclude_unreleased:
+                    release_year = item.get("release_year")
+                    if release_year is not None and release_year > current_year:
+                        continue
                 book = self._parse_search_result(item)
                 if book:
                     books.append(book)
@@ -869,6 +877,12 @@ def hardcover_settings():
             key="HARDCOVER_EXCLUDE_COMPILATIONS",
             label="Exclude Compilations",
             description="Filter out compilations, anthologies, and omnibus editions from search results",
+            default=False,
+        ),
+        CheckboxField(
+            key="HARDCOVER_EXCLUDE_UNRELEASED",
+            label="Exclude Unreleased Books",
+            description="Filter out books with a release year in the future",
             default=False,
         ),
     ]

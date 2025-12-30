@@ -87,3 +87,21 @@ export const formatDefaultLanguageLabel = (
   return `Default (${joined}${suffix})`;
 };
 
+/**
+ * Check if ALL languages in a multi-language release match the selected filter.
+ */
+export const releaseLanguageMatchesFilter = (
+  releaseLang: string | undefined,
+  selectedCodes: string[] | null,
+): boolean => {
+  if (!releaseLang || !selectedCodes) {
+    return true;
+  }
+  if (selectedCodes.includes(LANGUAGE_OPTION_ALL)) {
+    return true;
+  }
+  const releaseCodes = releaseLang.split(/[,/]/).map(l => l.trim().toLowerCase()).filter(Boolean);
+  const selectedSet = new Set(selectedCodes.map(c => c.toLowerCase()));
+  return releaseCodes.every(code => selectedSet.has(code));
+};
+

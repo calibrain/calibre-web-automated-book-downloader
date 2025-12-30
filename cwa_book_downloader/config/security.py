@@ -142,14 +142,12 @@ def security_settings():
             key="USE_CWA_AUTH",
             label="Use Calibre-Web Database",
             description=(
-                "Authenticate using your existing Calibre-Web users instead of the credentials above."
-                if cwa_db_available
-                else "Authenticate using your existing Calibre-Web users. Set the CWA_DB_PATH environment variable to your Calibre-Web app.db file to enable this option."
+                "Use your existing Calibre-Web user credentials for authentication."
             ),
             default=False,
             env_supported=False,
             disabled=not cwa_db_available,
-            disabled_reason="Set the CWA_DB_PATH environment variable to your Calibre-Web app.db file path to enable this option.",
+            disabled_reason="Mount your Calibre-Web app.db to /auth/app.db in docker compose to enable.",
         ),
     ]
 

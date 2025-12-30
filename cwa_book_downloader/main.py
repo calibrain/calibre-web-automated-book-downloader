@@ -147,8 +147,8 @@ def get_auth_mode() -> str:
 
     try:
         security_config = load_config_file("security")
-        # 1. Check for explicit CWA auth
-        if security_config.get("USE_CWA_AUTH") and CWA_DB_PATH and os.path.isfile(CWA_DB_PATH):
+        # 1. Check for explicit CWA auth (CWA_DB_PATH is pre-validated at startup)
+        if security_config.get("USE_CWA_AUTH") and CWA_DB_PATH:
             return "cwa"
         # 2. Check for built-in credentials
         if security_config.get("BUILTIN_USERNAME") and security_config.get("BUILTIN_PASSWORD_HASH"):
@@ -249,9 +249,9 @@ def login_required(f):
         if auth_mode == "none":
             return f(*args, **kwargs)
 
-        # If CWA mode and database path is invalid, return error
-        if auth_mode == "cwa" and CWA_DB_PATH and not os.path.isfile(CWA_DB_PATH):
-            logger.error(f"CWA_DB_PATH is set to {CWA_DB_PATH} but this is not a valid path")
+        # If CWA mode and database disappeared after startup, return error
+        if auth_mode == "cwa" and CWA_DB_PATH and not CWA_DB_PATH.exists():
+            logger.error(f"CWA database at {CWA_DB_PATH} is no longer accessible")
             return jsonify({"error": "Internal Server Error"}), 500
 
         # Check if user has a valid session
@@ -932,9 +932,9 @@ def api_login() -> Union[Response, Tuple[Response, int]]:
 
         # CWA database authentication mode
         if auth_mode == "cwa":
-            # Validate CWA database path
-            if not os.path.isfile(CWA_DB_PATH):
-                logger.error(f"CWA_DB_PATH is set to {CWA_DB_PATH} but this is not a valid path")
+            # Verify database still exists (it was validated at startup)
+            if not CWA_DB_PATH or not CWA_DB_PATH.exists():
+                logger.error(f"CWA database at {CWA_DB_PATH} is no longer accessible")
                 return jsonify({"error": "Database configuration error"}), 500
 
             try:
@@ -1333,13 +1333,11 @@ def api_releases() -> Union[Response, Tuple[Response, int]]:
             cache_id = f"{provider}_{book_id}"
             book_dict['cover_url'] = transform_cover_url(book_dict['cover_url'], cache_id)
 
-        # Get search info from direct_download source (if it was searched)
         search_info = {}
-        if "direct_download" in source_instances:
-            dd_source = source_instances["direct_download"]
-            if hasattr(dd_source, 'last_search_type'):
-                search_info["direct_download"] = {
-                    "search_type": dd_source.last_search_type
+        for source_name, source_instance in source_instances.items():
+            if hasattr(source_instance, 'last_search_type') and source_instance.last_search_type:
+                search_info[source_name] = {
+                    "search_type": source_instance.last_search_type
                 }
 
         response = {

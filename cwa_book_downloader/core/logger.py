@@ -40,11 +40,21 @@ class CustomLogger(logging.Logger):
 
     def log_resource_usage(self):
         import psutil
+
+        # Sum RSS of all processes for actual app memory
+        app_memory_mb = 0
+        for proc in psutil.process_iter(['memory_info']):
+            try:
+                if proc.info['memory_info']:
+                    app_memory_mb += proc.info['memory_info'].rss / (1024 * 1024)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
         memory = psutil.virtual_memory()
+        system_used_mb = memory.used / (1024 * 1024)
         available_mb = memory.available / (1024 * 1024)
-        memory_used_mb = memory.used / (1024 * 1024)
         cpu_percent = psutil.cpu_percent()
-        self.debug(f"Container Memory: Available={available_mb:.2f} MB, Used={memory_used_mb:.2f} MB, CPU: {cpu_percent:.2f}%")
+        self.debug(f"Container Memory: App={app_memory_mb:.2f} MB, System={system_used_mb:.2f} MB, Available={available_mb:.2f} MB, CPU: {cpu_percent:.2f}%")
 
 
 def setup_logger(name: str, log_file: Path = LOG_FILE) -> CustomLogger:

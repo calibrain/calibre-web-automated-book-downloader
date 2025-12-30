@@ -129,18 +129,22 @@ class TestSupportedFormats:
 class TestContentTypeRouting:
     """Tests for content-type based directory routing."""
 
-    def test_download_paths_default_to_ingest_dir(self):
-        """All content types should default to INGEST_DIR if not specified."""
-        from cwa_book_downloader.config.env import DOWNLOAD_PATHS, INGEST_DIR
+    def test_get_ingest_dir_returns_path(self):
+        """get_ingest_dir should return a Path for all content types."""
+        from cwa_book_downloader.core.utils import get_ingest_dir, CONTENT_TYPES
 
-        # When no specific paths are set, all should default to INGEST_DIR
-        for content_type, path in DOWNLOAD_PATHS.items():
-            # Path should be INGEST_DIR or a custom path
+        # Default (no content type) should return a Path
+        default_path = get_ingest_dir()
+        assert isinstance(default_path, Path)
+
+        # All content types should return a Path
+        for content_type in CONTENT_TYPES:
+            path = get_ingest_dir(content_type)
             assert isinstance(path, Path)
 
-    def test_content_type_routing_keys(self):
-        """All expected content types should be present."""
-        from cwa_book_downloader.config.env import DOWNLOAD_PATHS
+    def test_content_types_list_complete(self):
+        """All expected content types should be present in CONTENT_TYPES."""
+        from cwa_book_downloader.core.utils import CONTENT_TYPES
 
         expected_types = [
             "book (fiction)",
@@ -155,7 +159,15 @@ class TestContentTypeRouting:
         ]
 
         for content_type in expected_types:
-            assert content_type in DOWNLOAD_PATHS, f"Missing content type: {content_type}"
+            assert content_type in CONTENT_TYPES, f"Missing content type: {content_type}"
+
+    def test_get_ingest_dir_unknown_type_returns_default(self):
+        """Unknown content types should return the default ingest directory."""
+        from cwa_book_downloader.core.utils import get_ingest_dir
+
+        default_path = get_ingest_dir()
+        unknown_path = get_ingest_dir("unknown content type")
+        assert unknown_path == default_path
 
 
 # =============================================================================

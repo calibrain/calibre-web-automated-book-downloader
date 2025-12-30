@@ -9,7 +9,7 @@ import { ReleaseCell } from './ReleaseCell';
 import { getColorStyleFromHint } from '../utils/colorMaps';
 import { getNestedValue } from '../utils/objectHelpers';
 import { LanguageMultiSelect } from './LanguageMultiSelect';
-import { LANGUAGE_OPTION_ALL, LANGUAGE_OPTION_DEFAULT, getLanguageFilterValues } from '../utils/languageFilters';
+import { LANGUAGE_OPTION_ALL, LANGUAGE_OPTION_DEFAULT, getLanguageFilterValues, releaseLanguageMatchesFilter } from '../utils/languageFilters';
 
 // Module-level cache for release search results
 // Key format: `${provider}:${provider_id}:${source}`
@@ -92,6 +92,7 @@ const DEFAULT_COLUMN_CONFIG: ReleaseColumnConfig = {
     },
   ],
   grid_template: 'minmax(0,2fr) 60px 80px 80px',
+  supported_filters: ['format', 'language'],  // Default: both filters available
 };
 
 interface ReleaseModalProps {
@@ -916,32 +917,27 @@ export const ReleaseModal = ({
     const supportedLower = supportedFormats.map((f) => f.toLowerCase());
 
     return releases.filter((r) => {
-      // Format filtering: always filter by supported formats
-      if (r.format) {
-        const fmt = r.format.toLowerCase();
-        // If user selected a specific format, filter to that
-        if (formatFilter) {
-          if (fmt !== formatFilter.toLowerCase()) return false;
-        } else {
-          // Otherwise, only show supported formats
-          if (!supportedLower.includes(fmt)) return false;
-        }
-      }
+      // Format filtering
+      const fmt = r.format?.toLowerCase();
 
-      // Language filtering using resolved language codes
-      // null or includes 'all' means show all languages
-      // Otherwise filter to the specific language codes
+      if (formatFilter) {
+        // User selected a specific format - must match exactly
+        if (!fmt || fmt !== formatFilter.toLowerCase()) return false;
+      } else if (fmt) {
+        // No specific filter - show only supported formats
+        if (!supportedLower.includes(fmt)) return false;
+      }
+      // Releases with no format pass through when no filter is set (show all)
+
+      // Language filtering
       const releaseLang = r.extra?.language as string | undefined;
-      if (releaseLang && resolvedLanguageCodes && !resolvedLanguageCodes.includes(LANGUAGE_OPTION_ALL)) {
-        const releaseLangLower = releaseLang.toLowerCase();
-        if (!resolvedLanguageCodes.some(code => code.toLowerCase() === releaseLangLower)) {
-          return false;
-        }
+      if (!releaseLanguageMatchesFilter(releaseLang, resolvedLanguageCodes ?? defaultLanguages)) {
+        return false;
       }
 
       return true;
     });
-  }, [releasesBySource, activeTab, formatFilter, resolvedLanguageCodes, supportedFormats]);
+  }, [releasesBySource, activeTab, formatFilter, resolvedLanguageCodes, supportedFormats, defaultLanguages]);
 
   // Get column config from response or use default
   const columnConfig = useMemo((): ReleaseColumnConfig => {
@@ -1254,7 +1250,9 @@ export const ReleaseModal = ({
                   </div>
 
                   {/* Filter funnel button - stays fixed */}
-                  {(availableFormats.length > 0 || bookLanguages.length > 0) && (
+                  {/* Only show filter button if source supports at least one filter type */}
+                  {((columnConfig.supported_filters?.includes('format') && availableFormats.length > 0) ||
+                    (columnConfig.supported_filters?.includes('language') && bookLanguages.length > 0)) && (
                     <Dropdown
                       align="right"
                       widthClassName="w-auto flex-shrink-0"
@@ -1287,7 +1285,7 @@ export const ReleaseModal = ({
                     >
                       {({ close }) => (
                         <div className="p-4 space-y-4">
-                          {availableFormats.length > 0 && (
+                          {columnConfig.supported_filters?.includes('format') && availableFormats.length > 0 && (
                             <DropdownList
                               label="Format"
                               options={formatOptions}
@@ -1296,13 +1294,15 @@ export const ReleaseModal = ({
                               placeholder="All Formats"
                             />
                           )}
-                          <LanguageMultiSelect
-                            label="Language"
-                            options={bookLanguages}
-                            value={languageFilter}
-                            onChange={setLanguageFilter}
-                            defaultLanguageCodes={defaultLanguages}
-                          />
+                          {columnConfig.supported_filters?.includes('language') && (
+                            <LanguageMultiSelect
+                              label="Language"
+                              options={bookLanguages}
+                              value={languageFilter}
+                              onChange={setLanguageFilter}
+                              defaultLanguageCodes={defaultLanguages}
+                            />
+                          )}
                           {/* Apply button - for AA, re-fetches with language filter; for others, just closes */}
                           {activeTab === 'direct_download' && (
                             <button
@@ -1386,7 +1386,8 @@ export const ReleaseModal = ({
                 />
               ) : (
                 <>
-                  <div className="divide-y divide-gray-200/60 dark:divide-gray-800/60">
+                  {/* Key includes filter to force remount when filter changes */}
+                  <div key={`releases-${formatFilter}-${languageFilter.join(',')}`} className="divide-y divide-gray-200/60 dark:divide-gray-800/60">
                     {filteredReleases.map((release, index) => (
                       <ReleaseRow
                         key={`${release.source}-${release.source_id}`}
@@ -1401,11 +1402,13 @@ export const ReleaseModal = ({
                       />
                     ))}
                   </div>
-                  {/* Expand search button - only show if ISBN search was used (otherwise we already did title+author) */}
-                  {activeTab === 'direct_download' &&
-                   releasesBySource[activeTab]?.search_info?.direct_download?.search_type === 'isbn' &&
-                   !expandedBySource[activeTab] &&
-                   !currentTabLoading && (
+                  {/* Expand search button */}
+                  {!expandedBySource[activeTab] &&
+                   !currentTabLoading &&
+                   releasesBySource[activeTab]?.search_info?.[activeTab]?.search_type &&
+                   !['title_author', 'expanded'].includes(
+                     releasesBySource[activeTab]?.search_info?.[activeTab]?.search_type ?? ''
+                   ) && (
                     <div
                       className="py-3 text-center animate-slide-up will-change-transform"
                       style={{

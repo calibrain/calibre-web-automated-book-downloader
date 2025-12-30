@@ -117,6 +117,7 @@ class ReleaseColumnConfig:
     leading_cell: Optional[LeadingCellConfig] = None     # Defaults to thumbnail mode if None
     online_servers: Optional[List[str]] = None           # For IRC: list of currently online server nicks
     cache_ttl_seconds: Optional[int] = None              # How long to cache results (default: 5 min)
+    supported_filters: Optional[List[str]] = None        # Which filters this source supports: ["format", "language"]
 
 
 def serialize_column_config(config: ReleaseColumnConfig) -> Dict[str, Any]:
@@ -162,6 +163,10 @@ def serialize_column_config(config: ReleaseColumnConfig) -> Dict[str, Any]:
     if config.cache_ttl_seconds is not None:
         result["cache_ttl_seconds"] = config.cache_ttl_seconds
 
+    # Include supported filters (sources declare which filters they support)
+    if config.supported_filters is not None:
+        result["supported_filters"] = config.supported_filters
+
     return result
 
 
@@ -198,7 +203,8 @@ def _default_column_config() -> ReleaseColumnConfig:
                 hide_mobile=False,  # Size shown on mobile
             ),
         ],
-        grid_template="minmax(0,2fr) 60px 80px 80px"
+        grid_template="minmax(0,2fr) 60px 80px 80px",
+        supported_filters=["format", "language"],  # Default: both filters available
     )
 
 

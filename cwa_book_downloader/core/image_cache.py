@@ -563,7 +563,7 @@ def get_image_cache() -> ImageCacheService:
                     max_size_mb=max_size_mb,
                     ttl_seconds=ttl_seconds,
                 )
-                logger.info(f"Initialized image cache: {cache_dir} (max {max_size_mb}MB, TTL {ttl_days} days)")
+                logger.debug(f"Initialized image cache: {cache_dir} (max {max_size_mb}MB, TTL {ttl_days} days)")
 
     return _instance
 

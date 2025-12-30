@@ -5,7 +5,58 @@ Provides common helper functions used across the application.
 """
 
 import base64
+from pathlib import Path
 from typing import Optional
+
+
+CONTENT_TYPES = [
+    "book (fiction)",
+    "book (non-fiction)",
+    "book (unknown)",
+    "magazine",
+    "comic book",
+    "audiobook",
+    "standards document",
+    "musical score",
+    "other",
+]
+
+_CONTENT_TYPE_TO_CONFIG_KEY = {
+    "book (fiction)": "INGEST_DIR_BOOK_FICTION",
+    "book (non-fiction)": "INGEST_DIR_BOOK_NON_FICTION",
+    "book (unknown)": "INGEST_DIR_BOOK_UNKNOWN",
+    "magazine": "INGEST_DIR_MAGAZINE",
+    "comic book": "INGEST_DIR_COMIC_BOOK",
+    "audiobook": "INGEST_DIR_AUDIOBOOK",
+    "standards document": "INGEST_DIR_STANDARDS_DOCUMENT",
+    "musical score": "INGEST_DIR_MUSICAL_SCORE",
+    "other": "INGEST_DIR_OTHER",
+}
+
+
+def get_ingest_dir(content_type: Optional[str] = None) -> Path:
+    """Get the ingest directory for a content type, falling back to default."""
+    from cwa_book_downloader.core.config import config
+
+    default_ingest_dir = Path(config.get("INGEST_DIR", "/cwa-book-ingest"))
+
+    if not content_type:
+        return default_ingest_dir
+
+    # Normalize content type for lookup
+    content_type_lower = content_type.lower().strip()
+
+    # Look up the config key for this content type
+    config_key = _CONTENT_TYPE_TO_CONFIG_KEY.get(content_type_lower)
+    if not config_key:
+        return default_ingest_dir
+
+    # Get the custom directory from config (empty string means use default)
+    custom_dir = config.get(config_key, "")
+    if custom_dir:
+        return Path(custom_dir)
+
+    return default_ingest_dir
 
 
 def transform_cover_url(cover_url: Optional[str], cache_id: str) -> Optional[str]:

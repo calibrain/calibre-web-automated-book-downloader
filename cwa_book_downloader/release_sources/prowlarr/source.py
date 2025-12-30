@@ -197,6 +197,10 @@ class ProwlarrSource(ReleaseSource):
     name = "prowlarr"
     display_name = "Prowlarr"
 
+    def __init__(self):
+        self.last_search_type: Optional[str] = None
+        self._category_filtered_indexers: List[int] = []
+
     @classmethod
     def get_column_config(cls) -> ReleaseColumnConfig:
         """Column configuration for Prowlarr releases."""
@@ -250,6 +254,7 @@ class ProwlarrSource(ReleaseSource):
             ],
             grid_template="minmax(0,2fr) minmax(80px,1fr) 60px 70px 70px 80px",
             leading_cell=LeadingCellConfig(type=LeadingCellType.NONE),  # No leading cell for Prowlarr
+            supported_filters=["format"],  # Prowlarr has unreliable language metadata
         )
 
     def _get_client(self) -> Optional[ProwlarrClient]:
@@ -300,7 +305,7 @@ class ProwlarrSource(ReleaseSource):
 
         Args:
             book: Book metadata to search for
-            expand_search: Ignored - Prowlarr always uses title+author search
+            expand_search: If True, skip category filtering (broader search)
             languages: Ignored - Prowlarr doesn't support language filtering
 
         Returns:
@@ -340,31 +345,46 @@ class ProwlarrSource(ReleaseSource):
             logger.warning("No indexers selected - configure indexers in Prowlarr settings")
             return []
 
-        # Book categories: 7000 (Books parent), 7020 (EBook), 7030 (Comics), etc.
-        # We search the parent category which includes all subcategories
-        book_categories = [7000]
+        if expand_search:
+            if not self._category_filtered_indexers:
+                logger.debug("No category-filtered indexers to expand")
+                return []
+            indexers_to_search = self._category_filtered_indexers
+            categories = None
+            self.last_search_type = "expanded"
+        else:
+            indexers_to_search = indexer_ids
+            categories = [7000]
+            self._category_filtered_indexers = []
+            self.last_search_type = "categories"
 
-        logger.debug(f"Searching Prowlarr: query='{query}', indexers={indexer_ids}")
+        logger.debug(f"Searching Prowlarr: query='{query}', indexers={indexers_to_search}, categories={categories}")
 
         all_results = []
         try:
-            # Make separate API call for each indexer
-            for indexer_id in indexer_ids:
+            for indexer_id in indexers_to_search:
                 try:
-                    raw_results = client.search(query=query, indexer_ids=[indexer_id], categories=book_categories)
+                    raw_results = client.search(query=query, indexer_ids=[indexer_id], categories=categories)
+
+                    if raw_results and categories:
+                        self._category_filtered_indexers.append(indexer_id)
+                    elif not raw_results and categories:
+                        logger.debug(f"Indexer {indexer_id}: retrying without category filter")
+                        raw_results = client.search(query=query, indexer_ids=[indexer_id], categories=None)
+
                     if raw_results:
                         all_results.extend(raw_results)
                 except Exception as e:
                     logger.warning(f"Search failed for indexer {indexer_id}: {e}")
-                    continue
+
+            if not expand_search and not self._category_filtered_indexers:
+                self.last_search_type = "expanded"
 
             results = [_prowlarr_result_to_release(r) for r in all_results]
 
-            # Log consolidated summary
             if results:
                 torrent_count = sum(1 for r in results if r.protocol == "torrent")
                 nzb_count = sum(1 for r in results if r.protocol == "nzb")
-                # Get unique indexer names
                 indexers = sorted(set(r.indexer for r in results if r.indexer))
                 indexer_str = ", ".join(indexers) if indexers else "unknown"
                 logger.info(f"Prowlarr: {len(results)} results ({torrent_count} torrent, {nzb_count} nzb) from {indexer_str}")
