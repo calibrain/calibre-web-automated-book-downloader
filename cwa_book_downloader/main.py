@@ -138,28 +138,24 @@ def clear_failed_logins(username: str) -> None:
 def get_auth_mode() -> str:
     """Determine which authentication mode is active.
 
-    Priority order:
-    1. Built-in credentials (if configured) -> "builtin"
-    2. CWA database (if CWA_DB_PATH is set and exists) -> "cwa"
-    3. No auth required -> "none"
+    Priority: 
+    1. CWA (if enabled in settings and DB path exists)
+    2. Built-in credentials (if configured)
+    3. No auth required or error -> "none"
     """
     from cwa_book_downloader.core.settings_registry import load_config_file
 
-    # Check for built-in credentials first (they take priority)
     try:
         security_config = load_config_file("security")
-        username = security_config.get("BUILTIN_USERNAME")
-        password_hash = security_config.get("BUILTIN_PASSWORD_HASH")
-        if username and password_hash:
+        # 1. Check for explicit CWA auth
+        if security_config.get("USE_CWA_AUTH") and CWA_DB_PATH and os.path.isfile(CWA_DB_PATH):
+            return "cwa"
+        # 2. Check for built-in credentials
+        if security_config.get("BUILTIN_USERNAME") and security_config.get("BUILTIN_PASSWORD_HASH"):
             return "builtin"
     except Exception:
-        pass  # If config can't be loaded, fall through to other methods
+        pass
 
-    # Check for CWA database
-    if CWA_DB_PATH and os.path.isfile(CWA_DB_PATH):
-        return "cwa"
-
-    # No auth configured
     return "none"
 
 
