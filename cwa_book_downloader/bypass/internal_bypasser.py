@@ -966,6 +966,14 @@ def _get_driver():
     
     if not DRIVER:
         return _init_driver()
+
+    # Verify the existing driver is actually healthy (browser process still alive)
+    if not _is_driver_healthy():
+        logger.warning("Existing driver is unhealthy (browser may have crashed), reinitializing...")
+        _reset_driver()
+        _ensure_display_initialized()  # Display was shut down by _reset_driver, reinitialize it
+        return _init_driver()
+
     logger.log_resource_usage()
     return DRIVER
 
@@ -1159,14 +1167,23 @@ def warmup():
         logger.debug("Bypasser warmup skipped - AA donator key set (fast downloads available)")
         return
 
-    # Clean up any orphan processes from previous crashes before starting fresh
-    _cleanup_orphan_processes()
-
     with LOCKED:
         if is_warmed_up():
             logger.debug("Bypasser already fully warmed up")
             return
-        
+
+        # Clean up any orphan processes from previous crashes before starting fresh.
+        # This must be AFTER the is_warmed_up() check to avoid killing a healthy
+        # Chrome browser that was started by a previous warmup.
+        _cleanup_orphan_processes()
+
+        # If we get here, either nothing is initialized OR the driver is unhealthy.
+        # Reset any stale state before reinitializing to avoid the warmup thinking
+        # things are already set up when the underlying processes are dead.
+        if DRIVER is not None or DISPLAY["xvfb"] is not None:
+            logger.info("Resetting stale bypasser state before warmup...")
+            _reset_driver()
+
         logger.info("Warming up Cloudflare bypasser (pre-initializing display and browser)...")
         
         try:
@@ -1186,9 +1203,31 @@ def warmup():
         except Exception as e:
             logger.warning(f"Failed to warm up bypasser: {e}")
 
+def _is_driver_healthy() -> bool:
+    """Check if the Chrome driver is actually responsive (not just non-None).
+
+    The DRIVER variable can be non-None but the underlying Chrome process may have
+    crashed silently. This function pings the driver to verify it's actually alive.
+    """
+    global DRIVER
+    if DRIVER is None:
+        return False
+
+    try:
+        # Try a simple operation that requires the driver to be responsive
+        # get_current_url() is lightweight and doesn't change state
+        DRIVER.get_current_url()
+        return True
+    except Exception as e:
+        logger.warning(f"Driver health check failed: {type(e).__name__}: {e}")
+        return False
+
+
 def is_warmed_up() -> bool:
-    """Check if the bypasser is fully warmed up (display and browser initialized)."""
-    return DISPLAY["xvfb"] is not None and DRIVER is not None
+    """Check if the bypasser is fully warmed up (display and browser initialized and healthy)."""
+    if DISPLAY["xvfb"] is None or DRIVER is None:
+        return False
+    return _is_driver_healthy()
 
 def shutdown_if_idle():
     """Start the inactivity countdown when all WebSocket clients disconnect.
