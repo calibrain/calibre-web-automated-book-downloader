@@ -365,6 +365,18 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
 
     # Extract additional metadata
     info = _extract_book_metadata(original_divs[-6])
+
+    # Fetch download count from the summary API (loaded async on the page)
+    try:
+        summary_url = f"{network.get_aa_base_url()}/dyn/md5/summary/{book_id}"
+        summary_response = downloader.html_get_page(summary_url, selector=network.AAMirrorSelector())
+        if summary_response:
+            summary_data = json.loads(summary_response)
+            if "downloads_total" in summary_data:
+                info["Downloads"] = [str(summary_data["downloads_total"])]
+    except Exception as e:
+        logger.debug(f"Failed to fetch download count for {book_id}: {e}")
+
     book_info.info = info
 
     # Set language and year from metadata if available
@@ -372,6 +384,9 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str) -> BookInfo:
         book_info.language = info["Language"][0]
     if info.get("Year"):
         book_info.year = info["Year"][0]
+
+    # Set source URL for linking back to Anna's Archive
+    book_info.source_url = f"{network.get_aa_base_url()}/md5/{book_id}"
 
     return book_info
 
@@ -562,14 +577,14 @@ def _get_urls_for_source(
     # Welib - fetch page and parse for slow_download links
     if source_id == "welib":
         if status_callback:
-            status_callback("resolving", "Fetching welib sources...")
+            status_callback("resolving", "Fetching welib sources")
         return _get_download_urls_from_welib(book_info.id, selector=selector, cancel_flag=cancel_flag)
 
     # AA page sources - fetch AA page if not already done
     if source_id in _AA_PAGE_SOURCES:
         if not aa_page_fetched and not urls_by_source:
             if status_callback:
-                status_callback("resolving", "Fetching download sources...")
+                status_callback("resolving", "Fetching download sources")
             _fetch_aa_page_urls(book_info, urls_by_source)
 
         return urls_by_source.get(source_id, [])
@@ -877,7 +892,7 @@ def _extract_slow_download_url(
 
         # After countdown, update status and re-fetch
         if status_callback and source_context:
-            status_callback("resolving", f"{source_context} - Fetching...")
+            status_callback("resolving", f"{source_context} - Fetching")
 
         return _get_download_url(link, title, cancel_flag, status_callback, selector, source_context)
 
@@ -900,6 +915,7 @@ def _book_info_to_release(book_info: BookInfo) -> Release:
         format=book_info.format,
         size=book_info.size,
         download_url=book_info.download_urls[0] if book_info.download_urls else None,
+        info_url=f"{network.get_aa_base_url()}/md5/{book_info.id}",
         protocol=ReleaseProtocol.HTTP,
         indexer="Anna's Archive",
         extra={
@@ -1158,7 +1174,7 @@ class DirectDownloadHandler(DownloadHandler):
                 return None
 
             # Execute download via _download_book (handles cascade and bypass)
-            status_callback("resolving", "Finding download source...")
+            status_callback("resolving", "Finding download source")
             success_url = _download_book(
                 book_info,
                 book_path,

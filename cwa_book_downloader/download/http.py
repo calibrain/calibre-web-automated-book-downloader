@@ -11,19 +11,77 @@ import requests
 from tqdm import tqdm
 
 from cwa_book_downloader.download import network
-from cwa_book_downloader.config.env import USE_CF_BYPASS, USING_EXTERNAL_BYPASSER
 from cwa_book_downloader.core.config import config as app_config
 from cwa_book_downloader.core.logger import setup_logger
 
-# Import bypasser if enabled
-if USE_CF_BYPASS:
-    if USING_EXTERNAL_BYPASSER:
-        from cwa_book_downloader.bypass.external_bypasser import get_bypassed_page
-        # External bypasser doesn't share cookies/UA
-        get_cf_cookies_for_domain = lambda domain: {}
-        get_cf_user_agent_for_domain = lambda domain: None
+# Bypasser modules are imported lazily to support dynamic selection based on config
+_internal_bypasser = None
+_external_bypasser = None
+
+
+def _get_internal_bypasser():
+    """Lazy import of internal bypasser module."""
+    global _internal_bypasser
+    if _internal_bypasser is None:
+        try:
+            from cwa_book_downloader.bypass import internal_bypasser
+            _internal_bypasser = internal_bypasser
+        except ImportError as e:
+            raise RuntimeError(
+                f"Failed to import internal bypasser: {e}. "
+                "Check that all dependencies are installed. "
+                "You may need to disable CF bypass or use the external bypasser."
+            ) from e
+    return _internal_bypasser
+
+
+def _get_external_bypasser():
+    """Lazy import of external bypasser module."""
+    global _external_bypasser
+    if _external_bypasser is None:
+        try:
+            from cwa_book_downloader.bypass import external_bypasser
+            _external_bypasser = external_bypasser
+        except ImportError as e:
+            raise RuntimeError(
+                f"Failed to import external bypasser: {e}. "
+                "Check that the external bypasser is properly configured."
+            ) from e
+    return _external_bypasser
+
+
+def _is_using_external_bypasser() -> bool:
+    """Check if external bypasser is configured (reads from config, not just env)."""
+    return app_config.get("USING_EXTERNAL_BYPASSER", False)
+
+
+def _is_cf_bypass_enabled() -> bool:
+    """Check if Cloudflare bypass is enabled."""
+    return app_config.get("USE_CF_BYPASS", True)
+
+
+def get_bypassed_page(url, selector=None, cancel_flag=None):
+    """Wrapper that delegates to the appropriate bypasser based on config."""
+    if _is_using_external_bypasser():
+        return _get_external_bypasser().get_bypassed_page(url, selector, cancel_flag)
     else:
-        from cwa_book_downloader.bypass.internal_bypasser import get_bypassed_page, get_cf_cookies_for_domain, get_cf_user_agent_for_domain
+        return _get_internal_bypasser().get_bypassed_page(url, selector, cancel_flag)
+
+
+def get_cf_cookies_for_domain(domain):
+    """Get CF cookies - only available with internal bypasser."""
+    if _is_using_external_bypasser():
+        logger.debug(f"External bypasser in use, CF cookies not available for {domain}")
+        return {}
+    return _get_internal_bypasser().get_cf_cookies_for_domain(domain)
+
+
+def get_cf_user_agent_for_domain(domain):
+    """Get CF user agent - only available with internal bypasser."""
+    if _is_using_external_bypasser():
+        logger.debug(f"External bypasser in use, CF user agent not available for {domain}")
+        return None
+    return _get_internal_bypasser().get_cf_user_agent_for_domain(domain)
 
 logger = setup_logger(__name__)
 
@@ -135,7 +193,7 @@ def html_get_page(
             return ""
 
         try:
-            if use_bypasser_now and USE_CF_BYPASS:
+            if use_bypasser_now and _is_cf_bypass_enabled():
                 logger.debug(f"GET (bypasser): {current_url}")
                 try:
                     result = get_bypassed_page(current_url, selector, cancel_flag)
@@ -148,7 +206,7 @@ def html_get_page(
             # Try with CF cookies/UA if available (from previous bypass)
             cookies = {}
             headers = {}
-            if USE_CF_BYPASS:
+            if _is_cf_bypass_enabled():
                 parsed = urlparse(current_url)
                 hostname = parsed.hostname or ""
                 cookies = get_cf_cookies_for_domain(hostname)
@@ -165,7 +223,7 @@ def html_get_page(
 
             # 403 = Cloudflare/DDoS-Guard protection
             if status == 403:
-                if USE_CF_BYPASS and not use_bypasser_now:
+                if _is_cf_bypass_enabled() and not use_bypasser_now:
                     # Before switching to bypasser, check if cookies have become available
                     # (another concurrent download may have completed bypass and extracted cookies)
                     parsed = urlparse(current_url)
@@ -238,7 +296,7 @@ def download_url(
             logger.info(f"Downloading: {current_url} (attempt {attempt + 1}/{MAX_DOWNLOAD_RETRIES})")
             # Try with CF cookies/UA if available
             cookies = {}
-            if USE_CF_BYPASS:
+            if _is_cf_bypass_enabled():
                 parsed = urlparse(current_url)
                 hostname = parsed.hostname or ""
                 cookies = get_cf_cookies_for_domain(hostname)
@@ -286,7 +344,7 @@ def download_url(
             retryable = _is_retryable_error(e)
 
             # Z-Library 403 - try refreshing cookies via bypasser once before giving up
-            if status == 403 and USE_CF_BYPASS and not zlib_cookie_refresh_attempted:
+            if status == 403 and _is_cf_bypass_enabled() and not zlib_cookie_refresh_attempted:
                 parsed = urlparse(current_url)
                 if parsed.hostname and 'z-lib' in parsed.hostname and referer:
                     zlib_cookie_refresh_attempted = True
@@ -309,14 +367,14 @@ def download_url(
             if status == 429:
                 logger.info(f"Rate limited (429) - trying next source")
                 if status_callback:
-                    status_callback("resolving", "Server busy, trying next...")
+                    status_callback("resolving", "Server busy, trying next")
                 return None
 
             # Timeout - don't retry, server likely overloaded
             if isinstance(e, requests.exceptions.Timeout):
                 logger.warning(f"Timeout: {current_url} - skipping to next source")
                 if status_callback:
-                    status_callback("resolving", "Server timed out, trying next...")
+                    status_callback("resolving", "Server timed out, trying next")
                 return None
 
             # Try to resume if we got some data
@@ -360,7 +418,7 @@ def _try_resume(
             # Try with CF cookies/UA if available
             cookies = {}
             resume_headers = {**(base_headers or DOWNLOAD_HEADERS), 'Range': f'bytes={start_byte}-'}
-            if USE_CF_BYPASS:
+            if _is_cf_bypass_enabled():
                 parsed = urlparse(url)
                 hostname = parsed.hostname or ""
                 cookies = get_cf_cookies_for_domain(hostname)

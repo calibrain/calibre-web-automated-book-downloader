@@ -626,7 +626,7 @@ def _post_process_download(
     # Handle archive extraction (RAR/ZIP)
     if is_archive(temp_file):
         logger.info(f"Archive detected, extracting: {temp_file.name}")
-        status_callback("resolving", "Extracting archive...")
+        status_callback("resolving", "Extracting archive")
 
         result = process_archive(
             archive_path=temp_file,
@@ -646,7 +646,7 @@ def _post_process_download(
     # Handle directory (multi-file torrent/usenet downloads)
     if temp_file.is_dir():
         logger.info(f"Directory detected, processing: {temp_file.name}")
-        status_callback("resolving", "Processing download folder...")
+        status_callback("resolving", "Processing download folder")
 
         final_paths, error = process_directory(
             directory=temp_file,
@@ -659,11 +659,10 @@ def _post_process_download(
             return None
 
         if final_paths:
-            formats = [p.suffix.lstrip(".").upper() for p in final_paths]
-            if len(formats) == 1:
-                message = f"Downloaded: {formats[0]}"
+            if len(final_paths) == 1:
+                message = "Complete"
             else:
-                message = f"Downloaded: {len(formats)} files ({', '.join(formats)})"
+                message = f"Complete ({len(final_paths)} files)"
             status_callback("complete", message)
             return str(final_paths[0])
         else:
@@ -723,6 +722,8 @@ def _post_process_download(
 
     os.rename(str(intermediate_path), str(final_path))
     logger.info(f"Download completed: {final_path.name}")
+
+    status_callback("complete", "Complete")
 
     return str(final_path)
 

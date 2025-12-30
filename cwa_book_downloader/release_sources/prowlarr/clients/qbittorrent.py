@@ -184,7 +184,7 @@ class QBittorrentClient(DownloadClient):
             # For active downloads without a special message, leave message as None
             # so the handler can build the progress message
             if complete:
-                message = "Download complete"
+                message = "Complete"
 
             # Only include ETA if it's reasonable (less than 1 week)
             eta = torrent.eta if 0 < torrent.eta < 604800 else None

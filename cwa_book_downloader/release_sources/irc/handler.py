@@ -60,7 +60,7 @@ class IRCDownloadHandler(DownloadHandler):
 
         try:
             # Phase 1: Connect to IRC
-            status_callback("resolving", "Connecting to IRC...")
+            status_callback("resolving", "Connecting to IRC")
 
             if check_cancelled():
                 return None
@@ -70,7 +70,7 @@ class IRCDownloadHandler(DownloadHandler):
             client.join_channel(DEFAULT_CHANNEL)
 
             # Phase 2: Send download request
-            status_callback("resolving", "Requesting file from bot...")
+            status_callback("resolving", "Requesting file from bot")
 
             if check_cancelled():
                 return None
@@ -79,7 +79,7 @@ class IRCDownloadHandler(DownloadHandler):
             client.send_message(f"#{DEFAULT_CHANNEL}", download_request)
 
             # Phase 3: Wait for DCC offer
-            status_callback("resolving", "Waiting for bot response...")
+            status_callback("resolving", "Waiting for bot response")
 
             offer = client.wait_for_dcc(timeout=120.0, result_type=False)
 

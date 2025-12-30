@@ -248,7 +248,7 @@ class SABnzbdClient(DownloadClient):
                         return DownloadStatus(
                             progress=100,
                             state="complete",
-                            message="Download complete",
+                            message="Complete",
                             complete=True,
                             file_path=storage,
                         )

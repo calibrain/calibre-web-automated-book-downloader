@@ -210,7 +210,7 @@ class NZBGetClient(DownloadClient):
                     return DownloadStatus(
                         progress=progress,
                         state=state,
-                        message=status,
+                        message=status.replace("-", " ").title(),
                         complete=False,
                         file_path=None,
                         download_speed=group.get("DownloadRate"),
@@ -233,7 +233,7 @@ class NZBGetClient(DownloadClient):
                         return DownloadStatus(
                             progress=100,
                             state="complete",
-                            message="Download complete",
+                            message="Complete",
                             complete=True,
                             file_path=dest_dir,
                         )

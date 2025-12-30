@@ -21,7 +21,7 @@ from cwa_book_downloader.release_sources.direct_download import SearchUnavailabl
 from cwa_book_downloader.config.settings import _SUPPORTED_BOOK_LANGUAGE
 from cwa_book_downloader.config.env import (
     BUILD_VERSION, CWA_DB_PATH, DEBUG, FLASK_HOST, FLASK_PORT,
-    RELEASE_VERSION, USING_EXTERNAL_BYPASSER,
+    RELEASE_VERSION,
 )
 from cwa_book_downloader.core.config import config as app_config
 from cwa_book_downloader.core.logger import setup_logger
@@ -295,7 +295,8 @@ def favicon(_: Any = None) -> Response:
 
 # Register bypasser warmup callback for when first WebSocket client connects
 # and shutdown callback for when all clients disconnect
-if not USING_EXTERNAL_BYPASSER:
+# Use app_config to read from settings file (not just env var) so UI changes work after restart
+if not app_config.get("USING_EXTERNAL_BYPASSER", False):
     from cwa_book_downloader.bypass.internal_bypasser import warmup as bypasser_warmup, shutdown_if_idle as bypasser_shutdown
     ws_manager.register_on_first_connect(bypasser_warmup)
     ws_manager.register_on_all_disconnect(bypasser_shutdown)
@@ -303,7 +304,7 @@ if not USING_EXTERNAL_BYPASSER:
 
 if DEBUG:
     import subprocess
-    if USING_EXTERNAL_BYPASSER:
+    if app_config.get("USING_EXTERNAL_BYPASSER", False):
         STOP_GUI = lambda: None
     else:
         from cwa_book_downloader.bypass.internal_bypasser import _reset_driver as STOP_GUI
