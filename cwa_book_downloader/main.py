@@ -1333,13 +1333,11 @@ def api_releases() -> Union[Response, Tuple[Response, int]]:
             cache_id = f"{provider}_{book_id}"
             book_dict['cover_url'] = transform_cover_url(book_dict['cover_url'], cache_id)
 
-        # Get search info from direct_download source (if it was searched)
         search_info = {}
-        if "direct_download" in source_instances:
-            dd_source = source_instances["direct_download"]
-            if hasattr(dd_source, 'last_search_type'):
-                search_info["direct_download"] = {
-                    "search_type": dd_source.last_search_type
+        for source_name, source_instance in source_instances.items():
+            if hasattr(source_instance, 'last_search_type') and source_instance.last_search_type:
+                search_info[source_name] = {
+                    "search_type": source_instance.last_search_type
                 }
 
         response = {

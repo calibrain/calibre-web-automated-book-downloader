@@ -251,7 +251,7 @@ export interface Release {
 
 // Search info returned by release sources
 export interface SourceSearchInfo {
-  search_type: 'isbn' | 'title_author';
+  search_type: 'isbn' | 'title_author' | 'categories' | 'expanded';
 }
 
 // Response from /api/releases endpoint

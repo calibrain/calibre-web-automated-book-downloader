@@ -55,8 +55,8 @@ class QBittorrentClient(DownloadClient):
         """Test connection to qBittorrent."""
         try:
             self._client.auth_log_in()
-            version = self._client.app.version
-            return True, f"Connected to qBittorrent {version}"
+            api_version = self._client.app.web_api_version
+            return True, f"Connected to qBittorrent (API v{api_version})"
         except Exception as e:
             return False, f"Connection failed: {str(e)}"
 

@@ -1402,11 +1402,13 @@ export const ReleaseModal = ({
                       />
                     ))}
                   </div>
-                  {/* Expand search button - only show if ISBN search was used (otherwise we already did title+author) */}
-                  {activeTab === 'direct_download' &&
-                   releasesBySource[activeTab]?.search_info?.direct_download?.search_type === 'isbn' &&
-                   !expandedBySource[activeTab] &&
-                   !currentTabLoading && (
+                  {/* Expand search button */}
+                  {!expandedBySource[activeTab] &&
+                   !currentTabLoading &&
+                   releasesBySource[activeTab]?.search_info?.[activeTab]?.search_type &&
+                   !['title_author', 'expanded'].includes(
+                     releasesBySource[activeTab]?.search_info?.[activeTab]?.search_type ?? ''
+                   ) && (
                     <div
                       className="py-3 text-center animate-slide-up will-change-transform"
                       style={{
