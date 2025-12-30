@@ -1,31 +1,27 @@
 """External Cloudflare bypasser using FlareSolverr."""
 
-from threading import Event
-from typing import Optional, TYPE_CHECKING
-import requests
-import time
 import random
+import time
+from threading import Event
+from typing import TYPE_CHECKING, Optional
 
+import requests
+
+from cwa_book_downloader.bypass import BypassCancelledException
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.core.logger import setup_logger
 
 if TYPE_CHECKING:
     from cwa_book_downloader.download import network
 
-
-class BypassCancelledException(Exception):
-    """Raised when a bypass operation is cancelled."""
-    pass
-
 logger = setup_logger(__name__)
 
-# Connection timeout (seconds) - how long to wait for external bypasser to accept connection
+# Timeout constants (seconds)
 CONNECT_TIMEOUT = 10
-# Maximum read timeout cap (seconds) - hard limit regardless of EXT_BYPASSER_TIMEOUT
 MAX_READ_TIMEOUT = 120
-# Buffer added to bypasser's configured timeout (seconds) - accounts for processing overhead
 READ_TIMEOUT_BUFFER = 15
-# Retry settings for bypasser failures
+
+# Retry settings
 MAX_RETRY = 5
 BACKOFF_BASE = 1.0
 BACKOFF_CAP = 10.0
@@ -48,22 +44,13 @@ def _fetch_via_bypasser(target_url: str) -> Optional[str]:
         logger.error("External bypasser not configured. Check EXT_BYPASSER_URL and EXT_BYPASSER_PATH.")
         return None
 
-    bypasser_endpoint = f"{bypasser_url}{bypasser_path}"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "cmd": "request.get",
-        "url": target_url,
-        "maxTimeout": bypasser_timeout
-    }
-
-    # Calculate read timeout: bypasser timeout (ms -> s) + buffer, capped at max
     read_timeout = min((bypasser_timeout / 1000) + READ_TIMEOUT_BUFFER, MAX_READ_TIMEOUT)
 
     try:
         response = requests.post(
-            bypasser_endpoint,
-            headers=headers,
-            json=payload,
+            f"{bypasser_url}{bypasser_path}",
+            headers={"Content-Type": "application/json"},
+            json={"cmd": "request.get", "url": target_url, "maxTimeout": bypasser_timeout},
             timeout=(CONNECT_TIMEOUT, read_timeout)
         )
         response.raise_for_status()
@@ -73,17 +60,13 @@ def _fetch_via_bypasser(target_url: str) -> Optional[str]:
         message = result.get('message', '')
         logger.debug(f"External bypasser response for '{target_url}': {status} - {message}")
 
-        # Check for error status (bypasser returns status="error" with solution=null on failure)
         if status != 'ok':
             logger.warning(f"External bypasser failed for '{target_url}': {status} - {message}")
             return None
 
         solution = result.get('solution')
-        if not solution:
-            logger.warning(f"External bypasser returned empty solution for '{target_url}'")
-            return None
+        html = solution.get('response', '') if solution else ''
 
-        html = solution.get('response', '')
         if not html:
             logger.warning(f"External bypasser returned empty response for '{target_url}'")
             return None
@@ -92,16 +75,36 @@ def _fetch_via_bypasser(target_url: str) -> Optional[str]:
 
     except requests.exceptions.Timeout:
         logger.warning(f"External bypasser timed out for '{target_url}' (connect: {CONNECT_TIMEOUT}s, read: {read_timeout:.0f}s)")
-        return None
     except requests.exceptions.RequestException as e:
         logger.warning(f"External bypasser request failed for '{target_url}': {e}")
-        return None
     except (KeyError, TypeError, ValueError) as e:
         logger.warning(f"External bypasser returned malformed response for '{target_url}': {e}")
-        return None
+
+    return None
 
 
-def get_bypassed_page(url: str, selector: Optional["network.AAMirrorSelector"] = None, cancel_flag: Optional[Event] = None) -> Optional[str]:
+def _check_cancelled(cancel_flag: Optional[Event], context: str) -> None:
+    """Check if operation was cancelled and raise exception if so."""
+    if cancel_flag and cancel_flag.is_set():
+        logger.info(f"External bypasser cancelled {context}")
+        raise BypassCancelledException("Bypass cancelled")
+
+
+def _sleep_with_cancellation(seconds: float, cancel_flag: Optional[Event]) -> None:
+    """Sleep for the specified duration, checking for cancellation each second."""
+    for _ in range(int(seconds)):
+        _check_cancelled(cancel_flag, "during backoff")
+        time.sleep(1)
+    remaining = seconds - int(seconds)
+    if remaining > 0:
+        time.sleep(remaining)
+
+
+def get_bypassed_page(
+    url: str,
+    selector: Optional["network.AAMirrorSelector"] = None,
+    cancel_flag: Optional[Event] = None
+) -> Optional[str]:
     """Fetch HTML content from a URL using an external Cloudflare bypasser service.
 
     Retries with exponential backoff and mirror/DNS rotation on failure.
@@ -118,13 +121,11 @@ def get_bypassed_page(url: str, selector: Optional["network.AAMirrorSelector"] =
         BypassCancelledException: If cancel_flag is set during operation
     """
     from cwa_book_downloader.download import network as network_module
+
     sel = selector or network_module.AAMirrorSelector()
 
     for attempt in range(1, MAX_RETRY + 1):
-        # Check for cancellation before each attempt
-        if cancel_flag and cancel_flag.is_set():
-            logger.info("External bypasser cancelled by user")
-            raise BypassCancelledException("Bypass cancelled")
+        _check_cancelled(cancel_flag, "by user")
 
         attempt_url = sel.rewrite(url)
         result = _fetch_via_bypasser(attempt_url)
@@ -134,27 +135,11 @@ def get_bypassed_page(url: str, selector: Optional["network.AAMirrorSelector"] =
         if attempt == MAX_RETRY:
             break
 
-        # Check for cancellation before backoff wait
-        if cancel_flag and cancel_flag.is_set():
-            logger.info("External bypasser cancelled during retry")
-            raise BypassCancelledException("Bypass cancelled")
-
-        # Backoff with jitter before retry, checking cancellation during wait
         delay = min(BACKOFF_CAP, BACKOFF_BASE * (2 ** (attempt - 1))) + random.random()
         logger.info(f"External bypasser attempt {attempt}/{MAX_RETRY} failed, retrying in {delay:.1f}s")
 
-        # Check cancellation during delay (check every second)
-        for _ in range(int(delay)):
-            if cancel_flag and cancel_flag.is_set():
-                logger.info("External bypasser cancelled during backoff")
-                raise BypassCancelledException("Bypass cancelled")
-            time.sleep(1)
-        # Sleep remaining fraction
-        remaining = delay - int(delay)
-        if remaining > 0:
-            time.sleep(remaining)
+        _sleep_with_cancellation(delay, cancel_flag)
 
-        # Rotate mirror/DNS for next attempt
         new_base, action = sel.next_mirror_or_rotate_dns()
         if action in ("mirror", "dns") and new_base:
             logger.info(f"Rotated {action} for retry")

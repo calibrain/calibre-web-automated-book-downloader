@@ -789,7 +789,7 @@ def init_dns_resolvers():
             DOH_SERVER = ""
             config.CUSTOM_DNS = []
             config.DOH_SERVER = ""
-            logger.info("Using system DNS (auto mode - will switch on failure)")
+            logger.debug("Using system DNS (auto mode - will switch on failure)")
             socket.getaddrinfo = cast(Any, create_system_failover_getaddrinfo())
             return
     
@@ -845,7 +845,7 @@ def _initialize_aa_state() -> None:
             _current_aa_url_index = _aa_urls.index(state['aa_base_url'])
             AA_BASE_URL = state['aa_base_url']
         else:
-            logger.info(f"AA_BASE_URL: auto, checking available urls {_aa_urls}")
+            logger.debug(f"AA_BASE_URL: auto, checking available urls {_aa_urls}")
             for i, url in enumerate(_aa_urls):
                 try:
                     response = requests.get(url, proxies=get_proxies(), timeout=3)

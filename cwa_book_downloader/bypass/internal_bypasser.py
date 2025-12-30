@@ -11,26 +11,18 @@ from threading import Event
 from typing import Optional
 from urllib.parse import urlparse
 
-
-class BypassCancelledException(Exception):
-    """Raised when a bypass operation is cancelled."""
-    pass
-
 import requests
 from seleniumbase import Driver
 
+from cwa_book_downloader.bypass import BypassCancelledException
+from cwa_book_downloader.bypass.fingerprint import clear_screen_size, get_screen_size
 from cwa_book_downloader.config import env
-from cwa_book_downloader.download import network
-from cwa_book_downloader.download.network import get_proxies
-from cwa_book_downloader.config.settings import RECORDING_DIR
-from cwa_book_downloader.bypass.fingerprint import (
-    get_screen_size,
-    rotate_screen_size,
-    clear_screen_size,
-)
 from cwa_book_downloader.config.env import LOG_DIR
+from cwa_book_downloader.config.settings import RECORDING_DIR
 from cwa_book_downloader.core.config import config as app_config
 from cwa_book_downloader.core.logger import setup_logger
+from cwa_book_downloader.download import network
+from cwa_book_downloader.download.network import get_proxies
 
 logger = setup_logger(__name__)
 
@@ -79,6 +71,20 @@ DDG_COOKIE_NAMES = {'__ddg1_', '__ddg2_', '__ddg5_', '__ddg8_', '__ddg9_', '__dd
 FULL_COOKIE_DOMAINS = {'z-lib.fm', 'z-lib.gs', 'z-lib.id', 'z-library.sk', 'zlibrary-global.se'}
 
 
+def _get_base_domain(domain: str) -> str:
+    """Extract base domain from hostname (e.g., 'www.example.com' -> 'example.com')."""
+    return '.'.join(domain.split('.')[-2:]) if '.' in domain else domain
+
+
+def _should_extract_cookie(name: str, extract_all: bool) -> bool:
+    """Determine if a cookie should be extracted based on its name."""
+    if extract_all:
+        return True
+    is_cf = name in CF_COOKIE_NAMES or name.startswith('cf_')
+    is_ddg = name in DDG_COOKIE_NAMES or name.startswith('__ddg')
+    return is_cf or is_ddg
+
+
 def _extract_cookies_from_driver(driver, url: str) -> None:
     """Extract cookies from Chrome after successful bypass."""
     try:
@@ -87,24 +93,13 @@ def _extract_cookies_from_driver(driver, url: str) -> None:
         if not domain:
             return
 
-        # Get base domain for storage and full-cookie check
-        base_domain = '.'.join(domain.split('.')[-2:]) if '.' in domain else domain
+        base_domain = _get_base_domain(domain)
         extract_all = base_domain in FULL_COOKIE_DOMAINS
 
-        cookies = driver.get_cookies()
         cookies_found = {}
-
-        for cookie in cookies:
+        for cookie in driver.get_cookies():
             name = cookie.get('name', '')
-
-            if extract_all:
-                should_extract = True
-            else:
-                is_cf = name in CF_COOKIE_NAMES or name.startswith('cf_')
-                is_ddg = name in DDG_COOKIE_NAMES or name.startswith('__ddg')
-                should_extract = is_cf or is_ddg
-
-            if should_extract:
+            if _should_extract_cookie(name, extract_all):
                 cookies_found[name] = {
                     'value': cookie.get('value', ''),
                     'domain': cookie.get('domain', domain),
@@ -114,23 +109,24 @@ def _extract_cookies_from_driver(driver, url: str) -> None:
                     'httpOnly': cookie.get('httpOnly', True),
                 }
 
-        if cookies_found:
-            # Extract User-Agent - Cloudflare ties cf_clearance to the UA
-            try:
-                user_agent = driver.execute_script("return navigator.userAgent")
-            except Exception:
-                user_agent = None
+        if not cookies_found:
+            return
 
-            with _cf_cookies_lock:
-                _cf_cookies[base_domain] = cookies_found
-                if user_agent:
-                    _cf_user_agents[base_domain] = user_agent
-                    logger.debug(f"Stored UA for {base_domain}: {user_agent[:60]}...")
-                else:
-                    logger.debug(f"No UA captured for {base_domain}")
+        try:
+            user_agent = driver.execute_script("return navigator.userAgent")
+        except Exception:
+            user_agent = None
 
-            cookie_type = "all" if extract_all else "protection"
-            logger.debug(f"Extracted {len(cookies_found)} {cookie_type} cookies for {base_domain}")
+        with _cf_cookies_lock:
+            _cf_cookies[base_domain] = cookies_found
+            if user_agent:
+                _cf_user_agents[base_domain] = user_agent
+                logger.debug(f"Stored UA for {base_domain}: {user_agent[:60]}...")
+            else:
+                logger.debug(f"No UA captured for {base_domain}")
+
+        cookie_type = "all" if extract_all else "protection"
+        logger.debug(f"Extracted {len(cookies_found)} {cookie_type} cookies for {base_domain}")
 
     except Exception as e:
         logger.debug(f"Failed to extract cookies: {e}")
@@ -141,15 +137,13 @@ def get_cf_cookies_for_domain(domain: str) -> dict[str, str]:
     if not domain:
         return {}
 
-    # Get base domain
-    base_domain = '.'.join(domain.split('.')[-2:]) if '.' in domain else domain
+    base_domain = _get_base_domain(domain)
 
     with _cf_cookies_lock:
         cookies = _cf_cookies.get(base_domain, {})
         if not cookies:
             return {}
 
-        # Check if cf_clearance exists and hasn't expired
         cf_clearance = cookies.get('cf_clearance', {})
         if cf_clearance:
             expiry = cf_clearance.get('expiry')
@@ -158,7 +152,6 @@ def get_cf_cookies_for_domain(domain: str) -> dict[str, str]:
                 _cf_cookies.pop(base_domain, None)
                 return {}
 
-        # Return simple name->value dict for requests
         return {name: c['value'] for name, c in cookies.items()}
 
 
@@ -171,16 +164,15 @@ def get_cf_user_agent_for_domain(domain: str) -> Optional[str]:
     """Get the User-Agent that was used during bypass for a domain."""
     if not domain:
         return None
-    base_domain = '.'.join(domain.split('.')[-2:]) if '.' in domain else domain
     with _cf_cookies_lock:
-        return _cf_user_agents.get(base_domain)
+        return _cf_user_agents.get(_get_base_domain(domain))
 
 
 def clear_cf_cookies(domain: str = None) -> None:
     """Clear stored Cloudflare cookies and User-Agent. If domain is None, clear all."""
     with _cf_cookies_lock:
         if domain:
-            base_domain = '.'.join(domain.split('.')[-2:]) if '.' in domain else domain
+            base_domain = _get_base_domain(domain)
             _cf_cookies.pop(base_domain, None)
             _cf_user_agents.pop(base_domain, None)
         else:
@@ -198,7 +190,7 @@ def _reset_pyautogui_display_state():
 
 
 def _cleanup_orphan_processes() -> int:
-    # Safety: only cleanup in Docker mode to avoid killing user's browser
+    """Kill orphan Chrome/Xvfb/ffmpeg processes. Only runs in Docker mode."""
     if not env.DOCKERMODE:
         return 0
 
@@ -210,34 +202,35 @@ def _cleanup_orphan_processes() -> int:
 
     for proc_name in processes_to_kill:
         try:
-            # Use pgrep to find processes, then kill them
             result = subprocess.run(
                 ["pgrep", "-f", proc_name],
                 capture_output=True,
                 text=True,
                 timeout=5
             )
-            if result.returncode == 0 and result.stdout.strip():
-                pids = result.stdout.strip().split('\n')
-                count = len(pids)
-                if count > 0:
-                    logger.info(f"Found {count} orphan {proc_name} process(es), killing...")
-                    kill_result = subprocess.run(
-                        ["pkill", "-9", "-f", proc_name],
-                        capture_output=True,
-                        timeout=5
-                    )
-                    if kill_result.returncode == 0:
-                        total_killed += count
-                    else:
-                        logger.warning(f"pkill for {proc_name} returned {kill_result.returncode}, processes may not have been killed")
+            if result.returncode != 0 or not result.stdout.strip():
+                continue
+
+            pids = result.stdout.strip().split('\n')
+            count = len(pids)
+            logger.info(f"Found {count} orphan {proc_name} process(es), killing...")
+
+            kill_result = subprocess.run(
+                ["pkill", "-9", "-f", proc_name],
+                capture_output=True,
+                timeout=5
+            )
+            if kill_result.returncode == 0:
+                total_killed += count
+            else:
+                logger.warning(f"pkill for {proc_name} returned {kill_result.returncode}")
+
         except subprocess.TimeoutExpired:
             logger.warning(f"Timeout while checking for {proc_name} processes")
         except Exception as e:
             logger.debug(f"Error checking for {proc_name} processes: {e}")
 
     if total_killed > 0:
-        # Give processes time to fully terminate
         time.sleep(1)
         logger.info(f"Cleaned up {total_killed} orphan process(es)")
         logger.log_resource_usage()
@@ -321,8 +314,7 @@ def _is_bypassed(sb, escape_emojis: bool = True) -> bool:
                 return True
 
         # Check for protection indicators (means NOT bypassed)
-        if found := _check_indicators(title, body, CLOUDFLARE_INDICATORS + DDOS_GUARD_INDICATORS):
-            logger.debug(f"Protection indicator found: '{found}'")
+        if _check_indicators(title, body, CLOUDFLARE_INDICATORS + DDOS_GUARD_INDICATORS):
             return False
         
         # Cloudflare URL patterns
@@ -345,17 +337,14 @@ def _is_bypassed(sb, escape_emojis: bool = True) -> bool:
 def _simulate_human_behavior(sb) -> None:
     """Simulate human-like behavior before bypass attempt."""
     try:
-        # Random short wait (human reaction time)
         time.sleep(random.uniform(0.5, 1.5))
 
-        # Maybe scroll a bit (30% chance)
         if random.random() < 0.3:
             sb.scroll_down(random.randint(20, 50))
             time.sleep(random.uniform(0.2, 0.5))
             sb.scroll_up(random.randint(10, 30))
             time.sleep(random.uniform(0.2, 0.4))
 
-        # Brief mouse jiggle via PyAutoGUI
         try:
             import pyautogui
             x, y = pyautogui.position()
@@ -365,9 +354,9 @@ def _simulate_human_behavior(sb) -> None:
                 duration=random.uniform(0.05, 0.15)
             )
         except Exception as e:
-            logger.debug(f"Mouse jiggle failed (non-critical): {e}")
+            logger.debug(f"Mouse jiggle failed: {e}")
     except Exception as e:
-        logger.debug(f"Human simulation failed (non-critical): {e}")
+        logger.debug(f"Human simulation failed: {e}")
 
 
 def _bypass_method_handle_captcha(sb) -> bool:
@@ -406,26 +395,22 @@ def _bypass_method_click_captcha(sb) -> bool:
 
 
 def _bypass_method_humanlike(sb) -> bool:
-    """Method 4: Human-like behavior with scroll, wait, and reload."""
+    """Human-like behavior with scroll, wait, and reload."""
     try:
         logger.debug("Attempting bypass: human-like interaction")
-
-        # Extended human-like wait
         time.sleep(random.uniform(6, 10))
 
-        # Scroll behavior
         try:
             sb.scroll_to_bottom()
             time.sleep(random.uniform(1, 2))
             sb.scroll_to_top()
             time.sleep(random.uniform(2, 3))
         except Exception as e:
-            logger.debug(f"Scroll behavior failed (non-critical): {e}")
+            logger.debug(f"Scroll behavior failed: {e}")
 
         if _is_bypassed(sb):
             return True
 
-        # Try refresh
         logger.debug("Trying page refresh...")
         sb.refresh()
         time.sleep(random.uniform(5, 8))
@@ -433,12 +418,11 @@ def _bypass_method_humanlike(sb) -> bool:
         if _is_bypassed(sb):
             return True
 
-        # Final captcha click attempt
         try:
             sb.uc_gui_click_captcha()
             time.sleep(random.uniform(3, 5))
         except Exception as e:
-            logger.debug(f"Final captcha click failed (non-critical): {e}")
+            logger.debug(f"Final captcha click failed: {e}")
 
         return _is_bypassed(sb)
     except Exception as e:
@@ -446,26 +430,28 @@ def _bypass_method_humanlike(sb) -> bool:
         return False
 
 
-def _bypass_method_cdp_solve(sb) -> bool:
-    """Method 5: CDP Mode with solve_captcha() - WebDriver disconnected, no PyAutoGUI.
+def _safe_reconnect(sb) -> None:
+    """Safely attempt to reconnect WebDriver after CDP mode."""
+    try:
+        sb.reconnect()
+    except Exception as e:
+        logger.debug(f"Reconnect failed: {e}")
 
-    CDP Mode completely disconnects WebDriver during interaction, making detection
-    much harder. The solve_captcha() method auto-detects challenge type.
+
+def _bypass_method_cdp_solve(sb) -> bool:
+    """CDP Mode with solve_captcha() - WebDriver disconnected, no PyAutoGUI.
+
+    CDP Mode disconnects WebDriver during interaction, making detection harder.
+    The solve_captcha() method auto-detects challenge type.
     """
     try:
         logger.debug("Attempting bypass: CDP Mode solve_captcha")
-        current_url = sb.get_current_url()
-
-        # Activate CDP mode - this disconnects WebDriver
-        sb.activate_cdp_mode(current_url)
+        sb.activate_cdp_mode(sb.get_current_url())
         time.sleep(random.uniform(1, 2))
 
-        # Try CDP solve_captcha (auto-detects challenge type)
         try:
             sb.cdp.solve_captcha()
             time.sleep(random.uniform(3, 5))
-
-            # Reconnect WebDriver to check result
             sb.reconnect()
             time.sleep(random.uniform(1, 2))
 
@@ -473,101 +459,82 @@ def _bypass_method_cdp_solve(sb) -> bool:
                 return True
         except Exception as e:
             logger.debug(f"CDP solve_captcha failed: {e}")
-            # Make sure we reconnect on failure
-            try:
-                sb.reconnect()
-            except Exception as reconnect_e:
-                logger.debug(f"Reconnect after CDP solve failure failed: {reconnect_e}")
+            _safe_reconnect(sb)
 
         return False
     except Exception as e:
         logger.debug(f"CDP Mode solve failed: {e}")
-        # Ensure WebDriver is reconnected
-        try:
-            sb.reconnect()
-        except Exception as reconnect_e:
-            logger.debug(f"Reconnect after CDP Mode solve failed: {reconnect_e}")
+        _safe_reconnect(sb)
         return False
+
+
+CDP_CLICK_SELECTORS = [
+    "#turnstile-widget div",      # Cloudflare Turnstile
+    "#cf-turnstile div",          # Alternative CF Turnstile
+    "iframe[src*='challenges']",  # CF challenge iframe
+    "input[type='checkbox']",     # Generic checkbox (DDOS-Guard)
+    "[class*='checkbox']",        # Class-based checkbox
+    "#challenge-running",         # CF challenge indicator
+]
 
 
 def _bypass_method_cdp_click(sb) -> bool:
     """CDP Mode with native clicking - no PyAutoGUI dependency.
 
-    Uses sb.cdp.click() which is native CDP clicking added in SeleniumBase 4.45.6.
-    This doesn't require PyAutoGUI at all.
+    Uses sb.cdp.click() which is native CDP clicking (SeleniumBase 4.45.6+).
     """
     try:
         logger.debug("Attempting bypass: CDP Mode native click")
-        current_url = sb.get_current_url()
-
-        # Activate CDP mode
-        sb.activate_cdp_mode(current_url)
+        sb.activate_cdp_mode(sb.get_current_url())
         time.sleep(random.uniform(1, 2))
 
-        # Common captcha/challenge selectors to try
-        selectors = [
-            "#turnstile-widget div",      # Cloudflare Turnstile (parent above shadow-root)
-            "#cf-turnstile div",          # Alternative CF Turnstile
-            "iframe[src*='challenges']",  # CF challenge iframe
-            "input[type='checkbox']",     # Generic checkbox (DDOS-Guard)
-            "[class*='checkbox']",        # Class-based checkbox
-            "#challenge-running",         # CF challenge indicator
-        ]
-
-        for selector in selectors:
+        for selector in CDP_CLICK_SELECTORS:
             try:
-                # Check if element exists and is visible
-                if sb.cdp.is_element_visible(selector):
-                    logger.debug(f"CDP clicking: {selector}")
-                    sb.cdp.click(selector)
-                    time.sleep(random.uniform(2, 4))
+                if not sb.cdp.is_element_visible(selector):
+                    continue
 
-                    # Reconnect and check
-                    sb.reconnect()
-                    time.sleep(random.uniform(1, 2))
+                logger.debug(f"CDP clicking: {selector}")
+                sb.cdp.click(selector)
+                time.sleep(random.uniform(2, 4))
 
-                    if _is_bypassed(sb):
-                        return True
+                sb.reconnect()
+                time.sleep(random.uniform(1, 2))
 
-                    # Re-enter CDP mode for next attempt
-                    sb.activate_cdp_mode(sb.get_current_url())
-                    time.sleep(random.uniform(0.5, 1))
+                if _is_bypassed(sb):
+                    return True
+
+                sb.activate_cdp_mode(sb.get_current_url())
+                time.sleep(random.uniform(0.5, 1))
             except Exception as e:
                 logger.debug(f"CDP click on '{selector}' failed: {e}")
-                continue
 
-        # Final reconnect
-        try:
-            sb.reconnect()
-        except Exception as e:
-            logger.debug(f"Final reconnect in CDP click failed: {e}")
-
+        _safe_reconnect(sb)
         return _is_bypassed(sb)
     except Exception as e:
         logger.debug(f"CDP Mode click failed: {e}")
-        try:
-            sb.reconnect()
-        except Exception as reconnect_e:
-            logger.debug(f"Reconnect after CDP Mode click failed: {reconnect_e}")
+        _safe_reconnect(sb)
         return False
+
+
+CDP_GUI_CLICK_SELECTORS = [
+    "#turnstile-widget div",      # Cloudflare Turnstile
+    "#cf-turnstile div",          # Alternative CF Turnstile
+    "#challenge-stage div",       # CF challenge stage
+    "input[type='checkbox']",     # Generic checkbox
+    "[class*='cb-i']",            # DDOS-Guard checkbox
+]
 
 
 def _bypass_method_cdp_gui_click(sb) -> bool:
     """CDP Mode with PyAutoGUI-based clicking - uses actual mouse movement.
 
-    For advanced protections (Kasada, DataDome, Akamai), the docs recommend
-    using gui_* methods with actual mouse movements instead of CDP clicks.
-    This is the most human-like approach in CDP mode.
+    Most human-like approach for advanced protections (Kasada, DataDome, Akamai).
     """
     try:
         logger.debug("Attempting bypass: CDP Mode gui_click (mouse-based)")
-        current_url = sb.get_current_url()
-
-        # Activate CDP mode
-        sb.activate_cdp_mode(current_url)
+        sb.activate_cdp_mode(sb.get_current_url())
         time.sleep(random.uniform(1, 2))
 
-        # Try the dedicated CDP captcha method first
         try:
             logger.debug("Trying cdp.gui_click_captcha()")
             sb.cdp.gui_click_captcha()
@@ -584,111 +551,108 @@ def _bypass_method_cdp_gui_click(sb) -> bool:
         except Exception as e:
             logger.debug(f"cdp.gui_click_captcha() failed: {e}")
 
-        # Turnstile selectors - use parent above shadow-root as per docs
-        selectors = [
-            "#turnstile-widget div",      # Cloudflare Turnstile
-            "#cf-turnstile div",          # Alternative CF Turnstile
-            "#challenge-stage div",       # CF challenge stage
-            "input[type='checkbox']",     # Generic checkbox
-            "[class*='cb-i']",            # DDOS-Guard checkbox
-        ]
-
-        for selector in selectors:
+        for selector in CDP_GUI_CLICK_SELECTORS:
             try:
-                if sb.cdp.is_element_visible(selector):
-                    logger.debug(f"CDP gui_click_element: {selector}")
-                    sb.cdp.gui_click_element(selector)
-                    time.sleep(random.uniform(3, 5))
+                if not sb.cdp.is_element_visible(selector):
+                    continue
 
-                    sb.reconnect()
-                    time.sleep(random.uniform(1, 2))
+                logger.debug(f"CDP gui_click_element: {selector}")
+                sb.cdp.gui_click_element(selector)
+                time.sleep(random.uniform(3, 5))
 
-                    if _is_bypassed(sb):
-                        return True
+                sb.reconnect()
+                time.sleep(random.uniform(1, 2))
 
-                    sb.activate_cdp_mode(sb.get_current_url())
-                    time.sleep(random.uniform(0.5, 1))
+                if _is_bypassed(sb):
+                    return True
+
+                sb.activate_cdp_mode(sb.get_current_url())
+                time.sleep(random.uniform(0.5, 1))
             except Exception as e:
                 logger.debug(f"CDP gui_click on '{selector}' failed: {e}")
-                continue
 
-        # Final reconnect
-        try:
-            sb.reconnect()
-        except Exception as e:
-            logger.debug(f"Final reconnect in CDP gui_click failed: {e}")
-
+        _safe_reconnect(sb)
         return _is_bypassed(sb)
     except Exception as e:
         logger.debug(f"CDP Mode gui_click failed: {e}")
-        try:
-            sb.reconnect()
-        except Exception as reconnect_e:
-            logger.debug(f"Reconnect after CDP Mode gui_click failed: {reconnect_e}")
+        _safe_reconnect(sb)
         return False
 
 
+BYPASS_METHODS = [
+    _bypass_method_cdp_solve,
+    _bypass_method_cdp_click,
+    _bypass_method_cdp_gui_click,
+    _bypass_method_handle_captcha,
+    _bypass_method_click_captcha,
+    _bypass_method_humanlike,
+]
+
+MAX_CONSECUTIVE_SAME_CHALLENGE = 3
+
+
+def _check_cancellation(cancel_flag: Optional[Event], message: str) -> None:
+    """Check if cancellation was requested and raise if so."""
+    if cancel_flag and cancel_flag.is_set():
+        logger.info(message)
+        raise BypassCancelledException("Bypass cancelled")
+
+
 def _bypass(sb, max_retries: Optional[int] = None, cancel_flag: Optional[Event] = None) -> bool:
+    """Attempt to bypass Cloudflare/DDOS-Guard protection using multiple methods."""
     max_retries = max_retries if max_retries is not None else app_config.MAX_RETRY
 
-    # Unified method order - works for both Cloudflare and DDOS-Guard
-    # Prioritizes CDP Mode (stealthier), falls back to UC Mode PyAutoGUI methods
-    methods = [
-        _bypass_method_cdp_solve,        # CDP Mode, WebDriver disconnected
-        _bypass_method_cdp_click,        # CDP native click, no PyAutoGUI
-        _bypass_method_cdp_gui_click,    # CDP with PyAutoGUI (most human-like)
-        _bypass_method_handle_captcha,   # TAB+SPACEBAR via PyAutoGUI (UC Mode)
-        _bypass_method_click_captcha,    # Direct click via PyAutoGUI (UC Mode)
-        _bypass_method_humanlike,        # Last resort with scroll/refresh
-    ]
-
-    # Track repeated failures to bail early on unsolvable challenges
     last_challenge_type = None
     consecutive_same_challenge = 0
-    max_consecutive_same = 3  # Bail after 3 identical challenges in a row
 
     for try_count in range(max_retries):
-        # Check for cancellation before each attempt
-        if cancel_flag and cancel_flag.is_set():
-            logger.info("Bypass cancelled by user")
-            raise BypassCancelledException("Bypass cancelled")
+        _check_cancellation(cancel_flag, "Bypass cancelled by user")
 
         if _is_bypassed(sb):
             if try_count == 0:
-                logger.info("Page already bypassed (no challenge or auto-solved by uc_open_with_reconnect)")
+                logger.info("Page already bypassed")
             return True
 
-        # Detect challenge type and track repeated failures
         challenge_type = _detect_challenge_type(sb)
-        logger.info(f"Challenge detected: {challenge_type}")
+        logger.debug(f"Challenge detected: {challenge_type}")
 
-        # Check for repeated same challenge (indicates we're stuck)
-        if challenge_type == last_challenge_type and challenge_type != "none":
+        # No challenge detected but page doesn't look bypassed - wait and retry
+        if challenge_type == "none":
+            logger.info("No challenge detected, waiting for page to settle...")
+            time.sleep(random.uniform(2, 3))
+            if _is_bypassed(sb):
+                return True
+            # Try a simple reconnect instead of captcha methods
+            try:
+                sb.reconnect()
+                time.sleep(random.uniform(1, 2))
+                if _is_bypassed(sb):
+                    logger.info("Bypass successful after reconnect")
+                    return True
+            except Exception as e:
+                logger.debug(f"Reconnect during no-challenge wait failed: {e}")
+            continue
+
+        if challenge_type == last_challenge_type:
             consecutive_same_challenge += 1
-            if consecutive_same_challenge >= max_consecutive_same:
+            if consecutive_same_challenge >= MAX_CONSECUTIVE_SAME_CHALLENGE:
                 logger.warning(
-                    f"Same challenge ({challenge_type}) detected {consecutive_same_challenge} times "
-                    f"in a row - aborting to avoid wasting time"
+                    f"Same challenge ({challenge_type}) detected {consecutive_same_challenge} times - aborting"
                 )
                 return False
         else:
-            consecutive_same_challenge = 1  # Reset counter (1 because current counts)
+            consecutive_same_challenge = 1
         last_challenge_type = challenge_type
 
-        method = methods[try_count % len(methods)]
+        method = BYPASS_METHODS[try_count % len(BYPASS_METHODS)]
         logger.info(f"Bypass attempt {try_count + 1}/{max_retries} using {method.__name__}")
 
-        # Progressive backoff with cancellation checks (randomized)
         if try_count > 0:
             wait_time = min(random.uniform(2, 4) * try_count, 12)
             logger.info(f"Waiting {wait_time:.1f}s before trying...")
-            # Check cancellation during wait (check every second)
             for _ in range(int(wait_time)):
-                if cancel_flag and cancel_flag.is_set():
-                    logger.info("Bypass cancelled during wait")
-                    raise BypassCancelledException("Bypass cancelled")
+                _check_cancellation(cancel_flag, "Bypass cancelled during wait")
                 time.sleep(1)
-            # Sleep remaining fractional second
             time.sleep(wait_time - int(wait_time))
 
         try:
@@ -705,192 +669,165 @@ def _bypass(sb, max_retries: Optional[int] = None, cancel_flag: Optional[Event] 
     logger.warning("Exceeded maximum retries. Bypass failed.")
     return False
 
-def _get_chromium_args():
-    """Build Chrome arguments dynamically, pre-resolving hostnames via Python's DNS.
+def _get_chromium_args() -> list[str]:
+    """Build Chrome arguments, pre-resolving hostnames via Python's patched DNS.
 
-    Instead of trying to configure Chrome's DNS (which is unreliable), we pre-resolve
-    AA hostnames using Python's patched socket (which uses DoH/custom DNS) and pass
-    the resolved IPs directly to Chrome via --host-resolver-rules. This bypasses
-    Chrome's DNS entirely for those hosts.
+    Pre-resolves AA hostnames and passes IPs to Chrome via --host-resolver-rules,
+    bypassing Chrome's DNS entirely for those hosts.
     """
     arguments = [
-        # Ignore certificate and SSL errors (similar to curl's --insecure)
         "--ignore-certificate-errors",
         "--ignore-ssl-errors",
         "--allow-running-insecure-content",
         "--ignore-certificate-errors-spki-list",
         "--ignore-certificate-errors-skip-list"
     ]
-    
-    # Conditionally add verbose logging arguments
+
     if app_config.get("DEBUG", False):
         arguments.extend([
-            "--enable-logging", # Enable Chrome browser logging
-            "--v=1",            # Set verbosity level for Chrome logs
+            "--enable-logging",
+            "--v=1",
             "--log-file=" + str(LOG_DIR / "chrome_browser.log")
         ])
 
-    # Add proxy settings if configured
     proxies = get_proxies()
     if proxies:
         proxy_url = proxies.get('https') or proxies.get('http')
         if proxy_url:
             arguments.append(f'--proxy-server={proxy_url}')
 
-    # --- Pre-resolve AA hostnames and map them directly in Chrome ---
-    # This bypasses Chrome's DNS entirely - we resolve via Python's patched socket.getaddrinfo
-    # (which uses DoH/Cloudflare when system DNS fails) and tell Chrome to use those IPs
-    host_rules = []
-    
-    try:
-        aa_urls = network.get_available_aa_urls()
-        for url in aa_urls:
-            hostname = urlparse(url).hostname
-            if hostname:
-                try:
-                    # Use socket.getaddrinfo which IS patched by our network module
-                    # (DoH/Cloudflare if system DNS failed)
-                    # getaddrinfo returns: [(family, type, proto, canonname, sockaddr), ...]
-                    # sockaddr for IPv4 is (ip, port)
-                    results = socket.getaddrinfo(hostname, 443, socket.AF_INET)
-                    if results:
-                        ip = results[0][4][0]  # First result, sockaddr tuple, IP address
-                        host_rules.append(f"MAP {hostname} {ip}")
-                        logger.debug(f"Chrome: Pre-resolved {hostname} -> {ip}")
-                    else:
-                        logger.warning(f"Chrome: No addresses returned for {hostname}")
-                except socket.gaierror as e:
-                    logger.warning(f"Chrome: Could not pre-resolve {hostname}: {e}")
-        
-        if host_rules:
-            # Join all rules with comma, e.g. "MAP host1 ip1, MAP host2 ip2"
-            rules_str = ", ".join(host_rules)
-            arguments.append(f'--host-resolver-rules={rules_str}')
-            logger.info(f"Chrome: Using host resolver rules for {len(host_rules)} hosts")
-        else:
-            logger.warning("Chrome: No hosts could be pre-resolved, Chrome will use its own DNS")
-            
-    except Exception as e:
-        logger.error_trace(f"Error pre-resolving hostnames for Chrome: {e}")
-    
+    host_rules = _build_host_resolver_rules()
+    if host_rules:
+        arguments.append(f'--host-resolver-rules={", ".join(host_rules)}')
+        logger.debug(f"Chrome: Using host resolver rules for {len(host_rules)} hosts")
+    else:
+        logger.warning("Chrome: No hosts could be pre-resolved")
+
     return arguments
 
-def _get(url, retry: Optional[int] = None, cancel_flag: Optional[Event] = None):
-    retry = retry if retry is not None else app_config.MAX_RETRY
-    # Check for cancellation before starting
-    if cancel_flag and cancel_flag.is_set():
-        logger.info("Bypass cancelled before starting")
-        raise BypassCancelledException("Bypass cancelled")
+
+def _build_host_resolver_rules() -> list[str]:
+    """Pre-resolve AA hostnames and build Chrome host resolver rules."""
+    host_rules = []
 
     try:
-        logger.info(f"SB_GET: {url}")
+        for url in network.get_available_aa_urls():
+            hostname = urlparse(url).hostname
+            if not hostname:
+                continue
+
+            try:
+                results = socket.getaddrinfo(hostname, 443, socket.AF_INET)
+                if results:
+                    ip = results[0][4][0]
+                    host_rules.append(f"MAP {hostname} {ip}")
+                    logger.debug(f"Chrome: Pre-resolved {hostname} -> {ip}")
+                else:
+                    logger.warning(f"Chrome: No addresses returned for {hostname}")
+            except socket.gaierror as e:
+                logger.warning(f"Chrome: Could not pre-resolve {hostname}: {e}")
+    except Exception as e:
+        logger.error_trace(f"Error pre-resolving hostnames for Chrome: {e}")
+
+    return host_rules
+
+DRIVER_RESET_ERRORS = {"WebDriverException", "SessionNotCreatedException", "TimeoutException", "MaxRetryError"}
+
+
+def _get(url: str, retry: Optional[int] = None, cancel_flag: Optional[Event] = None) -> str:
+    """Fetch URL with Cloudflare bypass. Retries on failure."""
+    retry = retry if retry is not None else app_config.MAX_RETRY
+    _check_cancellation(cancel_flag, "Bypass cancelled before starting")
+
+    try:
+        logger.debug(f"SB_GET: {url}")
         sb = _get_driver()
 
-        # Adaptive reconnect time: shorter if we have valid cookies (likely no challenge),
-        # longer if no cookies (need time for Cloudflare verification)
-        parsed = urlparse(url)
-        hostname = parsed.hostname or ""
+        hostname = urlparse(url).hostname or ""
         if has_valid_cf_cookies(hostname):
-            reconnect_time = 1.0  # Fast path - cookies should work
+            reconnect_time = 1.0
             logger.debug(f"Using fast reconnect ({reconnect_time}s) - valid cookies exist")
         else:
-            reconnect_time = app_config.DEFAULT_SLEEP  # Defensive - allow time for challenge
+            reconnect_time = app_config.DEFAULT_SLEEP
             logger.debug(f"Using standard reconnect ({reconnect_time}s) - no cached cookies")
 
-        # Enhanced page loading with better error handling
         logger.debug("Opening URL with SeleniumBase...")
         sb.uc_open_with_reconnect(url, reconnect_time)
 
-        # Check for cancellation after page load
-        if cancel_flag and cancel_flag.is_set():
-            logger.info("Bypass cancelled after page load")
-            raise BypassCancelledException("Bypass cancelled")
+        _check_cancellation(cancel_flag, "Bypass cancelled after page load")
 
-        # Log current page title and URL for debugging
         try:
-            current_url = sb.get_current_url()
-            current_title = sb.get_title()
-            logger.debug(f"Page loaded - URL: {current_url}, Title: {current_title}")
-        except Exception as debug_e:
-            logger.debug(f"Could not get page info: {debug_e}")
+            logger.debug(f"Page loaded - URL: {sb.get_current_url()}, Title: {sb.get_title()}")
+        except Exception as e:
+            logger.debug(f"Could not get page info: {e}")
 
-        # Attempt bypass with cancellation support
         logger.debug("Starting bypass process...")
         if _bypass(sb, cancel_flag=cancel_flag):
-            logger.info("Bypass successful.")
-            # Extract cookies for sharing with requests library
             _extract_cookies_from_driver(sb, url)
             return sb.page_source
-        else:
-            logger.warning("Bypass completed but page still shows Cloudflare protection")
-            # Log page content for debugging (truncated)
-            try:
-                page_text = sb.get_text("body")[:500] + "..." if len(sb.get_text("body")) > 500 else sb.get_text("body")
-                logger.debug(f"Page content: {page_text}")
-            except Exception:
-                pass
+
+        logger.warning("Bypass completed but page still shows protection")
+        try:
+            body = sb.get_text("body")
+            logger.debug(f"Page content: {body[:500]}..." if len(body) > 500 else body)
+        except Exception:
+            pass
 
     except BypassCancelledException:
         raise
     except Exception as e:
-        error_details = f"Exception type: {type(e).__name__}, Message: {str(e)}"
-        stack_trace = traceback.format_exc()
+        error_details = f"{type(e).__name__}: {e}"
 
         if retry == 0:
-            logger.error(f"Failed to initialize browser after all retries: {error_details}")
-            logger.debug(f"Full stack trace: {stack_trace}")
+            logger.error(f"Failed after all retries: {error_details}")
+            logger.debug(f"Stack trace: {traceback.format_exc()}")
             _reset_driver()
-            raise e
+            raise
 
-        logger.warning(f"Failed to bypass Cloudflare (retry {app_config.MAX_RETRY - retry + 1}/{app_config.MAX_RETRY}): {error_details}")
-        logger.debug(f"Stack trace: {stack_trace}")
+        logger.warning(f"Bypass failed (retry {app_config.MAX_RETRY - retry + 1}/{app_config.MAX_RETRY}): {error_details}")
+        logger.debug(f"Stack trace: {traceback.format_exc()}")
 
-        # Reset driver on certain errors
-        error_type = type(e).__name__
-        if error_type in ("WebDriverException", "SessionNotCreatedException", "TimeoutException", "MaxRetryError"):
+        if type(e).__name__ in DRIVER_RESET_ERRORS:
             logger.info("Restarting bypasser due to browser error...")
             _reset_driver()
 
-    # Check for cancellation before retry
-    if cancel_flag and cancel_flag.is_set():
-        logger.info("Bypass cancelled before retry")
-        raise BypassCancelledException("Bypass cancelled")
-
+    _check_cancellation(cancel_flag, "Bypass cancelled before retry")
     return _get(url, retry - 1, cancel_flag)
 
-def get(url, retry: Optional[int] = None, cancel_flag: Optional[Event] = None):
+def get(url: str, retry: Optional[int] = None, cancel_flag: Optional[Event] = None) -> str:
     """Fetch a URL with protection bypass."""
     retry = retry if retry is not None else app_config.MAX_RETRY
     global LAST_USED
+
     with LOCKED:
-        # Check for cookies AFTER acquiring lock - another request may have
-        # completed bypass while we were waiting, making Chrome unnecessary
-        parsed = urlparse(url)
-        cookies = get_cf_cookies_for_domain(parsed.hostname or "")
+        # Try cookies first - another request may have completed bypass while waiting
+        cookies = get_cf_cookies_for_domain(urlparse(url).hostname or "")
         if cookies:
             try:
                 response = requests.get(url, cookies=cookies, proxies=get_proxies(), timeout=(5, 10))
                 if response.status_code == 200:
-                    logger.debug(f"Cookies available after lock wait - skipped Chrome")
+                    logger.debug("Cookies available after lock wait - skipped Chrome")
                     LAST_USED = time.time()
                     return response.text
             except Exception:
-                pass  # Fall through to Chrome bypass
+                pass
 
-        ret = _get(url, retry, cancel_flag)
+        result = _get(url, retry, cancel_flag)
         LAST_USED = time.time()
-        return ret
+        return result
 
-def _init_driver():
+def _init_driver() -> Driver:
+    """Initialize the Chrome driver with undetected-chromedriver settings."""
     global DRIVER
     if DRIVER:
         _reset_driver()
-    # Build Chrome args dynamically to pick up current DNS settings from network module
+
     chromium_args = _get_chromium_args()
-    # Get randomized screen size (generated on first call, reused until cleared)
     screen_width, screen_height = get_screen_size()
+
     logger.debug(f"Initializing Chrome driver with args: {chromium_args}")
-    logger.info(f"Browser screen size: {screen_width}x{screen_height}")
+    logger.debug(f"Browser screen size: {screen_width}x{screen_height}")
+
     driver = Driver(
         uc=True,
         headless=False,
@@ -929,7 +866,7 @@ def _ensure_display_initialized():
 
 def _get_driver():
     global DRIVER, DISPLAY, LAST_USED
-    logger.info("Getting driver...")
+    logger.debug("Getting driver...")
     LAST_USED = time.time()
     
     _ensure_display_initialized()
@@ -966,7 +903,7 @@ def _get_driver():
             output_file.as_posix(),
             "-nostats", "-loglevel", "0"
         ]
-        logger.info("Starting FFmpeg recording to %s", output_file)
+        logger.debug("Starting FFmpeg recording to %s", output_file)
         logger.debug_trace(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
         DISPLAY["ffmpeg"] = subprocess.Popen(ffmpeg_cmd)
     
@@ -983,16 +920,14 @@ def _get_driver():
     logger.log_resource_usage()
     return DRIVER
 
-def _reset_driver():
+def _reset_driver() -> None:
     """Reset the browser driver and cleanup all associated processes."""
     logger.log_resource_usage()
     logger.info("Shutting down Cloudflare bypasser...")
     global DRIVER, DISPLAY
 
-    # Clear screen size so next session gets a fresh random size
     clear_screen_size()
 
-    # Quit driver
     if DRIVER:
         try:
             DRIVER.quit()
@@ -1000,54 +935,47 @@ def _reset_driver():
             logger.warning(f"Error quitting driver: {e}")
         DRIVER = None
 
-    # Stop virtual display
     if DISPLAY["xvfb"]:
         try:
             DISPLAY["xvfb"].stop()
         except Exception as e:
             logger.warning(f"Error stopping display: {e}")
         DISPLAY["xvfb"] = None
-    
-    # Stop ffmpeg recording
+
     if DISPLAY["ffmpeg"]:
         try:
             DISPLAY["ffmpeg"].send_signal(signal.SIGINT)
         except Exception as e:
             logger.debug(f"Error stopping ffmpeg: {e}")
         DISPLAY["ffmpeg"] = None
-    
-    # Kill any lingering processes
+
     time.sleep(0.5)
     for process in ["Xvfb", "ffmpeg", "chrom"]:
         try:
             os.system(f"pkill -f {process}")
         except Exception as e:
             logger.debug(f"Error killing {process}: {e}")
-    
+
     time.sleep(0.5)
-    logger.info("Cloudflare bypasser shut down (browser and display stopped)")
+    logger.info("Cloudflare bypasser shut down")
     logger.log_resource_usage()
 
-def _restart_chrome_only():
-    """Restart just Chrome (not the display) to pick up new DNS settings.
+def _restart_chrome_only() -> None:
+    """Restart Chrome (not the display) to pick up new DNS settings.
 
-    Called when DNS provider rotates in auto mode. The display is kept running
-    to avoid the slower full restart. Chrome will be re-initialized with fresh
-    pre-resolved IPs from the new DNS provider.
+    Called when DNS provider rotates. Display is kept running to avoid slower full restart.
     """
     global DRIVER, LAST_USED
 
     logger.debug("Restarting Chrome to apply new DNS settings...")
 
-    # Quit existing driver
     if DRIVER:
         try:
             DRIVER.quit()
         except Exception as e:
-            logger.debug(f"Error quitting driver during DNS rotation restart: {e}")
+            logger.debug(f"Error quitting driver during DNS rotation: {e}")
         DRIVER = None
 
-    # Kill any lingering Chrome processes (same pattern as _reset_driver)
     try:
         os.system("pkill -f chrom")
     except Exception as e:
@@ -1055,58 +983,47 @@ def _restart_chrome_only():
 
     time.sleep(0.5)
 
-    # Re-initialize driver with new DNS settings
-    # _get_chromium_args() will re-resolve hostnames using the new DNS
     try:
         _init_driver()
         LAST_USED = time.time()
         logger.debug("Chrome restarted with updated DNS settings")
     except Exception as e:
         logger.warning(f"Failed to restart Chrome after DNS rotation: {e}")
-        # Don't raise - the bypasser can try again on next request
 
 
 def _on_dns_rotation(provider_name: str, servers: list, doh_url: str) -> None:
     """Callback invoked when network.py rotates DNS provider.
 
-    If Chrome is currently running, schedule a restart in the background.
-    This is async to avoid blocking the request that triggered DNS rotation.
+    Schedules an async Chrome restart to avoid blocking the current request.
     """
-    global DRIVER, _dns_rotation_pending
+    global _dns_rotation_pending
 
     if DRIVER is None:
         return
 
-    # Always set pending flag - the restart will happen asynchronously
-    # This avoids blocking the current request (which triggered DNS rotation)
     with _dns_rotation_lock:
         if _dns_rotation_pending:
-            return  # Already scheduled
+            return
         _dns_rotation_pending = True
 
     def _async_restart():
         global _dns_rotation_pending
         logger.debug(f"DNS rotated to {provider_name} - restarting Chrome in background")
         with LOCKED:
-            # Clear flag before restart (under lock to be safe)
             with _dns_rotation_lock:
                 _dns_rotation_pending = False
             _restart_chrome_only()
 
-    restart_thread = threading.Thread(target=_async_restart, daemon=True)
-    restart_thread.start()
+    threading.Thread(target=_async_restart, daemon=True).start()
 
 
-def _cleanup_driver():
+def _cleanup_driver() -> None:
     """Reset driver after inactivity timeout.
 
-    Uses a longer timeout (4x) when UI clients are connected to avoid
-    resetting while users are actively browsing. After all clients disconnect,
-    the standard timeout applies as a grace period before shutdown.
+    Uses 4x longer timeout when UI clients are connected.
     """
     global LAST_USED
 
-    # Check for active UI connections
     try:
         from cwa_book_downloader.api.websocket import ws_manager
         has_active_clients = ws_manager.has_active_connections()
@@ -1114,117 +1031,96 @@ def _cleanup_driver():
         ws_manager = None
         has_active_clients = False
 
-    # Use longer timeout when UI is connected (user might be browsing)
     timeout_minutes = app_config.BYPASS_RELEASE_INACTIVE_MIN
     if has_active_clients:
-        timeout_minutes *= 4  # 20 min default when UI open vs 5 min after disconnect
+        timeout_minutes *= 4
 
     with LOCKED:
-        if LAST_USED and time.time() - LAST_USED >= timeout_minutes * 60:
-            logger.info(f"Cloudflare bypasser idle for {timeout_minutes} min - shutting down to free resources")
-            _reset_driver()
-            LAST_USED = None
+        if not LAST_USED or time.time() - LAST_USED < timeout_minutes * 60:
+            return
 
-            # If clients are still connected, request warmup on next connect so the
-            # bypasser restarts when the user becomes active again
-            if has_active_clients and ws_manager:
-                ws_manager.request_warmup_on_next_connect()
-                logger.debug("Requested warmup on next client connect (clients still connected)")
+        logger.info(f"Bypasser idle for {timeout_minutes} min - shutting down")
+        _reset_driver()
+        LAST_USED = None
+        logger.log_resource_usage()
 
-def _cleanup_loop():
+        if has_active_clients and ws_manager:
+            ws_manager.request_warmup_on_next_connect()
+            logger.debug("Requested warmup on next client connect")
+
+def _cleanup_loop() -> None:
+    """Background loop that periodically checks for idle timeout."""
     while True:
         _cleanup_driver()
         time.sleep(max(app_config.BYPASS_RELEASE_INACTIVE_MIN / 2, 1))
 
-def _init_cleanup_thread():
-    cleanup_thread = threading.Thread(target=_cleanup_loop)
-    cleanup_thread.daemon = True
-    cleanup_thread.start()
 
-def warmup():
-    """Pre-initialize the virtual display and Chrome browser to eliminate cold start time.
-    
-    This function can be called when a user connects to the web UI to
-    warm up the bypasser environment before it's actually needed.
-    Both the display and Chrome driver are initialized so the first
-    bypass request is nearly instant.
-    
-    Warmup is skipped in the following scenarios:
-    - BYPASS_WARMUP_ON_CONNECT is false (explicit disable)
-    - Not running in Docker mode
-    - USE_CF_BYPASS is disabled
-    - AA_DONATOR_KEY is set (user has fast downloads, bypass rarely needed)
-    
-    Note: Even when warmup is skipped, the bypasser can still start on-demand
-    when actually needed for a download.
-    """
-    global DRIVER, LAST_USED
-    
+def _init_cleanup_thread() -> None:
+    """Start the background cleanup thread."""
+    threading.Thread(target=_cleanup_loop, daemon=True).start()
+
+def _should_warmup() -> bool:
+    """Check if warmup should proceed based on configuration."""
     if not app_config.get("BYPASS_WARMUP_ON_CONNECT", True):
-        logger.debug("Bypasser warmup disabled via BYPASS_WARMUP_ON_CONNECT")
-        return
-
+        logger.debug("Bypasser warmup disabled via config")
+        return False
     if not env.DOCKERMODE:
         logger.debug("Bypasser warmup skipped - not in Docker mode")
-        return
-
+        return False
     if not app_config.get("USE_CF_BYPASS", True):
         logger.debug("Bypasser warmup skipped - CF bypass disabled")
-        return
-
+        return False
     if app_config.get("AA_DONATOR_KEY", ""):
-        logger.debug("Bypasser warmup skipped - AA donator key set (fast downloads available)")
+        logger.debug("Bypasser warmup skipped - AA donator key set")
+        return False
+    return True
+
+
+def warmup() -> None:
+    """Pre-initialize the virtual display and Chrome browser.
+
+    Called when a user connects to the web UI. Skipped if warmup is disabled,
+    not in Docker mode, CF bypass is disabled, or AA donator key is set.
+    """
+    global LAST_USED
+
+    if not _should_warmup():
         return
 
     with LOCKED:
         if is_warmed_up():
-            logger.debug("Bypasser already fully warmed up")
+            logger.debug("Bypasser already warmed up")
             return
 
-        # Clean up any orphan processes from previous crashes before starting fresh.
-        # This must be AFTER the is_warmed_up() check to avoid killing a healthy
-        # Chrome browser that was started by a previous warmup.
         _cleanup_orphan_processes()
 
-        # If we get here, either nothing is initialized OR the driver is unhealthy.
-        # Reset any stale state before reinitializing to avoid the warmup thinking
-        # things are already set up when the underlying processes are dead.
         if DRIVER is not None or DISPLAY["xvfb"] is not None:
             logger.info("Resetting stale bypasser state before warmup...")
             _reset_driver()
 
-        logger.info("Warming up Cloudflare bypasser (pre-initializing display and browser)...")
-        
+        logger.info("Warming up Cloudflare bypasser...")
+
         try:
-            # Initialize virtual display (FFmpeg recording starts later on first actual request)
             _ensure_display_initialized()
-            
-            # Initialize Chrome driver
+
             if DRIVER is None:
                 logger.info("Pre-initializing Chrome browser...")
                 _init_driver()
                 LAST_USED = time.time()
                 logger.info("Chrome browser ready")
-            
-            logger.info("Bypasser warmup complete - ready for instant bypass")
+
+            logger.info("Bypasser warmup complete")
             logger.log_resource_usage()
-                
+
         except Exception as e:
             logger.warning(f"Failed to warm up bypasser: {e}")
 
 def _is_driver_healthy() -> bool:
-    """Check if the Chrome driver is actually responsive (not just non-None).
-
-    The DRIVER variable can be non-None but the underlying Chrome process may have
-    crashed silently. This function pings the driver to verify it's actually alive.
-    """
-    global DRIVER
+    """Check if the Chrome driver is responsive (not just non-None)."""
     if DRIVER is None:
         return False
 
     try:
-        # Try a simple operation that requires the driver to be responsive
-        # get_current_url() is lightweight and doesn't change state
         DRIVER.get_current_url()
         return True
     except Exception as e:
@@ -1233,89 +1129,78 @@ def _is_driver_healthy() -> bool:
 
 
 def is_warmed_up() -> bool:
-    """Check if the bypasser is fully warmed up (display and browser initialized and healthy)."""
+    """Check if the bypasser is fully warmed up (display and browser initialized)."""
     if DISPLAY["xvfb"] is None or DRIVER is None:
         return False
     return _is_driver_healthy()
 
-def shutdown_if_idle():
+
+def shutdown_if_idle() -> None:
     """Start the inactivity countdown when all WebSocket clients disconnect.
-    
-    Instead of immediately shutting down, this sets LAST_USED to start the
-    inactivity timer. The cleanup loop will then shut down the bypasser after
-    BYPASS_RELEASE_INACTIVE_MIN minutes, giving users a grace period to return
-    (e.g., if they refresh the page or briefly navigate away).
-    
-    If there are active downloads, the timer naturally won't trigger until
-    they complete since LAST_USED gets updated on each bypass operation.
+
+    Sets LAST_USED to start the timer. The cleanup loop shuts down after
+    BYPASS_RELEASE_INACTIVE_MIN minutes of inactivity.
     """
     global LAST_USED
-    
+
     with LOCKED:
         if not is_warmed_up():
             logger.debug("Bypasser already shut down")
             return
-        
-        # Start the inactivity countdown
+
         LAST_USED = time.time()
-        logger.info(f"All clients disconnected - bypasser will shut down after {app_config.BYPASS_RELEASE_INACTIVE_MIN} min of inactivity")
+        logger.info(f"All clients disconnected - shutdown after {app_config.BYPASS_RELEASE_INACTIVE_MIN} min of inactivity")
 
 _init_cleanup_thread()
 
-# Register for DNS rotation notifications so Chrome can restart with new DNS settings
-# Only register if using the internal Chrome bypasser (not external FlareSolverr)
-# Note: This module is only imported when internal bypasser is selected, so this check
-# is redundant but kept for safety. Use app_config for consistency with other modules.
+# Register for DNS rotation notifications (Chrome restarts with new DNS settings)
 if app_config.get("USE_CF_BYPASS", True) and not app_config.get("USING_EXTERNAL_BYPASSER", False):
     network.register_dns_rotation_callback(_on_dns_rotation)
 
 
-def get_bypassed_page(url: str, selector: Optional[network.AAMirrorSelector] = None, cancel_flag: Optional[Event] = None) -> Optional[str]:
-    """Fetch HTML content from a URL using the internal Cloudflare Bypasser.
+def _try_with_cached_cookies(url: str, hostname: str) -> Optional[str]:
+    """Attempt request with cached cookies before using Chrome."""
+    cookies = get_cf_cookies_for_domain(hostname)
+    if not cookies:
+        return None
 
-    Args:
-        url: Target URL
-        selector: Optional mirror selector for AA URL rewriting
-        cancel_flag: Optional threading Event to signal cancellation
+    try:
+        headers = {}
+        stored_ua = get_cf_user_agent_for_domain(hostname)
+        if stored_ua:
+            headers['User-Agent'] = stored_ua
 
-    Returns:
-        str: HTML content if successful, None otherwise
+        logger.debug(f"Trying request with cached cookies: {url}")
+        response = requests.get(url, cookies=cookies, headers=headers, proxies=get_proxies(), timeout=(5, 10))
+        if response.status_code == 200:
+            logger.debug("Cached cookies worked, skipped Chrome bypass")
+            return response.text
+    except Exception:
+        pass
 
-    Raises:
-        BypassCancelledException: If cancel_flag is set during operation
-    """
+    return None
+
+
+def get_bypassed_page(
+    url: str,
+    selector: Optional[network.AAMirrorSelector] = None,
+    cancel_flag: Optional[Event] = None
+) -> Optional[str]:
+    """Fetch HTML content from a URL using the internal Cloudflare Bypasser."""
     sel = selector or network.AAMirrorSelector()
     attempt_url = sel.rewrite(url)
+    hostname = urlparse(attempt_url).hostname or ""
 
-    # Before using Chrome, check if cookies are available (from a previous bypass)
-    # This helps concurrent downloads avoid unnecessary Chrome usage
-    parsed = urlparse(attempt_url)
-    hostname = parsed.hostname or ""
-    cookies = get_cf_cookies_for_domain(hostname)
-    if cookies:
-        try:
-            # Use stored UA - Cloudflare ties cf_clearance to the UA that solved the challenge
-            headers = {}
-            stored_ua = get_cf_user_agent_for_domain(hostname)
-            if stored_ua:
-                headers['User-Agent'] = stored_ua
-            logger.debug(f"Trying request with cached cookies before Chrome: {attempt_url}")
-            response = requests.get(attempt_url, cookies=cookies, headers=headers, proxies=get_proxies(), timeout=(5, 10))
-            if response.status_code == 200:
-                logger.debug(f"Cached cookies worked, skipped Chrome bypass")
-                return response.text
-        except Exception:
-            pass  # Fall through to Chrome bypass
+    cached_result = _try_with_cached_cookies(attempt_url, hostname)
+    if cached_result:
+        return cached_result
 
     try:
         response_html = get(attempt_url, cancel_flag=cancel_flag)
     except BypassCancelledException:
         raise
     except Exception:
-        # Check for cancellation before retry
-        if cancel_flag and cancel_flag.is_set():
-            raise BypassCancelledException("Bypass cancelled")
-        # On failure, try mirror/DNS rotation for AA-like URLs
+        _check_cancellation(cancel_flag, "Bypass cancelled")
         new_base, action = sel.next_mirror_or_rotate_dns()
         if action in ("mirror", "dns") and new_base:
             attempt_url = sel.rewrite(url)
@@ -1323,8 +1208,7 @@ def get_bypassed_page(url: str, selector: Optional[network.AAMirrorSelector] = N
         else:
             raise
 
-    logger.debug(f"Cloudflare Bypasser response length: {len(response_html)}")
-    if response_html.strip() == "":
+    if not response_html.strip():
         raise requests.exceptions.RequestException("Failed to bypass Cloudflare")
 
     return response_html

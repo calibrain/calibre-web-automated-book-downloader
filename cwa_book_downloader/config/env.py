@@ -41,8 +41,42 @@ def _read_debug_from_config() -> bool:
 # Authentication and session settings
 SESSION_COOKIE_SECURE_ENV = os.getenv("SESSION_COOKIE_SECURE", "false")
 
-CWA_DB = os.getenv("CWA_DB_PATH")
-CWA_DB_PATH = Path(CWA_DB) if CWA_DB else None
+def _resolve_cwa_db_path() -> Path | None:
+    """
+    Resolve the Calibre-Web database path.
+
+    Priority:
+    1. CWA_DB_PATH env var (backwards compatibility)
+    2. Default path /auth/app.db if it exists and is a valid SQLite file
+
+    Returns None if no valid database is found.
+    """
+    # Check env var first (backwards compatibility)
+    env_path = os.getenv("CWA_DB_PATH")
+    if env_path:
+        path = Path(env_path)
+        if path.exists() and path.is_file() and _is_sqlite_file(path):
+            return path
+
+    # Check default mount path
+    default_path = Path("/auth/app.db")
+    if default_path.exists() and default_path.is_file() and _is_sqlite_file(default_path):
+        return default_path
+
+    return None
+
+
+def _is_sqlite_file(path: Path) -> bool:
+    """Check if a file is a valid SQLite database by reading magic bytes."""
+    try:
+        with open(path, "rb") as f:
+            header = f.read(16)
+            return header[:16] == b"SQLite format 3\x00"
+    except (OSError, PermissionError):
+        return False
+
+
+CWA_DB_PATH = _resolve_cwa_db_path()
 CONFIG_DIR = Path(os.getenv("CONFIG_DIR", "/config"))
 LOG_ROOT = Path(os.getenv("LOG_ROOT", "/var/log/"))
 LOG_DIR = LOG_ROOT / "cwa-book-downloader"

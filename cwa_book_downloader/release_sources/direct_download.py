@@ -872,7 +872,7 @@ def _extract_slow_download_url(
         sleep_time = min(raw_countdown, MAX_COUNTDOWN_SECONDS)
         if raw_countdown > MAX_COUNTDOWN_SECONDS:
             logger.warning(f"Countdown {raw_countdown}s exceeds max, capping at {MAX_COUNTDOWN_SECONDS}s")
-        logger.info(f"Waiting {sleep_time}s for {title}")
+        logger.info(f"AA waitlist: {sleep_time}s for {title}")
 
         # Live countdown with status updates
         remaining = sleep_time

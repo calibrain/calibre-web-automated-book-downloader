@@ -147,8 +147,8 @@ def get_auth_mode() -> str:
 
     try:
         security_config = load_config_file("security")
-        # 1. Check for explicit CWA auth
-        if security_config.get("USE_CWA_AUTH") and CWA_DB_PATH and os.path.isfile(CWA_DB_PATH):
+        # 1. Check for explicit CWA auth (CWA_DB_PATH is pre-validated at startup)
+        if security_config.get("USE_CWA_AUTH") and CWA_DB_PATH:
             return "cwa"
         # 2. Check for built-in credentials
         if security_config.get("BUILTIN_USERNAME") and security_config.get("BUILTIN_PASSWORD_HASH"):
@@ -249,9 +249,9 @@ def login_required(f):
         if auth_mode == "none":
             return f(*args, **kwargs)
 
-        # If CWA mode and database path is invalid, return error
-        if auth_mode == "cwa" and CWA_DB_PATH and not os.path.isfile(CWA_DB_PATH):
-            logger.error(f"CWA_DB_PATH is set to {CWA_DB_PATH} but this is not a valid path")
+        # If CWA mode and database disappeared after startup, return error
+        if auth_mode == "cwa" and CWA_DB_PATH and not CWA_DB_PATH.exists():
+            logger.error(f"CWA database at {CWA_DB_PATH} is no longer accessible")
             return jsonify({"error": "Internal Server Error"}), 500
 
         # Check if user has a valid session
@@ -932,9 +932,9 @@ def api_login() -> Union[Response, Tuple[Response, int]]:
 
         # CWA database authentication mode
         if auth_mode == "cwa":
-            # Validate CWA database path
-            if not os.path.isfile(CWA_DB_PATH):
-                logger.error(f"CWA_DB_PATH is set to {CWA_DB_PATH} but this is not a valid path")
+            # Verify database still exists (it was validated at startup)
+            if not CWA_DB_PATH or not CWA_DB_PATH.exists():
+                logger.error(f"CWA database at {CWA_DB_PATH} is no longer accessible")
                 return jsonify({"error": "Database configuration error"}), 500
 
             try:
