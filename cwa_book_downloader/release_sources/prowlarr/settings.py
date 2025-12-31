@@ -323,6 +323,24 @@ def prowlarr_config_settings():
             default=[],
             show_when={"field": "PROWLARR_ENABLED", "value": True},
         ),
+        MultiSelectField(
+            key="PROWLARR_SEARCH_CATEGORIES",
+            label="Search Categories",
+            description="Categories to include in search. Select multiple to broaden results. Leave empty to search all categories.",
+            options=[
+                {"value": "7000", "label": "Books (All)"},
+                {"value": "7010", "label": "Mags", "childOf": "7000"},
+                {"value": "7020", "label": "Ebook", "childOf": "7000"},
+                {"value": "7030", "label": "Comics", "childOf": "7000"},
+                {"value": "7040", "label": "Technical", "childOf": "7000"},
+                {"value": "7050", "label": "Other", "childOf": "7000"},
+                {"value": "7060", "label": "Foreign", "childOf": "7000"},
+                {"value": "3030", "label": "Audio/Audiobook"},
+            ],
+            default=["7000"],
+            variant="dropdown",
+            show_when={"field": "PROWLARR_ENABLED", "value": True},
+        ),
     ]
 
 

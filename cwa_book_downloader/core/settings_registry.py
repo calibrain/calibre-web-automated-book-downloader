@@ -78,6 +78,7 @@ class MultiSelectField(FieldBase):
     # Options can be a list or a callable that returns a list (for lazy evaluation)
     options: Any = field(default_factory=list)  # [{value: "", label: ""}] or callable
     default: List[str] = field(default_factory=list)
+    variant: str = "pills"  # "pills" (default) or "dropdown" for checkbox dropdown style
 
 
 @dataclass
@@ -308,7 +309,8 @@ def _get_config_dir() -> Path:
 def _get_config_file_path(tab_name: str) -> Path:
     """Get the config file path for a settings tab."""
     config_dir = _get_config_dir()
-    if tab_name == "general":
+    # Core settings tabs share the main settings.json file
+    if tab_name in ("general", "search_mode"):
         return config_dir / "settings.json"
     else:
         plugins_dir = config_dir / "plugins"
@@ -537,10 +539,15 @@ def serialize_field(field: SettingsField, tab_name: str, include_value: bool = T
         result["min"] = field.min_value
         result["max"] = field.max_value
         result["step"] = field.step
-    elif isinstance(field, (SelectField, MultiSelectField)):
+    elif isinstance(field, SelectField):
         # Support callable options for lazy evaluation (avoids circular imports)
         options = field.options() if callable(field.options) else field.options
         result["options"] = options
+    elif isinstance(field, MultiSelectField):
+        # Support callable options for lazy evaluation (avoids circular imports)
+        options = field.options() if callable(field.options) else field.options
+        result["options"] = options
+        result["variant"] = field.variant
     elif isinstance(field, OrderableListField):
         # Support callable options for lazy evaluation (avoids circular imports)
         options = field.options() if callable(field.options) else field.options

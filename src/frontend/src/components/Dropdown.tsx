@@ -103,7 +103,7 @@ export const Dropdown = ({
           type="button"
           onClick={toggleOpen}
           disabled={disabled}
-          className={`w-full px-2.5 py-1.5 text-sm rounded-md border flex items-center justify-between text-left focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 ${buttonClassName}`}
+          className={`w-full px-3 py-2 text-sm rounded-lg border flex items-center justify-between text-left focus:outline-none focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 ${buttonClassName}`}
           style={{
             background: 'var(--bg-soft)',
             color: 'var(--text)',
@@ -130,7 +130,7 @@ export const Dropdown = ({
           ref={panelRef}
           className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} ${
             panelDirection === 'down' ? 'mt-2' : 'bottom-full mb-2'
-          } rounded-md border shadow-lg z-20 ${panelClassName || widthClassName}`}
+          } rounded-lg border shadow-lg z-20 ${panelClassName || widthClassName}`}
           style={{
             background: 'var(--bg)',
             borderColor: 'var(--border-muted)',

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { Book, Release, ReleaseSource, ReleasesResponse, Language, StatusData, ButtonStateInfo, ColumnSchema, ReleaseColumnConfig, LeadingCellConfig, SearchStatusData } from '../types';
+import { Book, Release, ReleaseSource, ReleasesResponse, Language, StatusData, ButtonStateInfo, ColumnSchema, ReleaseColumnConfig, LeadingCellConfig, SearchStatusData, ContentType } from '../types';
 import { getReleases, getReleaseSources } from '../services/api';
 import { useSocket } from '../contexts/SocketContext';
 import { Dropdown } from './Dropdown';
@@ -100,6 +100,8 @@ interface ReleaseModalProps {
   onClose: () => void;
   onDownload: (book: Book, release: Release) => Promise<void>;
   supportedFormats: string[];
+  supportedAudiobookFormats?: string[];  // Audiobook formats (m4b, mp3)
+  contentType?: ContentType;  // 'ebook' or 'audiobook'
   defaultLanguages: string[];
   bookLanguages: Language[];
   currentStatus: StatusData;
@@ -528,12 +530,18 @@ export const ReleaseModal = ({
   onClose,
   onDownload,
   supportedFormats,
+  supportedAudiobookFormats = [],
+  contentType = 'ebook',
   defaultLanguages,
   bookLanguages,
   currentStatus,
   defaultReleaseSource,
   onSearchSeries,
 }: ReleaseModalProps) => {
+  // Use audiobook formats when in audiobook mode
+  const effectiveFormats = contentType === 'audiobook' && supportedAudiobookFormats.length > 0
+    ? supportedAudiobookFormats
+    : supportedFormats;
   const [isClosing, setIsClosing] = useState(false);
 
   // Available sources from plugin registry
@@ -714,10 +722,18 @@ export const ReleaseModal = ({
         setSourcesLoading(true);
         const sources = await getReleaseSources();
         setAvailableSources(sources);
-        // Set active tab: prefer defaultReleaseSource if enabled, otherwise first enabled source
-        if (sources.length > 0) {
-          const enabledSources = sources.filter(s => s.enabled);
-          const defaultIsEnabled = defaultReleaseSource && enabledSources.some(s => s.name === defaultReleaseSource);
+
+        // Filter sources by content type support
+        const supportedSources = sources.filter(s => {
+          const types = s.supported_content_types || ['ebook', 'audiobook'];
+          return types.includes(contentType);
+        });
+
+        // Set active tab: prefer defaultReleaseSource if enabled and supports content type
+        if (supportedSources.length > 0) {
+          const enabledSources = supportedSources.filter(s => s.enabled);
+          const defaultIsEnabled = defaultReleaseSource &&
+            enabledSources.some(s => s.name === defaultReleaseSource);
 
           let defaultSource: string;
           if (defaultIsEnabled) {
@@ -725,22 +741,32 @@ export const ReleaseModal = ({
           } else if (enabledSources.length > 0) {
             defaultSource = enabledSources[0].name;
           } else {
-            defaultSource = sources[0].name;  // Fallback to first source if none enabled
+            defaultSource = supportedSources[0].name;  // Fallback to first supported source
           }
           setActiveTab(defaultSource);
+        } else if (sources.length > 0) {
+          // No sources support this content type - fall back to first source
+          setActiveTab(sources[0].name);
         }
       } catch (err) {
         console.error('Failed to fetch release sources:', err);
-        // Fallback: assume direct_download is available
-        setAvailableSources([{ name: 'direct_download', display_name: "Anna's Archive", enabled: true }]);
-        setActiveTab('direct_download');
+        // Fallback: assume direct_download is available (for ebooks)
+        setAvailableSources([{
+          name: 'direct_download',
+          display_name: "Anna's Archive",
+          enabled: true,
+          supported_content_types: ['ebook']
+        }]);
+        if (contentType === 'ebook') {
+          setActiveTab('direct_download');
+        }
       } finally {
         setSourcesLoading(false);
       }
     };
 
     fetchSources();
-  }, [book, defaultReleaseSource]);
+  }, [book, defaultReleaseSource, contentType]);
 
   // Fetch releases when active tab changes (with caching)
   // Initial fetch always uses ISBN-first search; expansion is handled by handleExpandSearch
@@ -766,7 +792,7 @@ export const ReleaseModal = ({
       setErrorBySource((prev) => ({ ...prev, [activeTab]: null }));
 
       try {
-        const response = await getReleases(provider, bookId, activeTab, book.title, book.author);
+        const response = await getReleases(provider, bookId, activeTab, book.title, book.author, undefined, undefined, contentType);
         setCachedReleases(provider, bookId, activeTab, response);
         setReleasesBySource((prev) => ({ ...prev, [activeTab]: response }));
       } catch (err) {
@@ -778,7 +804,7 @@ export const ReleaseModal = ({
     };
 
     fetchReleases();
-  }, [book, activeTab, releasesBySource, loadingBySource, errorBySource]);
+  }, [book, activeTab, releasesBySource, loadingBySource, errorBySource, contentType]);
 
   // Handler for expanding search (title+author instead of ISBN)
   // Fetches additional results and merges with existing ISBN results
@@ -801,7 +827,7 @@ export const ReleaseModal = ({
 
       // Fetch with expand_search=true (title+author search)
       const expandedResponse = await getReleases(
-        provider, bookId, activeTab, book.title, book.author, true, languagesParam
+        provider, bookId, activeTab, book.title, book.author, true, languagesParam, contentType
       );
 
       // Merge with existing results, deduplicating by source_id
@@ -828,19 +854,25 @@ export const ReleaseModal = ({
     } finally {
       setLoadingBySource((prev) => ({ ...prev, [activeTab]: false }));
     }
-  }, [activeTab, book, languageFilter, bookLanguages, defaultLanguages]);
+  }, [activeTab, book, languageFilter, bookLanguages, defaultLanguages, contentType]);
 
   // Build list of tabs to show
   // All sources come from backend with their enabled status
-  // Order: 1) Default source, 2) Other enabled sources, 3) Disabled sources
+  // Filter by supported content types, then order: 1) Default source, 2) Other enabled sources, 3) Disabled sources
   const allTabs = useMemo(() => {
     type TabInfo = { name: string; displayName: string; enabled: boolean };
 
     const enabledTabs: TabInfo[] = [];
     const disabledTabs: TabInfo[] = [];
 
-    // Separate sources by enabled status
+    // Filter sources by content type and separate by enabled status
     availableSources.forEach((src) => {
+      // Check if source supports the current content type
+      const supportedTypes = src.supported_content_types || ['ebook', 'audiobook'];
+      if (!supportedTypes.includes(contentType)) {
+        return; // Skip sources that don't support this content type
+      }
+
       const tab = { name: src.name, displayName: src.display_name, enabled: src.enabled };
       if (src.enabled) {
         enabledTabs.push(tab);
@@ -860,7 +892,7 @@ export const ReleaseModal = ({
 
     // Combine: enabled sources first (with default first), then disabled
     return [...enabledTabs, ...disabledTabs];
-  }, [availableSources, defaultReleaseSource]);
+  }, [availableSources, defaultReleaseSource, contentType]);
 
   // Update tab indicator position when active tab changes
   useEffect(() => {
@@ -883,19 +915,19 @@ export const ReleaseModal = ({
   const availableFormats = useMemo(() => {
     const releases = releasesBySource[activeTab]?.releases || [];
     const formats = new Set<string>();
-    const supportedLower = supportedFormats.map((f) => f.toLowerCase());
+    const effectiveLower = effectiveFormats.map((f) => f.toLowerCase());
 
     releases.forEach((r) => {
       if (r.format) {
         const fmt = r.format.toLowerCase();
         // Only include formats that are in the supported list
-        if (supportedLower.includes(fmt)) {
+        if (effectiveLower.includes(fmt)) {
           formats.add(fmt);
         }
       }
     });
     return Array.from(formats).sort();
-  }, [releasesBySource, activeTab, supportedFormats]);
+  }, [releasesBySource, activeTab, effectiveFormats]);
 
   // Build select options for format filter
   const formatOptions = useMemo(() => {
@@ -914,7 +946,7 @@ export const ReleaseModal = ({
   // Filter releases based on settings and user selection
   const filteredReleases = useMemo(() => {
     const releases = releasesBySource[activeTab]?.releases || [];
-    const supportedLower = supportedFormats.map((f) => f.toLowerCase());
+    const effectiveLower = effectiveFormats.map((f) => f.toLowerCase());
 
     return releases.filter((r) => {
       // Format filtering
@@ -925,7 +957,7 @@ export const ReleaseModal = ({
         if (!fmt || fmt !== formatFilter.toLowerCase()) return false;
       } else if (fmt) {
         // No specific filter - show only supported formats
-        if (!supportedLower.includes(fmt)) return false;
+        if (!effectiveLower.includes(fmt)) return false;
       }
       // Releases with no format pass through when no filter is set (show all)
 
@@ -937,7 +969,7 @@ export const ReleaseModal = ({
 
       return true;
     });
-  }, [releasesBySource, activeTab, formatFilter, resolvedLanguageCodes, supportedFormats, defaultLanguages]);
+  }, [releasesBySource, activeTab, formatFilter, resolvedLanguageCodes, effectiveFormats, defaultLanguages]);
 
   // Get column config from response or use default
   const columnConfig = useMemo((): ReleaseColumnConfig => {
@@ -1340,7 +1372,7 @@ export const ReleaseModal = ({
                                     : langCodes;
 
                                   const response = await getReleases(
-                                    provider, bookId, activeTab, book.title, book.author, false, languagesParam
+                                    provider, bookId, activeTab, book.title, book.author, false, languagesParam, contentType
                                   );
                                   setCachedReleases(provider, bookId, activeTab, response);
                                   setReleasesBySource((prev) => ({ ...prev, [activeTab]: response }));
@@ -1377,13 +1409,31 @@ export const ReleaseModal = ({
               ) : currentTabError ? (
                 <ErrorState message={currentTabError} />
               ) : filteredReleases.length === 0 && !currentTabLoading ? (
-                <EmptyState
-                  message={
-                    formatFilter
-                      ? `No ${formatFilter.toUpperCase()} releases found. Try a different format.`
-                      : 'No releases found for this book.'
-                  }
-                />
+                <>
+                  <EmptyState
+                    message={
+                      formatFilter
+                        ? `No ${formatFilter.toUpperCase()} releases found. Try a different format.`
+                        : 'No releases found for this book.'
+                    }
+                  />
+                  {/* Expand search button - also shown in empty state */}
+                  {!expandedBySource[activeTab] &&
+                   releasesBySource[activeTab]?.search_info?.[activeTab]?.search_type &&
+                   !['title_author', 'expanded'].includes(
+                     releasesBySource[activeTab]?.search_info?.[activeTab]?.search_type ?? ''
+                   ) && (
+                    <div className="py-3 text-center">
+                      <button
+                        type="button"
+                        onClick={handleExpandSearch}
+                        className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 rounded-full hover-action transition-all duration-200"
+                      >
+                        Expand search
+                      </button>
+                    </div>
+                  )}
+                </>
               ) : (
                 <>
                   {/* Key includes filter to force remount when filter changes */}

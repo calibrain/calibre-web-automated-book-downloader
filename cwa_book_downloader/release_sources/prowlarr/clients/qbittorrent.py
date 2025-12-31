@@ -100,8 +100,10 @@ class QBittorrentClient(DownloadClient):
                     rename=name,
                 )
             else:
+                # Use magnet URL if available, otherwise original URL
+                add_url = torrent_info.magnet_url or url
                 result = self._client.torrents_add(
-                    urls=url,
+                    urls=add_url,
                     category=category,
                     rename=name,
                 )
