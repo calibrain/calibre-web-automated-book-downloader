@@ -455,7 +455,7 @@ function App() {
   };
 
   // Handle download from ReleaseModal
-  const handleReleaseDownload = async (book: Book, release: Release) => {
+  const handleReleaseDownload = async (book: Book, release: Release, releaseContentType: ContentType) => {
     try {
       trackRelease(book.id, release.source_id);
 
@@ -474,6 +474,7 @@ function App() {
         seeders: release.seeders,
         extra: release.extra,
         preview: book.preview,  // Pass book cover from metadata
+        content_type: releaseContentType,  // For audiobook directory routing
       });
       await fetchStatus();
     } catch (error) {

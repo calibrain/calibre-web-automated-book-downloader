@@ -165,6 +165,7 @@ export const downloadRelease = async (release: {
   seeders?: number;
   extra?: Record<string, unknown>;
   preview?: string;  // Book cover from metadata provider
+  content_type?: string;  // "ebook" or "audiobook" - for directory routing
 }): Promise<void> => {
   await fetchJSON(`${API_BASE}/releases/download`, {
     method: 'POST',

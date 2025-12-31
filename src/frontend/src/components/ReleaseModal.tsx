@@ -98,10 +98,10 @@ const DEFAULT_COLUMN_CONFIG: ReleaseColumnConfig = {
 interface ReleaseModalProps {
   book: Book | null;
   onClose: () => void;
-  onDownload: (book: Book, release: Release) => Promise<void>;
+  onDownload: (book: Book, release: Release, contentType: ContentType) => Promise<void>;
   supportedFormats: string[];
   supportedAudiobookFormats?: string[];  // Audiobook formats (m4b, mp3)
-  contentType?: ContentType;  // 'ebook' or 'audiobook'
+  contentType: ContentType;  // 'ebook' or 'audiobook'
   defaultLanguages: string[];
   bookLanguages: Language[];
   currentStatus: StatusData;
@@ -1028,7 +1028,7 @@ export const ReleaseModal = ({
     async (release: Release): Promise<void> => {
       if (book) {
         try {
-          await onDownload(book, release);
+          await onDownload(book, release, contentType);
           // Close modal after successful queue
           handleClose();
         } catch {
@@ -1036,7 +1036,7 @@ export const ReleaseModal = ({
         }
       }
     },
-    [book, onDownload, handleClose]
+    [book, onDownload, contentType, handleClose]
   );
 
   if (!book && !isClosing) return null;
