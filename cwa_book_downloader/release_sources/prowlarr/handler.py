@@ -117,16 +117,17 @@ class ProwlarrHandler(DownloadHandler):
                 # No existing download - add new
                 status_callback("resolving", f"Sending to {client.name}")
                 try:
+                    release_name = prowlarr_result.get("title") or task.title or "Unknown"
                     download_id = client.add_download(
                         url=download_url,
-                        name=task.title or "Unknown",
+                        name=release_name,
                     )
                 except Exception as e:
                     logger.error(f"Failed to add to {client.name}: {e}")
                     status_callback("error", f"Failed to add to {client.name}: {e}")
                     return None
 
-                logger.info(f"Added to {client.name}: {download_id} for '{task.title}'")
+                logger.info(f"Added to {client.name}: {download_id} for '{release_name}'")
 
             # Poll for progress
             return self._poll_and_complete(

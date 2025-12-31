@@ -111,35 +111,44 @@ def stage_file(source_path: Path, task_id: str, copy: bool = False) -> Path:
     return staged_path
 
 
-def _get_supported_formats() -> List[str]:
-    """Get current supported formats from config singleton."""
-    formats = config.get("SUPPORTED_FORMATS", ["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"])
+def _get_supported_formats(content_type: str = None) -> List[str]:
+    """Get current supported formats from config singleton based on content type."""
+    if content_type and content_type.lower() == "audiobook":
+        formats = config.get("SUPPORTED_AUDIOBOOK_FORMATS", ["m4b", "mp3"])
+    else:
+        formats = config.get("SUPPORTED_FORMATS", ["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"])
     # Handle both list (from MultiSelectField) and comma-separated string (legacy/env)
     if isinstance(formats, str):
         return [fmt.strip().lower() for fmt in formats.split(",") if fmt.strip()]
     return [fmt.lower() for fmt in formats]
 
 
-def _find_book_files_in_directory(directory: Path) -> Tuple[List[Path], List[Path]]:
-    """Find all book files in a directory matching SUPPORTED_FORMATS.
+def _find_book_files_in_directory(directory: Path, content_type: str = None) -> Tuple[List[Path], List[Path]]:
+    """Find all book files in a directory matching supported formats.
 
     Args:
         directory: Directory to search recursively
+        content_type: Content type to determine format list (e.g., "audiobook")
 
     Returns:
         Tuple of (matching book files, rejected files with unsupported extensions)
     """
     book_files = []
     rejected_files = []
-    supported_formats = _get_supported_formats()
+    supported_formats = _get_supported_formats(content_type)
     supported_exts = {f".{fmt}" for fmt in supported_formats}
+
+    is_audiobook = content_type and content_type.lower() == "audiobook"
+    if is_audiobook:
+        trackable_exts = {'.m4b', '.mp3', '.m4a', '.flac', '.ogg', '.wma', '.aac', '.wav'}
+    else:
+        trackable_exts = {'.pdf', '.epub', '.mobi', '.azw', '.azw3', '.fb2', '.djvu', '.cbz', '.cbr', '.doc', '.docx', '.rtf', '.txt'}
 
     for file_path in directory.rglob("*"):
         if file_path.is_file():
             if file_path.suffix.lower() in supported_exts:
                 book_files.append(file_path)
-            elif file_path.suffix.lower() in {'.pdf', '.epub', '.mobi', '.azw', '.azw3', '.fb2', '.djvu', '.cbz', '.cbr', '.doc', '.docx', '.rtf', '.txt'}:
-                # Track ebook-like files that were rejected due to format settings
+            elif file_path.suffix.lower() in trackable_exts:
                 rejected_files.append(file_path)
 
     return book_files, rejected_files
@@ -164,7 +173,8 @@ def process_directory(
         Tuple of (list of final paths, error message if failed)
     """
     try:
-        book_files, rejected_files = _find_book_files_in_directory(directory)
+        content_type = task.content_type
+        book_files, rejected_files = _find_book_files_in_directory(directory, content_type)
 
         # Find archives in directory (ZIP/RAR)
         archive_files = [f for f in directory.rglob("*") if f.is_file() and is_archive(f)]
@@ -206,7 +216,7 @@ def process_directory(
                 # Files were found but didn't match supported formats
                 rejected_exts = sorted(set(f.suffix.lower() for f in rejected_files))
                 rejected_list = ", ".join(rejected_exts)
-                supported_formats = _get_supported_formats()
+                supported_formats = _get_supported_formats(content_type)
                 logger.warning(
                     f"Found {len(rejected_files)} file(s) but none match supported formats. "
                     f"Rejected formats: {rejected_list}. Supported: {', '.join(sorted(supported_formats))}"

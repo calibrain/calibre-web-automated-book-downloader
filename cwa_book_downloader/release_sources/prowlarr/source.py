@@ -199,7 +199,6 @@ class ProwlarrSource(ReleaseSource):
 
     def __init__(self):
         self.last_search_type: Optional[str] = None
-        self._category_filtered_indexers: List[int] = []
 
     @classmethod
     def get_column_config(cls) -> ReleaseColumnConfig:
@@ -348,48 +347,44 @@ class ProwlarrSource(ReleaseSource):
             return []
 
         # Get search categories based on content type
-        # Audiobooks always use 3030 (Audio/Audiobook), ebooks use configured categories
+        # Audiobooks use 3030 (Audio/Audiobook), ebooks use 7000 (Books)
         if content_type == "audiobook":
-            search_categories = ["3030"]  # Audio/Audiobook category
+            search_categories = [3030]  # Audio/Audiobook category
         else:
-            search_categories = config.get("PROWLARR_SEARCH_CATEGORIES", ["7000"])
-            # Handle both list and comma-separated string formats
-            if isinstance(search_categories, str):
-                search_categories = [c.strip() for c in search_categories.split(",") if c.strip()]
+            search_categories = [7000]  # Books category
 
         if expand_search:
-            if not self._category_filtered_indexers:
-                logger.debug("No category-filtered indexers to expand")
-                return []
-            indexers_to_search = self._category_filtered_indexers
+            # Expand search: search all indexers without category filtering
             categories = None
             self.last_search_type = "expanded"
         else:
-            indexers_to_search = indexer_ids
-            # Use configured categories, or None if empty (all categories)
-            categories = [int(c) for c in search_categories] if search_categories else None
-            self._category_filtered_indexers = []
-            self.last_search_type = "expanded" if not search_categories else "categories"
+            categories = search_categories
+            self.last_search_type = "categories"
 
-        logger.debug(f"Searching Prowlarr: query='{query}', indexers={indexers_to_search}, categories={categories}")
+        logger.debug(f"Searching Prowlarr: query='{query}', indexers={indexer_ids}, categories={categories}")
 
         all_results = []
         try:
-            for indexer_id in indexers_to_search:
+            for indexer_id in indexer_ids:
                 try:
                     raw_results = client.search(query=query, indexer_ids=[indexer_id], categories=categories)
-
-                    # Track indexers that returned no results with category filter
-                    # so "Expand search" can retry them without the filter
-                    if categories and not raw_results:
-                        self._category_filtered_indexers.append(indexer_id)
-
                     if raw_results:
                         all_results.extend(raw_results)
                 except Exception as e:
                     logger.warning(f"Search failed for indexer {indexer_id}: {e}")
 
-            if not expand_search and not self._category_filtered_indexers:
+            # Auto-expand: if no results with categories and auto-expand enabled, retry without categories
+            auto_expand_enabled = config.get("PROWLARR_AUTO_EXPAND", False)
+            logger.debug(f"Auto-expand check: no_results={not all_results}, has_categories={bool(categories)}, auto_expand_enabled={auto_expand_enabled}")
+            if not all_results and categories and auto_expand_enabled:
+                logger.info("Prowlarr: no results with category filter, auto-expanding search")
+                for indexer_id in indexer_ids:
+                    try:
+                        raw_results = client.search(query=query, indexer_ids=[indexer_id], categories=None)
+                        if raw_results:
+                            all_results.extend(raw_results)
+                    except Exception as e:
+                        logger.warning(f"Expanded search failed for indexer {indexer_id}: {e}")
                 self.last_search_type = "expanded"
 
             results = [_prowlarr_result_to_release(r) for r in all_results]
