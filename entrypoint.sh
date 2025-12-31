@@ -107,7 +107,7 @@ make_writable() {
     else
         echo "Folder $folder is not writable, changing ownership"
         change_ownership $folder
-        chmod g+r,g+w $folder || echo "Failed to change group permissions for ${folder}, continuing..."
+        chmod -R g+r,g+w $folder || echo "Failed to change group permissions for ${folder}, continuing..."
     fi
     test_write $folder || echo "Failed to test write to ${folder}, continuing..."
 }
