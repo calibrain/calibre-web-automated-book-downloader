@@ -142,6 +142,9 @@ export type MetadataSearchField =
   | CheckboxSearchField;
 
 // App configuration
+// Content type for search (ebook vs audiobook)
+export type ContentType = 'ebook' | 'audiobook';
+
 export interface AppConfig {
   calibre_web_url: string;
   debug: boolean;
@@ -150,6 +153,7 @@ export interface AppConfig {
   book_languages: Language[];
   default_language: string[];
   supported_formats: string[];
+  supported_audiobook_formats: string[];  // Audiobook formats (m4b, mp3)
   search_mode: SearchMode;
   metadata_sort_options: SortOption[];
   metadata_search_fields: MetadataSearchField[];
@@ -189,6 +193,7 @@ export interface ReleaseSource {
   name: string;           // e.g., 'direct_download', 'prowlarr'
   display_name: string;   // e.g., 'Direct Download', 'Prowlarr'
   enabled: boolean;       // Whether the source is available for use
+  supported_content_types?: string[];  // Content types this source supports (e.g., ['ebook', 'audiobook'])
 }
 
 // Column schema types for plugin-driven release list UI

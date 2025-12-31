@@ -295,7 +295,8 @@ class ProwlarrSource(ReleaseSource):
         self,
         book: BookMetadata,
         expand_search: bool = False,
-        languages: Optional[List[str]] = None
+        languages: Optional[List[str]] = None,
+        content_type: str = "ebook"
     ) -> List[Release]:
         """
         Search Prowlarr for releases matching the book.
@@ -307,6 +308,7 @@ class ProwlarrSource(ReleaseSource):
             book: Book metadata to search for
             expand_search: If True, skip category filtering (broader search)
             languages: Ignored - Prowlarr doesn't support language filtering
+            content_type: "ebook" or "audiobook" - determines search categories
 
         Returns:
             List of Release objects
@@ -345,6 +347,16 @@ class ProwlarrSource(ReleaseSource):
             logger.warning("No indexers selected - configure indexers in Prowlarr settings")
             return []
 
+        # Get search categories based on content type
+        # Audiobooks always use 3030 (Audio/Audiobook), ebooks use configured categories
+        if content_type == "audiobook":
+            search_categories = ["3030"]  # Audio/Audiobook category
+        else:
+            search_categories = config.get("PROWLARR_SEARCH_CATEGORIES", ["7000"])
+            # Handle both list and comma-separated string formats
+            if isinstance(search_categories, str):
+                search_categories = [c.strip() for c in search_categories.split(",") if c.strip()]
+
         if expand_search:
             if not self._category_filtered_indexers:
                 logger.debug("No category-filtered indexers to expand")
@@ -354,9 +366,10 @@ class ProwlarrSource(ReleaseSource):
             self.last_search_type = "expanded"
         else:
             indexers_to_search = indexer_ids
-            categories = [7000]
+            # Use configured categories, or None if empty (all categories)
+            categories = [int(c) for c in search_categories] if search_categories else None
             self._category_filtered_indexers = []
-            self.last_search_type = "categories"
+            self.last_search_type = "expanded" if not search_categories else "categories"
 
         logger.debug(f"Searching Prowlarr: query='{query}', indexers={indexers_to_search}, categories={categories}")
 
@@ -366,11 +379,10 @@ class ProwlarrSource(ReleaseSource):
                 try:
                     raw_results = client.search(query=query, indexer_ids=[indexer_id], categories=categories)
 
-                    if raw_results and categories:
+                    # Track indexers that returned no results with category filter
+                    # so "Expand search" can retry them without the filter
+                    if categories and not raw_results:
                         self._category_filtered_indexers.append(indexer_id)
-                    elif not raw_results and categories:
-                        logger.debug(f"Indexer {indexer_id}: retrying without category filter")
-                        raw_results = client.search(query=query, indexer_ids=[indexer_id], categories=None)
 
                     if raw_results:
                         all_results.extend(raw_results)

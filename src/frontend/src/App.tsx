@@ -5,6 +5,7 @@ import {
   Release,
   StatusData,
   AppConfig,
+  ContentType,
 } from './types';
 import { getBookInfo, getMetadataBookInfo, downloadBook, downloadRelease, cancelDownload, clearCompleted, getConfig } from './services/api';
 import { useToast } from './hooks/useToast';
@@ -68,6 +69,9 @@ function App() {
     showToast,
   });
 
+  // Content type state (ebook vs audiobook) - defined before useSearch since it's passed to it
+  const [contentType, setContentType] = useState<ContentType>('ebook');
+
   // Search state and handlers
   const {
     books,
@@ -95,6 +99,7 @@ function App() {
     setIsAuthenticated,
     authRequired,
     onSearchReset: clearTracking,
+    contentType,
   });
 
   // Wire up logout callback to clear search state
@@ -450,7 +455,7 @@ function App() {
   };
 
   // Handle download from ReleaseModal
-  const handleReleaseDownload = async (book: Book, release: Release) => {
+  const handleReleaseDownload = async (book: Book, release: Release, releaseContentType: ContentType) => {
     try {
       trackRelease(book.id, release.source_id);
 
@@ -469,6 +474,7 @@ function App() {
         seeders: release.seeders,
         extra: release.extra,
         preview: book.preview,  // Pass book cover from metadata
+        content_type: releaseContentType,  // For audiobook directory routing
       });
       await fetchStatus();
     } catch (error) {
@@ -548,6 +554,9 @@ function App() {
         isLoading={isSearching}
         onShowToast={showToast}
         onRemoveToast={removeToast}
+        searchMode={searchMode}
+        contentType={contentType}
+        onContentTypeChange={setContentType}
       />
 
       <AdvancedFilters
@@ -591,6 +600,7 @@ function App() {
           metadataSearchFields={config?.metadata_search_fields}
           searchFieldValues={searchFieldValues}
           onSearchFieldChange={updateSearchFieldValue}
+          contentType={contentType}
         />
 
         {isInitialState && !featureNoticeDismissed && (
@@ -639,6 +649,8 @@ function App() {
             onClose={() => setReleaseBook(null)}
             onDownload={handleReleaseDownload}
             supportedFormats={supportedFormats}
+            supportedAudiobookFormats={config?.supported_audiobook_formats || []}
+            contentType={contentType}
             defaultLanguages={defaultLanguageCodes}
             bookLanguages={bookLanguages}
             currentStatus={currentStatus}

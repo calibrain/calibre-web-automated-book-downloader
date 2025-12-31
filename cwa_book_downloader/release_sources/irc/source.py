@@ -66,6 +66,7 @@ class IRCReleaseSource(ReleaseSource):
 
     name = "irc"
     display_name = "IRC Highway"
+    supported_content_types = ["ebook"]  # IRC only supports ebooks
 
     def __init__(self):
         # Track online servers from most recent search
@@ -116,7 +117,8 @@ class IRCReleaseSource(ReleaseSource):
         self,
         book: BookMetadata,
         expand_search: bool = False,
-        languages: Optional[List[str]] = None
+        languages: Optional[List[str]] = None,
+        content_type: str = "ebook"
     ) -> List[Release]:
         """Search IRC Highway for books matching metadata.
 
@@ -124,6 +126,7 @@ class IRCReleaseSource(ReleaseSource):
             book: Book metadata (title, authors, etc.)
             expand_search: Ignored - IRC always uses title+author search
             languages: Ignored - IRC doesn't support language filtering
+            content_type: Ignored - IRC doesn't differentiate content types
 
         Returns:
             List of matching releases

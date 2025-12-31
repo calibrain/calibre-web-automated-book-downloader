@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { MultiSelectFieldConfig } from '../../../types/settings';
+import { DropdownList } from '../../DropdownList';
 
 interface MultiSelectFieldProps {
   field: MultiSelectFieldConfig;
@@ -30,6 +31,83 @@ export const MultiSelectField = ({ field, value, onChange, disabled }: MultiSele
   const selected = value ?? [];
   // disabled prop is already computed by SettingsContent.getDisabledState()
   const isDisabled = disabled ?? false;
+
+  // Dropdown variant - use DropdownList with checkboxes
+  if (field.variant === 'dropdown') {
+    // Build parent -> children map for cascading selection
+    const parentChildMap = new Map<string, string[]>();
+    field.options.forEach((opt) => {
+      if (opt.childOf) {
+        const children = parentChildMap.get(opt.childOf) || [];
+        children.push(opt.value);
+        parentChildMap.set(opt.childOf, children);
+      }
+    });
+
+    // Check which children are implicitly selected via parent
+    const implicitlySelected = new Set<string>();
+    selected.forEach((val) => {
+      const children = parentChildMap.get(val);
+      if (children) {
+        children.forEach((child) => implicitlySelected.add(child));
+      }
+    });
+
+    // Build options with disabled state for implicitly selected children
+    const dropdownOptions = field.options.map((opt) => ({
+      value: opt.value,
+      label: opt.label,
+      disabled: implicitlySelected.has(opt.value),
+    }));
+
+    // For display purposes, show both explicit and implicit selections
+    const displayValue = [...selected, ...Array.from(implicitlySelected)];
+
+    const handleDropdownChange = (newValue: string | string[]) => {
+      const arr = Array.isArray(newValue) ? newValue : [newValue];
+      // Filter out implicitly selected values - only store explicit selections
+      const explicitOnly = arr.filter((v) => !implicitlySelected.has(v));
+      onChange(explicitOnly);
+    };
+
+    // Custom summary formatter - only count explicit selections
+    const summaryFormatter = () => {
+      if (selected.length === 0) {
+        return <span className="opacity-60">Select categories...</span>;
+      }
+      const selectedLabels = selected
+        .map((v) => field.options.find((o) => o.value === v)?.label)
+        .filter(Boolean);
+      if (selectedLabels.length === 1) {
+        return selectedLabels[0];
+      }
+      const [first, second, ...rest] = selectedLabels;
+      const suffix = rest.length > 0 ? ` +${rest.length}` : '';
+      return `${first}, ${second ?? ''}${suffix}`.trim();
+    };
+
+    if (isDisabled) {
+      return (
+        <div className="w-full px-3 py-2 rounded-lg border border-[var(--border-muted)] bg-[var(--bg-soft)] text-sm opacity-60 cursor-not-allowed">
+          {summaryFormatter()}
+        </div>
+      );
+    }
+
+    return (
+      <DropdownList
+        options={dropdownOptions}
+        value={displayValue}
+        onChange={handleDropdownChange}
+        multiple
+        showCheckboxes
+        keepOpenOnSelect
+        placeholder="Select categories..."
+        widthClassName="w-full"
+        summaryFormatter={summaryFormatter}
+      />
+    );
+  }
   const [isExpanded, setIsExpanded] = useState(false);
   // Initialize based on option count to avoid flash of expanded content
   const [needsCollapse, setNeedsCollapse] = useState(

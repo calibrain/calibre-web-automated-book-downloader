@@ -37,6 +37,9 @@ class TorrentInfo:
     is_magnet: bool
     """True if the URL was a magnet link."""
 
+    magnet_url: Optional[str] = None
+    """The actual magnet URL, if available."""
+
 
 def extract_torrent_info(url: str, fetch_torrent: bool = True) -> TorrentInfo:
     """
@@ -45,6 +48,9 @@ def extract_torrent_info(url: str, fetch_torrent: bool = True) -> TorrentInfo:
     Handles both magnet links and .torrent file URLs. For magnet links,
     extracts the hash directly. For .torrent URLs, optionally fetches
     the file and parses it to extract the hash.
+
+    Also handles the case where a download URL redirects to a magnet link
+    or returns a magnet link in the response body.
 
     Args:
         url: Magnet link or .torrent URL
@@ -59,7 +65,7 @@ def extract_torrent_info(url: str, fetch_torrent: bool = True) -> TorrentInfo:
     # Try to extract hash from magnet URL
     if is_magnet:
         info_hash = extract_hash_from_magnet(url)
-        return TorrentInfo(info_hash=info_hash, torrent_data=None, is_magnet=True)
+        return TorrentInfo(info_hash=info_hash, torrent_data=None, is_magnet=True, magnet_url=url)
 
     # Not a magnet - try to fetch and parse the .torrent file
     if not fetch_torrent:
@@ -67,9 +73,41 @@ def extract_torrent_info(url: str, fetch_torrent: bool = True) -> TorrentInfo:
 
     try:
         logger.debug(f"Fetching torrent file from: {url[:80]}...")
-        resp = requests.get(url, timeout=30)
+
+        # Use allow_redirects=False to handle magnet link redirects manually
+        # Some indexers redirect download URLs to magnet links
+        resp = requests.get(url, timeout=30, allow_redirects=False)
+
+        # Check if this is a redirect to a magnet link
+        if resp.status_code in (301, 302, 303, 307, 308):
+            redirect_url = resp.headers.get("Location", "")
+            if redirect_url.startswith("magnet:"):
+                logger.debug(f"Download URL redirected to magnet link")
+                info_hash = extract_hash_from_magnet(redirect_url)
+                return TorrentInfo(
+                    info_hash=info_hash, torrent_data=None, is_magnet=True, magnet_url=redirect_url
+                )
+            # Not a magnet redirect, follow it manually
+            logger.debug(f"Following redirect to: {redirect_url[:80]}...")
+            resp = requests.get(redirect_url, timeout=30)
+
         resp.raise_for_status()
         torrent_data = resp.content
+
+        # Check if response is actually a magnet link (text response)
+        # Some indexers return magnet links as plain text instead of redirecting
+        if len(torrent_data) < 2000:  # Magnet links are typically short
+            try:
+                text_content = torrent_data.decode("utf-8", errors="ignore").strip()
+                if text_content.startswith("magnet:"):
+                    logger.debug("Download URL returned magnet link as response body")
+                    info_hash = extract_hash_from_magnet(text_content)
+                    return TorrentInfo(
+                        info_hash=info_hash, torrent_data=None, is_magnet=True, magnet_url=text_content
+                    )
+            except Exception:
+                pass  # Not text, continue with torrent parsing
+
         info_hash = extract_info_hash_from_torrent(torrent_data)
         if info_hash:
             logger.debug(f"Extracted hash from torrent file: {info_hash}")

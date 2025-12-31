@@ -118,10 +118,11 @@ class DelugeClient(DownloadClient):
             options = {}
 
             if torrent_info.is_magnet:
-                # Add magnet link
+                # Use magnet URL if available, otherwise original URL
+                magnet_url = torrent_info.magnet_url or url
                 torrent_id = self._client.call(
                     'core.add_torrent_magnet',
-                    url,
+                    magnet_url,
                     options,
                 )
             else:

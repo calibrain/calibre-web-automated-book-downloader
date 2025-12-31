@@ -945,6 +945,7 @@ class DirectDownloadSource(ReleaseSource):
     """
     name = "direct_download"
     display_name = "Anna's Archive"
+    supported_content_types = ["ebook"]  # Direct downloads only support ebooks
 
     def __init__(self):
         # Tracks which search method was used in the last search() call
@@ -1002,7 +1003,8 @@ class DirectDownloadSource(ReleaseSource):
         self,
         book: BookMetadata,
         expand_search: bool = False,
-        languages: Optional[List[str]] = None
+        languages: Optional[List[str]] = None,
+        content_type: str = "ebook"
     ) -> List[Release]:
         """
         Search for releases using the book's metadata.
@@ -1014,6 +1016,7 @@ class DirectDownloadSource(ReleaseSource):
             book: Book metadata from provider
             expand_search: If True, skip ISBN and use title+author directly
             languages: Language codes to filter by (overrides book.language/config)
+            content_type: Ignored - Direct download uses format filtering instead
         """
         # Language filter: explicit param > book.language > config default
         lang_filter = languages or ([book.language] if book.language else config.BOOK_LANGUAGE)

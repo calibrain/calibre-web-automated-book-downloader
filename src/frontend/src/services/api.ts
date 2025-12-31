@@ -97,7 +97,8 @@ export const searchMetadata = async (
   limit: number = 40,
   sort: string = 'relevance',
   fields: Record<string, string | number | boolean> = {},
-  page: number = 1
+  page: number = 1,
+  contentType: string = 'ebook'
 ): Promise<MetadataSearchResult> => {
   const hasFields = Object.values(fields).some(v => v !== '' && v !== false);
 
@@ -112,6 +113,7 @@ export const searchMetadata = async (
   params.set('limit', String(limit));
   params.set('sort', sort);
   params.set('page', String(page));
+  params.set('content_type', contentType);
 
   // Add custom search field values
   Object.entries(fields).forEach(([key, value]) => {
@@ -163,6 +165,7 @@ export const downloadRelease = async (release: {
   seeders?: number;
   extra?: Record<string, unknown>;
   preview?: string;  // Book cover from metadata provider
+  content_type?: string;  // "ebook" or "audiobook" - for directory routing
 }): Promise<void> => {
   await fetchJSON(`${API_BASE}/releases/download`, {
     method: 'POST',
@@ -245,7 +248,8 @@ export const getReleases = async (
   title?: string,
   author?: string,
   expandSearch?: boolean,
-  languages?: string[]
+  languages?: string[],
+  contentType?: string
 ): Promise<ReleasesResponse> => {
   const params = new URLSearchParams({
     provider,
@@ -265,6 +269,9 @@ export const getReleases = async (
   }
   if (languages && languages.length > 0) {
     params.set('languages', languages.join(','));
+  }
+  if (contentType) {
+    params.set('content_type', contentType);
   }
   return fetchJSON<ReleasesResponse>(`${API_BASE}/releases?${params.toString()}`);
 };

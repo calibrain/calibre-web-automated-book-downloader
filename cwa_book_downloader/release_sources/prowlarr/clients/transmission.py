@@ -93,8 +93,10 @@ class TransmissionClient(DownloadClient):
                     labels=[category],
                 )
             else:
+                # Use magnet URL if available, otherwise original URL
+                add_url = torrent_info.magnet_url or url
                 torrent = self._client.add_torrent(
-                    torrent=url,
+                    torrent=add_url,
                     labels=[category],
                 )
 

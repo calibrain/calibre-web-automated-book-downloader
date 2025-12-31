@@ -14,6 +14,7 @@ export type FieldType =
 export interface SelectOption {
   value: string;
   label: string;
+  childOf?: string;  // Parent value - when parent is selected, this option is auto-selected and disabled
 }
 
 // Conditional visibility configuration
@@ -83,6 +84,7 @@ export interface MultiSelectFieldConfig extends BaseField {
   type: 'MultiSelectField';
   value: string[];
   options: SelectOption[];
+  variant?: 'pills' | 'dropdown';  // 'pills' (default) or 'dropdown' for checkbox dropdown style
 }
 
 // OrderableListField types - generic drag-and-drop reorderable list

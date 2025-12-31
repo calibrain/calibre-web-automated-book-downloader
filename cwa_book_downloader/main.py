@@ -519,6 +519,7 @@ def api_config() -> Union[Response, Tuple[Response, int]]:
             "book_languages": _SUPPORTED_BOOK_LANGUAGE,
             "default_language": app_config.BOOK_LANGUAGE,
             "supported_formats": app_config.SUPPORTED_FORMATS,
+            "supported_audiobook_formats": app_config.SUPPORTED_AUDIOBOOK_FORMATS,
             "search_mode": app_config.get("SEARCH_MODE", "direct"),
             "metadata_sort_options": get_provider_sort_options(),
             "metadata_search_fields": get_provider_search_fields(),
@@ -1099,6 +1100,7 @@ def api_metadata_search() -> Union[Response, Tuple[Response, int]]:
         from dataclasses import asdict
 
         query = request.args.get('query', '').strip()
+        content_type = request.args.get('content_type', 'ebook').strip()
 
         try:
             limit = min(int(request.args.get('limit', 40)), 100)
@@ -1117,7 +1119,7 @@ def api_metadata_search() -> Union[Response, Tuple[Response, int]]:
         except ValueError:
             sort_order = SortOrder.RELEVANCE
 
-        provider = get_configured_provider()
+        provider = get_configured_provider(content_type=content_type)
         if not provider:
             return jsonify({
                 "error": "No metadata provider configured",
@@ -1266,6 +1268,8 @@ def api_releases() -> Union[Response, Tuple[Response, int]]:
         # Accept language codes for filtering (comma-separated)
         languages_param = request.args.get('languages', '').strip()
         languages = [lang.strip() for lang in languages_param.split(',') if lang.strip()] if languages_param else None
+        # Content type for audiobook vs ebook search
+        content_type = request.args.get('content_type', 'ebook').strip()
 
         if not provider or not book_id:
             return jsonify({"error": "Parameters 'provider' and 'book_id' are required"}), 400
@@ -1304,8 +1308,8 @@ def api_releases() -> Union[Response, Tuple[Response, int]]:
             try:
                 source = get_source(source_name)
                 source_instances[source_name] = source
-                logger.debug(f"Searching {source_name} for '{book.title}' by {book.authors} (expand={expand_search})")
-                releases = source.search(book, expand_search=expand_search, languages=languages)
+                logger.debug(f"Searching {source_name} for '{book.title}' by {book.authors} (expand={expand_search}, content_type={content_type})")
+                releases = source.search(book, expand_search=expand_search, languages=languages, content_type=content_type)
                 all_releases.extend(releases)
             except ValueError:
                 errors.append(f"Unknown source: {source_name}")

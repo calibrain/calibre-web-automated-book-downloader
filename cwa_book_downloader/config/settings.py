@@ -70,6 +70,8 @@ AA_AVAILABLE_URLS = [url.strip() for url in AA_AVAILABLE_URLS if url.strip()]
 # File format settings
 SUPPORTED_FORMATS = env._SUPPORTED_FORMATS.split(",")
 logger.debug(f"SUPPORTED_FORMATS: {SUPPORTED_FORMATS}")
+SUPPORTED_AUDIOBOOK_FORMATS = env._SUPPORTED_AUDIOBOOK_FORMATS.split(",")
+logger.debug(f"SUPPORTED_AUDIOBOOK_FORMATS: {SUPPORTED_AUDIOBOOK_FORMATS}")
 
 # Complex language processing logic kept in config.py
 BOOK_LANGUAGE = env._BOOK_LANGUAGE.split(',')
@@ -151,6 +153,13 @@ _FORMAT_OPTIONS = [
     {"value": "rar", "label": "RAR"},
 ]
 
+_AUDIOBOOK_FORMAT_OPTIONS = [
+    {"value": "m4b", "label": "M4B"},
+    {"value": "mp3", "label": "MP3"},
+    {"value": "zip", "label": "ZIP"},
+    {"value": "rar", "label": "RAR"},
+]
+
 
 def _get_metadata_provider_options():
     """Build metadata provider options dynamically from enabled providers only."""
@@ -168,6 +177,13 @@ def _get_metadata_provider_options():
             {"value": "", "label": "No providers enabled"},
         ]
 
+    return options
+
+
+def _get_metadata_provider_options_with_none():
+    """Build metadata provider options with a 'Use main provider' option first."""
+    options = [{"value": "", "label": "Use book provider"}]
+    options.extend(_get_metadata_provider_options())
     return options
 
 
@@ -238,9 +254,42 @@ def general_settings():
             placeholder="http://calibre-web:8083",
         ),
         HeadingField(
+            key="search_defaults_heading",
+            title="Default Search Filters",
+            description="Default filters applied to searches. Can be overridden using advanced search options.",
+        ),
+        MultiSelectField(
+            key="SUPPORTED_FORMATS",
+            label="Supported Book Formats",
+            description="Book formats to include in search results. ZIP/RAR archives are extracted automatically and book files are used if found.",
+            options=_FORMAT_OPTIONS,
+            default=["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"],
+        ),
+        MultiSelectField(
+            key="SUPPORTED_AUDIOBOOK_FORMATS",
+            label="Supported Audiobook Formats",
+            description="Audiobook formats to include in search results. ZIP/RAR archives are extracted automatically and audiobook files are used if found.",
+            options=_AUDIOBOOK_FORMAT_OPTIONS,
+            default=["m4b", "mp3"],
+        ),
+        MultiSelectField(
+            key="BOOK_LANGUAGE",
+            label="Default Book Languages",
+            description="Default language filter for searches.",
+            options=_LANGUAGE_OPTIONS,
+            default=["en"],
+        ),
+    ]
+
+
+@register_settings("search_mode", "Search Mode", icon="search", order=1)
+def search_mode_settings():
+    """Configure how you search for and download books."""
+    return [
+        HeadingField(
             key="search_mode_heading",
             title="Search Mode",
-            description="Direct searches Anna's Archive and downloads immediately. Universal searches book metadata first, letting you choose from multiple release sources including Anna's Archive and Prowlarr.",
+            description="Direct mode searches Anna's Archive and downloads immediately. Universal mode searches book metadata first, letting you choose from multiple release sources including Anna's Archive and Prowlarr.",
         ),
         SelectField(
             key="SEARCH_MODE",
@@ -255,7 +304,7 @@ def general_settings():
                 {
                     "value": "universal",
                     "label": "Universal",
-                    "description": "Metadata-based search with downloads from all sources.",
+                    "description": "Metadata-based search with downloads from all sources. Book and Audiobook support.",
                 },
             ],
             default="direct",
@@ -269,12 +318,26 @@ def general_settings():
             env_supported=False,  # UI-only setting
             show_when={"field": "SEARCH_MODE", "value": "direct"},
         ),
+        HeadingField(
+            key="universal_mode_heading",
+            title="Universal Mode Settings",
+            description="Configure metadata providers and release sources for Universal search mode.",
+            show_when={"field": "SEARCH_MODE", "value": "universal"},
+        ),
         SelectField(
             key="METADATA_PROVIDER",
-            label="Metadata Provider",
+            label="Book Metadata Provider",
             description="Choose which metadata provider to use for book searches.",
             options=_get_metadata_provider_options,  # Callable - evaluated lazily to avoid circular imports
             default="openlibrary",
+            show_when={"field": "SEARCH_MODE", "value": "universal"},
+        ),
+        SelectField(
+            key="METADATA_PROVIDER_AUDIOBOOK",
+            label="Audiobook Metadata Provider",
+            description="Metadata provider for audiobook searches. Uses the book provider if not set.",
+            options=_get_metadata_provider_options_with_none,  # Callable - includes "Use main provider" option
+            default="",
             show_when={"field": "SEARCH_MODE", "value": "universal"},
         ),
         SelectField(
@@ -285,25 +348,6 @@ def general_settings():
             default="direct_download",
             env_supported=False,  # UI-only setting, not configurable via ENV
             show_when={"field": "SEARCH_MODE", "value": "universal"},
-        ),
-        HeadingField(
-            key="search_defaults_heading",
-            title="Default Search Options",
-            description="Default filters applied to searches. Can be overridden using advanced search options.",
-        ),
-        MultiSelectField(
-            key="SUPPORTED_FORMATS",
-            label="Supported Formats",
-            description="Book formats to include in search results. ZIP/RAR archives are extracted automatically and book files are used if found.",
-            options=_FORMAT_OPTIONS,
-            default=["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"],
-        ),
-        MultiSelectField(
-            key="BOOK_LANGUAGE",
-            label="Default Book Languages",
-            description="Default language filter for searches.",
-            options=_LANGUAGE_OPTIONS,
-            default=["en"],
         ),
     ]
 

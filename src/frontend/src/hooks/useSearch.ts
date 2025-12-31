@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Book, AppConfig, AdvancedFilterState } from '../types';
+import { Book, AppConfig, AdvancedFilterState, ContentType } from '../types';
 import { searchBooks, searchMetadata, AuthenticationError } from '../services/api';
 import { LANGUAGE_OPTION_DEFAULT } from '../utils/languageFilters';
 import { DEFAULT_SUPPORTED_FORMATS } from '../data/languages';
@@ -12,6 +12,7 @@ interface UseSearchOptions {
   setIsAuthenticated: (value: boolean) => void;
   authRequired: boolean;
   onSearchReset?: () => void;
+  contentType?: ContentType;
 }
 
 // Search field values for universal mode (provider-specific fields)
@@ -44,7 +45,7 @@ interface UseSearchReturn {
 }
 
 export function useSearch(options: UseSearchOptions): UseSearchReturn {
-  const { showToast, setIsAuthenticated, authRequired, onSearchReset } = options;
+  const { showToast, setIsAuthenticated, authRequired, onSearchReset, contentType = 'ebook' } = options;
   const navigate = useNavigate();
 
   const [books, setBooks] = useState<Book[]>([]);
@@ -148,7 +149,7 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
       setTotalFound(0);
 
       try {
-        const result = await searchMetadata(searchQuery, 40, sort, effectiveFieldValues, 1);
+        const result = await searchMetadata(searchQuery, 40, sort, effectiveFieldValues, 1, contentType);
         if (result.books.length > 0) {
           setBooks(result.books);
           setHasMore(result.hasMore);
@@ -243,7 +244,7 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
     setIsLoadingMore(true);
 
     try {
-      const result = await searchMetadata(query, 40, sort, fieldValues, nextPage);
+      const result = await searchMetadata(query, 40, sort, fieldValues, nextPage, contentType);
       if (result.books.length > 0) {
         setBooks(prev => [...prev, ...result.books]);
         setHasMore(result.hasMore);

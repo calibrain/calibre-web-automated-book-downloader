@@ -212,13 +212,15 @@ class ReleaseSource(ABC):
     """Interface for searching a release source."""
     name: str                        # "direct", "prowlarr"
     display_name: str                # "Direct Download", "Prowlarr"
+    supported_content_types: List[str] = ["ebook", "audiobook"]  # Content types this source supports
 
     @abstractmethod
     def search(
         self,
         book: BookMetadata,
         expand_search: bool = False,
-        languages: Optional[List[str]] = None
+        languages: Optional[List[str]] = None,
+        content_type: str = "ebook"
     ) -> List[Release]:
         """Search for releases of a book.
 
@@ -229,6 +231,8 @@ class ReleaseSource(ABC):
             languages: Optional list of language codes to filter by.
                       If provided, overrides book.language and default settings.
                       Not all sources support this - they may ignore it.
+            content_type: Content type - "ebook" or "audiobook" (default: "ebook").
+                         Sources may use this to adjust search categories/filters.
         """
         pass
 
@@ -357,6 +361,7 @@ def list_available_sources() -> List[dict]:
             "name": name,
             "display_name": instance.display_name,
             "enabled": instance.is_available(),
+            "supported_content_types": getattr(instance, 'supported_content_types', ["ebook", "audiobook"]),
         })
     return result
 

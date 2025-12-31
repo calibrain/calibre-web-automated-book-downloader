@@ -373,11 +373,15 @@ def get_enabled_providers() -> List[str]:
     return enabled
 
 
-def get_configured_provider() -> Optional[MetadataProvider]:
+def get_configured_provider(content_type: str = "ebook") -> Optional[MetadataProvider]:
     """Get the currently configured metadata provider, if any.
 
     Uses the METADATA_PROVIDER config setting to determine which provider
-    to instantiate. Returns None if no provider is configured or not enabled.
+    to instantiate. For audiobook content type, uses METADATA_PROVIDER_AUDIOBOOK
+    if configured, otherwise falls back to METADATA_PROVIDER.
+
+    Args:
+        content_type: Content type - "ebook" or "audiobook" (default: "ebook")
 
     Returns:
         MetadataProvider instance or None.
@@ -387,7 +391,14 @@ def get_configured_provider() -> Optional[MetadataProvider]:
     # Refresh config to ensure we have the latest saved settings
     app_config.refresh()
 
-    metadata_provider = app_config.get("METADATA_PROVIDER", "")
+    # For audiobooks, try audiobook-specific provider first, then fall back to main provider
+    if content_type == "audiobook":
+        metadata_provider = app_config.get("METADATA_PROVIDER_AUDIOBOOK", "")
+        if not metadata_provider:
+            metadata_provider = app_config.get("METADATA_PROVIDER", "")
+    else:
+        metadata_provider = app_config.get("METADATA_PROVIDER", "")
+
     if not metadata_provider:
         return None
 

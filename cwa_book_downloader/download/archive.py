@@ -22,6 +22,15 @@ def _get_supported_formats() -> List[str]:
         return [fmt.strip().lower() for fmt in formats.split(",") if fmt.strip()]
     return [fmt.lower() for fmt in formats]
 
+
+def _get_supported_audiobook_formats() -> List[str]:
+    """Get current supported audiobook formats from config singleton."""
+    formats = config.get("SUPPORTED_AUDIOBOOK_FORMATS", ["m4b", "mp3"])
+    # Handle both list (from MultiSelectField) and comma-separated string (legacy/env)
+    if isinstance(formats, str):
+        return [fmt.strip().lower() for fmt in formats.split(",") if fmt.strip()]
+    return [fmt.lower() for fmt in formats]
+
 # Check for rarfile availability at module load
 try:
     import rarfile
@@ -56,60 +65,80 @@ def is_archive(file_path: Path) -> bool:
     return suffix in ("zip", "rar")
 
 
-def _is_book_file(file_path: Path) -> bool:
-    """Check if file matches user's SUPPORTED_FORMATS setting."""
+def _is_supported_file(file_path: Path, content_type: Optional[str] = None) -> bool:
+    """Check if file matches user's supported formats setting based on content type."""
     ext = file_path.suffix.lower().lstrip(".")
-    supported_formats = _get_supported_formats()
+    if content_type and content_type.lower() == "audiobook":
+        supported_formats = _get_supported_audiobook_formats()
+    else:
+        supported_formats = _get_supported_formats()
     return ext in supported_formats
 
 
-def _filter_book_files(extracted_files: List[Path]) -> Tuple[List[Path], List[Path], List[Path]]:
+# All known ebook extensions (superset of what user might enable)
+ALL_EBOOK_EXTENSIONS = {'.pdf', '.epub', '.mobi', '.azw', '.azw3', '.fb2', '.djvu', '.cbz', '.cbr', '.doc', '.docx', '.rtf', '.txt'}
+
+# All known audio extensions (superset of what user might enable for audiobooks)
+ALL_AUDIO_EXTENSIONS = {'.m4b', '.mp3', '.m4a', '.aac', '.flac', '.ogg', '.wma', '.wav', '.opus'}
+
+
+def _filter_files(
+    extracted_files: List[Path],
+    content_type: Optional[str] = None,
+) -> Tuple[List[Path], List[Path], List[Path]]:
     """
-    Filter extracted files to only book formats.
+    Filter extracted files based on content type.
+
+    For audiobooks: filters to audio formats using SUPPORTED_AUDIOBOOK_FORMATS
+    For books: filters to book formats using SUPPORTED_FORMATS
 
     Returns:
-        Tuple of (book_files, rejected_ebook_files, non_book_files)
-        - book_files: Match SUPPORTED_FORMATS
-        - rejected_ebook_files: Ebook formats not in SUPPORTED_FORMATS
-        - non_book_files: Non-ebook files (images, html, etc)
+        Tuple of (matched_files, rejected_format_files, other_files)
+        - matched_files: Match user's supported formats for this content type
+        - rejected_format_files: Valid formats for this type but not enabled by user
+        - other_files: Unrelated files (images, html, etc)
     """
-    # All known ebook extensions (superset of what user might enable)
-    ALL_EBOOK_EXTENSIONS = {'.pdf', '.epub', '.mobi', '.azw', '.azw3', '.fb2', '.djvu', '.cbz', '.cbr', '.doc', '.docx', '.rtf', '.txt'}
+    is_audiobook = content_type and content_type.lower() == "audiobook"
+    known_extensions = ALL_AUDIO_EXTENSIONS if is_audiobook else ALL_EBOOK_EXTENSIONS
 
-    book_files = []
-    rejected_ebook_files = []
-    non_book_files = []
+    matched_files = []
+    rejected_format_files = []
+    other_files = []
 
     for file_path in extracted_files:
-        if _is_book_file(file_path):
-            book_files.append(file_path)
-        elif file_path.suffix.lower() in ALL_EBOOK_EXTENSIONS:
-            rejected_ebook_files.append(file_path)
+        if _is_supported_file(file_path, content_type):
+            matched_files.append(file_path)
+        elif file_path.suffix.lower() in known_extensions:
+            rejected_format_files.append(file_path)
         else:
-            non_book_files.append(file_path)
+            other_files.append(file_path)
 
-    return book_files, rejected_ebook_files, non_book_files
+    return matched_files, rejected_format_files, other_files
 
 
 def extract_archive(
     archive_path: Path,
     output_dir: Path,
+    content_type: Optional[str] = None,
 ) -> Tuple[List[Path], List[str], List[Path]]:
     """
-    Extract book files from an archive.
+    Extract files from an archive based on content type.
 
-    Extracts all files, then filters to only keep recognized book formats.
-    Non-book files (HTML, images, etc.) are deleted.
+    Extracts all files, then filters based on content type:
+    - Audiobooks: keeps files matching SUPPORTED_AUDIOBOOK_FORMATS
+    - Books: keeps files matching SUPPORTED_FORMATS
+    Non-matching files (HTML, images, etc.) are deleted.
 
     Args:
         archive_path: Path to the archive file
         output_dir: Directory to extract files to
+        content_type: Content type (e.g., "audiobook") to determine which formats to keep
 
     Returns:
-        Tuple of (book_files, warnings, rejected_ebook_files)
-        - book_files: Paths to extracted files matching SUPPORTED_FORMATS
+        Tuple of (matched_files, warnings, rejected_files)
+        - matched_files: Paths to extracted files matching supported formats
         - warnings: List of warning messages
-        - rejected_ebook_files: Ebook files that were rejected (format not enabled)
+        - rejected_files: Files that were rejected (format not enabled)
 
     Raises:
         ArchiveExtractionError: If extraction fails
@@ -125,33 +154,36 @@ def extract_archive(
     else:
         raise ArchiveExtractionError(f"Unsupported archive format: {suffix}")
 
-    # Filter to only book files, delete non-book files
-    book_files, rejected_ebook_files, non_book_files = _filter_book_files(extracted_files)
+    is_audiobook = content_type and content_type.lower() == "audiobook"
+    file_type_label = "audiobook" if is_audiobook else "book"
 
-    # Delete rejected ebook files (valid formats but not enabled by user)
-    for rejected_file in rejected_ebook_files:
+    # Filter files based on content type
+    matched_files, rejected_files, other_files = _filter_files(extracted_files, content_type)
+
+    # Delete rejected files (valid formats but not enabled by user)
+    for rejected_file in rejected_files:
         try:
             rejected_file.unlink()
-            logger.debug(f"Deleted rejected ebook file: {rejected_file.name}")
+            logger.debug(f"Deleted rejected {file_type_label} file: {rejected_file.name}")
         except OSError as e:
-            logger.warning(f"Failed to delete rejected ebook file {rejected_file}: {e}")
+            logger.warning(f"Failed to delete rejected {file_type_label} file {rejected_file}: {e}")
 
-    if rejected_ebook_files:
-        rejected_exts = sorted(set(f.suffix.lower() for f in rejected_ebook_files))
-        warnings.append(f"Skipped {len(rejected_ebook_files)} ebook(s) with unsupported format: {', '.join(rejected_exts)}")
+    if rejected_files:
+        rejected_exts = sorted(set(f.suffix.lower() for f in rejected_files))
+        warnings.append(f"Skipped {len(rejected_files)} {file_type_label}(s) with unsupported format: {', '.join(rejected_exts)}")
 
-    # Delete non-book files (images, html, etc)
-    for non_book_file in non_book_files:
+    # Delete other files (images, html, etc)
+    for other_file in other_files:
         try:
-            non_book_file.unlink()
-            logger.debug(f"Deleted non-book file: {non_book_file.name}")
+            other_file.unlink()
+            logger.debug(f"Deleted non-{file_type_label} file: {other_file.name}")
         except OSError as e:
-            logger.warning(f"Failed to delete non-book file {non_book_file}: {e}")
+            logger.warning(f"Failed to delete non-{file_type_label} file {other_file}: {e}")
 
-    if non_book_files:
-        warnings.append(f"Skipped {len(non_book_files)} non-book file(s)")
+    if other_files:
+        warnings.append(f"Skipped {len(other_files)} non-{file_type_label} file(s)")
 
-    return book_files, warnings, rejected_ebook_files
+    return matched_files, warnings, rejected_files
 
 
 def _extract_zip(
@@ -287,62 +319,68 @@ def process_archive(
     task: Optional["DownloadTask"] = None,
 ) -> ArchiveResult:
     """
-    Process an archive file: extract, filter to book files, move to ingest.
+    Process an archive file: extract, filter to supported files, move to ingest.
 
     This is the main entry point for archive handling, usable by any download handler.
+    Filters files based on content type:
+    - Audiobooks: keeps files matching SUPPORTED_AUDIOBOOK_FORMATS
+    - Books: keeps files matching SUPPORTED_FORMATS
 
     Args:
         archive_path: Path to the downloaded archive file
         temp_dir: Base temp directory for extraction (e.g., TMP_DIR)
-        ingest_dir: Final destination directory for book files
+        ingest_dir: Final destination directory for files
         archive_id: Unique identifier for temp directory naming
-        task: Optional download task for filename generation
+        task: Optional download task for filename generation and content type
 
     Returns:
         ArchiveResult with success status, final paths, and status message
     """
     extract_dir = temp_dir / f"extract_{archive_id}"
+    content_type = task.content_type if task else None
+    is_audiobook = content_type and content_type.lower() == "audiobook"
+    file_type_label = "audiobook" if is_audiobook else "book"
 
     try:
         # Create temp extraction directory
         os.makedirs(extract_dir, exist_ok=True)
         os.makedirs(ingest_dir, exist_ok=True)
 
-        # Extract to temp directory (filters to book files only)
-        extracted_files, warnings, rejected_ebook_files = extract_archive(archive_path, extract_dir)
+        # Extract to temp directory (filters based on content type)
+        extracted_files, warnings, rejected_files = extract_archive(archive_path, extract_dir, content_type)
 
         if not extracted_files:
             # Clean up and return error
             shutil.rmtree(extract_dir, ignore_errors=True)
             archive_path.unlink(missing_ok=True)
 
-            if rejected_ebook_files:
-                # Found ebooks but they weren't in supported formats
-                rejected_exts = sorted(set(f.suffix.lower() for f in rejected_ebook_files))
+            if rejected_files:
+                # Found files but they weren't in supported formats
+                rejected_exts = sorted(set(f.suffix.lower() for f in rejected_files))
                 rejected_list = ", ".join(rejected_exts)
-                supported_formats = _get_supported_formats()
+                supported_formats = _get_supported_audiobook_formats() if is_audiobook else _get_supported_formats()
                 logger.warning(
-                    f"Found {len(rejected_ebook_files)} ebook(s) in archive but format not supported. "
+                    f"Found {len(rejected_files)} {file_type_label}(s) in archive but format not supported. "
                     f"Rejected: {rejected_list}. Supported: {', '.join(sorted(supported_formats))}"
                 )
                 return ArchiveResult(
                     success=False,
                     final_paths=[],
                     message="",
-                    error=f"Found {len(rejected_ebook_files)} ebook(s) but format not supported ({rejected_list}). Enable in Settings > Formats.",
+                    error=f"Found {len(rejected_files)} {file_type_label}(s) but format not supported ({rejected_list}). Enable in Settings > Formats.",
                 )
 
             return ArchiveResult(
                 success=False,
                 final_paths=[],
                 message="",
-                error="No book files found in archive",
+                error=f"No {file_type_label} files found in archive",
             )
 
         for warning in warnings:
             logger.debug(warning)
 
-        logger.info(f"Extracted {len(extracted_files)} book file(s) from archive")
+        logger.info(f"Extracted {len(extracted_files)} {file_type_label} file(s) from archive")
 
         # Move book files to ingest folder
         final_paths = []
