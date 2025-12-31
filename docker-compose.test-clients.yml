@@ -8,11 +8,14 @@
 #
 # Web UIs:
 #   - cwabd:        http://localhost:8084
+#   - Prowlarr:     http://localhost:9696 (no auth by default)
 #   - qBittorrent:  http://localhost:8080 (admin / adminadmin - check logs for temp password)
 #   - Transmission: http://localhost:9091 (admin / admin)
 #   - Deluge:       http://localhost:8112 (password: deluge)
 #   - NZBGet:       http://localhost:6789 (nzbget / tegbzn6789)
 #   - SABnzbd:      http://localhost:8085 (complete setup wizard for API key)
+#   - aMule:        http://localhost:4711 (password: amule)
+#   - Amarr:        http://localhost:8086 (torznab indexer + qBittorrent emulation for amule)
 #
 # Hot-reload: Python code changes are picked up automatically (source mounted)
 # Rebuild needed only for: requirements changes, frontend changes, Dockerfile changes
@@ -60,6 +63,21 @@ services:
       - qbittorrent
       - transmission
       - deluge
+    restart: unless-stopped
+
+  # ============ PROWLARR (INDEXER MANAGER) ============
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: test-prowlarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ./.local/test-clients/prowlarr/config:/config
+    ports:
+      - "9696:9696"
     restart: unless-stopped
 
   # ============ USENET CLIENTS ============
@@ -147,6 +165,47 @@ services:
       - "58846:58846"  # Daemon RPC
       - "6881:6881"
       - "6881:6881/udp"
+    restart: unless-stopped
+
+  # ============ AMULE + AMARR BRIDGE ============
+
+  amule:
+    image: ngosang/amule:latest
+    container_name: test-amule
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - GUI_PWD=amule
+      - WEBUI_PWD=amule
+    volumes:
+      - ./.local/test-clients/amule/config:/home/amule/.aMule
+      - ./.local/test-clients/downloads:/incoming
+      - ./.local/test-clients/amule/temp:/temp
+    ports:
+      - "4711:4711"   # Web UI
+      - "4712:4712"   # EC (External Connections) for Amarr
+      - "4662:4662"   # ED2K TCP
+      - "4665:4665/udp"  # ED2K global search
+      - "4672:4672/udp"  # ED2K UDP
+    restart: unless-stopped
+
+  amarr:
+    image: vexdev/amarr:latest
+    container_name: test-amarr
+    environment:
+      - AMULE_HOST=amule
+      - AMULE_PORT=4712
+      - AMULE_PASSWORD=amule
+      - AMULE_FINISHED_PATH=/downloads
+      - AMARR_LOG_LEVEL=DEBUG
+    volumes:
+      - ./.local/test-clients/amarr/config:/config
+      - ./.local/test-clients/downloads:/downloads
+    ports:
+      - "8086:8080"  # Amarr web/API (torznab indexer + qBittorrent emulation)
+    depends_on:
+      - amule
     restart: unless-stopped
 
 # All services automatically on same network (test-clients_default)

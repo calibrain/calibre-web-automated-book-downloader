@@ -1,11 +1,7 @@
-"""
-qBittorrent download client for Prowlarr integration.
-
-Uses the qbittorrent-api library to communicate with qBittorrent's Web API.
-"""
+"""qBittorrent download client for Prowlarr integration."""
 
 import time
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.core.logger import setup_logger
@@ -37,12 +33,35 @@ class QBittorrentClient(DownloadClient):
         if not url:
             raise ValueError("QBITTORRENT_URL is required")
 
+        self._base_url = url.rstrip("/")
         self._client = Client(
             host=url,
             username=config.get("QBITTORRENT_USERNAME", ""),
             password=config.get("QBITTORRENT_PASSWORD", ""),
         )
         self._category = config.get("QBITTORRENT_CATEGORY", "cwabd")
+
+    def _get_torrents_info(self, torrent_hash: Optional[str] = None) -> List:
+        """Get torrent info using GET (per API spec for read operations)."""
+        try:
+            params = {"hashes": torrent_hash} if torrent_hash else {}
+            response = self._client._session.get(
+                f"{self._base_url}/api/v2/torrents/info",
+                params=params,
+                timeout=10,
+            )
+            response.raise_for_status()
+            torrents = response.json()
+
+            class TorrentInfo:
+                def __init__(self, data):
+                    for key, value in data.items():
+                        setattr(self, key, value)
+
+            return [TorrentInfo(t) for t in torrents]
+        except Exception as e:
+            logger.debug(f"Failed to get torrents info: {e}")
+            return []
 
     @staticmethod
     def is_configured() -> bool:
@@ -111,29 +130,21 @@ class QBittorrentClient(DownloadClient):
             logger.debug(f"qBittorrent add result: {result}")
 
             if result == "Ok.":
-                if expected_hash:
-                    # We know the hash - verify it was added
-                    for attempt in range(10):
-                        torrents = self._client.torrents_info(
-                            torrent_hashes=expected_hash
-                        )
-                        if torrents:
-                            logger.info(f"Added torrent to qBittorrent: {expected_hash}")
-                            return expected_hash
-                        time.sleep(0.5)
+                if not expected_hash:
+                    raise Exception("Could not determine torrent hash from URL")
 
-                    # qBittorrent said Ok, trust it even if we can't find it yet
-                    logger.warning(
-                        f"qBittorrent returned Ok but torrent not yet visible. "
-                        f"Returning expected hash: {expected_hash}"
-                    )
-                    return expected_hash
+                # Wait for torrent to appear in client
+                for _ in range(10):
+                    torrents = self._get_torrents_info(expected_hash)
+                    for t in torrents:
+                        if t.hash.lower() == expected_hash.lower():
+                            logger.info(f"Added torrent: {t.hash}")
+                            return t.hash.lower()
+                    time.sleep(0.5)
 
-                # No hash available - this shouldn't happen often
-                raise Exception(
-                    "Could not determine torrent hash. "
-                    "Try using a magnet link instead."
-                )
+                # Client said Ok, trust it
+                logger.warning(f"Torrent not yet visible, returning expected hash")
+                return expected_hash
 
             raise Exception(f"Failed to add torrent: {result}")
         except Exception as e:
@@ -151,11 +162,10 @@ class QBittorrentClient(DownloadClient):
             Current download status.
         """
         try:
-            torrents = self._client.torrents_info(torrent_hashes=download_id)
-            if not torrents:
+            torrents = self._get_torrents_info(download_id)
+            torrent = next((t for t in torrents if t.hash.lower() == download_id.lower()), None)
+            if not torrent:
                 return DownloadStatus.error("Torrent not found")
-
-            torrent = torrents[0]
 
             # Map qBittorrent states to our states and user-friendly messages
             state_info = {
@@ -188,15 +198,26 @@ class QBittorrentClient(DownloadClient):
             if complete:
                 message = "Complete"
 
-            # Only include ETA if it's reasonable (less than 1 week)
             eta = torrent.eta if 0 < torrent.eta < 604800 else None
+
+            # Get file path for completed downloads
+            file_path = None
+            if complete:
+                if getattr(torrent, 'content_path', ''):
+                    file_path = torrent.content_path
+                else:
+                    # Fallback for Amarr which doesn't populate content_path
+                    save_path = getattr(torrent, 'save_path', '')
+                    name = getattr(torrent, 'name', '')
+                    if save_path and name:
+                        file_path = f"{save_path}/{name}"
 
             return DownloadStatus(
                 progress=torrent.progress * 100,
                 state="complete" if complete else state,
                 message=message,
                 complete=complete,
-                file_path=torrent.content_path if complete else None,
+                file_path=file_path,
                 download_speed=torrent.dlspeed,
                 eta=eta,
             )
@@ -231,20 +252,18 @@ class QBittorrentClient(DownloadClient):
             return False
 
     def get_download_path(self, download_id: str) -> Optional[str]:
-        """
-        Get the path where torrent files are located.
-
-        Args:
-            download_id: Torrent info_hash
-
-        Returns:
-            Content path (file or directory), or None.
-        """
+        """Get the path where torrent files are located."""
         try:
-            torrents = self._client.torrents_info(torrent_hashes=download_id)
-            if torrents:
-                return torrents[0].content_path
-            return None
+            torrents = self._get_torrents_info(download_id)
+            torrent = next((t for t in torrents if t.hash.lower() == download_id.lower()), None)
+            if not torrent:
+                return None
+            # Prefer content_path, fall back to save_path/name (for Amarr compatibility)
+            if getattr(torrent, 'content_path', ''):
+                return torrent.content_path
+            save_path = getattr(torrent, 'save_path', '')
+            name = getattr(torrent, 'name', '')
+            return f"{save_path}/{name}" if save_path and name else None
         except Exception as e:
             error_type = type(e).__name__
             logger.debug(f"qBittorrent get_download_path failed ({error_type}): {e}")
@@ -257,10 +276,10 @@ class QBittorrentClient(DownloadClient):
             if not torrent_info.info_hash:
                 return None
 
-            torrents = self._client.torrents_info(torrent_hashes=torrent_info.info_hash)
-            if torrents:
-                status = self.get_status(torrent_info.info_hash)
-                return (torrent_info.info_hash, status)
+            torrents = self._get_torrents_info(torrent_info.info_hash)
+            torrent = next((t for t in torrents if t.hash.lower() == torrent_info.info_hash.lower()), None)
+            if torrent:
+                return (torrent.hash.lower(), self.get_status(torrent.hash.lower()))
 
             return None
         except Exception as e:

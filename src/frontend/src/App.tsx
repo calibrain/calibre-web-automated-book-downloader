@@ -554,7 +554,6 @@ function App() {
         isLoading={isSearching}
         onShowToast={showToast}
         onRemoveToast={removeToast}
-        searchMode={searchMode}
         contentType={contentType}
         onContentTypeChange={setContentType}
       />
@@ -601,6 +600,7 @@ function App() {
           searchFieldValues={searchFieldValues}
           onSearchFieldChange={updateSearchFieldValue}
           contentType={contentType}
+          onContentTypeChange={setContentType}
         />
 
         {isInitialState && !featureNoticeDismissed && (

@@ -921,12 +921,12 @@ def _book_info_to_release(book_info: BookInfo) -> Release:
         info_url=f"{network.get_aa_base_url()}/md5/{book_info.id}",
         protocol=ReleaseProtocol.HTTP,
         indexer="Anna's Archive",
+        content_type=book_info.content,  # Preserve content type from source
         extra={
             "author": book_info.author,
             "publisher": book_info.publisher,
             "year": book_info.year,
             "language": book_info.language,
-            "content": book_info.content,
             "preview": book_info.preview,
             "description": book_info.description,
             "download_urls": book_info.download_urls,

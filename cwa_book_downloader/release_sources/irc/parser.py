@@ -14,13 +14,18 @@ from cwa_book_downloader.core.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# All recognized ebook formats for parsing IRC result lines.
+# All recognized formats for parsing IRC result lines.
 # This comprehensive list is used to identify file extensions in results.
 # User's configured formats are used separately for filtering.
-ALL_EBOOK_FORMATS = {
+# Note: IRC source currently only supports ebooks, but audiobook formats
+# are included for future-proofing and format detection consistency.
+ALL_RECOGNIZED_FORMATS = {
+    # Ebook formats
     'epub', 'mobi', 'azw3', 'azw', 'pdf', 'doc', 'docx',
     'html', 'htm', 'rtf', 'txt', 'lit', 'fb2', 'djvu',
-    'cbr', 'cbz', 'cdr', 'jpg', 'rar', 'zip'
+    'cbr', 'cbz', 'cdr', 'jpg', 'rar', 'zip',
+    # Audiobook formats
+    'm4b', 'mp3', 'm4a', 'flac', 'ogg', 'wma', 'aac', 'wav', 'opus'
 }
 
 
@@ -104,7 +109,7 @@ def parse_result_line(line: str) -> Optional[SearchResult]:
 
         # Try to extract format from the line
         fmt = None
-        for known_fmt in ALL_EBOOK_FORMATS:
+        for known_fmt in ALL_RECOGNIZED_FORMATS:
             if f'.{known_fmt}' in rest.lower():
                 fmt = known_fmt
                 break
@@ -126,7 +131,7 @@ def parse_result_line(line: str) -> Optional[SearchResult]:
 
         # Clean up title (remove extension)
         title = title_part
-        for known_fmt in ALL_EBOOK_FORMATS:
+        for known_fmt in ALL_RECOGNIZED_FORMATS:
             title = re.sub(rf'\.{known_fmt}\b', '', title, flags=re.IGNORECASE)
 
         return SearchResult(
