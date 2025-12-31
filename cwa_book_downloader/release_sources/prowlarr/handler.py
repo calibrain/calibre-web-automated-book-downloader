@@ -249,6 +249,11 @@ class ProwlarrHandler(DownloadHandler):
         try:
             status_callback("resolving", "Staging file")
 
+            # For torrents, store original download client path for library mode hardlinking
+            # This is where the file lives for seeding - hardlinks must point to this location
+            if protocol == "torrent":
+                task.original_download_path = str(source_path)
+
             # Torrents: copy to preserve seeding. Usenet: configurable.
             if protocol == "torrent":
                 use_copy = True

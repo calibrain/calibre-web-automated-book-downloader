@@ -88,6 +88,13 @@ class DownloadTask:
     preview: Optional[str] = None
     content_type: Optional[str] = None  # "book (fiction)", "audiobook", "magazine", etc.
 
+    # Series info (for library naming templates)
+    series_name: Optional[str] = None
+    series_position: Optional[float] = None  # Float for novellas (e.g., 1.5)
+
+    # Hardlinking support
+    original_download_path: Optional[str] = None  # Path in download client (for hardlinking)
+
     # Runtime state
     priority: int = 0
     added_time: float = field(default_factory=time.time)

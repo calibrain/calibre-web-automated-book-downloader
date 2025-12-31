@@ -481,61 +481,49 @@ def network_settings():
 def download_settings():
     """Configure download behavior and file locations."""
     return [
+        # === BOOKS SECTION ===
+        HeadingField(
+            key="books_heading",
+            title="Books",
+            description="Configure how ebooks, comics, and magazines are processed.",
+        ),
+        SelectField(
+            key="PROCESSING_MODE",
+            label="Processing Mode",
+            description="Ingest mode moves files to an ingest folder. Library mode organizes files with custom naming.",
+            options=[
+                {"value": "ingest", "label": "Ingest"},
+                {"value": "library", "label": "Library"},
+            ],
+            default="ingest",
+        ),
         TextField(
             key="INGEST_DIR",
             label="Download Directory",
-            description="Directory where downloaded files are saved.",
+            description="Directory where downloaded files are saved for processing. Recommended to use your library's ingest directory.",
             default="/cwa-book-ingest",
             required=True,
+            show_when={"field": "PROCESSING_MODE", "value": "ingest"},
         ),
         CheckboxField(
             key="USE_BOOK_TITLE",
             label="Use Book Info as Filename",
-            description="Save files using Author, Title and Year instead of ID. May cause issues with special characters.",
+            description="Save files using Author, Title and Year instead of ID.",
             default=True,
-        ),
-        CheckboxField(
-            key="AUTO_OPEN_DOWNLOADS_SIDEBAR",
-            label="Auto-Open Downloads Sidebar",
-            description="Automatically open the downloads sidebar when a new download is queued.",
-            default=False,
-            env_supported=False,  # UI-only setting
-        ),
-        CheckboxField(
-            key="DOWNLOAD_TO_BROWSER",
-            label="Download to Browser",
-            description="Automatically download completed files to your browser.",
-            default=False,
-            env_supported=False,  # UI-only setting
-        ),
-        NumberField(
-            key="MAX_CONCURRENT_DOWNLOADS",
-            label="Max Concurrent Downloads",
-            description="Maximum number of simultaneous downloads.",
-            default=3,
-            min_value=1,
-            max_value=10,
-            requires_restart=True,
-        ),
-        NumberField(
-            key="STATUS_TIMEOUT",
-            label="Status Timeout (seconds)",
-            description="How long to keep completed/failed downloads in the queue display.",
-            default=3600,
-            min_value=60,
-            max_value=86400,
+            show_when={"field": "PROCESSING_MODE", "value": "ingest"},
         ),
         CheckboxField(
             key="USE_CONTENT_TYPE_DIRECTORIES",
-            label="Configure Content-Type Directories",
-            description="Show options to specify custom directories for each content type (fiction, non-fiction, comics, etc.). If a directory is set, that content type will be saved there instead of the default download directory.",
+            label="Use Content-Type Directories",
+            description="Route content to separate directories based on type (fiction, non-fiction, comics, etc.).",
             default=False,
-            env_supported=False,  # UI-only toggle to show/hide directory fields
+            env_supported=False,
+            show_when={"field": "PROCESSING_MODE", "value": "ingest"},
         ),
         HeadingField(
             key="content_type_directories_heading",
             title="Content-Type Directories",
-            description="Specify custom directories for each content type. Leave empty to use the default download directory.",
+            description="Leave empty to use the default ingest directory.",
             show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
         ),
         TextField(
@@ -569,12 +557,6 @@ def download_settings():
             show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
         ),
         TextField(
-            key="INGEST_DIR_AUDIOBOOK",
-            label="Audiobooks",
-            placeholder="/cwa-book-ingest/audiobooks",
-            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
-        ),
-        TextField(
             key="INGEST_DIR_STANDARDS_DOCUMENT",
             label="Standards Documents",
             placeholder="/cwa-book-ingest/standards",
@@ -591,6 +573,103 @@ def download_settings():
             label="Other",
             placeholder="/cwa-book-ingest/other",
             show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
+        ),
+        TextField(
+            key="LIBRARY_PATH",
+            label="Library Path",
+            description="Base path for your book library (e.g., /books).",
+            placeholder="/books",
+            required=True,
+            show_when={"field": "PROCESSING_MODE", "value": "library"},
+        ),
+        TextField(
+            key="LIBRARY_TEMPLATE",
+            label="Naming Template",
+            description="Available: {Author}, {Title}, {Year}, {Series}, {SeriesPosition}. Use {Series/} for conditional folders.",
+            default="{Author}/{Title}",
+            placeholder="{Author}/{Series/}{Title} ({Year})",
+            show_when={"field": "PROCESSING_MODE", "value": "library"},
+        ),
+        # === AUDIOBOOKS SECTION ===
+        HeadingField(
+            key="audiobooks_heading",
+            title="Audiobooks",
+            description="Configure how audiobooks are processed.",
+        ),
+        SelectField(
+            key="PROCESSING_MODE_AUDIOBOOK",
+            label="Processing Mode",
+            description="Ingest mode moves files to an ingest folder. Library mode organizes files with custom naming.",
+            options=[
+                {"value": "ingest", "label": "Ingest Mode"},
+                {"value": "library", "label": "Library Mode"},
+            ],
+            default="ingest",
+        ),
+        TextField(
+            key="INGEST_DIR_AUDIOBOOK",
+            label="Download Directory",
+            description="Leave empty to use the Books download directory.",
+            placeholder="/audiobooks",
+            show_when={"field": "PROCESSING_MODE_AUDIOBOOK", "value": "ingest"},
+        ),
+        TextField(
+            key="LIBRARY_PATH_AUDIOBOOK",
+            label="Library Path",
+            description="Base path for your audiobook library (e.g., /audiobooks).",
+            placeholder="/audiobooks",
+            required=True,
+            show_when={"field": "PROCESSING_MODE_AUDIOBOOK", "value": "library"},
+        ),
+        TextField(
+            key="LIBRARY_TEMPLATE_AUDIOBOOK",
+            label="Naming Template",
+            description="Available: {Author}, {Title}, {Year}, {Series}, {SeriesPosition}. Use {Series/} for conditional folders.",
+            default="{Author}/{Title}",
+            placeholder="{Author}/{Series/}{Title}",
+            show_when={"field": "PROCESSING_MODE_AUDIOBOOK", "value": "library"},
+        ),
+        # === OPTIONS SECTION ===
+        HeadingField(
+            key="library_options_heading",
+            title="Library Options",
+        ),
+        CheckboxField(
+            key="TORRENT_HARDLINK",
+            label="Hardlink Torrents in Library Mode",
+            description="Create hardlinks for torrent downloads instead of copying. Requires library and download paths on same filesystem.",
+            default=True,
+        ),
+        CheckboxField(
+            key="AUTO_OPEN_DOWNLOADS_SIDEBAR",
+            label="Auto-Open Downloads Sidebar",
+            description="Automatically open the downloads sidebar when a new download is queued.",
+            default=False,
+            env_supported=False,  # UI-only setting
+        ),
+        CheckboxField(
+            key="DOWNLOAD_TO_BROWSER",
+            label="Download to Browser",
+            description="Automatically download completed files to your browser.",
+            default=False,
+            env_supported=False,  # UI-only setting
+        ),
+        NumberField(
+            key="MAX_CONCURRENT_DOWNLOADS",
+            label="Max Concurrent Downloads",
+            description="Maximum number of simultaneous downloads.",
+            default=3,
+            min_value=1,
+            max_value=10,
+            requires_restart=True,
+        ),
+        NumberField(
+            key="STATUS_TIMEOUT",
+            label="Status Timeout (seconds)",
+            description="How long to keep completed/failed downloads in the queue display.",
+            default=3600,
+            min_value=60,
+            max_value=86400,
         ),
     ]
 
