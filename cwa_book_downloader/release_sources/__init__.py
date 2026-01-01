@@ -34,6 +34,7 @@ class Release:
     indexer: Optional[str] = None    # Source name for display
     seeders: Optional[int] = None    # For torrents
     peers: Optional[str] = None      # For torrents: "seeders/leechers" display string
+    content_type: Optional[str] = None  # "ebook" or "audiobook" - preserved from search
     extra: Dict = field(default_factory=dict)  # Source-specific metadata
 
 

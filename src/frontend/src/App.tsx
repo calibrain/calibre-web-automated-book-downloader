@@ -475,6 +475,9 @@ function App() {
         extra: release.extra,
         preview: book.preview,  // Pass book cover from metadata
         content_type: releaseContentType,  // For audiobook directory routing
+        series_name: book.series_name,
+        series_position: book.series_position,
+        subtitle: book.subtitle,
       });
       await fetchStatus();
     } catch (error) {
@@ -554,7 +557,6 @@ function App() {
         isLoading={isSearching}
         onShowToast={showToast}
         onRemoveToast={removeToast}
-        searchMode={searchMode}
         contentType={contentType}
         onContentTypeChange={setContentType}
       />
@@ -601,6 +603,7 @@ function App() {
           searchFieldValues={searchFieldValues}
           onSearchFieldChange={updateSearchFieldValue}
           contentType={contentType}
+          onContentTypeChange={setContentType}
         />
 
         {isInitialState && !featureNoticeDismissed && (

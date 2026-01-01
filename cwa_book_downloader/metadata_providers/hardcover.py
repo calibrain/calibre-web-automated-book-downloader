@@ -375,6 +375,7 @@ class HardcoverProvider(MetadataProvider):
             books(where: {id: {_eq: $id}}, limit: 1) {
                 id
                 title
+                subtitle
                 slug
                 release_date
                 headline
@@ -465,6 +466,7 @@ class HardcoverProvider(MetadataProvider):
                 book {
                     id
                     title
+                    subtitle
                     slug
                     release_date
                     headline
@@ -606,10 +608,14 @@ class HardcoverProvider(MetadataProvider):
             description = item.get("description")
             full_description = _combine_headline_description(headline, description)
 
+            # Extract subtitle if available in search results
+            subtitle = item.get("subtitle")
+
             return BookMetadata(
                 provider="hardcover",
                 provider_id=str(book_id),
                 title=title,
+                subtitle=subtitle,
                 provider_display_name="Hardcover",
                 authors=authors,
                 cover_url=cover_url,
@@ -735,6 +741,7 @@ class HardcoverProvider(MetadataProvider):
             provider="hardcover",
             provider_id=str(book["id"]),
             title=book["title"],
+            subtitle=book.get("subtitle"),
             provider_display_name="Hardcover",
             authors=authors,
             isbn_10=isbn_10,

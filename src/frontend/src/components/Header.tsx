@@ -31,7 +31,6 @@ interface HeaderProps {
   onLogout?: () => void;
   onShowToast?: (message: string, type: 'success' | 'error' | 'info', persistent?: boolean) => string;
   onRemoveToast?: (id: string) => void;
-  searchMode?: string;
   contentType?: ContentType;
   onContentTypeChange?: (type: ContentType) => void;
 }
@@ -55,7 +54,6 @@ export const Header = forwardRef<HeaderHandle, HeaderProps>(({
   onLogout,
   onShowToast,
   onRemoveToast,
-  searchMode = 'direct',
   contentType = 'ebook',
   onContentTypeChange,
 }, ref) => {
@@ -261,46 +259,7 @@ export const Header = forwardRef<HeaderHandle, HeaderProps>(({
             }}
           >
             <div className="py-1">
-              {/* Content Type Toggle - only shown in Universal search mode */}
-              {onContentTypeChange && searchMode === 'universal' && (
-                <>
-                  <div className="px-4 py-2">
-                    <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">Search for</div>
-                    <div className="flex flex-col rounded-lg overflow-hidden border border-[var(--border-muted)]">
-                      <button
-                        type="button"
-                        onClick={() => onContentTypeChange('ebook')}
-                        className={`w-full px-3 py-2 text-sm font-medium flex items-center gap-2 transition-colors ${
-                          contentType === 'ebook'
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-transparent hover:bg-[var(--hover-surface)]'
-                        }`}
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
-                        </svg>
-                        Books
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onContentTypeChange('audiobook')}
-                        className={`w-full px-3 py-2 text-sm font-medium flex items-center gap-2 transition-colors border-t border-[var(--border-muted)] ${
-                          contentType === 'audiobook'
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-transparent hover:bg-[var(--hover-surface)]'
-                        }`}
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z" />
-                        </svg>
-                        Audiobooks
-                      </button>
-                    </div>
-                  </div>
-                  <div className="border-t border-[var(--border-muted)] my-1"></div>
-                </>
-              )}
-
+              
               <a
                 href="https://github.com/calibrain/calibre-web-automated-book-downloader/issues"
                 target="_blank"
@@ -493,6 +452,8 @@ export const Header = forwardRef<HeaderHandle, HeaderProps>(({
                 onSubmit={handleHeaderSearch}
                 onAdvancedToggle={onAdvancedToggle}
                 isLoading={isLoading}
+                contentType={contentType}
+                onContentTypeChange={onContentTypeChange}
               />
             </div>
           </div>

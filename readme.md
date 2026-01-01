@@ -149,11 +149,11 @@ volumes:
 
 ## Health Monitoring
 
-The application exposes a health endpoint at `/api/status`. Add a health check to your compose:
+The application exposes a health endpoint at `/api/health` (no authentication required). Add a health check to your compose:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-sf", "http://localhost:8084/api/status"]
+  test: ["CMD", "curl", "-sf", "http://localhost:8084/api/health"]
   interval: 30s
   timeout: 30s
   retries: 3

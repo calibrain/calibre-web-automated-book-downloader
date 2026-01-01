@@ -45,6 +45,7 @@ export interface Book {
   series_name?: string;        // Name of the series
   series_position?: number;    // This book's position (e.g., 3, 1.5 for novellas)
   series_count?: number;       // Total books in the series
+  subtitle?: string;
 }
 
 // Status response types
@@ -266,6 +267,7 @@ export interface ReleasesResponse {
     provider: string;
     provider_id: string;
     title: string;
+    subtitle?: string;
     authors?: string[];
     isbn_10?: string;
     isbn_13?: string;

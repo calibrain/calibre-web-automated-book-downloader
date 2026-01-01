@@ -45,9 +45,16 @@ const DOWNLOAD_TYPE_COLORS: Record<string, ColorStyle> = {
   direct: { bg: 'bg-emerald-500/20', text: 'text-emerald-700 dark:text-emerald-300' },
 };
 
+const CONTENT_TYPE_COLORS: Record<string, ColorStyle> = {
+  book: { bg: 'bg-blue-500/20', text: 'text-blue-700 dark:text-blue-300' },
+  ebook: { bg: 'bg-blue-500/20', text: 'text-blue-700 dark:text-blue-300' },  // Alias for backwards compatibility
+  audiobook: { bg: 'bg-violet-500/20', text: 'text-violet-700 dark:text-violet-300' },
+};
+
 const DEFAULT_FORMAT_COLOR: ColorStyle = { bg: 'bg-cyan-500/20', text: 'text-cyan-700 dark:text-cyan-300' };
 const DEFAULT_LANGUAGE_COLOR: ColorStyle = { bg: 'bg-indigo-500/20', text: 'text-indigo-700 dark:text-indigo-300' };
 const DEFAULT_DOWNLOAD_TYPE_COLOR: ColorStyle = { bg: 'bg-violet-500/20', text: 'text-violet-700 dark:text-violet-300' };
+const DEFAULT_CONTENT_TYPE_COLOR: ColorStyle = { bg: 'bg-gray-500/20', text: 'text-gray-700 dark:text-gray-300' };
 const FALLBACK_COLOR: ColorStyle = { bg: 'bg-gray-500/20', text: 'text-gray-700 dark:text-gray-300' };
 
 export function getFormatColor(format?: string): ColorStyle {
@@ -63,6 +70,11 @@ export function getLanguageColor(language?: string): ColorStyle {
 export function getDownloadTypeColor(downloadType?: string): ColorStyle {
   if (!downloadType || downloadType === '-') return FALLBACK_COLOR;
   return DOWNLOAD_TYPE_COLORS[downloadType.toLowerCase()] || DEFAULT_DOWNLOAD_TYPE_COLOR;
+}
+
+export function getContentTypeColor(contentType?: string): ColorStyle {
+  if (!contentType || contentType === '-') return FALLBACK_COLOR;
+  return CONTENT_TYPE_COLORS[contentType.toLowerCase()] || DEFAULT_CONTENT_TYPE_COLOR;
 }
 
 /**
@@ -92,6 +104,8 @@ export function getColorStyleFromHint(value: string, colorHint?: ColumnColorHint
         return getLanguageColor(value);
       case 'download_type':
         return getDownloadTypeColor(value);
+      case 'content_type':
+        return getContentTypeColor(value);
       default:
         return FALLBACK_COLOR;
     }

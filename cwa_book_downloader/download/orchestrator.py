@@ -37,10 +37,11 @@ from cwa_book_downloader.release_sources.direct_download import SearchUnavailabl
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.config.env import TMP_DIR
 from cwa_book_downloader.core.utils import get_ingest_dir
+from cwa_book_downloader.core.naming import build_library_path, same_filesystem, assign_part_numbers
 from cwa_book_downloader.download.archive import is_archive, process_archive
 from cwa_book_downloader.release_sources import get_handler, get_source_display_name
 from cwa_book_downloader.core.logger import setup_logger
-from cwa_book_downloader.core.models import BookInfo, DownloadTask, QueueStatus, SearchFilters
+from cwa_book_downloader.core.models import BookInfo, DownloadTask, QueueStatus, SearchFilters, SearchMode
 from cwa_book_downloader.core.queue import book_queue
 
 logger = setup_logger(__name__)
@@ -250,22 +251,11 @@ def process_directory(
             else:
                 filename = book_file.name
 
-            final_path = ingest_dir / filename
-
-            # Handle duplicates
-            if final_path.exists():
-                base = final_path.stem
-                ext = final_path.suffix
-                counter = 1
-                while final_path.exists():
-                    final_path = ingest_dir / f"{base}_{counter}{ext}"
-                    counter += 1
-
-            shutil.move(str(book_file), str(final_path))
+            dest_path = ingest_dir / filename
+            final_path = _atomic_move(book_file, dest_path)
             final_paths.append(final_path)
             logger.debug(f"Moved to ingest: {final_path.name}")
 
-        # Clean up the now-empty directory
         shutil.rmtree(directory, ignore_errors=True)
 
         return final_paths, None
@@ -280,6 +270,7 @@ def process_directory(
 try:
     from cwa_book_downloader.api.websocket import ws_manager
 except ImportError:
+    logger.warning("WebSocket unavailable - real-time updates disabled")
     ws_manager = None
 
 # Progress update throttling - track last broadcast time per book
@@ -358,6 +349,7 @@ def queue_book(book_id: str, priority: int = 0, source: str = "direct_download")
             size=book_info.size,
             preview=book_info.preview,
             content_type=book_info.content,
+            search_mode=SearchMode.DIRECT,
             priority=priority,
         )
 
@@ -403,6 +395,11 @@ def queue_release(release_data: dict, priority: int = 0) -> bool:
         preview = release_data.get('preview') or extra.get('preview')
         content_type = release_data.get('content_type') or extra.get('content_type')
 
+        # Get series info for library naming templates
+        series_name = release_data.get('series_name') or extra.get('series_name')
+        series_position = release_data.get('series_position') or extra.get('series_position')
+        subtitle = release_data.get('subtitle') or extra.get('subtitle')
+
         # Create a source-agnostic download task from release data
         task = DownloadTask(
             task_id=release_data['source_id'],
@@ -414,6 +411,10 @@ def queue_release(release_data: dict, priority: int = 0) -> bool:
             size=release_data.get('size'),
             preview=preview,
             content_type=content_type,
+            series_name=series_name,
+            series_position=series_position,
+            subtitle=subtitle,
+            search_mode=SearchMode.UNIVERSAL,
             priority=priority,
         )
 
@@ -607,6 +608,367 @@ def _download_task(task_id: str, cancel_flag: Event) -> Optional[str]:
         return None
 
 
+def _process_library_mode(
+    temp_file: Path,
+    task: DownloadTask,
+    status_callback,
+) -> Optional[str]:
+    """Process a download in Library Mode.
+
+    Library mode organizes files directly into your library with template-based
+    naming (e.g., "{Author}/{Series}/{Title}"). Files are transferred as-is
+    with no processing.
+
+    Use ingest mode if you need archive extraction or custom scripts.
+
+    Returns:
+        Path to library file if successful, None if library path not configured
+    """
+    # Check if this is an audiobook and use audiobook-specific settings if configured
+    content_type = task.content_type.lower() if task.content_type else ""
+    is_audiobook = "audiobook" in content_type
+
+    if is_audiobook:
+        # Use audiobook-specific settings, falling back to main settings
+        library_path = config.get("LIBRARY_PATH_AUDIOBOOK") or config.get("LIBRARY_PATH")
+        template = config.get("LIBRARY_TEMPLATE_AUDIOBOOK") or config.get("LIBRARY_TEMPLATE", "{Author}/{Title}")
+    else:
+        library_path = config.get("LIBRARY_PATH")
+        template = config.get("LIBRARY_TEMPLATE", "{Author}/{Title}")
+
+    if not library_path:
+        logger.warning("Library mode enabled but no library path configured, falling back to ingest")
+        status_callback("resolving", "Library path not configured, using ingest")
+        return None
+
+    # Validate library path
+    library_path_obj = Path(library_path)
+    if not library_path_obj.is_absolute():
+        logger.warning(f"Library path must be absolute: {library_path}, falling back to ingest")
+        status_callback("resolving", f"Library path must be absolute: {library_path}")
+        return None
+
+    if not library_path_obj.exists():
+        try:
+            library_path_obj.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            logger.warning(f"Cannot create library path: {e}, falling back to ingest")
+            status_callback("resolving", f"Cannot create library path: {e}")
+            return None
+
+    if not os.access(library_path_obj, os.W_OK):
+        logger.warning(f"Library path not writable: {library_path}, falling back to ingest")
+        status_callback("resolving", f"Library path not writable: {library_path}")
+        return None
+
+    # Determine if we should use hardlinking (torrents only)
+    use_hardlink = False
+    hardlink_source = None
+
+    if task.original_download_path:
+        # Torrent with download client path available
+        torrent_hardlink_enabled = config.get("TORRENT_HARDLINK", True)
+        if torrent_hardlink_enabled:
+            hardlink_source = Path(task.original_download_path)
+            if hardlink_source.exists():
+                # Check same filesystem (required for hardlinks)
+                if same_filesystem(hardlink_source, library_path):
+                    use_hardlink = True
+                else:
+                    logger.warning(
+                        f"Cannot hardlink: {hardlink_source} and {library_path} are on different filesystems. "
+                        "Falling back to move. To fix: ensure torrent client downloads to same filesystem as library."
+                    )
+                    status_callback("resolving", "Cannot hardlink (different filesystems), using move")
+
+    # Build metadata dict for template
+    metadata = {
+        "Author": task.author,
+        "Title": task.title,
+        "Subtitle": task.subtitle,
+        "Year": task.year,
+        "Series": task.series_name,
+        "SeriesPosition": task.series_position,
+    }
+
+    try:
+        if use_hardlink:
+            status_callback("resolving", "Creating library hardlinks")
+        else:
+            status_callback("resolving", "Organizing in library")
+
+        # Use torrent client path for hardlinks, staging path for moves
+        source = hardlink_source if use_hardlink else temp_file
+
+        if source.is_dir():
+            return _transfer_directory_to_library(
+                source, library_path, template, metadata, task, temp_file, status_callback, use_hardlink
+            )
+        else:
+            return _transfer_file_to_library(
+                source, library_path, template, metadata, task, temp_file, status_callback, use_hardlink
+            )
+    except PermissionError as e:
+        logger.error(f"Permission denied in library mode: {e}")
+        status_callback("error", f"Permission denied: {e}")
+        return None
+    except Exception as e:
+        logger.error_trace(f"Library mode failed: {e}")
+        status_callback("error", f"Library mode failed: {e}")
+        return None
+
+
+def _is_torrent_source(source_path: Path, task: DownloadTask) -> bool:
+    """Check if source is the torrent client path (needs copy to preserve seeding)."""
+    if not task.original_download_path:
+        return False
+    try:
+        return source_path.resolve() == Path(task.original_download_path).resolve()
+    except (OSError, ValueError):
+        return False
+
+
+def _get_unique_path(dest_path: Path) -> Path:
+    """Return a unique path by appending counter if file already exists.
+
+    Note: Has TOCTOU race. Use _atomic_hardlink/_atomic_move for concurrent safety.
+    """
+    if not dest_path.exists():
+        return dest_path
+
+    base = dest_path.stem
+    ext = dest_path.suffix
+    counter = 1
+    while dest_path.exists():
+        dest_path = dest_path.parent / f"{base}_{counter}{ext}"
+        counter += 1
+
+    logger.info(f"File already exists, saving as: {dest_path.name}")
+    return dest_path
+
+
+def _atomic_hardlink(source_path: Path, dest_path: Path, max_attempts: int = 100) -> Path:
+    """Create a hardlink with atomic collision detection. Retries with counter suffix on collision."""
+    base = dest_path.stem
+    ext = dest_path.suffix
+
+    for attempt in range(max_attempts):
+        try_path = dest_path if attempt == 0 else dest_path.parent / f"{base}_{attempt}{ext}"
+        try:
+            os.link(str(source_path), str(try_path))
+            if attempt > 0:
+                logger.info(f"File collision resolved: {try_path.name}")
+            return try_path
+        except FileExistsError:
+            continue
+
+    raise RuntimeError(f"Could not create hardlink after {max_attempts} attempts: {dest_path}")
+
+
+def _atomic_copy(source_path: Path, dest_path: Path, max_attempts: int = 100) -> Path:
+    """Copy a file with atomic collision detection. Retries with counter suffix on collision."""
+    base = dest_path.stem
+    ext = dest_path.suffix
+
+    for attempt in range(max_attempts):
+        try_path = dest_path if attempt == 0 else dest_path.parent / f"{base}_{attempt}{ext}"
+        try:
+            # Atomically claim the destination by creating an exclusive file
+            fd = os.open(str(try_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            try:
+                # Copy to temp file first, then replace to avoid partial files
+                temp_path = try_path.parent / f".{try_path.name}.tmp"
+                shutil.copy2(str(source_path), str(temp_path))
+                temp_path.replace(try_path)
+                if attempt > 0:
+                    logger.info(f"File collision resolved: {try_path.name}")
+                return try_path
+            except Exception:
+                try_path.unlink(missing_ok=True)
+                temp_path.unlink(missing_ok=True) if 'temp_path' in locals() else None
+                raise
+        except FileExistsError:
+            continue
+
+    raise RuntimeError(f"Could not copy file after {max_attempts} attempts: {dest_path}")
+
+
+def _atomic_move(source_path: Path, dest_path: Path, max_attempts: int = 100) -> Path:
+    """Move a file with atomic collision detection. Retries with counter suffix on collision."""
+    import errno
+
+    base = dest_path.stem
+    ext = dest_path.suffix
+
+    for attempt in range(max_attempts):
+        try_path = dest_path if attempt == 0 else dest_path.parent / f"{base}_{attempt}{ext}"
+        try:
+            os.link(str(source_path), str(try_path))
+            source_path.unlink()
+            if attempt > 0:
+                logger.info(f"File collision resolved: {try_path.name}")
+            return try_path
+        except FileExistsError:
+            continue
+        except OSError as e:
+            # Cross-filesystem - fall back to exclusive create
+            if e.errno not in (errno.EXDEV, errno.EMLINK):
+                raise
+            try:
+                fd = os.open(str(try_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
+                try:
+                    shutil.move(str(source_path), str(try_path))
+                    if attempt > 0:
+                        logger.info(f"File collision resolved: {try_path.name}")
+                    return try_path
+                except Exception:
+                    try_path.unlink(missing_ok=True)
+                    raise
+            except FileExistsError:
+                continue
+
+    raise RuntimeError(f"Could not move file after {max_attempts} attempts: {dest_path}")
+
+
+def _cleanup_staged_files(temp_file: Path, source_dir: Optional[Path] = None) -> None:
+    """Remove staged files. Optionally removes source_dir if empty."""
+    try:
+        if temp_file.is_dir():
+            shutil.rmtree(temp_file)
+        elif temp_file.exists():
+            temp_file.unlink()
+    except (OSError, PermissionError) as e:
+        logger.debug(f"Cleanup failed for {temp_file}: {e}")
+
+    if source_dir and source_dir.is_dir():
+        try:
+            source_dir.rmdir()
+        except OSError:
+            pass  # Directory not empty or permission issue
+
+
+def _transfer_single_file(
+    source_path: Path,
+    dest_path: Path,
+    use_hardlink: bool,
+    is_torrent: bool,
+) -> Tuple[Path, str]:
+    """Transfer a file via hardlink, copy, or move. Returns (final_path, operation_name)."""
+    if use_hardlink:
+        return _atomic_hardlink(source_path, dest_path), "hardlink"
+    if is_torrent:
+        return _atomic_copy(source_path, dest_path), "copy"
+    return _atomic_move(source_path, dest_path), "move"
+
+
+def _transfer_file_to_library(
+    source_path: Path,
+    library_base: str,
+    template: str,
+    metadata: dict,
+    task: DownloadTask,
+    temp_file: Optional[Path],
+    status_callback,
+    use_hardlink: bool,
+) -> Optional[str]:
+    """Transfer a single file to the library with template-based naming."""
+    extension = source_path.suffix.lstrip('.') or task.format
+    dest_path = build_library_path(library_base, template, metadata, extension)
+
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    is_torrent = _is_torrent_source(source_path, task)
+    final_path, op = _transfer_single_file(source_path, dest_path, use_hardlink, is_torrent)
+    logger.info(f"Library {op}: {final_path}")
+
+    if use_hardlink:
+        _cleanup_staged_files(temp_file)
+
+    status_callback("complete", "Complete (library mode)")
+    return str(final_path)
+
+
+def _transfer_directory_to_library(
+    source_dir: Path,
+    library_base: str,
+    template: str,
+    metadata: dict,
+    task: DownloadTask,
+    temp_file: Optional[Path],
+    status_callback,
+    use_hardlink: bool,
+) -> Optional[str]:
+    """Transfer all files from a directory to the library with template-based naming."""
+    content_type = task.content_type.lower() if task.content_type else None
+    supported_formats = _get_supported_formats(content_type)
+
+    source_files = [
+        f for f in source_dir.rglob("*")
+        if f.is_file() and f.suffix.lower().lstrip('.') in supported_formats
+    ]
+
+    if not source_files:
+        logger.warning(f"No supported files in {source_dir.name}")
+        status_callback("error", "No supported file formats found")
+        if temp_file:
+            _cleanup_staged_files(temp_file)
+        return None
+
+    base_library_path = build_library_path(library_base, template, metadata, extension=None)
+    base_library_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Check if this is a torrent source that needs copy instead of move
+    is_torrent = _is_torrent_source(source_dir, task)
+    transferred_paths = []
+
+    if len(source_files) == 1:
+        # Single file - no part numbering needed
+        source_file = source_files[0]
+        ext = source_file.suffix.lstrip('.')
+        dest_path = base_library_path.with_suffix(f'.{ext}')
+
+        final_path, op = _transfer_single_file(source_file, dest_path, use_hardlink, is_torrent)
+        logger.debug(f"Library {op}: {source_file.name} -> {final_path}")
+        transferred_paths.append(final_path)
+    else:
+        # Multi-file: natural sort then sequential numbering
+        zero_pad_width = max(len(str(len(source_files))), 2)
+        files_with_parts = assign_part_numbers(source_files, zero_pad_width)
+
+        for source_file, part_number in files_with_parts:
+            ext = source_file.suffix.lstrip('.')
+
+            file_metadata = {**metadata, "PartNumber": part_number}
+            file_path = build_library_path(library_base, template, file_metadata, extension=ext)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+
+            final_path, op = _transfer_single_file(source_file, file_path, use_hardlink, is_torrent)
+            logger.debug(f"Library {op}: {source_file.name} -> {final_path}")
+            transferred_paths.append(final_path)
+
+    # Get operation name for summary log
+    if use_hardlink:
+        operation = "hardlinks"
+    elif is_torrent:
+        operation = "copies"
+    else:
+        operation = "files"
+    logger.info(f"Created {len(transferred_paths)} library {operation} in {base_library_path.parent}")
+
+    # Cleanup staging (not torrent source - that stays for seeding)
+    if use_hardlink:
+        _cleanup_staged_files(temp_file)
+    elif not is_torrent:
+        _cleanup_staged_files(temp_file, source_dir)
+
+    count_msg = f" ({len(transferred_paths)} files," if len(transferred_paths) > 1 else " ("
+    status_callback("complete", f"Complete{count_msg} library mode)")
+
+    return str(transferred_paths[0])
+
+
 def _post_process_download(
     temp_file: Path,
     task: DownloadTask,
@@ -626,13 +988,70 @@ def _post_process_download(
     Returns:
         Final path in ingest directory, or None on failure
     """
-    # Route to content-type-specific ingest directory if configured
-    content_type = task.content_type.lower() if task.content_type else None
+    content_type = task.content_type.lower() if task.content_type else ""
+    is_audiobook = "audiobook" in content_type
+
+    # Validate search_mode
+    if task.search_mode is None:
+        logger.warning(f"Task {task.task_id} has no search_mode set, defaulting to Direct mode behavior")
+    elif task.search_mode not in (SearchMode.DIRECT, SearchMode.UNIVERSAL):
+        logger.warning(f"Task {task.task_id} has invalid search_mode '{task.search_mode}', defaulting to Direct mode behavior")
+
+    # Library mode and audiobook-specific directories only apply to Universal mode
+    is_universal = task.search_mode == SearchMode.UNIVERSAL
+
+    if is_universal:
+        # Determine processing mode based on content type
+        if is_audiobook:
+            processing_mode = config.get("PROCESSING_MODE_AUDIOBOOK", "ingest")
+        else:
+            processing_mode = config.get("PROCESSING_MODE", "ingest")
+
+        if processing_mode == "library":
+            result = _process_library_mode(temp_file, task, status_callback)
+            if result is not None:
+                return result
+            # If library mode fails, fall through to normal processing
+
+    # Determine ingest directory
     default_ingest_dir = get_ingest_dir()
-    ingest_dir = get_ingest_dir(content_type)
-    if content_type and ingest_dir != default_ingest_dir:
-        logger.debug(f"Routing content type '{content_type}' to {ingest_dir}")
+
+    if is_universal and is_audiobook:
+        # Universal audiobooks use dedicated setting, falling back to main ingest dir
+        audiobook_ingest = config.get("INGEST_DIR_AUDIOBOOK", "")
+        ingest_dir = Path(audiobook_ingest) if audiobook_ingest else default_ingest_dir
+    else:
+        # Direct mode and non-audiobook content use content-type routing
+        ingest_dir = get_ingest_dir(content_type)
+
+    if ingest_dir != default_ingest_dir:
+        logger.debug(f"Routing '{content_type or 'default'}' to {ingest_dir}")
     os.makedirs(ingest_dir, exist_ok=True)
+
+    # For torrents going to ingest mode, stage first to preserve seeding
+    # (Torrent handler returns original path, not staged copy)
+    if _is_torrent_source(temp_file, task):
+        status_callback("resolving", "Staging torrent files")
+        staging_dir = get_staging_dir()
+
+        if temp_file.is_dir():
+            staged_path = staging_dir / temp_file.name
+            counter = 1
+            while staged_path.exists():
+                staged_path = staging_dir / f"{temp_file.name}_{counter}"
+                counter += 1
+            shutil.copytree(str(temp_file), str(staged_path))
+            logger.debug(f"Staged torrent directory: {staged_path.name}")
+        else:
+            staged_path = staging_dir / temp_file.name
+            counter = 1
+            while staged_path.exists():
+                staged_path = staging_dir / f"{temp_file.stem}_{counter}{temp_file.suffix}"
+                counter += 1
+            shutil.copy2(str(temp_file), str(staged_path))
+            logger.debug(f"Staged torrent file: {staged_path.name}")
+
+        temp_file = staged_path
 
     # Handle archive extraction (RAR/ZIP)
     if is_archive(temp_file):
@@ -683,7 +1102,33 @@ def _post_process_download(
     # Non-archive: run custom script if configured, then move to ingest
     if config.CUSTOM_SCRIPT:
         logger.info(f"Running custom script: {config.CUSTOM_SCRIPT}")
-        subprocess.run([config.CUSTOM_SCRIPT, str(temp_file)])
+        try:
+            result = subprocess.run(
+                [config.CUSTOM_SCRIPT, str(temp_file)],
+                check=True,
+                timeout=300,  # 5 minute timeout
+                capture_output=True,
+                text=True,
+            )
+            if result.stdout:
+                logger.debug(f"Custom script stdout: {result.stdout.strip()}")
+        except FileNotFoundError:
+            logger.error(f"Custom script not found: {config.CUSTOM_SCRIPT}")
+            status_callback("error", f"Custom script not found: {config.CUSTOM_SCRIPT}")
+            return None
+        except PermissionError:
+            logger.error(f"Custom script not executable: {config.CUSTOM_SCRIPT}")
+            status_callback("error", f"Custom script not executable: {config.CUSTOM_SCRIPT}")
+            return None
+        except subprocess.TimeoutExpired:
+            logger.error(f"Custom script timed out after 300s: {config.CUSTOM_SCRIPT}")
+            status_callback("error", "Custom script timed out")
+            return None
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.strip() if e.stderr else "No error output"
+            logger.error(f"Custom script failed (exit code {e.returncode}): {stderr}")
+            status_callback("error", f"Custom script failed: {stderr[:100]}")
+            return None
 
     # Check cancellation before final move
     if cancel_flag.is_set():
@@ -699,39 +1144,15 @@ def _post_process_download(
     else:
         filename = temp_file.name
 
-    final_path = ingest_dir / filename
-
-    # Handle duplicate filenames
-    if final_path.exists():
-        base = final_path.stem
-        ext = final_path.suffix
-        counter = 1
-        while final_path.exists():
-            final_path = ingest_dir / f"{base}_{counter}{ext}"
-            counter += 1
-        logger.info(f"File already exists, saving as: {final_path.name}")
-
-    # Use intermediate .crdownload file for atomic move
-    intermediate_path = ingest_dir / f"{temp_file.stem}.crdownload"
+    dest_path = ingest_dir / filename
 
     try:
-        shutil.move(str(temp_file), str(intermediate_path))
+        final_path = _atomic_move(temp_file, dest_path)
     except Exception as e:
-        logger.debug(f"Error moving file: {e}, trying copy instead")
-        try:
-            shutil.copyfile(str(temp_file), str(intermediate_path))
-            temp_file.unlink(missing_ok=True)
-        except Exception as e2:
-            logger.error(f"Failed to move/copy file to ingest: {e2}")
-            return None
-
-    # Final cancellation check
-    if cancel_flag.is_set():
-        logger.info(f"Download cancelled before final rename: {task.task_id}")
-        intermediate_path.unlink(missing_ok=True)
+        logger.error(f"Failed to move file to ingest: {e}")
+        status_callback("error", f"Failed to move file: {e}")
         return None
 
-    os.rename(str(intermediate_path), str(final_path))
     logger.info(f"Download completed: {final_path.name}")
 
     status_callback("complete", "Complete")

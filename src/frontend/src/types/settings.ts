@@ -44,6 +44,7 @@ export interface BaseField {
   showWhen?: ShowWhenCondition; // Conditional visibility based on another field's value
   disabledWhen?: DisabledWhenCondition; // Conditional disable based on another field's value
   requiresRestart?: boolean; // True if changing this setting requires a container restart
+  universalOnly?: boolean; // Only show in Universal search mode (hide in Direct mode)
 }
 
 // Specific field interfaces
@@ -120,6 +121,7 @@ export interface HeadingFieldConfig {
   linkUrl?: string;
   linkText?: string;
   showWhen?: ShowWhenCondition; // Conditional visibility based on another field's value
+  universalOnly?: boolean; // Only show in Universal search mode (hide in Direct mode)
 }
 
 // Union type for all fields

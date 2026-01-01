@@ -52,37 +52,44 @@ def _parse_size(size_bytes: Optional[int]) -> Optional[str]:
 # Common ebook formats in priority order
 EBOOK_FORMATS = ["epub", "mobi", "azw3", "azw", "pdf", "cbz", "cbr", "fb2", "djvu", "lit", "pdb", "txt"]
 
+# Common audiobook formats
+AUDIOBOOK_FORMATS = ["m4b", "mp3", "m4a", "flac", "ogg", "wma", "aac", "wav", "opus"]
+
+# Combined list for format detection (audiobook formats first for priority)
+ALL_BOOK_FORMATS = AUDIOBOOK_FORMATS + EBOOK_FORMATS
+
 
 def _extract_format(title: str) -> Optional[str]:
     """
     Extract format from release title with smart parsing.
 
+    Supports both ebook formats (epub, mobi, etc.) and audiobook formats (m4b, mp3, etc.).
+
     Priority:
-    1. File extension at end of title or in quotes (e.g., ".azw3")
-    2. File extension anywhere in title
-    3. Format keyword in brackets/parentheses (e.g., "[EPUB]", "(PDF)")
-    4. Fallback to first format keyword found
+    1. File extension at end of title or in quotes (e.g., ".azw3", ".m4b")
+    2. Format keyword in brackets/parentheses (e.g., "[EPUB]", "(MP3)")
+    3. Format as standalone word (not part of another word)
     """
     title_lower = title.lower()
 
     # 1. Look for file extensions (most reliable) - pattern: .format at word boundary or end
-    #    This catches ".azw3", ".epub", etc.
-    for fmt in EBOOK_FORMATS:
+    #    This catches ".azw3", ".epub", ".m4b", ".mp3", etc.
+    for fmt in ALL_BOOK_FORMATS:
         # Match .format at end of string or followed by non-alphanumeric
         pattern = rf'\.{fmt}(?:["\'\s\]\)]|$)'
         if re.search(pattern, title_lower):
             return fmt
 
     # 2. Look for format in brackets/parentheses (common in release names)
-    #    e.g., "[EPUB]", "(PDF)", "{mobi}"
-    for fmt in EBOOK_FORMATS:
+    #    e.g., "[EPUB]", "(PDF)", "{mobi}", "[M4B]", "(MP3)"
+    for fmt in ALL_BOOK_FORMATS:
         pattern = rf'[\[\(\{{]{fmt}[\]\)\}}]'
         if re.search(pattern, title_lower):
             return fmt
 
     # 3. Look for format as standalone word (not part of another word)
-    #    e.g., "epub" but not "republic"
-    for fmt in EBOOK_FORMATS:
+    #    e.g., "epub" but not "republic", "m4b" but not "m4b123"
+    for fmt in ALL_BOOK_FORMATS:
         # Match format as whole word
         pattern = rf'\b{fmt}\b'
         if re.search(pattern, title_lower):
@@ -125,15 +132,69 @@ def _extract_language(title: str) -> Optional[str]:
     return None
 
 
-def _prowlarr_result_to_release(result: dict) -> Release:
+# Prowlarr category IDs for content type detection
+# See: https://wiki.servarr.com/prowlarr/cardigann-yml-definition#categories
+AUDIOBOOK_CATEGORY_IDS = {3000, 3030}  # 3000 = Audio, 3030 = Audio/Audiobook
+EBOOK_CATEGORY_IDS = {7000, 7020}  # 7000 = Books, 7020 = Books/Ebook
+
+
+def _detect_content_type_from_categories(categories: list, fallback: str = "book") -> str:
+    """
+    Detect content type from Prowlarr category IDs.
+
+    Prowlarr returns categories as a list of dicts with 'id' and 'name' keys,
+    or sometimes just category IDs directly.
+
+    Args:
+        categories: List of category objects from Prowlarr result
+        fallback: Content type to use if categories don't indicate a specific type
+
+    Returns:
+        "audiobook" if audiobook categories detected, "book" otherwise
+    """
+    # Normalize fallback - convert "ebook" to "book" for display consistency
+    if fallback == "ebook":
+        fallback = "book"
+
+    if not categories:
+        return fallback
+
+    # Extract category IDs from the nested structure
+    cat_ids = set()
+    for cat in categories:
+        if isinstance(cat, dict):
+            cat_id = cat.get("id")
+            if cat_id is not None:
+                cat_ids.add(cat_id)
+        elif isinstance(cat, int):
+            cat_ids.add(cat)
+
+    # Check for audiobook categories first (more specific)
+    if cat_ids & AUDIOBOOK_CATEGORY_IDS:
+        return "audiobook"
+
+    # Check for ebook categories
+    if cat_ids & EBOOK_CATEGORY_IDS:
+        return "book"
+
+    # Fall back to normalized content_type if no recognized categories
+    return fallback
+
+
+def _prowlarr_result_to_release(result: dict, search_content_type: str = "ebook") -> Release:
     """
     Convert a Prowlarr search result to a Release object.
 
     Uses structured fields from Prowlarr when available:
     - protocol: Direct from Prowlarr
     - fileName: For format detection (more reliable than title)
-    - categories: To confirm ebook type
+    - categories: To detect content type (audiobook vs ebook)
     - grabs: Download count
+
+    Args:
+        result: Raw Prowlarr API result
+        search_content_type: Content type from search, used as fallback if
+                            categories don't indicate a specific type
     """
     title = result.get("title", "Unknown")
     size_bytes = result.get("size")
@@ -156,6 +217,10 @@ def _prowlarr_result_to_release(result: dict) -> Release:
     # Extract language from title (Prowlarr doesn't provide this structured)
     language = _extract_language(title)
 
+    # Detect content type from categories (per-result), with search type as fallback
+    categories = result.get("categories", [])
+    content_type = _detect_content_type_from_categories(categories, search_content_type)
+
     # Build the source_id from GUID or generate from indexer + title
     source_id = result.get("guid") or f"{indexer}:{hash(title)}"
 
@@ -176,9 +241,10 @@ def _prowlarr_result_to_release(result: dict) -> Release:
         indexer=indexer,
         seeders=seeders if protocol == "torrent" else None,
         peers=peers_display if protocol == "torrent" else None,
+        content_type=content_type,  # Detected per-result from categories
         extra={
             "publish_date": result.get("publishDate"),
-            "categories": result.get("categories", []),
+            "categories": categories,
             "indexer_id": result.get("indexerId"),
             "files": result.get("files"),
             "grabs": grabs,
@@ -192,10 +258,12 @@ class ProwlarrSource(ReleaseSource):
     Prowlarr release source.
 
     Searches Prowlarr indexers for book releases (torrents and usenet).
+    Supports both ebooks (category 7000) and audiobooks (category 3030).
     """
 
     name = "prowlarr"
     display_name = "Prowlarr"
+    supported_content_types = ["ebook", "audiobook"]  # Explicitly declare support for both
 
     def __init__(self):
         self.last_search_type: Optional[str] = None
@@ -233,14 +301,15 @@ class ProwlarrSource(ReleaseSource):
                     fallback="-",
                 ),
                 ColumnSchema(
-                    key="format",
-                    label="Format",
+                    key="content_type",
+                    label="Type",
                     render_type=ColumnRenderType.BADGE,
                     align=ColumnAlign.CENTER,
-                    width="70px",
+                    width="90px",
                     hide_mobile=False,
-                    color_hint=ColumnColorHint(type="map", value="format"),
+                    color_hint=ColumnColorHint(type="map", value="content_type"),
                     uppercase=True,
+                    fallback="-",
                 ),
                 ColumnSchema(
                     key="size",
@@ -251,9 +320,9 @@ class ProwlarrSource(ReleaseSource):
                     hide_mobile=False,
                 ),
             ],
-            grid_template="minmax(0,2fr) minmax(80px,1fr) 60px 70px 70px 80px",
+            grid_template="minmax(0,2fr) minmax(80px,1fr) 60px 70px 90px 80px",
             leading_cell=LeadingCellConfig(type=LeadingCellType.NONE),  # No leading cell for Prowlarr
-            supported_filters=["format"],  # Prowlarr has unreliable language metadata
+            supported_filters=[],  # Prowlarr has unreliable format/language metadata; content_type is auto-detected
         )
 
     def _get_client(self) -> Optional[ProwlarrClient]:
@@ -387,7 +456,7 @@ class ProwlarrSource(ReleaseSource):
                         logger.warning(f"Expanded search failed for indexer {indexer_id}: {e}")
                 self.last_search_type = "expanded"
 
-            results = [_prowlarr_result_to_release(r) for r in all_results]
+            results = [_prowlarr_result_to_release(r, content_type) for r in all_results]
 
             if results:
                 torrent_count = sum(1 for r in results if r.protocol == "torrent")

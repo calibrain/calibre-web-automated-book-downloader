@@ -23,6 +23,7 @@ interface SearchSectionProps {
   searchFieldValues?: Record<string, string | number | boolean>;
   onSearchFieldChange?: (key: string, value: string | number | boolean) => void;
   contentType?: ContentType;
+  onContentTypeChange?: (type: ContentType) => void;
 }
 
 export const SearchSection = ({
@@ -43,6 +44,7 @@ export const SearchSection = ({
   searchFieldValues,
   onSearchFieldChange,
   contentType = 'ebook',
+  onContentTypeChange,
 }: SearchSectionProps) => {
   const { searchMode } = useSearchMode();
 
@@ -71,9 +73,7 @@ export const SearchSection = ({
         isInitialState ? 'opacity-100 mb-6 sm:mb-8' : 'opacity-0 h-0 mb-0 overflow-hidden'
       }`}>
         <img src={logoUrl} alt="Logo" className="h-8 w-8" />
-        <h1 className="text-2xl font-semibold">
-          {contentType === 'audiobook' ? 'Audiobook Search & Download' : 'Book Search & Download'}
-        </h1>
+        <h1 className="text-2xl font-semibold">Book Search & Download</h1>
       </div>
       <div className={`flex flex-col gap-3 search-wrapper transition-all duration-500 ${
         isInitialState ? '' : 'hidden'
@@ -84,6 +84,8 @@ export const SearchSection = ({
           onSubmit={handleSearch}
           isLoading={isLoading}
           onAdvancedToggle={onAdvancedToggle}
+          contentType={contentType}
+          onContentTypeChange={onContentTypeChange}
         />
         <AdvancedFilters
           visible={showAdvanced}

@@ -27,6 +27,7 @@ class FieldBase:
     show_when: Optional[Dict[str, Any]] = None  # Conditional visibility: {"field": "key", "value": "expected"} or {"field": "key", "notEmpty": True}
     disabled_when: Optional[Dict[str, Any]] = None  # Conditional disable: {"field": "key", "value": "expected", "reason": "..."}
     requires_restart: bool = False        # Whether changing this setting requires a container restart
+    universal_only: bool = False          # Only show in Universal search mode (hide in Direct mode)
 
     def get_env_var_name(self) -> str:
         """Get the environment variable name for this field."""
@@ -83,19 +84,6 @@ class MultiSelectField(FieldBase):
 
 @dataclass
 class OrderableListField(FieldBase):
-    """
-    Drag-and-drop reorderable list with enable/disable toggles.
-
-    A generic field for any ordered list of items where each item can be
-    enabled or disabled. Used for source priority, format preference, etc.
-
-    Options define the available items:
-        [{"id": "item1", "label": "Item 1", "description": "...",
-          "disabledReason": "...", "isLocked": False}, ...]
-
-    Value is stored as:
-        [{"id": "item1", "enabled": True}, {"id": "item2", "enabled": False}, ...]
-    """
     # Options can be a list or a callable that returns a list (for lazy evaluation)
     # Each option: {id, label, description?, disabledReason?, isLocked?}
     options: Any = field(default_factory=list)
@@ -105,12 +93,6 @@ class OrderableListField(FieldBase):
 
 @dataclass
 class ActionButton:
-    """
-    Button that triggers a callback function.
-
-    Used for actions like "Test Connection" that execute code
-    and return success/error status.
-    """
     key: str                              # Action identifier
     label: str                            # Button text
     description: str = ""                 # Help text
@@ -139,6 +121,7 @@ class HeadingField:
     link_url: str = ""                    # Optional URL for a link
     link_text: str = ""                   # Text for the link (defaults to URL if not provided)
     show_when: Optional[Dict[str, Any]] = None  # Conditional visibility: {"field": "key", "value": "expected"} or {"field": "key", "notEmpty": True}
+    universal_only: bool = False          # Only show in Universal search mode (hide in Direct mode)
 
     def get_field_type(self) -> str:
         return "HeadingField"
@@ -180,20 +163,6 @@ def register_group(
     icon: Optional[str] = None,
     order: int = 100
 ) -> None:
-    """
-    Register a settings group.
-
-    Groups are collapsible containers for related settings tabs.
-
-    Args:
-        name: Internal name for the group (e.g., "direct_download")
-        display_name: Display name in UI (e.g., "Direct Download")
-        icon: Optional icon name for the UI
-        order: Sort order (lower numbers appear first)
-
-    Example:
-        register_group("direct_download", "Direct Download", icon="download", order=20)
-    """
     with _REGISTRY_LOCK:
         group = SettingsGroup(
             name=name,
@@ -212,25 +181,6 @@ def register_settings(
     order: int = 100,
     group: Optional[str] = None
 ):
-    """
-    Decorator to register settings for a plugin/module.
-
-    The decorated function should return a list of SettingsField objects.
-
-    Args:
-        name: Internal name for the settings tab (e.g., "hardcover")
-        display_name: Display name in UI (e.g., "Hardcover")
-        icon: Optional icon name for the UI
-        order: Sort order (lower numbers appear first)
-        group: Optional group name this tab belongs to
-
-    Example:
-        @register_settings("hardcover", "Hardcover", icon="book", order=20, group="metadata_providers")
-        def hardcover_settings():
-            return [
-                PasswordField(key="HARDCOVER_API_KEY", label="API Key", required=True),
-            ]
-    """
     def decorator(func: Callable[[], List[SettingsField]]):
         with _REGISTRY_LOCK:
             fields = func()
@@ -253,28 +203,6 @@ def register_on_save(
     tab_name: str,
     handler: Callable[[Dict[str, Any]], Dict[str, Any]]
 ) -> None:
-    """
-    Register a custom on_save handler for a settings tab.
-
-    The handler is called before saving settings and can:
-    - Validate values (return {"error": True, "message": "..."})
-    - Transform values (e.g., hash passwords)
-    - Add computed values
-
-    Args:
-        tab_name: The settings tab name to register the handler for.
-        handler: Callable that takes values dict and returns:
-                 {"error": bool, "message": str (if error), "values": dict}
-
-    Example:
-        def _on_save_security(values: Dict[str, Any]) -> Dict[str, Any]:
-            password = values.pop("password", "")
-            if password:
-                values["password_hash"] = hash_password(password)
-            return {"error": False, "values": values}
-
-        register_on_save("security", _on_save_security)
-    """
     with _REGISTRY_LOCK:
         _ON_SAVE_HANDLERS[tab_name] = handler
         logger.debug(f"Registered on_save handler for tab: {tab_name}")
@@ -324,15 +252,6 @@ def _ensure_config_dir(tab_name: str) -> None:
 
 
 def load_config_file(tab_name: str) -> Dict[str, Any]:
-    """
-    Load settings from a config file.
-
-    Args:
-        tab_name: The settings tab name.
-
-    Returns:
-        Dict of setting key -> value from config file.
-    """
     config_path = _get_config_file_path(tab_name)
 
     if not config_path.exists():
@@ -347,16 +266,6 @@ def load_config_file(tab_name: str) -> Dict[str, Any]:
 
 
 def save_config_file(tab_name: str, values: Dict[str, Any]) -> bool:
-    """
-    Save settings to a config file.
-
-    Args:
-        tab_name: The settings tab name.
-        values: Dict of setting key -> value to save.
-
-    Returns:
-        True if save succeeded, False otherwise.
-    """
     try:
         _ensure_config_dir(tab_name)
         config_path = _get_config_file_path(tab_name)
@@ -376,14 +285,6 @@ def save_config_file(tab_name: str, values: Dict[str, Any]) -> bool:
 
 
 def sync_env_to_config() -> None:
-    """
-    Sync environment variable values to config files.
-
-    This ensures that when ENV vars are set, their values are persisted to config.
-    When ENV vars are later removed, the config file retains the last known values.
-
-    Called once during application startup.
-    """
     for tab in get_all_settings_tabs():
         values_to_sync = {}
 
@@ -412,18 +313,6 @@ def sync_env_to_config() -> None:
 
 
 def get_setting_value(field: SettingsField, tab_name: str) -> Any:
-    """
-    Get the current value for a settings field.
-
-    Priority: env var > config file > default
-
-    Args:
-        field: The settings field.
-        tab_name: The settings tab name (for config file lookup).
-
-    Returns:
-        The resolved value.
-    """
     if isinstance(field, (ActionButton, HeadingField)):
         return None  # Actions and headings don't have values
 
@@ -505,6 +394,8 @@ def serialize_field(field: SettingsField, tab_name: str, include_value: bool = T
             result["linkText"] = field.link_text or field.link_url
         if field.show_when:
             result["showWhen"] = field.show_when
+        if field.universal_only:
+            result["universalOnly"] = True
         return result
 
     result = {
@@ -527,6 +418,11 @@ def serialize_field(field: SettingsField, tab_name: str, include_value: bool = T
     disabled_when = getattr(field, 'disabled_when', None)
     if disabled_when:
         result["disabledWhen"] = disabled_when
+
+    # Add universal_only flag if set
+    universal_only = getattr(field, 'universal_only', False)
+    if universal_only:
+        result["universalOnly"] = True
 
     # Add type-specific properties
     if isinstance(field, TextField):
@@ -681,19 +577,6 @@ def _apply_dns_settings(config) -> None:
 
 
 def update_settings(tab_name: str, values: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Update settings for a tab.
-
-    Only updates values that are not set via environment variables.
-
-    Args:
-        tab_name: The settings tab name.
-        values: Dict of key -> value to update.
-
-    Returns:
-        Dict with "success" (bool), "message" (str), "updated" (list of keys),
-        and "requiresRestart" (bool) indicating if any changed setting requires restart.
-    """
     tab = get_settings_tab(tab_name)
     if not tab:
         return {"success": False, "message": f"Unknown settings tab: {tab_name}", "updated": [], "requiresRestart": False}
