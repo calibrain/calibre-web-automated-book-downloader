@@ -270,6 +270,7 @@ def process_directory(
 try:
     from cwa_book_downloader.api.websocket import ws_manager
 except ImportError:
+    logger.warning("WebSocket unavailable - real-time updates disabled")
     ws_manager = None
 
 # Progress update throttling - track last broadcast time per book
@@ -764,6 +765,35 @@ def _atomic_hardlink(source_path: Path, dest_path: Path, max_attempts: int = 100
     raise RuntimeError(f"Could not create hardlink after {max_attempts} attempts: {dest_path}")
 
 
+def _atomic_copy(source_path: Path, dest_path: Path, max_attempts: int = 100) -> Path:
+    """Copy a file with atomic collision detection. Retries with counter suffix on collision."""
+    base = dest_path.stem
+    ext = dest_path.suffix
+
+    for attempt in range(max_attempts):
+        try_path = dest_path if attempt == 0 else dest_path.parent / f"{base}_{attempt}{ext}"
+        try:
+            # Atomically claim the destination by creating an exclusive file
+            fd = os.open(str(try_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            try:
+                # Copy to temp file first, then replace to avoid partial files
+                temp_path = try_path.parent / f".{try_path.name}.tmp"
+                shutil.copy2(str(source_path), str(temp_path))
+                temp_path.replace(try_path)
+                if attempt > 0:
+                    logger.info(f"File collision resolved: {try_path.name}")
+                return try_path
+            except Exception:
+                try_path.unlink(missing_ok=True)
+                temp_path.unlink(missing_ok=True) if 'temp_path' in locals() else None
+                raise
+        except FileExistsError:
+            continue
+
+    raise RuntimeError(f"Could not copy file after {max_attempts} attempts: {dest_path}")
+
+
 def _atomic_move(source_path: Path, dest_path: Path, max_attempts: int = 100) -> Path:
     """Move a file with atomic collision detection. Retries with counter suffix on collision."""
     import errno
@@ -804,16 +834,33 @@ def _atomic_move(source_path: Path, dest_path: Path, max_attempts: int = 100) ->
 
 def _cleanup_staged_files(temp_file: Path, source_dir: Optional[Path] = None) -> None:
     """Remove staged files. Optionally removes source_dir if empty."""
-    if temp_file.is_dir():
-        shutil.rmtree(temp_file, ignore_errors=True)
-    elif temp_file.exists():
-        temp_file.unlink(missing_ok=True)
+    try:
+        if temp_file.is_dir():
+            shutil.rmtree(temp_file)
+        elif temp_file.exists():
+            temp_file.unlink()
+    except (OSError, PermissionError) as e:
+        logger.debug(f"Cleanup failed for {temp_file}: {e}")
 
     if source_dir and source_dir.is_dir():
         try:
             source_dir.rmdir()
         except OSError:
-            pass  # Directory not empty
+            pass  # Directory not empty or permission issue
+
+
+def _transfer_single_file(
+    source_path: Path,
+    dest_path: Path,
+    use_hardlink: bool,
+    is_torrent: bool,
+) -> Tuple[Path, str]:
+    """Transfer a file via hardlink, copy, or move. Returns (final_path, operation_name)."""
+    if use_hardlink:
+        return _atomic_hardlink(source_path, dest_path), "hardlink"
+    if is_torrent:
+        return _atomic_copy(source_path, dest_path), "copy"
+    return _atomic_move(source_path, dest_path), "move"
 
 
 def _transfer_file_to_library(
@@ -832,19 +879,12 @@ def _transfer_file_to_library(
 
     dest_path.parent.mkdir(parents=True, exist_ok=True)
 
+    is_torrent = _is_torrent_source(source_path, task)
+    final_path, op = _transfer_single_file(source_path, dest_path, use_hardlink, is_torrent)
+    logger.info(f"Library {op}: {final_path}")
+
     if use_hardlink:
-        final_path = _atomic_hardlink(source_path, dest_path)
-        logger.info(f"Library hardlink created: {final_path}")
         _cleanup_staged_files(temp_file)
-    elif _is_torrent_source(source_path, task):
-        # Torrent without hardlink - copy to preserve seeding
-        dest_path = _get_unique_path(dest_path)
-        shutil.copy2(str(source_path), str(dest_path))
-        final_path = dest_path
-        logger.info(f"Copied to library (torrent): {final_path}")
-    else:
-        final_path = _atomic_move(source_path, dest_path)
-        logger.info(f"Moved to library: {final_path}")
 
     status_callback("complete", "Complete (library mode)")
     return str(final_path)
@@ -870,7 +910,10 @@ def _transfer_directory_to_library(
     ]
 
     if not source_files:
-        logger.warning(f"No supported files found in directory: {source_dir}")
+        logger.warning(f"No supported files in {source_dir.name}")
+        status_callback("error", "No supported file formats found")
+        if temp_file:
+            _cleanup_staged_files(temp_file)
         return None
 
     base_library_path = build_library_path(library_base, template, metadata, extension=None)
@@ -886,18 +929,8 @@ def _transfer_directory_to_library(
         ext = source_file.suffix.lstrip('.')
         dest_path = base_library_path.with_suffix(f'.{ext}')
 
-        if use_hardlink:
-            final_path = _atomic_hardlink(source_file, dest_path)
-            logger.debug(f"Library hardlink: {source_file.name} -> {final_path}")
-        elif is_torrent:
-            dest_path = _get_unique_path(dest_path)
-            shutil.copy2(str(source_file), str(dest_path))
-            final_path = dest_path
-            logger.debug(f"Copied to library (torrent): {source_file.name} -> {final_path}")
-        else:
-            final_path = _atomic_move(source_file, dest_path)
-            logger.debug(f"Moved to library: {source_file.name} -> {final_path}")
-
+        final_path, op = _transfer_single_file(source_file, dest_path, use_hardlink, is_torrent)
+        logger.debug(f"Library {op}: {source_file.name} -> {final_path}")
         transferred_paths.append(final_path)
     else:
         # Multi-file: natural sort then sequential numbering
@@ -910,26 +943,16 @@ def _transfer_directory_to_library(
             file_metadata = {**metadata, "PartNumber": part_number}
             file_path = build_library_path(library_base, template, file_metadata, extension=ext)
             file_path.parent.mkdir(parents=True, exist_ok=True)
-            dest_path = file_path
 
-            if use_hardlink:
-                final_path = _atomic_hardlink(source_file, dest_path)
-                logger.debug(f"Library hardlink: {source_file.name} -> {final_path}")
-            elif is_torrent:
-                dest_path = _get_unique_path(dest_path)
-                shutil.copy2(str(source_file), str(dest_path))
-                final_path = dest_path
-                logger.debug(f"Copied to library (torrent): {source_file.name} -> {final_path}")
-            else:
-                final_path = _atomic_move(source_file, dest_path)
-                logger.debug(f"Moved to library: {source_file.name} -> {final_path}")
-
+            final_path, op = _transfer_single_file(source_file, file_path, use_hardlink, is_torrent)
+            logger.debug(f"Library {op}: {source_file.name} -> {final_path}")
             transferred_paths.append(final_path)
 
+    # Get operation name for summary log
     if use_hardlink:
         operation = "hardlinks"
     elif is_torrent:
-        operation = "copies (torrent)"
+        operation = "copies"
     else:
         operation = "files"
     logger.info(f"Created {len(transferred_paths)} library {operation} in {base_library_path.parent}")
@@ -1079,7 +1102,33 @@ def _post_process_download(
     # Non-archive: run custom script if configured, then move to ingest
     if config.CUSTOM_SCRIPT:
         logger.info(f"Running custom script: {config.CUSTOM_SCRIPT}")
-        subprocess.run([config.CUSTOM_SCRIPT, str(temp_file)])
+        try:
+            result = subprocess.run(
+                [config.CUSTOM_SCRIPT, str(temp_file)],
+                check=True,
+                timeout=300,  # 5 minute timeout
+                capture_output=True,
+                text=True,
+            )
+            if result.stdout:
+                logger.debug(f"Custom script stdout: {result.stdout.strip()}")
+        except FileNotFoundError:
+            logger.error(f"Custom script not found: {config.CUSTOM_SCRIPT}")
+            status_callback("error", f"Custom script not found: {config.CUSTOM_SCRIPT}")
+            return None
+        except PermissionError:
+            logger.error(f"Custom script not executable: {config.CUSTOM_SCRIPT}")
+            status_callback("error", f"Custom script not executable: {config.CUSTOM_SCRIPT}")
+            return None
+        except subprocess.TimeoutExpired:
+            logger.error(f"Custom script timed out after 300s: {config.CUSTOM_SCRIPT}")
+            status_callback("error", "Custom script timed out")
+            return None
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.strip() if e.stderr else "No error output"
+            logger.error(f"Custom script failed (exit code {e.returncode}): {stderr}")
+            status_callback("error", f"Custom script failed: {stderr[:100]}")
+            return None
 
     # Check cancellation before final move
     if cancel_flag.is_set():
@@ -1101,6 +1150,7 @@ def _post_process_download(
         final_path = _atomic_move(temp_file, dest_path)
     except Exception as e:
         logger.error(f"Failed to move file to ingest: {e}")
+        status_callback("error", f"Failed to move file: {e}")
         return None
 
     logger.info(f"Download completed: {final_path.name}")

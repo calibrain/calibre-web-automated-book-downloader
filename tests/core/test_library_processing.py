@@ -186,7 +186,7 @@ class TestLibraryPathBuilding:
             extension="epub"
         )
 
-        expected = temp_dirs["books"] / "Brandon Sanderson" / "Mistborn.epub"
+        expected = (temp_dirs["books"] / "Brandon Sanderson" / "Mistborn.epub").resolve()
         assert path == expected
 
     def test_audiobook_library_path_with_part_number(self, temp_dirs):
@@ -205,7 +205,7 @@ class TestLibraryPathBuilding:
             extension="mp3"
         )
 
-        expected = temp_dirs["audiobooks"] / "Brandon Sanderson" / "The Way of Kings - Part 01.mp3"
+        expected = (temp_dirs["audiobooks"] / "Brandon Sanderson" / "The Way of Kings - Part 01.mp3").resolve()
         assert path == expected
 
     def test_book_with_series_folder(self, temp_dirs):
@@ -224,7 +224,7 @@ class TestLibraryPathBuilding:
             extension="epub"
         )
 
-        expected = temp_dirs["books"] / "Brandon Sanderson" / "Stormlight Archive" / "The Way of Kings.epub"
+        expected = (temp_dirs["books"] / "Brandon Sanderson" / "Stormlight Archive" / "The Way of Kings.epub").resolve()
         assert path == expected
 
     def test_audiobook_with_series_and_parts(self, temp_dirs):
@@ -1893,7 +1893,7 @@ class TestRealWorldNamingScenarios:
         path = build_library_path(str(temp_dir), template, metadata, extension="epub")
 
         assert path.name == "Frank Herbert - Dune.epub"
-        assert path.parent == temp_dir
+        assert path.parent == temp_dir.resolve()
 
     def test_year_based_organization(self, temp_dir):
         """Year-based: Year/Author/Title.epub"""

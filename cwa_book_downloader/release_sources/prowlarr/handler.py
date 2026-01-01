@@ -56,6 +56,7 @@ class ProwlarrHandler(DownloadHandler):
             # Look up the cached release
             prowlarr_result = get_release(task.task_id)
             if not prowlarr_result:
+                logger.warning(f"Release cache miss: {task.task_id}")
                 status_callback("error", "Release not found in cache (may have expired)")
                 return None
 

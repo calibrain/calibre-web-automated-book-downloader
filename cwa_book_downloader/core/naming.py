@@ -1,8 +1,13 @@
 """Template-based naming for library organization."""
 
+import os
 import re
 from pathlib import Path
 from typing import Dict, Optional, Union
+
+from cwa_book_downloader.core.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 TOKEN_PATTERN = re.compile(
@@ -12,53 +17,28 @@ TOKEN_PATTERN = re.compile(
 )
 
 # Characters that are invalid in filenames on various filesystems
-INVALID_FILENAME_CHARS = re.compile(r'[\\:*?"<>|]')
+INVALID_CHARS = re.compile(r'[\\:*?"<>|]')
 
-# Characters invalid in path components (allow forward slash for folder separation)
-INVALID_PATH_CHARS = re.compile(r'[\\:*?"<>|]')
+
+def _sanitize(name: str, max_length: int = 245) -> str:
+    """Sanitize a string for filesystem use."""
+    if not name:
+        return ""
+
+    sanitized = INVALID_CHARS.sub('_', name)
+    sanitized = re.sub(r'^[\s.]+|[\s.]+$', '', sanitized)  # Strip whitespace and dots
+    sanitized = re.sub(r'_+', '_', sanitized)  # Collapse underscores
+    return sanitized[:max_length]
 
 
 def sanitize_filename(name: str, max_length: int = 245) -> str:
-    """Sanitize a string for use as a filename.
-
-    Args:
-        name: The string to sanitize
-        max_length: Maximum length (default 245 to leave room for extension)
-
-    Returns:
-        Sanitized string safe for filesystem use
-    """
-    if not name:
-        return ""
-
-    # Replace invalid characters with underscore
-    sanitized = INVALID_FILENAME_CHARS.sub('_', name)
-
-    # Remove leading/trailing whitespace and dots (strip both together to handle ". file .")
-    sanitized = re.sub(r'^[\s.]+|[\s.]+$', '', sanitized)
-
-    # Collapse multiple underscores
-    sanitized = re.sub(r'_+', '_', sanitized)
-
-    # Truncate to max length
-    return sanitized[:max_length]
+    """Sanitize a string for use as a filename."""
+    return _sanitize(name, max_length)
 
 
 def sanitize_path_component(name: str, max_length: int = 245) -> str:
-    if not name:
-        return ""
-
-    # Replace invalid characters with underscore
-    sanitized = INVALID_PATH_CHARS.sub('_', name)
-
-    # Remove leading/trailing whitespace and dots
-    sanitized = sanitized.strip().strip('.')
-
-    # Collapse multiple underscores
-    sanitized = re.sub(r'_+', '_', sanitized)
-
-    # Truncate to max length
-    return sanitized[:max_length]
+    """Sanitize a string for use as a path component."""
+    return _sanitize(name, max_length)
 
 
 def format_series_position(position: Optional[Union[int, float]]) -> str:
@@ -197,26 +177,26 @@ def build_library_path(
 
 
 def same_filesystem(path1: Union[str, Path], path2: Union[str, Path]) -> bool:
-    import os
-
+    """Check if two paths are on the same filesystem."""
     path1 = Path(path1)
     path2 = Path(path2)
 
     def get_device(p: Path) -> Optional[int]:
-        """Get device ID, walking up to find existing ancestor."""
         try:
             while not p.exists():
                 p = p.parent
-                if p == p.parent:  # Reached root
+                if p == p.parent:
                     break
             return os.stat(p).st_dev
-        except (OSError, PermissionError):
+        except (OSError, PermissionError) as e:
+            logger.debug(f"Cannot stat {p}: {e}")
             return None
 
     dev1 = get_device(path1)
     dev2 = get_device(path2)
 
     if dev1 is None or dev2 is None:
-        return False  # Can't determine, assume different filesystems (safe fallback)
+        logger.warning(f"Cannot determine filesystem for hardlink check, falling back to copy")
+        return False
 
     return dev1 == dev2

@@ -43,6 +43,8 @@ class QBittorrentClient(DownloadClient):
 
     def _get_torrents_info(self, torrent_hash: Optional[str] = None) -> List:
         """Get torrent info using GET (per API spec for read operations)."""
+        import requests
+
         try:
             params = {"hashes": torrent_hash} if torrent_hash else {}
             response = self._client._session.get(
@@ -59,6 +61,15 @@ class QBittorrentClient(DownloadClient):
                         setattr(self, key, value)
 
             return [TorrentInfo(t) for t in torrents]
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 403:
+                logger.warning("qBittorrent auth failed - check credentials")
+            else:
+                logger.warning(f"qBittorrent API error: {e}")
+            return []
+        except requests.exceptions.ConnectionError:
+            logger.warning(f"Cannot connect to qBittorrent at {self._base_url}")
+            return []
         except Exception as e:
             logger.debug(f"Failed to get torrents info: {e}")
             return []

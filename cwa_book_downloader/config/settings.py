@@ -490,7 +490,7 @@ def download_settings():
         SelectField(
             key="PROCESSING_MODE",
             label="Processing Mode",
-            description="Ingest mode moves files to an ingest folder. Library mode organizes files with custom naming.",
+            description="Ingest mode processes and moves files to an ingest folder. Library mode organizes files with custom naming. Note: RAR/ZIP extraction is only supported in Ingest mode.",
             options=[
                 {"value": "ingest", "label": "Ingest"},
                 {"value": "library", "label": "Library"},
