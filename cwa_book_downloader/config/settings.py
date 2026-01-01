@@ -496,6 +496,7 @@ def download_settings():
                 {"value": "library", "label": "Library"},
             ],
             default="ingest",
+            universal_only=True,
         ),
         TextField(
             key="INGEST_DIR",
@@ -581,30 +582,34 @@ def download_settings():
             placeholder="/books",
             required=True,
             show_when={"field": "PROCESSING_MODE", "value": "library"},
+            universal_only=True,
         ),
         TextField(
             key="LIBRARY_TEMPLATE",
             label="Naming Template",
-            description="Available: {Author}, {Title}, {Year}, {Series}, {SeriesPosition}. Use {Series/} for conditional folders.",
+            description="Available: {Author}, {Title}, {Subtitle}, {Year}, {Series}, {SeriesPosition}, {PartNumber}. Use {Series/} for conditional folders.",
             default="{Author}/{Title}",
-            placeholder="{Author}/{Series/}{Title} ({Year})",
+            placeholder="{Author}/{Series/}{Title}{ - Subtitle} ({Year})",
             show_when={"field": "PROCESSING_MODE", "value": "library"},
+            universal_only=True,
         ),
         # === AUDIOBOOKS SECTION ===
         HeadingField(
             key="audiobooks_heading",
             title="Audiobooks",
             description="Configure how audiobooks are processed.",
+            universal_only=True,
         ),
         SelectField(
             key="PROCESSING_MODE_AUDIOBOOK",
             label="Processing Mode",
             description="Ingest mode moves files to an ingest folder. Library mode organizes files with custom naming.",
             options=[
-                {"value": "ingest", "label": "Ingest Mode"},
-                {"value": "library", "label": "Library Mode"},
+                {"value": "ingest", "label": "Ingest"},
+                {"value": "library", "label": "Library"},
             ],
             default="ingest",
+            universal_only=True,
         ),
         TextField(
             key="INGEST_DIR_AUDIOBOOK",
@@ -612,6 +617,7 @@ def download_settings():
             description="Leave empty to use the Books download directory.",
             placeholder="/audiobooks",
             show_when={"field": "PROCESSING_MODE_AUDIOBOOK", "value": "ingest"},
+            universal_only=True,
         ),
         TextField(
             key="LIBRARY_PATH_AUDIOBOOK",
@@ -620,25 +626,29 @@ def download_settings():
             placeholder="/audiobooks",
             required=True,
             show_when={"field": "PROCESSING_MODE_AUDIOBOOK", "value": "library"},
+            universal_only=True,
         ),
         TextField(
             key="LIBRARY_TEMPLATE_AUDIOBOOK",
             label="Naming Template",
-            description="Available: {Author}, {Title}, {Year}, {Series}, {SeriesPosition}. Use {Series/} for conditional folders.",
+            description="Available: {Author}, {Title}, {Subtitle}, {Year}, {Series}, {SeriesPosition}, {PartNumber}. Use {PartNumber} for multi-file audiobooks.",
             default="{Author}/{Title}",
-            placeholder="{Author}/{Series/}{Title}",
+            placeholder="{Author}/{Series/}{Title}{ - Part }{PartNumber}",
             show_when={"field": "PROCESSING_MODE_AUDIOBOOK", "value": "library"},
+            universal_only=True,
         ),
         # === OPTIONS SECTION ===
         HeadingField(
             key="library_options_heading",
-            title="Library Options",
+            title="Options",
+            universal_only=True,
         ),
         CheckboxField(
             key="TORRENT_HARDLINK",
             label="Hardlink Torrents in Library Mode",
             description="Create hardlinks for torrent downloads instead of copying. Requires library and download paths on same filesystem.",
             default=True,
+            universal_only=True,
         ),
         CheckboxField(
             key="AUTO_OPEN_DOWNLOADS_SIDEBAR",

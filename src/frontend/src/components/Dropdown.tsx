@@ -1,4 +1,27 @@
-import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+
+// Simple throttle function to limit how often a function can be called
+function throttle<T extends (...args: unknown[]) => void>(fn: T, delay: number): T {
+  let lastCall = 0;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  return ((...args: unknown[]) => {
+    const now = Date.now();
+    const timeSinceLastCall = now - lastCall;
+
+    if (timeSinceLastCall >= delay) {
+      lastCall = now;
+      fn(...args);
+    } else if (!timeoutId) {
+      // Schedule a trailing call
+      timeoutId = setTimeout(() => {
+        lastCall = Date.now();
+        timeoutId = null;
+        fn(...args);
+      }, delay - timeSinceLastCall);
+    }
+  }) as T;
+}
 
 interface DropdownProps {
   label?: string;
@@ -62,32 +85,36 @@ export const Dropdown = ({
     };
   }, [isOpen]);
 
+  // Memoize the panel direction calculation
+  const updatePanelDirection = useCallback(() => {
+    if (!containerRef.current || !panelRef.current) {
+      return;
+    }
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const panelHeight = panelRef.current.offsetHeight || panelRef.current.scrollHeight;
+    const spaceBelow = window.innerHeight - rect.bottom - 8;
+    const spaceAbove = rect.top - 8;
+    const shouldOpenUp = spaceBelow < panelHeight && spaceAbove >= panelHeight;
+
+    setPanelDirection(shouldOpenUp ? 'up' : 'down');
+  }, []);
+
   useLayoutEffect(() => {
     if (!isOpen) return;
 
-    const updatePanelDirection = () => {
-      if (!containerRef.current || !panelRef.current) {
-        return;
-      }
-
-      const rect = containerRef.current.getBoundingClientRect();
-      const panelHeight = panelRef.current.offsetHeight || panelRef.current.scrollHeight;
-      const spaceBelow = window.innerHeight - rect.bottom - 8;
-      const spaceAbove = rect.top - 8;
-      const shouldOpenUp = spaceBelow < panelHeight && spaceAbove >= panelHeight;
-
-      setPanelDirection(shouldOpenUp ? 'up' : 'down');
-    };
+    // Throttle scroll/resize handlers to reduce layout thrashing
+    const throttledUpdate = throttle(updatePanelDirection, 100);
 
     updatePanelDirection();
-    window.addEventListener('resize', updatePanelDirection);
-    window.addEventListener('scroll', updatePanelDirection, true);
+    window.addEventListener('resize', throttledUpdate);
+    window.addEventListener('scroll', throttledUpdate, true);
 
     return () => {
-      window.removeEventListener('resize', updatePanelDirection);
-      window.removeEventListener('scroll', updatePanelDirection, true);
+      window.removeEventListener('resize', throttledUpdate);
+      window.removeEventListener('scroll', throttledUpdate, true);
     };
-  }, [isOpen]);
+  }, [isOpen, updatePanelDirection]);
 
   return (
     <div className={`relative ${widthClassName}`} ref={containerRef}>

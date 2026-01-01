@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useSettings } from '../../hooks/useSettings';
+import { useSearchMode } from '../../contexts/SearchModeContext';
 import { SettingsHeader } from './SettingsHeader';
 import { SettingsSidebar } from './SettingsSidebar';
 import { SettingsContent } from './SettingsContent';
@@ -26,6 +27,8 @@ export const SettingsModal = ({ isOpen, onClose, onShowToast, onSettingsSaved }:
     executeAction,
     isSaving,
   } = useSettings();
+
+  const { isUniversalMode } = useSearchMode();
 
   // Track if we're showing detail view on mobile
   const [isMobile, setIsMobile] = useState(false);
@@ -143,6 +146,23 @@ export const SettingsModal = ({ isOpen, onClose, onShowToast, onSettingsSaved }:
     [selectedTab, executeAction]
   );
 
+  // Memoize the field change handler to prevent creating new functions on every render
+  const handleFieldChange = useCallback(
+    (key: string, value: unknown) => {
+      if (selectedTab) {
+        updateValue(selectedTab, key, value);
+      }
+    },
+    [selectedTab, updateValue]
+  );
+
+  // Memoize hasChanges to avoid expensive JSON.stringify comparisons on every render
+  // Must be before early returns to satisfy React's rules of hooks
+  const currentTabHasChanges = useMemo(
+    () => (selectedTab ? hasChanges(selectedTab) : false),
+    [selectedTab, hasChanges, values]
+  );
+
   if (!isOpen && !isClosing) return null;
 
   const currentTab = tabs.find((t) => t.name === selectedTab);
@@ -153,7 +173,8 @@ export const SettingsModal = ({ isOpen, onClose, onShowToast, onSettingsSaved }:
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center">
         <div
-          className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+          className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+          style={{ willChange: 'opacity', contain: 'strict' }}
           onClick={handleClose}
         />
         <div
@@ -189,7 +210,8 @@ export const SettingsModal = ({ isOpen, onClose, onShowToast, onSettingsSaved }:
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center">
         <div
-          className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+          className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+          style={{ willChange: 'opacity', contain: 'strict' }}
           onClick={handleClose}
         />
         <div
@@ -261,11 +283,12 @@ export const SettingsModal = ({ isOpen, onClose, onShowToast, onSettingsSaved }:
               <SettingsContent
                 tab={currentTab}
                 values={values[currentTab.name] || {}}
-                onChange={(key, value) => updateValue(currentTab.name, key, value)}
+                onChange={handleFieldChange}
                 onSave={handleSave}
                 onAction={handleAction}
                 isSaving={isSaving}
-                hasChanges={hasChanges(currentTab.name)}
+                hasChanges={currentTabHasChanges}
+                isUniversalMode={isUniversalMode}
               />
             )}
           </>
@@ -279,8 +302,9 @@ export const SettingsModal = ({ isOpen, onClose, onShowToast, onSettingsSaved }:
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
-        className={`absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity duration-150
+        className={`absolute inset-0 bg-black/50 backdrop-blur-[2px] transition-opacity duration-150
                     ${isClosing ? 'opacity-0' : 'opacity-100'}`}
+        style={{ willChange: 'opacity', contain: 'strict' }}
         onClick={handleClose}
       />
 
@@ -310,11 +334,12 @@ export const SettingsModal = ({ isOpen, onClose, onShowToast, onSettingsSaved }:
             <SettingsContent
               tab={currentTab}
               values={values[currentTab.name] || {}}
-              onChange={(key, value) => updateValue(currentTab.name, key, value)}
+              onChange={handleFieldChange}
               onSave={handleSave}
               onAction={handleAction}
               isSaving={isSaving}
-              hasChanges={hasChanges(currentTab.name)}
+              hasChanges={currentTabHasChanges}
+              isUniversalMode={isUniversalMode}
             />
           ) : (
             <div className="flex-1 flex items-center justify-center text-sm opacity-60">

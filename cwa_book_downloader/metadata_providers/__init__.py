@@ -163,6 +163,7 @@ class BookMetadata:
     language: Optional[str] = None
     genres: List[str] = field(default_factory=list)
     source_url: Optional[str] = None  # Link to book on provider's site
+    subtitle: Optional[str] = None  # Book subtitle, if any
 
     # Provider-specific display fields for cards/lists
     display_fields: List[DisplayField] = field(default_factory=list)

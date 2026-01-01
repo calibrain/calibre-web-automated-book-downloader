@@ -241,42 +241,38 @@ class ProwlarrHandler(DownloadHandler):
         task: DownloadTask,
         status_callback: Callable[[str, Optional[str]], None],
     ) -> Optional[str]:
-        """Stage completed download for orchestrator post-processing.
+        """Handle completed download - stage or return path for orchestrator.
 
-        For directories (multi-file torrents), copies the entire directory.
-        The orchestrator will find and filter book files.
+        For torrents: returns original path directly (no copy). Orchestrator
+        will hardlink or copy as needed, avoiding unnecessary staging of
+        large files like audiobooks.
+
+        For usenet: stages to temp directory based on config.
         """
         try:
-            status_callback("resolving", "Staging file")
-
-            # For torrents, store original download client path for library mode hardlinking
-            # This is where the file lives for seeding - hardlinks must point to this location
+            # For torrents, skip staging - return original path directly
+            # Orchestrator will hardlink (library mode) or copy (ingest mode) as needed
             if protocol == "torrent":
                 task.original_download_path = str(source_path)
+                logger.debug(f"Torrent complete, returning original path: {source_path}")
+                return str(source_path)
 
-            # Torrents: copy to preserve seeding. Usenet: configurable.
-            if protocol == "torrent":
-                use_copy = True
-            else:
-                use_copy = config.get("PROWLARR_USENET_ACTION", "move") == "copy"
+            # Usenet: stage based on config
+            status_callback("resolving", "Staging file")
+            use_copy = config.get("PROWLARR_USENET_ACTION", "move") == "copy"
 
             from cwa_book_downloader.download.orchestrator import get_staging_dir
             staging_dir = get_staging_dir()
 
             if source_path.is_dir():
-                # Multi-file download: stage entire directory
-                # Orchestrator will extract book files
                 staged_path = get_unique_path(staging_dir, source_path.name)
-
                 if use_copy:
                     shutil.copytree(str(source_path), str(staged_path))
                 else:
                     shutil.move(str(source_path), str(staged_path))
                 logger.debug(f"Staged directory: {staged_path.name}")
             else:
-                # Single file download
                 staged_path = get_unique_path(staging_dir, source_path.stem, source_path.suffix)
-
                 if use_copy:
                     shutil.copy2(str(source_path), str(staged_path))
                 else:

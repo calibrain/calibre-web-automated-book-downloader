@@ -1,25 +1,10 @@
-"""Template-based naming for library organization.
-
-Supports Readarr-style templates with conditional prefix/suffix inclusion.
-
-Examples:
-    {Author}/{Title}                    -> "Brandon Sanderson/The Way of Kings"
-    {Author}/{Series/}{Title}           -> "Brandon Sanderson/Stormlight Archive/The Way of Kings"
-                                        -> "Brandon Sanderson/The Way of Kings" (if no series)
-    {Author} - {Title} ({Year})         -> "Brandon Sanderson - The Way of Kings (2010)"
-    {SeriesPosition - }{Title}          -> "1 - The Way of Kings" or "The Way of Kings"
-"""
+"""Template-based naming for library organization."""
 
 import re
 from pathlib import Path
 from typing import Dict, Optional, Union
 
 
-# Pattern to match tokens with optional prefix/suffix
-# Examples: {Author}, {Series/}, {SeriesPosition - }, {(Year)}
-# Group 1: prefix (characters before token name, inside braces)
-# Group 2: token name
-# Group 3: suffix (characters after token name, inside braces)
 TOKEN_PATTERN = re.compile(
     r'\{([- ._/\[(]*)'   # prefix: space, dash, dot, underscore, slash, brackets
     r'([A-Za-z]+)'        # token name
@@ -49,8 +34,8 @@ def sanitize_filename(name: str, max_length: int = 245) -> str:
     # Replace invalid characters with underscore
     sanitized = INVALID_FILENAME_CHARS.sub('_', name)
 
-    # Remove leading/trailing whitespace and dots
-    sanitized = sanitized.strip().strip('.')
+    # Remove leading/trailing whitespace and dots (strip both together to handle ". file .")
+    sanitized = re.sub(r'^[\s.]+|[\s.]+$', '', sanitized)
 
     # Collapse multiple underscores
     sanitized = re.sub(r'_+', '_', sanitized)
@@ -60,15 +45,6 @@ def sanitize_filename(name: str, max_length: int = 245) -> str:
 
 
 def sanitize_path_component(name: str, max_length: int = 245) -> str:
-    """Sanitize a string for use as a path component (folder or filename).
-
-    Args:
-        name: The string to sanitize
-        max_length: Maximum length per component
-
-    Returns:
-        Sanitized string safe for filesystem use
-    """
     if not name:
         return ""
 
@@ -86,14 +62,6 @@ def sanitize_path_component(name: str, max_length: int = 245) -> str:
 
 
 def format_series_position(position: Optional[Union[int, float]]) -> str:
-    """Format series position for display.
-
-    Args:
-        position: Series position (can be float for novellas like 1.5)
-
-    Returns:
-        Formatted string: "1" for integers, "1.5" for floats
-    """
     if position is None:
         return ""
 
@@ -104,27 +72,35 @@ def format_series_position(position: Optional[Union[int, float]]) -> str:
     return str(position)
 
 
+# Pads numbers to 9 digits for natural sorting (e.g., "Part 2" -> "Part 000000002")
+PAD_NUMBERS_PATTERN = re.compile(r'\d+')
+
+
+def natural_sort_key(path: Union[str, Path]) -> str:
+    """Generate a sort key with padded numbers for natural sorting."""
+    filename = Path(path).name.lower()
+    return PAD_NUMBERS_PATTERN.sub(lambda m: m.group().zfill(9), filename)
+
+
+def assign_part_numbers(
+    files: list[Path],
+    zero_pad_width: int = 2,
+) -> list[tuple[Path, str]]:
+    """Sort files naturally and assign sequential part numbers (1, 2, 3...)."""
+    if not files:
+        return []
+
+    sorted_files = sorted(files, key=natural_sort_key)
+    return [
+        (file_path, str(part_num).zfill(zero_pad_width))
+        for part_num, file_path in enumerate(sorted_files, start=1)
+    ]
+
+
 def parse_naming_template(
     template: str,
     metadata: Dict[str, Optional[Union[str, int, float]]],
 ) -> str:
-    """Parse a Readarr-style naming template and substitute metadata values.
-
-    The template supports conditional prefix/suffix inclusion:
-    - {Token} - simple replacement
-    - {Token/} - include trailing slash only if Token has a value (for folders)
-    - {Token - } - include trailing " - " only if Token has a value
-    - { - Token} - include leading " - " only if Token has a value
-    - {(Token)} - include parentheses only if Token has a value
-
-    Args:
-        template: Template string with {Token} placeholders
-        metadata: Dictionary mapping token names to values
-            Expected keys: Author, Title, Year, Series, SeriesPosition, Format
-
-    Returns:
-        Processed path string with substitutions made
-    """
     if not template:
         return ""
 
@@ -176,6 +152,13 @@ def parse_naming_template(
     result = re.sub(r'[\s\-_.]+$', '', result)
     result = re.sub(r'(\s*-\s*){2,}', ' - ', result)
 
+    # Clean up empty parentheses/brackets
+    result = re.sub(r'\(\s*\)', '', result)
+    result = re.sub(r'\[\s*\]', '', result)
+
+    # Final trim of any trailing separators left after cleanup
+    result = re.sub(r'[\s\-_.]+$', '', result)
+
     return result
 
 
@@ -185,20 +168,6 @@ def build_library_path(
     metadata: Dict[str, Optional[Union[str, int, float]]],
     extension: Optional[str] = None,
 ) -> Path:
-    """Build a complete library path from template and metadata.
-
-    Args:
-        base_path: Base library directory (e.g., "/books")
-        template: Naming template (e.g., "{Author}/{Series/}{Title}")
-        metadata: Dictionary with Author, Title, Year, Series, SeriesPosition
-        extension: File extension to append (without dot)
-
-    Returns:
-        Complete Path object for the destination file
-
-    Raises:
-        ValueError: If the resulting path would escape the base directory
-    """
     relative = parse_naming_template(template, metadata)
 
     if not relative:
@@ -220,23 +189,14 @@ def build_library_path(
 
     if extension:
         ext = extension.lstrip('.')
-        full_path = full_path.with_suffix(f'.{ext}')
+        # Don't use with_suffix() - it replaces everything after the first dot
+        # e.g., "2.5 - Title" would become "2.epub" instead of "2.5 - Title.epub"
+        full_path = Path(f"{full_path}.{ext}")
 
     return full_path
 
 
 def same_filesystem(path1: Union[str, Path], path2: Union[str, Path]) -> bool:
-    """Check if two paths are on the same filesystem.
-
-    This is required for hardlinking to work.
-
-    Args:
-        path1: First path
-        path2: Second path
-
-    Returns:
-        True if both paths are on the same filesystem, False if different or on error
-    """
     import os
 
     path1 = Path(path1)

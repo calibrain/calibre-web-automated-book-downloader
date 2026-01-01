@@ -14,17 +14,6 @@ def build_filename(
     year: Optional[str] = None,
     fmt: Optional[str] = None,
 ) -> str:
-    """Build sanitized filename: 'Author - Title (Year).format'
-
-    Args:
-        title: Book title (required)
-        author: Book author
-        year: Publication year
-        fmt: File format/extension
-
-    Returns:
-        Sanitized filename safe for filesystem use
-    """
     parts = []
     if author:
         parts.append(author)
@@ -54,6 +43,11 @@ class QueueStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class SearchMode(str, Enum):
+    DIRECT = "direct"
+    UNIVERSAL = "universal"
+
+
 @dataclass
 class QueueItem:
     """Queue item with priority and metadata."""
@@ -70,12 +64,6 @@ class QueueItem:
 
 @dataclass
 class DownloadTask:
-    """Source-agnostic download task for the queue.
-
-    This replaces BookInfo in the queue, providing a unified interface
-    for both Direct Download and Universal modes. The handler uses task_id
-    to fetch whatever source-specific data it needs internally.
-    """
     task_id: str                                # Unique ID (e.g., AA MD5 hash, Prowlarr GUID)
     source: str                                 # Handler name ("direct_download", "prowlarr")
     title: str                                  # Display title for queue sidebar
@@ -91,9 +79,14 @@ class DownloadTask:
     # Series info (for library naming templates)
     series_name: Optional[str] = None
     series_position: Optional[float] = None  # Float for novellas (e.g., 1.5)
+    subtitle: Optional[str] = None  # Book subtitle for naming templates
 
     # Hardlinking support
     original_download_path: Optional[str] = None  # Path in download client (for hardlinking)
+
+    # Search mode - determines post-download processing behavior
+    # See SearchMode enum for behavioral differences
+    search_mode: Optional[SearchMode] = None
 
     # Runtime state
     priority: int = 0

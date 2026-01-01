@@ -475,8 +475,9 @@ function App() {
         extra: release.extra,
         preview: book.preview,  // Pass book cover from metadata
         content_type: releaseContentType,  // For audiobook directory routing
-        series_name: book.series_name,        // For library naming templates
-        series_position: book.series_position,  // For library naming templates
+        series_name: book.series_name,
+        series_position: book.series_position,
+        subtitle: book.subtitle,
       });
       await fetchStatus();
     } catch (error) {

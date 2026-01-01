@@ -37,11 +37,11 @@ from cwa_book_downloader.release_sources.direct_download import SearchUnavailabl
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.config.env import TMP_DIR
 from cwa_book_downloader.core.utils import get_ingest_dir
-from cwa_book_downloader.core.naming import build_library_path, same_filesystem
+from cwa_book_downloader.core.naming import build_library_path, same_filesystem, assign_part_numbers
 from cwa_book_downloader.download.archive import is_archive, process_archive
 from cwa_book_downloader.release_sources import get_handler, get_source_display_name
 from cwa_book_downloader.core.logger import setup_logger
-from cwa_book_downloader.core.models import BookInfo, DownloadTask, QueueStatus, SearchFilters
+from cwa_book_downloader.core.models import BookInfo, DownloadTask, QueueStatus, SearchFilters, SearchMode
 from cwa_book_downloader.core.queue import book_queue
 
 logger = setup_logger(__name__)
@@ -348,6 +348,7 @@ def queue_book(book_id: str, priority: int = 0, source: str = "direct_download")
             size=book_info.size,
             preview=book_info.preview,
             content_type=book_info.content,
+            search_mode=SearchMode.DIRECT,
             priority=priority,
         )
 
@@ -396,6 +397,7 @@ def queue_release(release_data: dict, priority: int = 0) -> bool:
         # Get series info for library naming templates
         series_name = release_data.get('series_name') or extra.get('series_name')
         series_position = release_data.get('series_position') or extra.get('series_position')
+        subtitle = release_data.get('subtitle') or extra.get('subtitle')
 
         # Create a source-agnostic download task from release data
         task = DownloadTask(
@@ -410,6 +412,8 @@ def queue_release(release_data: dict, priority: int = 0) -> bool:
             content_type=content_type,
             series_name=series_name,
             series_position=series_position,
+            subtitle=subtitle,
+            search_mode=SearchMode.UNIVERSAL,
             priority=priority,
         )
 
@@ -610,17 +614,14 @@ def _process_library_mode(
 ) -> Optional[str]:
     """Process a download in Library Mode.
 
-    Organizes files into a library path with template-based folder/file naming.
-    For torrents with hardlinking enabled, creates hardlinks from the download
-    client's location. For other sources, moves files from staging.
+    Library mode organizes files directly into your library with template-based
+    naming (e.g., "{Author}/{Series}/{Title}"). Files are transferred as-is
+    with no processing.
 
-    Args:
-        temp_file: Staged file/directory in temp directory
-        task: Download task with metadata
-        status_callback: Callback for status updates
+    Use ingest mode if you need archive extraction or custom scripts.
 
     Returns:
-        Path to library file if successful, None to fall through to normal processing
+        Path to library file if successful, None if library path not configured
     """
     # Check if this is an audiobook and use audiobook-specific settings if configured
     content_type = task.content_type.lower() if task.content_type else ""
@@ -643,7 +644,7 @@ def _process_library_mode(
     library_path_obj = Path(library_path)
     if not library_path_obj.is_absolute():
         logger.warning(f"Library path must be absolute: {library_path}, falling back to ingest")
-        status_callback("resolving", "Library path must be absolute, using ingest")
+        status_callback("resolving", f"Library path must be absolute: {library_path}")
         return None
 
     if not library_path_obj.exists():
@@ -651,12 +652,12 @@ def _process_library_mode(
             library_path_obj.mkdir(parents=True, exist_ok=True)
         except (OSError, PermissionError) as e:
             logger.warning(f"Cannot create library path: {e}, falling back to ingest")
-            status_callback("resolving", f"Cannot create library path, using ingest")
+            status_callback("resolving", f"Cannot create library path: {e}")
             return None
 
     if not os.access(library_path_obj, os.W_OK):
         logger.warning(f"Library path not writable: {library_path}, falling back to ingest")
-        status_callback("resolving", "Library path not writable, using ingest")
+        status_callback("resolving", f"Library path not writable: {library_path}")
         return None
 
     # Determine if we should use hardlinking (torrents only)
@@ -677,11 +678,13 @@ def _process_library_mode(
                         f"Cannot hardlink: {hardlink_source} and {library_path} are on different filesystems. "
                         "Falling back to move. To fix: ensure torrent client downloads to same filesystem as library."
                     )
+                    status_callback("resolving", "Cannot hardlink (different filesystems), using move")
 
     # Build metadata dict for template
     metadata = {
         "Author": task.author,
         "Title": task.title,
+        "Subtitle": task.subtitle,
         "Year": task.year,
         "Series": task.series_name,
         "SeriesPosition": task.series_position,
@@ -709,9 +712,19 @@ def _process_library_mode(
         status_callback("error", f"Permission denied: {e}")
         return None
     except Exception as e:
-        logger.error(f"Library mode failed: {e}")
+        logger.error_trace(f"Library mode failed: {e}")
         status_callback("error", f"Library mode failed: {e}")
         return None
+
+
+def _is_torrent_source(source_path: Path, task: DownloadTask) -> bool:
+    """Check if source is the torrent client path (needs copy to preserve seeding)."""
+    if not task.original_download_path:
+        return False
+    try:
+        return source_path.resolve() == Path(task.original_download_path).resolve()
+    except (OSError, ValueError):
+        return False
 
 
 def _get_unique_path(dest_path: Path) -> Path:
@@ -823,6 +836,12 @@ def _transfer_file_to_library(
         final_path = _atomic_hardlink(source_path, dest_path)
         logger.info(f"Library hardlink created: {final_path}")
         _cleanup_staged_files(temp_file)
+    elif _is_torrent_source(source_path, task):
+        # Torrent without hardlink - copy to preserve seeding
+        dest_path = _get_unique_path(dest_path)
+        shutil.copy2(str(source_path), str(dest_path))
+        final_path = dest_path
+        logger.info(f"Copied to library (torrent): {final_path}")
     else:
         final_path = _atomic_move(source_path, dest_path)
         logger.info(f"Moved to library: {final_path}")
@@ -845,11 +864,10 @@ def _transfer_directory_to_library(
     content_type = task.content_type.lower() if task.content_type else None
     supported_formats = _get_supported_formats(content_type)
 
-    source_files = sorted(
-        (f for f in source_dir.rglob("*")
-         if f.is_file() and f.suffix.lower().lstrip('.') in supported_formats),
-        key=lambda p: p.name
-    )
+    source_files = [
+        f for f in source_dir.rglob("*")
+        if f.is_file() and f.suffix.lower().lstrip('.') in supported_formats
+    ]
 
     if not source_files:
         logger.warning(f"No supported files found in directory: {source_dir}")
@@ -858,31 +876,68 @@ def _transfer_directory_to_library(
     base_library_path = build_library_path(library_base, template, metadata, extension=None)
     base_library_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Check if this is a torrent source that needs copy instead of move
+    is_torrent = _is_torrent_source(source_dir, task)
     transferred_paths = []
-    for source_file in source_files:
-        ext = source_file.suffix.lstrip('.')
 
-        if len(source_files) == 1:
-            dest_path = base_library_path.with_suffix(f'.{ext}')
-        else:
-            dest_path = base_library_path.parent / source_file.name
+    if len(source_files) == 1:
+        # Single file - no part numbering needed
+        source_file = source_files[0]
+        ext = source_file.suffix.lstrip('.')
+        dest_path = base_library_path.with_suffix(f'.{ext}')
 
         if use_hardlink:
             final_path = _atomic_hardlink(source_file, dest_path)
             logger.debug(f"Library hardlink: {source_file.name} -> {final_path}")
+        elif is_torrent:
+            dest_path = _get_unique_path(dest_path)
+            shutil.copy2(str(source_file), str(dest_path))
+            final_path = dest_path
+            logger.debug(f"Copied to library (torrent): {source_file.name} -> {final_path}")
         else:
             final_path = _atomic_move(source_file, dest_path)
             logger.debug(f"Moved to library: {source_file.name} -> {final_path}")
 
         transferred_paths.append(final_path)
+    else:
+        # Multi-file: natural sort then sequential numbering
+        zero_pad_width = max(len(str(len(source_files))), 2)
+        files_with_parts = assign_part_numbers(source_files, zero_pad_width)
 
-    operation = "hardlinks" if use_hardlink else "files"
+        for source_file, part_number in files_with_parts:
+            ext = source_file.suffix.lstrip('.')
+
+            file_metadata = {**metadata, "PartNumber": part_number}
+            file_path = build_library_path(library_base, template, file_metadata, extension=ext)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            dest_path = file_path
+
+            if use_hardlink:
+                final_path = _atomic_hardlink(source_file, dest_path)
+                logger.debug(f"Library hardlink: {source_file.name} -> {final_path}")
+            elif is_torrent:
+                dest_path = _get_unique_path(dest_path)
+                shutil.copy2(str(source_file), str(dest_path))
+                final_path = dest_path
+                logger.debug(f"Copied to library (torrent): {source_file.name} -> {final_path}")
+            else:
+                final_path = _atomic_move(source_file, dest_path)
+                logger.debug(f"Moved to library: {source_file.name} -> {final_path}")
+
+            transferred_paths.append(final_path)
+
+    if use_hardlink:
+        operation = "hardlinks"
+    elif is_torrent:
+        operation = "copies (torrent)"
+    else:
+        operation = "files"
     logger.info(f"Created {len(transferred_paths)} library {operation} in {base_library_path.parent}")
 
-    # Cleanup
+    # Cleanup staging (not torrent source - that stays for seeding)
     if use_hardlink:
         _cleanup_staged_files(temp_file)
-    else:
+    elif not is_torrent:
         _cleanup_staged_files(temp_file, source_dir)
 
     count_msg = f" ({len(transferred_paths)} files," if len(transferred_paths) > 1 else " ("
@@ -910,35 +965,70 @@ def _post_process_download(
     Returns:
         Final path in ingest directory, or None on failure
     """
-    # Determine processing mode based on content type
     content_type = task.content_type.lower() if task.content_type else ""
     is_audiobook = "audiobook" in content_type
 
-    if is_audiobook:
-        processing_mode = config.get("PROCESSING_MODE_AUDIOBOOK", "ingest")
-    else:
-        processing_mode = config.get("PROCESSING_MODE", "ingest")
+    # Validate search_mode
+    if task.search_mode is None:
+        logger.warning(f"Task {task.task_id} has no search_mode set, defaulting to Direct mode behavior")
+    elif task.search_mode not in (SearchMode.DIRECT, SearchMode.UNIVERSAL):
+        logger.warning(f"Task {task.task_id} has invalid search_mode '{task.search_mode}', defaulting to Direct mode behavior")
 
-    if processing_mode == "library":
-        result = _process_library_mode(temp_file, task, status_callback)
-        if result is not None:
-            return result
-        # If library mode fails, fall through to normal processing
+    # Library mode and audiobook-specific directories only apply to Universal mode
+    is_universal = task.search_mode == SearchMode.UNIVERSAL
+
+    if is_universal:
+        # Determine processing mode based on content type
+        if is_audiobook:
+            processing_mode = config.get("PROCESSING_MODE_AUDIOBOOK", "ingest")
+        else:
+            processing_mode = config.get("PROCESSING_MODE", "ingest")
+
+        if processing_mode == "library":
+            result = _process_library_mode(temp_file, task, status_callback)
+            if result is not None:
+                return result
+            # If library mode fails, fall through to normal processing
 
     # Determine ingest directory
     default_ingest_dir = get_ingest_dir()
 
-    if is_audiobook:
-        # Audiobooks use dedicated setting, falling back to main ingest dir
+    if is_universal and is_audiobook:
+        # Universal audiobooks use dedicated setting, falling back to main ingest dir
         audiobook_ingest = config.get("INGEST_DIR_AUDIOBOOK", "")
         ingest_dir = Path(audiobook_ingest) if audiobook_ingest else default_ingest_dir
     else:
-        # Other content types use content-type routing
+        # Direct mode and non-audiobook content use content-type routing
         ingest_dir = get_ingest_dir(content_type)
 
     if ingest_dir != default_ingest_dir:
         logger.debug(f"Routing '{content_type or 'default'}' to {ingest_dir}")
     os.makedirs(ingest_dir, exist_ok=True)
+
+    # For torrents going to ingest mode, stage first to preserve seeding
+    # (Torrent handler returns original path, not staged copy)
+    if _is_torrent_source(temp_file, task):
+        status_callback("resolving", "Staging torrent files")
+        staging_dir = get_staging_dir()
+
+        if temp_file.is_dir():
+            staged_path = staging_dir / temp_file.name
+            counter = 1
+            while staged_path.exists():
+                staged_path = staging_dir / f"{temp_file.name}_{counter}"
+                counter += 1
+            shutil.copytree(str(temp_file), str(staged_path))
+            logger.debug(f"Staged torrent directory: {staged_path.name}")
+        else:
+            staged_path = staging_dir / temp_file.name
+            counter = 1
+            while staged_path.exists():
+                staged_path = staging_dir / f"{temp_file.stem}_{counter}{temp_file.suffix}"
+                counter += 1
+            shutil.copy2(str(temp_file), str(staged_path))
+            logger.debug(f"Staged torrent file: {staged_path.name}")
+
+        temp_file = staged_path
 
     # Handle archive extraction (RAR/ZIP)
     if is_archive(temp_file):

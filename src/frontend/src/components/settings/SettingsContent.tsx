@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
   SettingsTab,
   SettingsField,
@@ -35,13 +35,20 @@ interface SettingsContentProps {
   onAction: (key: string) => Promise<ActionResult>;
   isSaving: boolean;
   hasChanges: boolean;
+  isUniversalMode?: boolean; // Whether app is in Universal search mode
 }
 
-// Check if a field should be visible based on showWhen condition
+// Check if a field should be visible based on showWhen condition and search mode
 function isFieldVisible(
   field: SettingsField,
-  values: Record<string, unknown>
+  values: Record<string, unknown>,
+  isUniversalMode: boolean
 ): boolean {
+  // Check universalOnly - hide these fields in Direct mode
+  if ('universalOnly' in field && field.universalOnly && !isUniversalMode) {
+    return false;
+  }
+
   const showWhen = field.showWhen;
   if (!showWhen) return true;
 
@@ -193,6 +200,7 @@ export const SettingsContent = ({
   onAction,
   isSaving,
   hasChanges,
+  isUniversalMode = true,
 }: SettingsContentProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -203,6 +211,12 @@ export const SettingsContent = ({
     }
   }, [tab.name]);
 
+  // Memoize the visible fields to avoid recalculating on every render
+  const visibleFields = useMemo(
+    () => tab.fields.filter((field) => isFieldVisible(field, values, isUniversalMode)),
+    [tab.fields, values, isUniversalMode]
+  );
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Scrollable content area */}
@@ -212,9 +226,7 @@ export const SettingsContent = ({
         style={{ paddingBottom: hasChanges ? 'calc(5rem + env(safe-area-inset-bottom))' : '1.5rem' }}
       >
         <div className="space-y-5">
-          {tab.fields
-            .filter((field) => isFieldVisible(field, values))
-            .map((field) => {
+          {visibleFields.map((field) => {
               const disabledState = getDisabledState(field, values);
               return (
                 <FieldWrapper

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { SettingsTab, SettingsGroup } from '../../types/settings';
 
 interface SettingsSidebarProps {
@@ -129,47 +129,52 @@ export const SettingsSidebar = ({
     });
   };
 
-  // Build grouped tabs map
-  const groupedTabs = new Map<string, SettingsTab[]>();
-  tabs.forEach((tab) => {
-    if (tab.group) {
-      const existing = groupedTabs.get(tab.group) || [];
-      existing.push(tab);
-      groupedTabs.set(tab.group, existing);
-    }
-  });
-
-  // Build a unified sorted list of tabs and groups
-  const sidebarItems: SidebarItem[] = [];
-
-  // Add ungrouped tabs (with section headers where needed)
-  tabs.forEach((tab) => {
-    if (!tab.group) {
-      // Check if this tab needs a section header before it
-      const sectionHeader = SECTION_HEADERS.find((s) => s.beforeTab === tab.name);
-      if (sectionHeader) {
-        sidebarItems.push({ type: 'section', label: sectionHeader.label, order: tab.order - 0.5 });
+  // Memoize the sidebar items to avoid rebuilding on every render
+  const sidebarItems = useMemo(() => {
+    // Build grouped tabs map
+    const groupedTabs = new Map<string, SettingsTab[]>();
+    tabs.forEach((tab) => {
+      if (tab.group) {
+        const existing = groupedTabs.get(tab.group) || [];
+        existing.push(tab);
+        groupedTabs.set(tab.group, existing);
       }
-      sidebarItems.push({ type: 'tab', tab, order: tab.order });
-    }
-  });
+    });
 
-  // Add groups (with their tabs) and section headers
-  groups.forEach((group) => {
-    const groupTabList = groupedTabs.get(group.name) || [];
-    if (groupTabList.length > 0) {
-      // Check if this group needs a section header before it
-      const sectionHeader = SECTION_HEADERS.find((s) => s.beforeGroup === group.name);
-      if (sectionHeader) {
-        // Insert section header just before this group (order - 0.5 to sort before)
-        sidebarItems.push({ type: 'section', label: sectionHeader.label, order: group.order - 0.5 });
+    // Build a unified sorted list of tabs and groups
+    const items: SidebarItem[] = [];
+
+    // Add ungrouped tabs (with section headers where needed)
+    tabs.forEach((tab) => {
+      if (!tab.group) {
+        // Check if this tab needs a section header before it
+        const sectionHeader = SECTION_HEADERS.find((s) => s.beforeTab === tab.name);
+        if (sectionHeader) {
+          items.push({ type: 'section', label: sectionHeader.label, order: tab.order - 0.5 });
+        }
+        items.push({ type: 'tab', tab, order: tab.order });
       }
-      sidebarItems.push({ type: 'group', group, tabs: groupTabList, order: group.order });
-    }
-  });
+    });
 
-  // Sort by order
-  sidebarItems.sort((a, b) => a.order - b.order);
+    // Add groups (with their tabs) and section headers
+    groups.forEach((group) => {
+      const groupTabList = groupedTabs.get(group.name) || [];
+      if (groupTabList.length > 0) {
+        // Check if this group needs a section header before it
+        const sectionHeader = SECTION_HEADERS.find((s) => s.beforeGroup === group.name);
+        if (sectionHeader) {
+          // Insert section header just before this group (order - 0.5 to sort before)
+          items.push({ type: 'section', label: sectionHeader.label, order: group.order - 0.5 });
+        }
+        items.push({ type: 'group', group, tabs: groupTabList, order: group.order });
+      }
+    });
+
+    // Sort by order
+    items.sort((a, b) => a.order - b.order);
+
+    return items;
+  }, [tabs, groups]);
 
   if (mode === 'list') {
     // Mobile: Clean list style with inset dividers
