@@ -17,6 +17,18 @@ from cwa_book_downloader.release_sources.prowlarr.clients.torrent_utils import (
 logger = setup_logger(__name__)
 
 
+def _hashes_match(hash1: str, hash2: str) -> bool:
+    """Compare hashes, handling Amarr's 40-char zero-padded hashes vs 32-char ed2k hashes."""
+    h1, h2 = hash1.lower(), hash2.lower()
+    if h1 == h2:
+        return True
+    if len(h1) == 40 and len(h2) == 32 and h1.endswith("00000000"):
+        return h1[:32] == h2
+    if len(h2) == 40 and len(h1) == 32 and h2.endswith("00000000"):
+        return h2[:32] == h1
+    return False
+
+
 @register_client("torrent")
 class QBittorrentClient(DownloadClient):
     """qBittorrent download client."""
@@ -46,6 +58,9 @@ class QBittorrentClient(DownloadClient):
         import requests
 
         try:
+            # Ensure session is authenticated before using it directly
+            self._client.auth_log_in()
+
             params = {"hashes": torrent_hash} if torrent_hash else {}
             response = self._client._session.get(
                 f"{self._base_url}/api/v2/torrents/info",
@@ -148,7 +163,7 @@ class QBittorrentClient(DownloadClient):
                 for _ in range(10):
                     torrents = self._get_torrents_info(expected_hash)
                     for t in torrents:
-                        if t.hash.lower() == expected_hash.lower():
+                        if _hashes_match(t.hash, expected_hash):
                             logger.info(f"Added torrent: {t.hash}")
                             return t.hash.lower()
                     time.sleep(0.5)
@@ -174,7 +189,7 @@ class QBittorrentClient(DownloadClient):
         """
         try:
             torrents = self._get_torrents_info(download_id)
-            torrent = next((t for t in torrents if t.hash.lower() == download_id.lower()), None)
+            torrent = next((t for t in torrents if _hashes_match(t.hash, download_id)), None)
             if not torrent:
                 return DownloadStatus.error("Torrent not found")
 
@@ -266,7 +281,7 @@ class QBittorrentClient(DownloadClient):
         """Get the path where torrent files are located."""
         try:
             torrents = self._get_torrents_info(download_id)
-            torrent = next((t for t in torrents if t.hash.lower() == download_id.lower()), None)
+            torrent = next((t for t in torrents if _hashes_match(t.hash, download_id)), None)
             if not torrent:
                 return None
             # Prefer content_path, fall back to save_path/name (for Amarr compatibility)
@@ -288,7 +303,7 @@ class QBittorrentClient(DownloadClient):
                 return None
 
             torrents = self._get_torrents_info(torrent_info.info_hash)
-            torrent = next((t for t in torrents if t.hash.lower() == torrent_info.info_hash.lower()), None)
+            torrent = next((t for t in torrents if _hashes_match(t.hash, torrent_info.info_hash)), None)
             if torrent:
                 return (torrent.hash.lower(), self.get_status(torrent.hash.lower()))
 

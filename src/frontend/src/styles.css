@@ -140,64 +140,73 @@ footer {
     to { transform: rotate(360deg); }
 }
 
+/* Use translate3d() for GPU acceleration on iOS Safari */
 @keyframes slide-up {
     from {
         opacity: 0;
-        transform: translateY(30px);
+        transform: translate3d(0, 30px, 0);
     }
     to {
         opacity: 1;
-        transform: translateY(0);
+        transform: translate3d(0, 0, 0);
     }
 }
 
 @keyframes fade-in-up {
     from {
         opacity: 0;
-        transform: translateY(10px);
+        transform: translate3d(0, 10px, 0);
     }
     to {
         opacity: 1;
-        transform: translateY(0);
+        transform: translate3d(0, 0, 0);
     }
 }
 
 @keyframes fade-in-down {
     from {
         opacity: 0;
-        transform: translateY(-10px);
+        transform: translate3d(0, -10px, 0);
     }
     to {
         opacity: 1;
-        transform: translateY(0);
+        transform: translate3d(0, 0, 0);
     }
 }
 
 @keyframes fade-out-up {
     from {
         opacity: 1;
-        transform: translateY(0);
+        transform: translate3d(0, 0, 0);
     }
     to {
         opacity: 0;
-        transform: translateY(-10px);
+        transform: translate3d(0, -10px, 0);
     }
 }
 
 .animate-slide-up {
     animation: slide-up 0.5s ease-out;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
 }
 
 .animate-fade-in-up {
     animation: fade-in-up 0.4s ease-out;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
 }
 
 .animate-fade-in-down {
     animation: fade-in-down 0.2s ease-out;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
 }
 
 .animate-fade-out-up {
     animation: fade-out-up 0.15s ease-in;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
 }
 
 /* Button spinner styles */

@@ -723,6 +723,15 @@ function App() {
     );
   }
 
+  // Wait for config to load before rendering main UI to prevent flicker
+  if (isAuthenticated && !config) {
+    return (
+      <div aria-live="polite" style={visuallyHiddenStyle}>
+        Loading configuration…
+      </div>
+    );
+  }
+
   const shouldRedirectFromLogin = !authRequired || isAuthenticated;
   const appElement = authRequired && !isAuthenticated ? (
     <Navigate to="/login" replace />
