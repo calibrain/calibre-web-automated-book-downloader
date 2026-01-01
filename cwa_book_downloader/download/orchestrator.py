@@ -677,9 +677,9 @@ def _process_library_mode(
                 else:
                     logger.warning(
                         f"Cannot hardlink: {hardlink_source} and {library_path} are on different filesystems. "
-                        "Falling back to move. To fix: ensure torrent client downloads to same filesystem as library."
+                        "Falling back to copy. To fix: ensure torrent client downloads to same filesystem as library."
                     )
-                    status_callback("resolving", "Cannot hardlink (different filesystems), using move")
+                    status_callback("resolving", "Cannot hardlink (different filesystems), using copy")
 
     # Build metadata dict for template
     metadata = {

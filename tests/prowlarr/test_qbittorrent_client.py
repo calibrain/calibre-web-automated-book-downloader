@@ -33,6 +33,26 @@ class MockTorrent:
         self.eta = eta
         self.content_path = content_path
 
+    def to_dict(self):
+        """Convert to dict for JSON response mocking."""
+        return {
+            "hash": self.hash,
+            "name": self.name,
+            "progress": self.progress,
+            "state": self.state,
+            "dlspeed": self.dlspeed,
+            "eta": self.eta,
+            "content_path": self.content_path,
+        }
+
+
+def create_mock_session_response(torrents):
+    """Create a mock response for _session.get() calls."""
+    mock_response = MagicMock()
+    mock_response.json.return_value = [t.to_dict() if isinstance(t, MockTorrent) else t for t in torrents]
+    mock_response.raise_for_status = MagicMock()
+    return mock_response
+
 
 class TestQBittorrentClientIsConfigured:
     """Tests for QBittorrentClient.is_configured()."""
@@ -106,7 +126,7 @@ class TestQBittorrentClientTestConnection:
         )
 
         mock_client_instance = MagicMock()
-        mock_client_instance.app.version = "4.6.0"
+        mock_client_instance.app.web_api_version = "2.9.3"
         mock_client_class = MagicMock(return_value=mock_client_instance)
 
         # Mock the import inside the module
@@ -120,7 +140,7 @@ class TestQBittorrentClientTestConnection:
             success, message = client.test_connection()
 
             assert success is True
-            assert "4.6.0" in message
+            assert "2.9.3" in message
 
     def test_test_connection_failure(self, monkeypatch):
         """Test failed connection."""
@@ -169,7 +189,8 @@ class TestQBittorrentClientGetStatus:
 
         mock_torrent = MockTorrent(progress=0.5, state="downloading", dlspeed=1024000, eta=3600)
         mock_client_instance = MagicMock()
-        mock_client_instance.torrents_info.return_value = [mock_torrent]
+        # Mock the session.get for _get_torrents_info
+        mock_client_instance._session.get.return_value = create_mock_session_response([mock_torrent])
         mock_client_class = MagicMock(return_value=mock_client_instance)
 
         with patch.dict('sys.modules', {'qbittorrentapi': MagicMock(Client=mock_client_class)}):
@@ -205,7 +226,8 @@ class TestQBittorrentClientGetStatus:
             content_path="/downloads/completed.epub",
         )
         mock_client_instance = MagicMock()
-        mock_client_instance.torrents_info.return_value = [mock_torrent]
+        # Mock the session.get for _get_torrents_info
+        mock_client_instance._session.get.return_value = create_mock_session_response([mock_torrent])
         mock_client_class = MagicMock(return_value=mock_client_instance)
 
         with patch.dict('sys.modules', {'qbittorrentapi': MagicMock(Client=mock_client_class)}):
@@ -234,7 +256,8 @@ class TestQBittorrentClientGetStatus:
         )
 
         mock_client_instance = MagicMock()
-        mock_client_instance.torrents_info.return_value = []
+        # Mock the session.get for _get_torrents_info - empty list
+        mock_client_instance._session.get.return_value = create_mock_session_response([])
         mock_client_class = MagicMock(return_value=mock_client_instance)
 
         with patch.dict('sys.modules', {'qbittorrentapi': MagicMock(Client=mock_client_class)}):
@@ -263,7 +286,8 @@ class TestQBittorrentClientGetStatus:
 
         mock_torrent = MockTorrent(progress=0.3, state="stalledDL")
         mock_client_instance = MagicMock()
-        mock_client_instance.torrents_info.return_value = [mock_torrent]
+        # Mock the session.get for _get_torrents_info
+        mock_client_instance._session.get.return_value = create_mock_session_response([mock_torrent])
         mock_client_class = MagicMock(return_value=mock_client_instance)
 
         with patch.dict('sys.modules', {'qbittorrentapi': MagicMock(Client=mock_client_class)}):
@@ -292,7 +316,8 @@ class TestQBittorrentClientGetStatus:
 
         mock_torrent = MockTorrent(progress=0.5, state="pausedDL")
         mock_client_instance = MagicMock()
-        mock_client_instance.torrents_info.return_value = [mock_torrent]
+        # Mock the session.get for _get_torrents_info
+        mock_client_instance._session.get.return_value = create_mock_session_response([mock_torrent])
         mock_client_class = MagicMock(return_value=mock_client_instance)
 
         with patch.dict('sys.modules', {'qbittorrentapi': MagicMock(Client=mock_client_class)}):
@@ -320,7 +345,8 @@ class TestQBittorrentClientGetStatus:
 
         mock_torrent = MockTorrent(progress=0.1, state="error")
         mock_client_instance = MagicMock()
-        mock_client_instance.torrents_info.return_value = [mock_torrent]
+        # Mock the session.get for _get_torrents_info
+        mock_client_instance._session.get.return_value = create_mock_session_response([mock_torrent])
         mock_client_class = MagicMock(return_value=mock_client_instance)
 
         with patch.dict('sys.modules', {'qbittorrentapi': MagicMock(Client=mock_client_class)}):
@@ -482,7 +508,8 @@ class TestQBittorrentClientFindExisting:
             state="downloading",
         )
         mock_client_instance = MagicMock()
-        mock_client_instance.torrents_info.return_value = [mock_torrent]
+        # Mock the session.get for _get_torrents_info
+        mock_client_instance._session.get.return_value = create_mock_session_response([mock_torrent])
         mock_client_class = MagicMock(return_value=mock_client_instance)
 
         with patch.dict('sys.modules', {'qbittorrentapi': MagicMock(Client=mock_client_class)}):
@@ -513,7 +540,8 @@ class TestQBittorrentClientFindExisting:
         )
 
         mock_client_instance = MagicMock()
-        mock_client_instance.torrents_info.return_value = []
+        # Mock the session.get for _get_torrents_info - empty list
+        mock_client_instance._session.get.return_value = create_mock_session_response([])
         mock_client_class = MagicMock(return_value=mock_client_instance)
 
         with patch.dict('sys.modules', {'qbittorrentapi': MagicMock(Client=mock_client_class)}):
@@ -522,7 +550,7 @@ class TestQBittorrentClientFindExisting:
             importlib.reload(qb_module)
 
             client = qb_module.QBittorrentClient()
-            magnet = "magnet:?xt=urn:btih:abc123&dn=test"
+            magnet = "magnet:?xt=urn:btih:abc123def456abc123def456abc123def456abc1&dn=test"
             result = client.find_existing(magnet)
 
             assert result is None
@@ -552,3 +580,40 @@ class TestQBittorrentClientFindExisting:
             result = client.find_existing("not-a-magnet-link")
 
             assert result is None
+
+
+class TestHashesMatch:
+    """Tests for _hashes_match() - Amarr compatibility."""
+
+    def test_identical_hashes_match(self):
+        from cwa_book_downloader.release_sources.prowlarr.clients.qbittorrent import _hashes_match
+        assert _hashes_match("abc123", "abc123") is True
+        assert _hashes_match("ABC123", "abc123") is True
+
+    def test_different_hashes_dont_match(self):
+        from cwa_book_downloader.release_sources.prowlarr.clients.qbittorrent import _hashes_match
+        assert _hashes_match("abc123", "def456") is False
+
+    def test_amarr_padded_hash_matches_ed2k_hash(self):
+        from cwa_book_downloader.release_sources.prowlarr.clients.qbittorrent import _hashes_match
+        ed2k_hash = "0320c47b3baa01f8d5f42cd7c05ce28d"  # 32 chars
+        padded_hash = "0320c47b3baa01f8d5f42cd7c05ce28d00000000"  # 40 chars
+        assert _hashes_match(padded_hash, ed2k_hash) is True
+        assert _hashes_match(ed2k_hash, padded_hash) is True
+
+    def test_non_zero_padded_40_char_hash_doesnt_match(self):
+        from cwa_book_downloader.release_sources.prowlarr.clients.qbittorrent import _hashes_match
+        bittorrent_hash = "3b245504cf5f11bbdbe1201cea6a6bf45aee1bc0"
+        partial_hash = "3b245504cf5f11bbdbe1201cea6a6bf4"
+        assert _hashes_match(bittorrent_hash, partial_hash) is False
+
+    def test_matching_is_case_insensitive(self):
+        from cwa_book_downloader.release_sources.prowlarr.clients.qbittorrent import _hashes_match
+        ed2k_hash = "0320C47B3BAA01F8D5F42CD7C05CE28D"
+        padded_hash = "0320c47b3baa01f8d5f42cd7c05ce28d00000000"
+        assert _hashes_match(padded_hash, ed2k_hash) is True
+
+    def test_wrong_length_hashes_dont_match(self):
+        from cwa_book_downloader.release_sources.prowlarr.clients.qbittorrent import _hashes_match
+        assert _hashes_match("a" * 40, "b" * 30) is False
+        assert _hashes_match("a" * 38, "b" * 32) is False

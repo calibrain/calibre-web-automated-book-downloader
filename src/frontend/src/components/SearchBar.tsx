@@ -64,7 +64,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(({
 
   // Dynamic placeholder based on content type
   const effectivePlaceholder = showContentTypeSelector
-    ? (contentType === 'ebook' ? 'Search books by title, author, ISBN...' : 'Search audiobooks by title, author...')
+    ? (contentType === 'ebook' ? 'Search Books' : 'Search Audiobooks')
     : placeholder;
 
   // Close dropdown on click outside or escape
