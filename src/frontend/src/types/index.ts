@@ -177,6 +177,7 @@ export interface AuthResponse {
   success?: boolean;
   authenticated?: boolean;
   auth_required?: boolean;
+  is_admin?: boolean;
   error?: string;
 }
 
@@ -216,6 +217,8 @@ export interface ColumnSchema {
   color_hint?: ColumnColorHint | null;
   fallback: string;        // Value when data is missing
   uppercase: boolean;      // Force uppercase display
+  sortable?: boolean;      // Show in sort dropdown (opt-in)
+  sort_key?: string;       // Field to sort by (defaults to key if not specified)
 }
 
 // Leading cell config - what to show in the left-most position of each row

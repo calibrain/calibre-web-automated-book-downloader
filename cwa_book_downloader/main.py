@@ -943,7 +943,7 @@ def api_login() -> Union[Response, Tuple[Response, int]]:
                 db_uri = f"file:{db_path}?mode=ro&immutable=1"
                 conn = sqlite3.connect(db_uri, uri=True)
                 cur = conn.cursor()
-                cur.execute("SELECT password FROM user WHERE name = ?", (username,))
+                cur.execute("SELECT password, role FROM user WHERE name = ?", (username,))
                 row = cur.fetchone()
                 conn.close()
 
@@ -951,11 +951,16 @@ def api_login() -> Union[Response, Tuple[Response, int]]:
                 if not row or not row[0] or not check_password_hash(row[0], password):
                     return _failed_login_response(username, ip_address)
 
+                # Check if user has admin role (ROLE_ADMIN = 1, bit flag)
+                user_role = row[1] if row[1] is not None else 0
+                is_admin = (user_role & 1) == 1
+
                 # Successful authentication - create session and clear failed attempts
                 session['user_id'] = username
+                session['is_admin'] = is_admin
                 session.permanent = remember_me
                 clear_failed_logins(username)
-                logger.info(f"Login successful for user '{username}' from IP {ip_address} (CWA auth, remember_me={remember_me})")
+                logger.info(f"Login successful for user '{username}' from IP {ip_address} (CWA auth, is_admin={is_admin}, remember_me={remember_me})")
                 return jsonify({"success": True})
 
             except Exception as e:
@@ -998,32 +1003,54 @@ def api_auth_check() -> Union[Response, Tuple[Response, int]]:
 
     Returns:
         flask.Response: JSON with authentication status, whether auth is required,
-        and which auth mode is active.
+        which auth mode is active, and whether user has admin privileges.
     """
+    from cwa_book_downloader.core.settings_registry import load_config_file
+
     try:
         auth_mode = get_auth_mode()
 
-        # If no authentication is configured, access is allowed
+        # If no authentication is configured, access is allowed (full admin)
         if auth_mode == "none":
             return jsonify({
                 "authenticated": True,
                 "auth_required": False,
-                "auth_mode": "none"
+                "auth_mode": "none",
+                "is_admin": True
             })
 
         # Check if user has a valid session
         is_authenticated = 'user_id' in session
+
+        # Determine admin status for settings access
+        # - Built-in auth: single user is always admin
+        # - CWA auth: check RESTRICT_SETTINGS_TO_ADMIN setting
+        if auth_mode == "builtin":
+            is_admin = True
+        elif auth_mode == "cwa":
+            security_config = load_config_file("security")
+            restrict_to_admin = security_config.get("RESTRICT_SETTINGS_TO_ADMIN", False)
+            if restrict_to_admin:
+                is_admin = session.get('is_admin', False)
+            else:
+                # All authenticated CWA users can access settings
+                is_admin = True
+        else:
+            is_admin = False
+
         return jsonify({
             "authenticated": is_authenticated,
             "auth_required": True,
-            "auth_mode": auth_mode
+            "auth_mode": auth_mode,
+            "is_admin": is_admin if is_authenticated else False
         })
     except Exception as e:
         logger.error_trace(f"Auth check error: {e}")
         return jsonify({
             "authenticated": False,
             "auth_required": True,
-            "auth_mode": "unknown"
+            "auth_mode": "unknown",
+            "is_admin": False
         })
 
 

@@ -19,6 +19,7 @@ export const SelectField = ({ field, value, onChange, disabled }: SelectFieldPro
   const dropdownOptions = field.options.map((opt) => ({
     value: opt.value,
     label: opt.label,
+    description: opt.description,
   }));
 
   const handleChange = (newValue: string | string[]) => {

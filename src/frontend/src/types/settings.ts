@@ -14,6 +14,7 @@ export type FieldType =
 export interface SelectOption {
   value: string;
   label: string;
+  description?: string;  // Optional description shown below the label in dropdowns
   childOf?: string;  // Parent value - when parent is selected, this option is auto-selected and disabled
 }
 

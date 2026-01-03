@@ -1169,9 +1169,13 @@ class DirectDownloadHandler(DownloadHandler):
         try:
             logger.info(f"Starting download: {book_info.title}")
 
-            # Prepare paths
-            full_name = book_info.get_filename()
-            book_name = full_name if config.USE_BOOK_TITLE else f"{book_info.id}.{book_info.format or 'bin'}"
+            # Prepare paths - use descriptive staging filename, orchestrator will rename
+            # based on FILE_ORGANIZATION setting
+            file_org = config.get("FILE_ORGANIZATION", "rename")
+            if file_org == "none":
+                book_name = f"{book_info.id}.{book_info.format or 'bin'}"
+            else:
+                book_name = book_info.get_filename()
             book_path = TMP_DIR / book_name
 
             # Check cancellation before download

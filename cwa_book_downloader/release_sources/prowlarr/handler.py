@@ -33,6 +33,33 @@ POLL_INTERVAL = 2
 class ProwlarrHandler(DownloadHandler):
     """Handler for Prowlarr downloads via configured torrent or usenet client."""
 
+    def _get_category_for_task(self, client, task: DownloadTask) -> Optional[str]:
+        """Get the appropriate category based on content type.
+
+        Returns the audiobook-specific category if configured and the task is an audiobook,
+        otherwise returns None to let the client use its default category.
+        """
+        is_audiobook = task.content_type and "audiobook" in task.content_type.lower()
+
+        if not is_audiobook:
+            return None
+
+        # Client-specific audiobook category config keys
+        audiobook_key = {
+            "qbittorrent": "QBITTORRENT_CATEGORY_AUDIOBOOK",
+            "transmission": "TRANSMISSION_CATEGORY_AUDIOBOOK",
+            "deluge": "DELUGE_CATEGORY_AUDIOBOOK",
+            "nzbget": "NZBGET_CATEGORY_AUDIOBOOK",
+            "sabnzbd": "SABNZBD_CATEGORY_AUDIOBOOK",
+        }.get(client.name)
+
+        if audiobook_key:
+            audiobook_cat = config.get(audiobook_key, "")
+            if audiobook_cat:
+                return audiobook_cat
+
+        return None  # Let client use its default
+
     def download(
         self,
         task: DownloadTask,
@@ -119,9 +146,11 @@ class ProwlarrHandler(DownloadHandler):
                 status_callback("resolving", f"Sending to {client.name}")
                 try:
                     release_name = prowlarr_result.get("title") or task.title or "Unknown"
+                    category = self._get_category_for_task(client, task)
                     download_id = client.add_download(
                         url=download_url,
                         name=release_name,
+                        category=category,
                     )
                 except Exception as e:
                     logger.error(f"Failed to add to {client.name}: {e}")

@@ -149,6 +149,16 @@ def security_settings():
             disabled=not cwa_db_available,
             disabled_reason="Mount your Calibre-Web app.db to /auth/app.db in docker compose to enable.",
         ),
+        CheckboxField(
+            key="RESTRICT_SETTINGS_TO_ADMIN",
+            label="Restrict Settings to Admins",
+            description=(
+                "Only users with admin role in Calibre-Web can access settings."
+            ),
+            default=False,
+            env_supported=False,
+            show_when={"field": "USE_CWA_AUTH", "value": True},
+        ),
     ]
 
     return fields

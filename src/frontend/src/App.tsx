@@ -60,6 +60,7 @@ function App() {
     isAuthenticated,
     authRequired,
     authChecked,
+    isAdmin,
     loginError,
     isLoggingIn,
     setIsAuthenticated,
@@ -530,13 +531,13 @@ function App() {
         searchInput={searchInput}
         onSearchChange={setSearchInput}
         onDownloadsClick={() => setDownloadsSidebarOpen(true)}
-        onSettingsClick={() => {
+        onSettingsClick={isAdmin ? () => {
           if (config?.settings_enabled) {
             setSettingsOpen(true);
           } else {
             setConfigBannerOpen(true);
           }
-        }}
+        } : undefined}
         statusCounts={statusCounts}
         onLogoClick={() => handleResetSearch(config)}
         authRequired={authRequired}
