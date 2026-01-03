@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 from cwa_book_downloader.core.models import DownloadTask, SearchMode
 from cwa_book_downloader.core.naming import build_library_path, assign_part_numbers
+from cwa_book_downloader.core.utils import is_audiobook
 
 
 class MockConfig:
@@ -118,8 +119,7 @@ class TestContentTypeDetection:
             search_mode=SearchMode.UNIVERSAL,
         )
 
-        content_type = task.content_type.lower() if task.content_type else ""
-        assert "audiobook" in content_type
+        assert is_audiobook(task.content_type)
 
     def test_detect_book_content_type(self):
         """Verify ebook detection from content_type field."""
@@ -132,9 +132,7 @@ class TestContentTypeDetection:
             search_mode=SearchMode.UNIVERSAL,
         )
 
-        content_type = task.content_type.lower() if task.content_type else ""
-        is_audiobook = "audiobook" in content_type
-        assert not is_audiobook
+        assert not is_audiobook(task.content_type)
 
     def test_empty_content_type_defaults_to_book(self):
         """Empty content_type should be treated as a book."""
@@ -146,9 +144,7 @@ class TestContentTypeDetection:
             search_mode=SearchMode.UNIVERSAL,
         )
 
-        content_type = task.content_type.lower() if task.content_type else ""
-        is_audiobook = "audiobook" in content_type
-        assert not is_audiobook
+        assert not is_audiobook(task.content_type)
 
 
 class TestLibraryPathBuilding:

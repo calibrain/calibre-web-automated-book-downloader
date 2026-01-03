@@ -24,24 +24,13 @@ class CacheService:
     """Thread-safe in-memory cache with TTL support."""
 
     def __init__(self, max_size: int = 1000):
-        """Initialize cache service.
-
-        Args:
-            max_size: Maximum number of entries before oldest are evicted.
-        """
+        """Initialize cache with max_size entries before eviction."""
         self._cache: Dict[str, CacheEntry] = {}
         self._lock = threading.Lock()
         self._max_size = max_size
 
     def get(self, key: str) -> Optional[Any]:
-        """Get cached value if not expired.
-
-        Args:
-            key: Cache key to retrieve.
-
-        Returns:
-            Cached value or None if not found/expired.
-        """
+        """Get cached value if not expired."""
         with self._lock:
             entry = self._cache.get(key)
             if entry is None:
@@ -54,13 +43,7 @@ class CacheService:
             return entry.value
 
     def set(self, key: str, value: Any, ttl: int) -> None:
-        """Cache value with TTL.
-
-        Args:
-            key: Cache key.
-            value: Value to cache.
-            ttl: Time to live in seconds.
-        """
+        """Cache value with TTL in seconds."""
         with self._lock:
             # Evict oldest entries if at capacity
             if len(self._cache) >= self._max_size:
@@ -72,14 +55,7 @@ class CacheService:
             )
 
     def invalidate(self, key: str) -> bool:
-        """Remove specific cache entry.
-
-        Args:
-            key: Cache key to remove.
-
-        Returns:
-            True if entry was removed, False if not found.
-        """
+        """Remove specific cache entry. Returns True if found."""
         with self._lock:
             if key in self._cache:
                 del self._cache[key]
@@ -92,11 +68,7 @@ class CacheService:
             self._cache.clear()
 
     def cleanup_expired(self) -> int:
-        """Remove all expired entries.
-
-        Returns:
-            Number of entries removed.
-        """
+        """Remove all expired entries. Returns count removed."""
         with self._lock:
             now = time.time()
             expired_keys = [
@@ -108,10 +80,7 @@ class CacheService:
             return len(expired_keys)
 
     def _evict_oldest(self) -> None:
-        """Evict oldest entries (by expiration time) to make room.
-
-        Called with lock held.
-        """
+        """Evict ~10% of oldest entries. Called with lock held."""
         if not self._cache:
             return
 
@@ -126,11 +95,7 @@ class CacheService:
             del self._cache[key]
 
     def stats(self) -> Dict[str, int]:
-        """Get cache statistics.
-
-        Returns:
-            Dict with size and max_size.
-        """
+        """Get cache statistics (size, max_size)."""
         with self._lock:
             return {
                 "size": len(self._cache),
@@ -148,15 +113,7 @@ def get_metadata_cache() -> CacheService:
 
 
 def cache_key(*args, **kwargs) -> str:
-    """Generate cache key from arguments.
-
-    Args:
-        *args: Positional arguments to include in key.
-        **kwargs: Keyword arguments to include in key.
-
-    Returns:
-        String cache key.
-    """
+    """Generate cache key from arguments."""
     parts = [str(arg) for arg in args]
     parts.extend(f"{k}={v}" for k, v in sorted(kwargs.items()))
     return ":".join(parts)
@@ -168,18 +125,7 @@ def cacheable(
     ttl_default: int = 300,
     key_prefix: str = ""
 ):
-    """Decorator for caching function results.
-
-    Args:
-        ttl: Static time to live in seconds (use this OR ttl_key, not both).
-        ttl_key: Config key to read TTL from (e.g., "METADATA_CACHE_SEARCH_TTL").
-        ttl_default: Default TTL if ttl_key not found in config.
-        key_prefix: Optional prefix for cache keys.
-
-    Examples:
-        @cacheable(ttl=300, key_prefix="hardcover:search")  # Static TTL
-        @cacheable(ttl_key="METADATA_CACHE_SEARCH_TTL", key_prefix="hardcover:search")  # Dynamic TTL
-    """
+    """Decorator for caching function results. Use ttl (static) or ttl_key (from config)."""
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
         def wrapper(*args, **kwargs) -> T:

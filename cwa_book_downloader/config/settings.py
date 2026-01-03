@@ -9,21 +9,17 @@ from cwa_book_downloader.core.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# Log configuration values at DEBUG level, filtering out module imports and functions
+# Log configuration values at DEBUG level
+_SENSITIVE_KEYS = {"AA_DONATOR_KEY", "HARDCOVER_API_KEY"}
 logger.debug("Environment configuration:")
 for key, value in env.__dict__.items():
-    # Skip private attributes, modules, types, and callables (functions)
-    if key.startswith('_'):
+    # Skip private attributes, modules, types, and callables
+    if key.startswith('_') or isinstance(value, type) or callable(value):
         continue
-    if isinstance(value, type) or callable(value):
-        continue
-    # Don't log module objects (they have __name__ attribute)
     if hasattr(value, '__name__') and hasattr(value, '__file__'):
         continue
     # Redact sensitive values
-    if key == "AA_DONATOR_KEY" and isinstance(value, str) and value.strip():
-        value = "REDACTED"
-    if key == "HARDCOVER_API_KEY" and isinstance(value, str) and value.strip():
+    if key in _SENSITIVE_KEYS and isinstance(value, str) and value.strip():
         value = "REDACTED"
     logger.debug(f"  {key}: {value}")
 
@@ -73,20 +69,20 @@ logger.debug(f"SUPPORTED_FORMATS: {SUPPORTED_FORMATS}")
 SUPPORTED_AUDIOBOOK_FORMATS = env._SUPPORTED_AUDIOBOOK_FORMATS.split(",")
 logger.debug(f"SUPPORTED_AUDIOBOOK_FORMATS: {SUPPORTED_AUDIOBOOK_FORMATS}")
 
-# Complex language processing logic kept in config.py
-BOOK_LANGUAGE = env._BOOK_LANGUAGE.split(',')
-BOOK_LANGUAGE = [l for l in BOOK_LANGUAGE if l in [lang['code'] for lang in _SUPPORTED_BOOK_LANGUAGE]]
-if len(BOOK_LANGUAGE) == 0:
+# Filter book languages to only supported codes
+_VALID_LANGUAGE_CODES = {lang['code'] for lang in _SUPPORTED_BOOK_LANGUAGE}
+BOOK_LANGUAGE = [lang for lang in env._BOOK_LANGUAGE.split(',') if lang in _VALID_LANGUAGE_CODES]
+if not BOOK_LANGUAGE:
     BOOK_LANGUAGE = ['en']
 
 # Custom script settings with validation logic
 CUSTOM_SCRIPT = env._CUSTOM_SCRIPT
 if CUSTOM_SCRIPT:
     if not os.path.exists(CUSTOM_SCRIPT):
-        logger.warn(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} does not exist")
+        logger.warning(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} does not exist")
         CUSTOM_SCRIPT = ""
     elif not os.access(CUSTOM_SCRIPT, os.X_OK):
-        logger.warn(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} is not executable")
+        logger.warning(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} is not executable")
         CUSTOM_SCRIPT = ""
 
 # Debugging settings
@@ -182,9 +178,7 @@ def _get_metadata_provider_options():
 
 def _get_metadata_provider_options_with_none():
     """Build metadata provider options with a 'Use main provider' option first."""
-    options = [{"value": "", "label": "Use book provider"}]
-    options.extend(_get_metadata_provider_options())
-    return options
+    return [{"value": "", "label": "Use book provider"}] + _get_metadata_provider_options()
 
 
 def _get_release_source_options():

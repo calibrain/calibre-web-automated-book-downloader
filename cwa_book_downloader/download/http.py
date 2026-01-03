@@ -15,6 +15,8 @@ from cwa_book_downloader.download.network import get_proxies
 from cwa_book_downloader.core.config import config as app_config
 from cwa_book_downloader.core.logger import setup_logger
 
+logger = setup_logger(__name__)
+
 # Bypasser modules are imported lazily to support dynamic selection based on config
 _internal_bypasser = None
 _external_bypasser = None
@@ -65,8 +67,7 @@ def get_bypassed_page(url, selector=None, cancel_flag=None):
     """Wrapper that delegates to the appropriate bypasser based on config."""
     if _is_using_external_bypasser():
         return _get_external_bypasser().get_bypassed_page(url, selector, cancel_flag)
-    else:
-        return _get_internal_bypasser().get_bypassed_page(url, selector, cancel_flag)
+    return _get_internal_bypasser().get_bypassed_page(url, selector, cancel_flag)
 
 
 def get_cf_cookies_for_domain(domain):
@@ -84,7 +85,24 @@ def get_cf_user_agent_for_domain(domain):
         return None
     return _get_internal_bypasser().get_cf_user_agent_for_domain(domain)
 
-logger = setup_logger(__name__)
+
+def _apply_cf_bypass(url: str, headers: dict) -> dict:
+    """Apply CF bypass cookies and user agent if available.
+
+    Modifies headers in-place with the stored user agent (if available).
+    Returns cookies dict to use with the request.
+    """
+    if not _is_cf_bypass_enabled():
+        return {}
+
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    cookies = get_cf_cookies_for_domain(hostname)
+    stored_ua = get_cf_user_agent_for_domain(hostname)
+    if stored_ua:
+        headers['User-Agent'] = stored_ua
+    return cookies
+
 
 # Network settings
 REQUEST_TIMEOUT = (5, 10)  # (connect, read)
@@ -131,7 +149,7 @@ def _is_retryable_error(e: Exception) -> bool:
     if isinstance(e, CONNECTION_ERRORS):
         return True
     status = _get_status_code(e)
-    return status in RETRYABLE_CODES if status else False
+    return status is not None and status in RETRYABLE_CODES
 
 
 def _try_rotation(original_url: str, current_url: str, selector: network.AAMirrorSelector) -> Optional[str]:
@@ -180,15 +198,8 @@ def html_get_page(
 
             logger.debug(f"GET: {current_url}")
             # Try with CF cookies/UA if available (from previous bypass)
-            cookies = {}
             headers = {}
-            if _is_cf_bypass_enabled():
-                parsed = urlparse(current_url)
-                hostname = parsed.hostname or ""
-                cookies = get_cf_cookies_for_domain(hostname)
-                stored_ua = get_cf_user_agent_for_domain(hostname)
-                if stored_ua:
-                    headers['User-Agent'] = stored_ua
+            cookies = _apply_cf_bypass(current_url, headers)
             response = requests.get(current_url, proxies=get_proxies(), timeout=REQUEST_TIMEOUT, cookies=cookies, headers=headers)
             response.raise_for_status()
             time.sleep(1)
@@ -271,20 +282,7 @@ def download_url(
 
             logger.info(f"Downloading: {current_url} (attempt {attempt + 1}/{MAX_DOWNLOAD_RETRIES})")
             # Try with CF cookies/UA if available
-            cookies = {}
-            if _is_cf_bypass_enabled():
-                parsed = urlparse(current_url)
-                hostname = parsed.hostname or ""
-                cookies = get_cf_cookies_for_domain(hostname)
-                # Use stored UA - Cloudflare ties cf_clearance to the UA that solved the challenge
-                stored_ua = get_cf_user_agent_for_domain(hostname)
-                if stored_ua:
-                    headers['User-Agent'] = stored_ua
-                    logger.debug(f"Using stored UA for {hostname}")
-                else:
-                    logger.debug(f"No stored UA available for {hostname}")
-                if cookies:
-                    logger.debug(f"Using {len(cookies)} cookies for {hostname}: {list(cookies.keys())}")
+            cookies = _apply_cf_bypass(current_url, headers)
             response = requests.get(current_url, stream=True, proxies=get_proxies(), timeout=REQUEST_TIMEOUT, cookies=cookies, headers=headers)
             response.raise_for_status()
 
@@ -392,15 +390,8 @@ def _try_resume(
 
         try:
             # Try with CF cookies/UA if available
-            cookies = {}
             resume_headers = {**(base_headers or DOWNLOAD_HEADERS), 'Range': f'bytes={start_byte}-'}
-            if _is_cf_bypass_enabled():
-                parsed = urlparse(url)
-                hostname = parsed.hostname or ""
-                cookies = get_cf_cookies_for_domain(hostname)
-                stored_ua = get_cf_user_agent_for_domain(hostname)
-                if stored_ua:
-                    resume_headers['User-Agent'] = stored_ua
+            cookies = _apply_cf_bypass(url, resume_headers)
             response = requests.get(
                 url, stream=True, proxies=get_proxies(), timeout=REQUEST_TIMEOUT,
                 headers=resume_headers, cookies=cookies

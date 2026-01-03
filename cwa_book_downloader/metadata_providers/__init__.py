@@ -1,9 +1,9 @@
 """Metadata provider plugin system - base classes and registry."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Dict, Type, Literal, Any, Union
+from typing import Any, Dict, List, Optional, Type, Union
 
 
 class SearchType(str, Enum):
@@ -79,24 +79,12 @@ class CheckboxSearchField:
 SearchField = Union[TextSearchField, NumberSearchField, SelectSearchField, CheckboxSearchField]
 
 
-def _get_field_type_name(search_field: SearchField) -> str:
-    """Get the type name for a search field."""
-    return search_field.__class__.__name__
-
-
 def serialize_search_field(search_field: SearchField) -> Dict[str, Any]:
-    """Serialize a search field for API response.
-
-    Args:
-        search_field: The search field definition.
-
-    Returns:
-        Dict representation for frontend.
-    """
+    """Serialize a search field to dict for API response."""
     result: Dict[str, Any] = {
         "key": search_field.key,
         "label": search_field.label,
-        "type": _get_field_type_name(search_field),
+        "type": search_field.__class__.__name__,
         "placeholder": getattr(search_field, 'placeholder', ''),
         "description": getattr(search_field, 'description', ''),
     }
@@ -116,11 +104,7 @@ def serialize_search_field(search_field: SearchField) -> Dict[str, Any]:
 
 @dataclass
 class MetadataSearchOptions:
-    """Options for metadata search queries.
-
-    Provides an abstracted interface that works across all metadata providers.
-    Providers map these options to their specific API parameters.
-    """
+    """Options for metadata search queries across all providers."""
     query: str
     search_type: SearchType = SearchType.GENERAL
     language: Optional[str] = None  # ISO 639-1 code (e.g., "en", "fr")
@@ -132,11 +116,7 @@ class MetadataSearchOptions:
 
 @dataclass
 class DisplayField:
-    """A display field for metadata cards.
-
-    Providers can populate these to show provider-specific metadata
-    like ratings, page counts, reader counts, etc.
-    """
+    """A display field for metadata cards (ratings, page counts, etc.)."""
     label: str                       # e.g., "Rating", "Pages", "Readers"
     value: str                       # e.g., "4.5", "496", "8,041"
     icon: Optional[str] = None       # Icon name: "star", "book", "users", "editions"
@@ -208,19 +188,7 @@ class MetadataProvider(ABC):
 
     @abstractmethod
     def search(self, options: MetadataSearchOptions) -> List[BookMetadata]:
-        """Search for books using the provided options.
-
-        Args:
-            options: Search options including query, type, language, sort, pagination.
-
-        Returns:
-            List of BookMetadata matching the search criteria.
-
-        Note:
-            - If search_type is ISBN, this delegates to search_by_isbn()
-            - Unsupported sort orders fall back to RELEVANCE
-            - Language filtering is best-effort (not all providers support it)
-        """
+        """Search for books using the provided options."""
         pass
 
     @abstractmethod
@@ -239,17 +207,7 @@ class MetadataProvider(ABC):
         pass
 
     def search_paginated(self, options: MetadataSearchOptions) -> SearchResult:
-        """Search for books and return results with pagination info.
-
-        Default implementation calls search() and estimates has_more.
-        Providers should override this to return accurate pagination info.
-
-        Args:
-            options: Search options including query, type, language, sort, pagination.
-
-        Returns:
-            SearchResult with books and pagination info.
-        """
+        """Search with pagination info. Override for accurate pagination."""
         books = self.search(options)
         # Heuristic: if we got exactly limit results, there might be more
         has_more = len(books) >= options.limit
@@ -309,18 +267,7 @@ def list_providers() -> List[dict]:
 
 
 def get_provider_kwargs(provider_name: str) -> Dict:
-    """Get provider-specific initialization kwargs based on configuration.
-
-    Looks up the provider's registered kwargs factory and calls it to get
-    the configuration. Each provider registers its own factory via
-    @register_provider_kwargs decorator.
-
-    Args:
-        provider_name: Name of the provider.
-
-    Returns:
-        Dict of kwargs to pass to provider constructor.
-    """
+    """Get provider-specific initialization kwargs from registered factory."""
     factory = _PROVIDER_KWARGS_FACTORIES.get(provider_name)
     if factory:
         return factory()
@@ -328,29 +275,12 @@ def get_provider_kwargs(provider_name: str) -> Dict:
 
 
 def is_provider_registered(provider_name: str) -> bool:
-    """Check if a provider is registered.
-
-    Args:
-        provider_name: Name of the provider.
-
-    Returns:
-        True if provider is registered, False otherwise.
-    """
+    """Check if a provider is registered."""
     return provider_name in _PROVIDERS
 
 
 def is_provider_enabled(provider_name: str) -> bool:
-    """Check if a provider is enabled in settings.
-
-    Each provider has an enabled flag (e.g., HARDCOVER_ENABLED, OPENLIBRARY_ENABLED)
-    that must be explicitly set to True for the provider to be used.
-
-    Args:
-        provider_name: Name of the provider.
-
-    Returns:
-        True if provider is enabled, False otherwise.
-    """
+    """Check if a provider is enabled in settings."""
     from cwa_book_downloader.core.config import config as app_config
 
     # Refresh config to get latest settings
@@ -362,31 +292,12 @@ def is_provider_enabled(provider_name: str) -> bool:
 
 
 def get_enabled_providers() -> List[str]:
-    """Get list of all enabled provider names.
-
-    Returns:
-        List of enabled provider names.
-    """
-    enabled = []
-    for name in _PROVIDERS:
-        if is_provider_enabled(name):
-            enabled.append(name)
-    return enabled
+    """Get list of all enabled provider names."""
+    return [name for name in _PROVIDERS if is_provider_enabled(name)]
 
 
 def get_configured_provider(content_type: str = "ebook") -> Optional[MetadataProvider]:
-    """Get the currently configured metadata provider, if any.
-
-    Uses the METADATA_PROVIDER config setting to determine which provider
-    to instantiate. For audiobook content type, uses METADATA_PROVIDER_AUDIOBOOK
-    if configured, otherwise falls back to METADATA_PROVIDER.
-
-    Args:
-        content_type: Content type - "ebook" or "audiobook" (default: "ebook")
-
-    Returns:
-        MetadataProvider instance or None.
-    """
+    """Get the currently configured metadata provider for the content type."""
     from cwa_book_downloader.core.config import config as app_config
 
     # Refresh config to ensure we have the latest saved settings
@@ -422,16 +333,7 @@ def _get_configured_provider_name() -> str:
 
 
 def get_provider_sort_options(provider_name: Optional[str] = None) -> List[Dict[str, str]]:
-    """Get sort options for a metadata provider.
-
-    Returns a list of {value, label} dicts suitable for frontend dropdowns.
-
-    Args:
-        provider_name: Provider name. If None, uses configured provider.
-
-    Returns:
-        List of sort option dicts, or default [relevance] if provider not found.
-    """
+    """Get sort options for a metadata provider as {value, label} dicts."""
     if provider_name is None:
         provider_name = _get_configured_provider_name()
 
@@ -448,16 +350,7 @@ def get_provider_sort_options(provider_name: Optional[str] = None) -> List[Dict[
 
 
 def get_provider_search_fields(provider_name: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Get search fields for a metadata provider.
-
-    Returns a list of serialized search field dicts suitable for frontend rendering.
-
-    Args:
-        provider_name: Provider name. If None, uses configured provider.
-
-    Returns:
-        List of search field dicts, or empty list if provider not found.
-    """
+    """Get search fields for a metadata provider as serialized dicts."""
     if provider_name is None:
         provider_name = _get_configured_provider_name()
 
@@ -471,16 +364,7 @@ def get_provider_search_fields(provider_name: Optional[str] = None) -> List[Dict
 
 
 def get_provider_default_sort(provider_name: Optional[str] = None) -> str:
-    """Get the default sort order for a metadata provider.
-
-    Reads from the provider-specific config setting (e.g., HARDCOVER_DEFAULT_SORT).
-
-    Args:
-        provider_name: Provider name. If None, uses configured provider.
-
-    Returns:
-        Default sort value string, or "relevance" if not configured.
-    """
+    """Get the default sort order for a metadata provider."""
     from cwa_book_downloader.core.config import config as app_config
 
     if provider_name is None:

@@ -28,14 +28,7 @@ BACKOFF_CAP = 10.0
 
 
 def _fetch_via_bypasser(target_url: str) -> Optional[str]:
-    """Make a single request to the external bypasser service.
-
-    Args:
-        target_url: The URL to fetch through the bypasser
-
-    Returns:
-        HTML content if successful, None otherwise
-    """
+    """Make a single request to the external bypasser service. Returns HTML or None."""
     bypasser_url = config.get("EXT_BYPASSER_URL", "http://flaresolverr:8191")
     bypasser_path = config.get("EXT_BYPASSER_PATH", "/v1")
     bypasser_timeout = config.get("EXT_BYPASSER_TIMEOUT", 60000)
@@ -105,21 +98,7 @@ def get_bypassed_page(
     selector: Optional["network.AAMirrorSelector"] = None,
     cancel_flag: Optional[Event] = None
 ) -> Optional[str]:
-    """Fetch HTML content from a URL using an external Cloudflare bypasser service.
-
-    Retries with exponential backoff and mirror/DNS rotation on failure.
-
-    Args:
-        url: Target URL to fetch
-        selector: Mirror selector for AA URL rewriting and rotation
-        cancel_flag: Optional threading Event to signal cancellation
-
-    Returns:
-        HTML content if successful, None otherwise
-
-    Raises:
-        BypassCancelledException: If cancel_flag is set during operation
-    """
+    """Fetch HTML via external bypasser with retries and mirror rotation."""
     from cwa_book_downloader.download import network as network_module
 
     sel = selector or network_module.AAMirrorSelector()

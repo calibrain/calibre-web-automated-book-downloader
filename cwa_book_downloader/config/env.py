@@ -11,13 +11,7 @@ def string_to_bool(s: str) -> bool:
 
 
 def _read_debug_from_config() -> bool:
-    """
-    Read DEBUG setting directly from config JSON file.
-
-    This is called at import time before the config singleton is available.
-    Priority: ENV var > config file > default (False)
-    """
-    # Check env var first (takes priority)
+    """Read DEBUG from env var or config file (import-time safe)."""
     env_debug = os.environ.get("DEBUG")
     if env_debug is not None:
         return string_to_bool(env_debug)
@@ -42,16 +36,7 @@ def _read_debug_from_config() -> bool:
 SESSION_COOKIE_SECURE_ENV = os.getenv("SESSION_COOKIE_SECURE", "false")
 
 def _resolve_cwa_db_path() -> Path | None:
-    """
-    Resolve the Calibre-Web database path.
-
-    Priority:
-    1. CWA_DB_PATH env var (backwards compatibility)
-    2. Default path /auth/app.db if it exists and is a valid SQLite file
-
-    Returns None if no valid database is found.
-    """
-    # Check env var first (backwards compatibility)
+    """Resolve CWA database path from env var or default location."""
     env_path = os.getenv("CWA_DB_PATH")
     if env_path:
         path = Path(env_path)
@@ -130,10 +115,9 @@ BYPASS_WARMUP_ON_CONNECT = string_to_bool(os.getenv("BYPASS_WARMUP_ON_CONNECT", 
 LOG_FILE = LOG_DIR / "cwa-book-downloader.log"
 
 USING_EXTERNAL_BYPASSER = string_to_bool(os.getenv("USING_EXTERNAL_BYPASSER", "false"))
-if USING_EXTERNAL_BYPASSER:
-    EXT_BYPASSER_URL = os.getenv("EXT_BYPASSER_URL", "http://flaresolverr:8191").strip()
-    EXT_BYPASSER_PATH = os.getenv("EXT_BYPASSER_PATH", "/v1").strip()
-    EXT_BYPASSER_TIMEOUT = int(os.getenv("EXT_BYPASSER_TIMEOUT", "60000"))
+EXT_BYPASSER_URL = os.getenv("EXT_BYPASSER_URL", "http://flaresolverr:8191").strip()
+EXT_BYPASSER_PATH = os.getenv("EXT_BYPASSER_PATH", "/v1").strip()
+EXT_BYPASSER_TIMEOUT = int(os.getenv("EXT_BYPASSER_TIMEOUT", "60000"))
 
 USING_TOR = string_to_bool(os.getenv("USING_TOR", "false"))
 # If using Tor, we don't need to set custom DNS, use DOH, or proxy
@@ -173,12 +157,7 @@ def _is_config_dir_writable() -> bool:
 
 
 def is_covers_cache_enabled() -> bool:
-    """Check if cover caching is enabled (dynamic, respects settings changes).
-
-    Cache is only enabled if:
-    1. The COVERS_CACHE_ENABLED setting is true
-    2. The config directory is writable
-    """
+    """Check if cover caching is enabled (requires setting + writable config dir)."""
     from cwa_book_downloader.core.config import config
     setting_enabled = config.get("COVERS_CACHE_ENABLED", True)
     return setting_enabled and _is_config_dir_writable()

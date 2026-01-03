@@ -240,9 +240,7 @@ def _get_config_file_path(tab_name: str) -> Path:
     # Core settings tabs share the main settings.json file
     if tab_name in ("general", "search_mode"):
         return config_dir / "settings.json"
-    else:
-        plugins_dir = config_dir / "plugins"
-        return plugins_dir / f"{tab_name}.json"
+    return config_dir / "plugins" / f"{tab_name}.json"
 
 
 def _ensure_config_dir(tab_name: str) -> None:
@@ -463,12 +461,9 @@ def is_value_from_env(field: SettingsField) -> bool:
     if isinstance(field, (ActionButton, HeadingField)):
         return False
     # UI-only settings never come from ENV (env_supported=False)
-    # Default to True for backwards compatibility
-    env_supported = getattr(field, 'env_supported', True)
-    if env_supported is False:
+    if not getattr(field, 'env_supported', True):
         return False
-    env_var_name = field.get_env_var_name()
-    return env_var_name in os.environ
+    return field.get_env_var_name() in os.environ
 
 
 def serialize_field(field: SettingsField, tab_name: str, include_value: bool = True) -> Dict[str, Any]:
@@ -511,19 +506,12 @@ def serialize_field(field: SettingsField, tab_name: str, include_value: bool = T
         "requiresRestart": getattr(field, 'requires_restart', False),
     }
 
-    # Add conditional visibility if specified
-    show_when = getattr(field, 'show_when', None)
-    if show_when:
-        result["showWhen"] = show_when
-
-    # Add conditional disable if specified
-    disabled_when = getattr(field, 'disabled_when', None)
-    if disabled_when:
-        result["disabledWhen"] = disabled_when
-
-    # Add universal_only flag if set
-    universal_only = getattr(field, 'universal_only', False)
-    if universal_only:
+    # Add optional properties if set
+    if getattr(field, 'show_when', None):
+        result["showWhen"] = field.show_when
+    if getattr(field, 'disabled_when', None):
+        result["disabledWhen"] = field.disabled_when
+    if getattr(field, 'universal_only', False):
         result["universalOnly"] = True
 
     # Add type-specific properties

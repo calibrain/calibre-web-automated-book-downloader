@@ -92,10 +92,13 @@ class ImageCacheService:
 
     def _load_index(self) -> None:
         """Load cache index from disk."""
+        if not self.index_path.exists():
+            self._index = {}
+            return
+
         try:
-            if self.index_path.exists():
-                with open(self.index_path, 'r') as f:
-                    self._index = json.load(f)
+            with open(self.index_path, 'r') as f:
+                self._index = json.load(f)
         except (json.JSONDecodeError, IOError):
             self._index = {}
 
@@ -179,9 +182,7 @@ class ImageCacheService:
         """Check if a cache entry is expired."""
         if self.ttl_seconds == 0:
             return False
-
-        cached_at = entry.get('cached_at', 0)
-        return (time.time() - cached_at) > self.ttl_seconds
+        return (time.time() - entry.get('cached_at', 0)) > self.ttl_seconds
 
     def _is_negative_expired(self, entry: Dict[str, Any]) -> bool:
         """Check if a negative cache entry is expired.
@@ -193,12 +194,8 @@ class ImageCacheService:
             return False
 
         cached_at = entry.get('cached_at', 0)
-
-        # Transient failures (timeouts, connection errors) use shorter TTL
-        if entry.get('transient', False):
-            return (time.time() - cached_at) > TRANSIENT_CACHE_TTL
-
-        return (time.time() - cached_at) > NEGATIVE_CACHE_TTL
+        ttl = TRANSIENT_CACHE_TTL if entry.get('transient', False) else NEGATIVE_CACHE_TTL
+        return (time.time() - cached_at) > ttl
 
     def _calculate_total_size(self) -> int:
         """Calculate total size of cached images."""
@@ -255,14 +252,13 @@ class ImageCacheService:
         with self._lock:
             entry = self._index.get(cache_id)
 
+            # Try reloading from disk if not found (handles multiprocess case)
             if not entry:
-                # Try reloading from disk (handles multiprocess case)
                 self._load_index()
                 entry = self._index.get(cache_id)
-
-            if not entry:
-                self._misses += 1
-                return None
+                if not entry:
+                    self._misses += 1
+                    return None
 
             # Check for negative cache (failed fetch)
             if entry.get('negative', False):
@@ -526,10 +522,8 @@ class ImageCacheService:
             self.put_negative(cache_id, transient=True)
             return None
         except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.status_code == 404:
-                self.put_negative(cache_id)
-            else:
-                self.put_negative(cache_id, transient=True)
+            is_404 = e.response is not None and e.response.status_code == 404
+            self.put_negative(cache_id, transient=not is_404)
             return None
         except Exception:
             return None

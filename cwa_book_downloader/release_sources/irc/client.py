@@ -72,24 +72,7 @@ class IRCConnectionError(IRCError):
 
 
 class IRCClient:
-    """Minimal IRC client for IRC Highway ebook searches.
-
-    Designed for per-request connections - connect, do operation, disconnect.
-    Not intended for long-lived connections.
-
-    Usage:
-        client = IRCClient(nick="mybot")
-        client.connect()
-        client.join_channel("ebooks")
-        client.send_message("#ebooks", "@search harry potter")
-
-        for msg in client.read_messages():
-            if msg.event == IRCEvent.SEARCH_RESULT:
-                offer = parse_dcc_send(msg.raw)
-                break
-
-        client.disconnect()
-    """
+    """Minimal IRC client for per-request ebook searches on IRC Highway."""
 
     def __init__(
         self,
@@ -119,16 +102,7 @@ class IRCClient:
         return f"cwa_{suffix}"
 
     def connect(self) -> None:
-        """Connect to IRC server and authenticate.
-
-        Connection sequence:
-        1. TCP/TLS connect
-        2. Send USER and NICK
-        3. Wait for server welcome messages
-
-        Raises:
-            IRCConnectionError: If connection fails
-        """
+        """Connect to IRC server, send USER/NICK, and wait for welcome."""
         logger.info(f"Connecting to {self.server}:{self.port} (TLS={self.use_tls})")
 
         try:
@@ -179,14 +153,7 @@ class IRCClient:
             logger.info("Disconnected from IRC")
 
     def join_channel(self, channel: str, wait_for_join: bool = True) -> None:
-        """Join an IRC channel.
-
-        Args:
-            channel: Channel name without # prefix
-            wait_for_join: If True, wait for server confirmation (366 message)
-
-        Also captures the channel's user list to track online servers.
-        """
+        """Join an IRC channel (without # prefix) and capture online servers."""
         self._send(f"JOIN #{channel}")
         logger.debug(f"Sent JOIN #{channel}")
 
@@ -228,41 +195,20 @@ class IRCClient:
             logger.warning(f"Joined #{channel} (no confirmation received)")
 
     def send_message(self, target: str, message: str) -> None:
-        """Send a PRIVMSG to a channel or user.
-
-        Args:
-            target: Channel (with #) or user nick
-            message: Message content
-        """
+        """Send a PRIVMSG to a channel or user."""
         self._send(f"PRIVMSG {target} :{message}")
         logger.debug(f"Sent to {target}: {message[:50]}...")
 
     def send_notice(self, target: str, message: str) -> None:
-        """Send a NOTICE to a user.
-
-        Args:
-            target: User nick
-            message: Notice content
-        """
+        """Send a NOTICE to a user."""
         self._send(f"NOTICE {target} :{message}")
 
     def request_names(self, channel: str) -> None:
-        """Request user list for a channel.
-
-        Args:
-            channel: Channel name without # prefix
-        """
+        """Request user list for a channel (without # prefix)."""
         self._send(f"NAMES #{channel}")
 
     def _parse_names_list(self, names_data: str) -> None:
-        """Parse NAMES list and extract elevated users (download servers).
-
-        IRC NAMES reply format (353):
-        :server 353 nick = #channel :@user1 +user2 user3 ...
-
-        Users with prefixes (~, &, @, %, +) are elevated (ops/voice).
-        These are the download bots/servers.
-        """
+        """Parse 353 NAMES reply and extract elevated users (download servers)."""
         # Extract the trailing part after the last colon (the actual names)
         if ' :' in names_data:
             names_part = names_data.split(' :')[-1]
@@ -270,9 +216,6 @@ class IRCClient:
             names_part = names_data
 
         for name in names_part.split():
-            if not name:
-                continue
-
             # Check if user has an elevated prefix
             if name[0] in ELEVATED_PREFIXES:
                 # Strip the prefix to get the actual nick
@@ -288,11 +231,7 @@ class IRCClient:
         self._socket.sendall(data)
 
     def _recv_lines(self) -> Iterator[str]:
-        """Receive and yield complete IRC lines.
-
-        IRC messages are delimited by \\r\\n. We buffer partial
-        reads and yield complete lines as they arrive.
-        """
+        """Receive and yield complete CRLF-delimited IRC lines."""
         while True:
             # Check if we have a complete line in buffer
             while '\r\n' in self._buffer:
@@ -344,11 +283,7 @@ class IRCClient:
         return msg
 
     def _classify_event(self, msg: IRCMessage) -> IRCEvent:
-        """Classify message into event type.
-
-        Uses simple string containment checks for robustness
-        rather than strict IRC protocol parsing.
-        """
+        """Classify message into event type using string containment checks."""
         raw = msg.raw
         trailing = msg.trailing or ""
 
@@ -370,9 +305,7 @@ class IRCClient:
                 return IRCEvent.MATCHES_FOUND
 
         # User list (RPL_NAMREPLY and RPL_ENDOFNAMES)
-        if msg.command == "353":
-            return IRCEvent.SERVER_LIST
-        if msg.command == "366":
+        if msg.command in ("353", "366"):
             return IRCEvent.SERVER_LIST
 
         # Server PING
@@ -401,14 +334,7 @@ class IRCClient:
             logger.debug(f"Sent VERSION to {sender}")
 
     def read_messages(self, auto_handle: bool = True) -> Iterator[IRCMessage]:
-        """Read and yield IRC messages.
-
-        Args:
-            auto_handle: If True, automatically handle PING and VERSION
-
-        Yields:
-            IRCMessage objects for each received message
-        """
+        """Read and yield IRC messages, optionally auto-handling PING/VERSION."""
         for line in self._recv_lines():
             msg = self._parse_message(line)
 
@@ -429,15 +355,7 @@ class IRCClient:
         timeout: float = 60.0,
         result_type: bool = False,
     ) -> Optional[DCCOffer]:
-        """Wait for a DCC SEND offer.
-
-        Args:
-            timeout: Maximum time to wait in seconds
-            result_type: If True, wait for SEARCH_RESULT; else BOOK_RESULT
-
-        Returns:
-            DCCOffer if received, None if timeout
-        """
+        """Wait for a DCC SEND offer. Returns None on timeout or no results."""
         target_event = IRCEvent.SEARCH_RESULT if result_type else IRCEvent.BOOK_RESULT
         start = time.time()
 
@@ -459,12 +377,12 @@ class IRCClient:
             if msg.event == IRCEvent.NO_RESULTS:
                 logger.info("Server reports no results")
                 return None
-            if msg.event == IRCEvent.BAD_SERVER:
+            elif msg.event == IRCEvent.BAD_SERVER:
                 logger.warning("Server unavailable")
                 return None
-            if msg.event == IRCEvent.SEARCH_ACCEPTED:
+            elif msg.event == IRCEvent.SEARCH_ACCEPTED:
                 logger.info("Search accepted, waiting for results...")
-            if msg.event == IRCEvent.MATCHES_FOUND:
+            elif msg.event == IRCEvent.MATCHES_FOUND:
                 # Extract count from "returned X matches"
                 if msg.trailing and "returned" in msg.trailing:
                     try:

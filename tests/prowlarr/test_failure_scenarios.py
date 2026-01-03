@@ -581,10 +581,19 @@ class TestFileHandlingFailures:
         assert recorder.had_error
         assert "locate" in recorder.last_message.lower()
 
-    def test_permission_denied_on_copy(
-        self, handler, mock_client, recorder, cancel_flag, sample_task, sample_release
+    def test_permission_denied_on_move(
+        self, handler, mock_client, recorder, cancel_flag, sample_task
     ):
-        """Handler should report permission errors during file staging."""
+        """Handler should report permission errors during file staging (usenet only - torrents skip staging)."""
+        # Use usenet protocol - torrents skip staging and return original path directly
+        # Default usenet action is "move", so we mock shutil.move
+        usenet_release = {
+            "guid": "test-task-123",
+            "title": "Test Book",
+            "downloadUrl": "https://indexer.example.com/download/123",
+            "protocol": "usenet",
+            "indexer": "TestIndexer",
+        }
         mock_client.status_sequence = [
             DownloadStatus(
                 progress=100,
@@ -598,21 +607,23 @@ class TestFileHandlingFailures:
         with tempfile.TemporaryDirectory() as tmpdir:
             source_file = Path(tmpdir) / "source.epub"
             source_file.write_text("test content")
+            staging_dir = Path(tmpdir) / "staging"
+            staging_dir.mkdir()
 
             mock_client.get_download_path = lambda x: str(source_file)
 
             with patch(
                 "cwa_book_downloader.release_sources.prowlarr.handler.get_release",
-                return_value=sample_release,
+                return_value=usenet_release,
             ), patch(
                 "cwa_book_downloader.release_sources.prowlarr.handler.get_client",
                 return_value=mock_client,
             ), patch(
-                "shutil.copy2",
+                "cwa_book_downloader.release_sources.prowlarr.handler.shutil.move",
                 side_effect=PermissionError("Permission denied"),
             ), patch(
                 "cwa_book_downloader.download.orchestrator.get_staging_dir",
-                return_value=Path(tmpdir) / "staging",
+                return_value=staging_dir,
             ):
                 result = handler.download(
                     task=sample_task,

@@ -19,6 +19,49 @@ from cwa_book_downloader.release_sources.prowlarr.clients import (
 logger = setup_logger(__name__)
 
 
+def _parse_eta(eta_str: str) -> Optional[int]:
+    """Parse SABnzbd ETA string (format: 'H:MM:SS') to seconds."""
+    if not eta_str or eta_str == "0:00:00":
+        return None
+    try:
+        parts = eta_str.split(":")
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    except (ValueError, IndexError):
+        pass
+    return None
+
+
+def _parse_speed(slot: dict) -> Optional[int]:
+    """Parse download speed from SABnzbd slot data, returning bytes/sec."""
+    # Prefer kbpersec field (more reliable numeric value)
+    kbpersec_str = slot.get("kbpersec", "")
+    if kbpersec_str:
+        try:
+            return int(float(kbpersec_str) * 1024)
+        except (ValueError, TypeError):
+            pass
+
+    # Fall back to human-readable speed field
+    speed_str = slot.get("speed", "")
+    if not speed_str:
+        return None
+
+    try:
+        speed_parts = speed_str.split()
+        if len(speed_parts) < 2:
+            return None
+        speed_val = float(speed_parts[0])
+        unit = speed_parts[1].upper()
+        multipliers = {"K": 1024, "M": 1024**2, "G": 1024**3}
+        for prefix, mult in multipliers.items():
+            if prefix in unit:
+                return int(speed_val * mult)
+        return int(speed_val)
+    except (ValueError, IndexError):
+        return None
+
+
 @register_client("usenet")
 class SABnzbdClient(DownloadClient):
     """SABnzbd download client using REST API."""
@@ -179,59 +222,14 @@ class SABnzbdClient(DownloadClient):
                     }
                     state = status_mapping.get(status_text, "downloading")
 
-                    # Parse ETA (format: "0:01:23" or empty)
-                    eta_str = slot.get("timeleft", "")
-                    eta_seconds = None
-                    if eta_str and eta_str != "0:00:00":
-                        try:
-                            parts = eta_str.split(":")
-                            if len(parts) == 3:
-                                eta_seconds = (
-                                    int(parts[0]) * 3600
-                                    + int(parts[1]) * 60
-                                    + int(parts[2])
-                                )
-                        except (ValueError, IndexError):
-                            pass  # ETA display is optional
-
-                    # Parse speed - prefer kbpersec field (more reliable numeric value)
-                    download_speed = None
-                    kbpersec_str = slot.get("kbpersec", "")
-                    if kbpersec_str:
-                        try:
-                            kbpersec = float(kbpersec_str)
-                            download_speed = int(kbpersec * 1024)  # Convert KB/s to bytes/s
-                        except (ValueError, TypeError):
-                            pass  # Speed display is optional
-
-                    # Fall back to human-readable speed field if kbpersec not available
-                    if download_speed is None:
-                        speed_str = slot.get("speed", "")
-                        if speed_str:
-                            try:
-                                speed_parts = speed_str.split()
-                                if len(speed_parts) >= 2:
-                                    speed_val = float(speed_parts[0])
-                                    unit = speed_parts[1].upper()
-                                    if "K" in unit:
-                                        download_speed = int(speed_val * 1024)
-                                    elif "M" in unit:
-                                        download_speed = int(speed_val * 1024 * 1024)
-                                    elif "G" in unit:
-                                        download_speed = int(speed_val * 1024 * 1024 * 1024)
-                                    else:
-                                        download_speed = int(speed_val)
-                            except (ValueError, IndexError):
-                                pass  # Speed display is optional
-
                     return DownloadStatus(
                         progress=percentage,
                         state=state,
                         message=status_text.lower().replace("_", " ").title(),
                         complete=False,
                         file_path=None,
-                        download_speed=download_speed,
-                        eta=eta_seconds,
+                        download_speed=_parse_speed(slot),
+                        eta=_parse_eta(slot.get("timeleft", "")),
                     )
 
             # Not in queue, check history

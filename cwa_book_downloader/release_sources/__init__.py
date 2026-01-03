@@ -40,13 +40,7 @@ class Release:
 
 @dataclass
 class DownloadProgress:
-    """Progress update structure.
-
-    DEPRECATED: This class is deprecated and will be removed.
-    The new DownloadHandler.download() uses simpler callbacks:
-    - progress_callback(float) for progress percentage
-    - status_callback(str, Optional[str]) for status and message
-    """
+    """DEPRECATED: Use progress_callback and status_callback instead."""
     status: str                      # "queued", "resolving", "downloading", "complete", "failed"
     progress: float                  # 0-100
     status_message: Optional[str] = None
@@ -227,18 +221,7 @@ class ReleaseSource(ABC):
         languages: Optional[List[str]] = None,
         content_type: str = "ebook"
     ) -> List[Release]:
-        """Search for releases of a book.
-
-        Args:
-            book: Book metadata from provider
-            expand_search: If True, use broader search (e.g., title+author instead of ISBN).
-                          Not all sources support this - they may ignore it.
-            languages: Optional list of language codes to filter by.
-                      If provided, overrides book.language and default settings.
-                      Not all sources support this - they may ignore it.
-            content_type: Content type - "ebook" or "audiobook" (default: "ebook").
-                         Sources may use this to adjust search categories/filters.
-        """
+        """Search for releases of a book."""
         pass
 
     @abstractmethod
@@ -248,41 +231,13 @@ class ReleaseSource(ABC):
 
     @classmethod
     def get_column_config(cls) -> ReleaseColumnConfig:
-        """Get the column configuration for this source's release list UI.
-
-        Override this method in subclasses to provide custom columns.
-        Default implementation returns standard columns (language, format, size).
-        """
+        """Get column configuration for release list UI. Override for custom columns."""
         return _default_column_config()
 
 
 class DownloadHandler(ABC):
-    """Interface for executing downloads from a source.
-
-    ## Staging Architecture
-
-    Handlers are responsible for getting files into the STAGING directory (TMP_DIR).
-    The orchestrator handles all post-processing and moving to the INGEST directory.
-
-    This means handlers should:
-    1. Download/retrieve the file to the staging directory
-    2. Return the path to the staged file
-    3. NOT move files to the ingest folder (orchestrator does this)
-
-    Examples by source type:
-    - **Direct downloads**: Download directly to staging dir
-    - **Torrents**: Copy completed file from torrent client to staging (keep seeding)
-    - **Usenet**: Move completed file from NZB client to staging
-
-    Use the staging helpers from orchestrator:
-    - `get_staging_dir()` - Get the staging directory path
-    - `get_staging_path(task_id, ext)` - Get a staging path for a task
-    - `stage_file(source, task_id, copy=False)` - Stage a file (copy or move)
-
-    The orchestrator then handles:
-    - Archive extraction (RAR/ZIP)
-    - Custom script execution
-    - Moving to the final ingest folder
+    """Interface for executing downloads. Handlers stage files to TMP_DIR;
+    orchestrator handles post-processing and move to INGEST_DIR.
     """
 
     @abstractmethod
@@ -293,22 +248,7 @@ class DownloadHandler(ABC):
         progress_callback: Callable[[float], None],
         status_callback: Callable[[str, Optional[str]], None]
     ) -> Optional[str]:
-        """
-        Execute download and return path to STAGED file.
-
-        Handlers should download/copy files to the staging directory (TMP_DIR),
-        NOT directly to the ingest folder. The orchestrator handles post-processing
-        (archive extraction, custom scripts) and final move to ingest.
-
-        Args:
-            task: The download task with task_id and display info
-            cancel_flag: Event to check for cancellation
-            progress_callback: Called with progress percentage (0-100)
-            status_callback: Called with (status, message) for status updates
-
-        Returns:
-            Path to staged file (in TMP_DIR) if successful, None otherwise
-        """
+        """Execute download and return path to staged file in TMP_DIR."""
         pass
 
     @abstractmethod
@@ -354,11 +294,7 @@ def get_handler(name: str) -> DownloadHandler:
 
 
 def list_available_sources() -> List[dict]:
-    """For frontend - list all registered sources with their status.
-
-    Returns all sources (not just available ones) so the frontend can show
-    appropriate UI for disabled/unconfigured sources instead of hiding them.
-    """
+    """List all registered sources with their availability status."""
     result = []
     for name, src_class in _SOURCES.items():
         instance = src_class()

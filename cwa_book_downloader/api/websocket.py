@@ -28,29 +28,17 @@ class WebSocketManager:
         logger.info("WebSocket manager initialized")
 
     def register_on_first_connect(self, callback: Callable[[], None]):
-        """Register a callback to be called when the first client connects.
-
-        This is useful for warming up resources (like the Cloudflare bypasser)
-        when a user starts using the web UI.
-        """
+        """Register a callback for when the first client connects."""
         self._on_first_connect_callbacks.append(callback)
         logger.debug(f"Registered on_first_connect callback: {callback.__name__}")
 
     def register_on_all_disconnect(self, callback: Callable[[], None]):
-        """Register a callback to be called when all clients disconnect.
-
-        This can be used to trigger cleanup or resource release.
-        """
+        """Register a callback for when all clients disconnect."""
         self._on_all_disconnect_callbacks.append(callback)
         logger.debug(f"Registered on_all_disconnect callback: {callback.__name__}")
 
     def request_warmup_on_next_connect(self):
-        """Request that warmup callbacks be triggered on the next client connect.
-
-        This is used when resources (like the Cloudflare bypasser) shut down due to
-        inactivity while clients are still connected. The next connect event should
-        trigger warmup even though it's not technically the "first" connection.
-        """
+        """Request warmup callbacks on the next client connect (e.g., after idle shutdown)."""
         with self._connection_lock:
             self._needs_rewarm = True
             logger.debug("Warmup requested for next client connect")
@@ -165,15 +153,7 @@ class WebSocketManager:
         message: str,
         phase: str = 'searching'
     ):
-        """Broadcast search status update for a release source search.
-
-        Args:
-            source: Release source name (e.g., 'irc', 'direct_download')
-            provider: Metadata provider name (e.g., 'hardcover')
-            book_id: Book ID from the metadata provider
-            message: Human-readable status message
-            phase: Search phase ('connecting', 'searching', 'downloading', 'parsing', 'complete', 'error')
-        """
+        """Broadcast search status update for a release source search."""
         if not self.is_enabled():
             return
 

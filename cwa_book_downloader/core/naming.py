@@ -32,20 +32,19 @@ def _sanitize(name: str, max_length: int = 245) -> str:
 
 
 def sanitize_filename(name: str, max_length: int = 245) -> str:
-    """Sanitize a string for use as a filename."""
+    """Sanitize a string for use as a filename or path component."""
     return _sanitize(name, max_length)
 
 
-def sanitize_path_component(name: str, max_length: int = 245) -> str:
-    """Sanitize a string for use as a path component."""
-    return _sanitize(name, max_length)
+# Alias for backwards compatibility
+sanitize_path_component = sanitize_filename
 
 
 def format_series_position(position: Optional[Union[int, float]]) -> str:
     if position is None:
         return ""
 
-    # Check if it's effectively an integer
+    # Display as integer if whole number
     if isinstance(position, float) and position.is_integer():
         return str(int(position))
 
@@ -110,11 +109,7 @@ def parse_naming_template(
             return ""
 
         # Sanitize the value
-        # If suffix contains a slash, this is meant to be a folder component
-        if '/' in suffix:
-            value = sanitize_path_component(value)
-        else:
-            value = sanitize_filename(value)
+        value = sanitize_filename(value)
 
         return f"{prefix}{value}{suffix}"
 

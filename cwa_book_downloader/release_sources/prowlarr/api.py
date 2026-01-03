@@ -1,14 +1,7 @@
-"""
-Prowlarr API client.
-
-Handles communication with the Prowlarr API for:
-- Connection testing
-- Indexer listing
-- Book search
-"""
+"""Prowlarr API client for connection testing, indexer listing, and search."""
 
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlencode, urljoin
+from urllib.parse import urljoin
 
 import requests
 
@@ -21,14 +14,6 @@ class ProwlarrClient:
     """Client for interacting with the Prowlarr API."""
 
     def __init__(self, url: str, api_key: str, timeout: int = 30):
-        """
-        Initialize the Prowlarr client.
-
-        Args:
-            url: Base URL of the Prowlarr instance (e.g., http://prowlarr:9696)
-            api_key: Prowlarr API key
-            timeout: Request timeout in seconds
-        """
         self.base_url = url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
@@ -45,22 +30,7 @@ class ProwlarrClient:
         params: Optional[Dict[str, Any]] = None,
         json_data: Optional[Dict[str, Any]] = None,
     ) -> Any:
-        """
-        Make an API request to Prowlarr.
-
-        Args:
-            method: HTTP method (GET, POST, etc.)
-            endpoint: API endpoint (e.g., /api/v1/search)
-            params: Query parameters
-            json_data: JSON body data
-
-        Returns:
-            Parsed JSON response
-
-        Raises:
-            requests.RequestException: On network errors
-            ValueError: On invalid JSON response
-        """
+        """Make an API request to Prowlarr. Returns parsed JSON response."""
         url = urljoin(self.base_url, endpoint)
         logger.debug(f"Prowlarr API: {method} {url}")
 
@@ -94,12 +64,7 @@ class ProwlarrClient:
             raise
 
     def test_connection(self) -> Tuple[bool, str]:
-        """
-        Test the connection to Prowlarr.
-
-        Returns:
-            Tuple of (success: bool, message: str)
-        """
+        """Test connection to Prowlarr. Returns (success, message)."""
         logger.info(f"Testing Prowlarr connection to: {self.base_url}")
         try:
             data = self._request("GET", "/api/v1/system/status")
@@ -117,12 +82,7 @@ class ProwlarrClient:
             return False, f"Connection failed: {str(e)}"
 
     def get_indexers(self) -> List[Dict[str, Any]]:
-        """
-        Get all configured indexers.
-
-        Returns:
-            List of indexer configurations with id, name, protocol, enabled status
-        """
+        """Get all configured indexers."""
         try:
             indexers = self._request("GET", "/api/v1/indexer")
             return indexers
@@ -131,12 +91,7 @@ class ProwlarrClient:
             return []
 
     def get_enabled_indexers(self) -> List[Dict[str, Any]]:
-        """
-        Get enabled indexers with book-related info.
-
-        Returns:
-            List of enabled indexers with simplified structure
-        """
+        """Get enabled indexers with book capability info."""
         indexers = self.get_indexers()
         result = []
 
@@ -144,20 +99,9 @@ class ProwlarrClient:
             if not idx.get("enable", False):
                 continue
 
-            # Check for book categories
-            capabilities = idx.get("capabilities", {})
-            categories = capabilities.get("categories", [])
-            has_books = False
-
-            for cat in categories:
-                cat_id = cat.get("id", 0)
-                if 7000 <= cat_id <= 7999:
-                    has_books = True
-                    break
-                for subcat in cat.get("subCategories", []):
-                    if 7000 <= subcat.get("id", 0) <= 7999:
-                        has_books = True
-                        break
+            # Check for book categories (7000-7999 range)
+            categories = idx.get("capabilities", {}).get("categories", [])
+            has_books = self._has_book_categories(categories)
 
             result.append({
                 "id": idx.get("id"),
@@ -168,6 +112,17 @@ class ProwlarrClient:
 
         return result
 
+    def _has_book_categories(self, categories: List[Dict[str, Any]]) -> bool:
+        """Check if any category or subcategory is in the book range (7000-7999)."""
+        for cat in categories:
+            cat_id = cat.get("id", 0)
+            if 7000 <= cat_id <= 7999:
+                return True
+            for subcat in cat.get("subCategories", []):
+                if 7000 <= subcat.get("id", 0) <= 7999:
+                    return True
+        return False
+
     def search(
         self,
         query: str,
@@ -175,33 +130,19 @@ class ProwlarrClient:
         categories: Optional[List[int]] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
-        """
-        Search for releases via Prowlarr.
-
-        Args:
-            query: Search query
-            indexer_ids: Specific indexer IDs to search (required for targeted search)
-            categories: Category IDs to filter by (optional)
-            limit: Maximum number of results to return (default: 100)
-
-        Returns:
-            List of search results
-        """
+        """Search for releases via Prowlarr."""
         if not query:
             return []
 
-        params = {"query": query, "limit": limit}
+        params: Dict[str, Any] = {"query": query, "limit": limit}
         if indexer_ids:
             params["indexerIds"] = indexer_ids
         if categories:
             params["categories"] = categories
 
-        endpoint = f"/api/v1/search?{urlencode(params, doseq=True)}"
-
         try:
-            results = self._request("GET", endpoint)
+            results = self._request("GET", "/api/v1/search", params=params)
             return results if isinstance(results, list) else []
-
         except Exception as e:
             logger.error(f"Prowlarr search failed: {e}")
             return []

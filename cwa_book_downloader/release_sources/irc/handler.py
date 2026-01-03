@@ -29,20 +29,7 @@ class IRCDownloadHandler(DownloadHandler):
         progress_callback: Callable[[float], None],
         status_callback: Callable[[str, Optional[str]], None],
     ) -> Optional[str]:
-        """Download a book via IRC DCC.
-
-        The task.task_id contains the full IRC request string,
-        e.g., "!ServerName Author - Title.epub ::INFO:: 2.5MB"
-
-        Args:
-            task: Download task with IRC request info
-            cancel_flag: Set to cancel download
-            progress_callback: Report progress 0-100
-            status_callback: Report status messages
-
-        Returns:
-            Path to downloaded file, or None on failure
-        """
+        """Download a book via IRC DCC. task.task_id contains the IRC request string."""
         download_request = task.task_id
         logger.info(f"IRC download: {download_request[:60]}...")
 
@@ -135,10 +122,6 @@ class IRCDownloadHandler(DownloadHandler):
             return None
 
     def cancel(self, task_id: str) -> bool:
-        """Cancel an in-progress download.
-
-        Note: Actual cancellation is handled via the cancel_flag in download().
-        This method is for cleanup if the cancel_flag mechanism fails.
-        """
+        """Cancel an in-progress download (cleanup if cancel_flag fails)."""
         logger.debug(f"Cancel requested for IRC task: {task_id}")
         return True

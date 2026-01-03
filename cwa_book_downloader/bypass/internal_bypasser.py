@@ -268,11 +268,7 @@ def _has_cloudflare_patterns(body: str, url: str) -> bool:
     return "cf-" in body or "cloudflare" in url.lower() or "/cdn-cgi/" in url
 
 def _detect_challenge_type(sb) -> str:
-    """Detect what type of challenge we're facing.
-    
-    Returns:
-        str: 'cloudflare', 'ddos_guard', or 'none' if no challenge detected
-    """
+    """Detect challenge type: 'cloudflare', 'ddos_guard', or 'none'."""
     try:
         title, body, current_url = _get_page_info(sb)
         

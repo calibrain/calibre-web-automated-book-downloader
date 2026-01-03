@@ -1,6 +1,5 @@
 """DNS rotation, mirror selection, and network utilities."""
 
-import os
 import requests
 import urllib.request
 from typing import Sequence, Tuple, Any, Union, cast, List, Optional, Callable
@@ -8,7 +7,6 @@ import socket
 import dns.resolver
 from socket import AddressFamily, SocketKind
 import urllib.parse
-import ssl
 import ipaddress
 
 from cwa_book_downloader.core.logger import setup_logger
@@ -107,13 +105,6 @@ def _notify_dns_rotation(provider_name: str, servers: List[str], doh_url: str) -
         except Exception as e:
             logger.warning(f"DNS rotation callback {callback.__name__} failed: {e}")
 
-def _agent_debug_log(code: str, source: str, reason: str, meta: Optional[dict] = None) -> None:
-    """Lightweight debug hook for automated runs; safe no-op on failure."""
-    try:
-        logger.debug(f"[agent] code={code} source={source} reason={reason} meta={meta or {}}")
-    except Exception as exc:
-        # Avoid raising inside debug logger
-        logger.debug(f"[agent] log failed: {exc}")
 
 def _load_state():
     """Return current in-memory network state (no disk persistence)."""
@@ -234,34 +225,17 @@ def _decode_port(port: Union[str, bytes, int, None]) -> int:
     """Convert port to integer, handling various input types."""
     if port is None:
         return 0
-    if isinstance(port, (str, bytes)):
-        return int(port)
     return int(port)
 
 def _is_local_address(host_str: str) -> bool:
     """Check if an address is local or private and should bypass custom DNS."""
-    # Localhost checks
-    if (host_str == 'localhost' or 
-        host_str.startswith('127.') or 
-        host_str == '::1' or 
-        host_str == '0.0.0.0'):
+    if host_str == 'localhost':
         return True
-        
-    # IPv4 private ranges (RFC 1918)
-    if (host_str.startswith('10.') or 
-        (host_str.startswith('172.') and 
-         len(host_str.split('.')) > 1 and 
-         16 <= int(host_str.split('.')[1]) <= 31) or
-        host_str.startswith('192.168.')):
-        return True
-        
-    # IPv6 private ranges
-    if (host_str.startswith('fc') or 
-        host_str.startswith('fd') or  # Unique local addresses (fc00::/7)
-        host_str.startswith('fe80:')):  # Link-local addresses (fe80::/10)
-        return True
-    
-    return False
+    try:
+        addr = ipaddress.ip_address(host_str)
+        return addr.is_private or addr.is_loopback or addr.is_link_local
+    except ValueError:
+        return False
 
 def _is_ip_address(host_str: str) -> bool:
     """Check if a string is a valid IP address (IPv4 or IPv6)."""
