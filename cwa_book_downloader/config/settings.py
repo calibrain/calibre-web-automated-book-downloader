@@ -482,173 +482,127 @@ def download_settings():
     """Configure download behavior and file locations."""
     return [
         # === BOOKS SECTION ===
+        # Visible for ALL modes (Direct + Universal)
         HeadingField(
             key="books_heading",
             title="Books",
-            description="Configure how ebooks, comics, and magazines are processed.",
-        ),
-        SelectField(
-            key="PROCESSING_MODE",
-            label="Processing Mode",
-            description="Ingest mode processes and moves files to an ingest folder. Library mode organizes files with custom naming. Note: RAR/ZIP extraction is only supported in Ingest mode.",
-            options=[
-                {"value": "ingest", "label": "Ingest"},
-                {"value": "library", "label": "Library"},
-            ],
-            default="ingest",
-            universal_only=True,
+            description="Configure where ebooks, comics, and magazines are saved.",
         ),
         TextField(
-            key="INGEST_DIR",
-            label="Download Directory",
-            description="Directory where downloaded files are saved for processing. Recommended to use your library's ingest directory.",
+            key="DESTINATION",
+            label="Destination",
+            description="Directory where downloaded files are saved.",
             default="/cwa-book-ingest",
             required=True,
-            show_when={"field": "PROCESSING_MODE", "value": "ingest"},
         ),
-        CheckboxField(
-            key="USE_BOOK_TITLE",
-            label="Use Book Info as Filename",
-            description="Save files using Author, Title and Year instead of ID.",
-            default=True,
-            show_when={"field": "PROCESSING_MODE", "value": "ingest"},
+        SelectField(
+            key="FILE_ORGANIZATION",
+            label="File Organization",
+            description="Choose how downloaded book files are named and organized. ",
+            options=[
+                {
+                    "value": "none",
+                    "label": "None",
+                    "description": "Keep original filename from source"
+                },
+                {
+                    "value": "rename",
+                    "label": "Rename",
+                    "description": "Rename files using a template"
+                },
+                {
+                    "value": "organize",
+                    "label": "Organize",
+                    "description": "Create folders and rename files using a template. Do not use with ingest folders."
+                },
+            ],
+            default="rename",
         ),
-        CheckboxField(
-            key="USE_CONTENT_TYPE_DIRECTORIES",
-            label="Use Content-Type Directories",
-            description="Route content to separate directories based on type (fiction, non-fiction, comics, etc.).",
-            default=False,
-            env_supported=False,
-            show_when={"field": "PROCESSING_MODE", "value": "ingest"},
-        ),
-        HeadingField(
-            key="content_type_directories_heading",
-            title="Content-Type Directories",
-            description="Leave empty to use the default ingest directory.",
-            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
-        ),
+        # Rename mode template - filename only
         TextField(
-            key="INGEST_DIR_BOOK_FICTION",
-            label="Fiction Books",
-            placeholder="/cwa-book-ingest/fiction",
-            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
-        ),
-        TextField(
-            key="INGEST_DIR_BOOK_NON_FICTION",
-            label="Non-Fiction Books",
-            placeholder="/cwa-book-ingest/non-fiction",
-            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
-        ),
-        TextField(
-            key="INGEST_DIR_BOOK_UNKNOWN",
-            label="Unknown Books",
-            placeholder="/cwa-book-ingest/unknown",
-            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
-        ),
-        TextField(
-            key="INGEST_DIR_MAGAZINE",
-            label="Magazines",
-            placeholder="/cwa-book-ingest/magazines",
-            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
-        ),
-        TextField(
-            key="INGEST_DIR_COMIC_BOOK",
-            label="Comic Books",
-            placeholder="/cwa-book-ingest/comics",
-            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
-        ),
-        TextField(
-            key="INGEST_DIR_STANDARDS_DOCUMENT",
-            label="Standards Documents",
-            placeholder="/cwa-book-ingest/standards",
-            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
-        ),
-        TextField(
-            key="INGEST_DIR_MUSICAL_SCORE",
-            label="Musical Scores",
-            placeholder="/cwa-book-ingest/scores",
-            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
-        ),
-        TextField(
-            key="INGEST_DIR_OTHER",
-            label="Other",
-            placeholder="/cwa-book-ingest/other",
-            show_when={"field": "USE_CONTENT_TYPE_DIRECTORIES", "value": True},
-        ),
-        TextField(
-            key="LIBRARY_PATH",
-            label="Library Path",
-            description="Base path for your book library (e.g., /books).",
-            placeholder="/books",
-            required=True,
-            show_when={"field": "PROCESSING_MODE", "value": "library"},
-            universal_only=True,
-        ),
-        TextField(
-            key="LIBRARY_TEMPLATE",
+            key="TEMPLATE_RENAME",
             label="Naming Template",
-            description="Available: {Author}, {Title}, {Subtitle}, {Year}, {Series}, {SeriesPosition}, {PartNumber}. Use {Series/} for conditional folders.",
-            default="{Author}/{Title}",
-            placeholder="{Author}/{Series/}{Title}{ - Subtitle} ({Year})",
-            show_when={"field": "PROCESSING_MODE", "value": "library"},
+            description="Variables: {Author}, {Title}, {Year}. Universal adds: {Series}, {SeriesPosition}, {Subtitle}",
+            default="{Author} - {Title} ({Year})",
+            placeholder="{Author} - {Title} ({Year})",
+            show_when={"field": "FILE_ORGANIZATION", "value": "rename"},
+        ),
+        # Organize mode template - folders allowed
+        TextField(
+            key="TEMPLATE_ORGANIZE",
+            label="Path Template",
+            description="Use / to create folders. Variables: {Author}, {Title}, {Year}. Universal adds: {Series}, {SeriesPosition}, {Subtitle}",
+            default="{Author}/{Title} ({Year})",
+            placeholder="{Author}/{Series/}{Title} ({Year})",
+            show_when={"field": "FILE_ORGANIZATION", "value": "organize"},
+        ),
+        CheckboxField(
+            key="HARDLINK_TORRENTS",
+            label="Hardlink Book Torrents",
+            description="Create hardlinks instead of copying. Preserves seeding but archives won't be extracted. Don't use if destination is a library ingest folder.",
+            default=False,
             universal_only=True,
         ),
+
         # === AUDIOBOOKS SECTION ===
+        # Universal mode only
         HeadingField(
             key="audiobooks_heading",
             title="Audiobooks",
-            description="Configure how audiobooks are processed.",
+            description="Configure where audiobooks are saved.",
+            universal_only=True,
+        ),
+        TextField(
+            key="DESTINATION_AUDIOBOOK",
+            label="Destination",
+            description="Leave empty to use Books destination.",
+            placeholder="/audiobooks",
             universal_only=True,
         ),
         SelectField(
-            key="PROCESSING_MODE_AUDIOBOOK",
-            label="Processing Mode",
-            description="Ingest mode moves files to an ingest folder. Library mode organizes files with custom naming.",
+            key="FILE_ORGANIZATION_AUDIOBOOK",
+            label="File Organization",
+            description="Choose how downloaded audiobook files are named and organized.",
             options=[
-                {"value": "ingest", "label": "Ingest"},
-                {"value": "library", "label": "Library"},
+                {"value": "none", "label": "None", "description": "Keep original filename from source"},
+                {"value": "rename", "label": "Rename", "description": "Rename files using a template"},
+                {"value": "organize", "label": "Organize", "description": "Create folders and rename files using a template. Recommended for Audiobookshelf. Do not use with ingest folders."},
             ],
-            default="ingest",
+            default="rename",
             universal_only=True,
         ),
+        # Rename mode template - filename only
         TextField(
-            key="INGEST_DIR_AUDIOBOOK",
-            label="Download Directory",
-            description="Leave empty to use the Books download directory.",
-            placeholder="/audiobooks",
-            show_when={"field": "PROCESSING_MODE_AUDIOBOOK", "value": "ingest"},
-            universal_only=True,
-        ),
-        TextField(
-            key="LIBRARY_PATH_AUDIOBOOK",
-            label="Library Path",
-            description="Base path for your audiobook library (e.g., /audiobooks).",
-            placeholder="/audiobooks",
-            required=True,
-            show_when={"field": "PROCESSING_MODE_AUDIOBOOK", "value": "library"},
-            universal_only=True,
-        ),
-        TextField(
-            key="LIBRARY_TEMPLATE_AUDIOBOOK",
+            key="TEMPLATE_AUDIOBOOK_RENAME",
             label="Naming Template",
-            description="Available: {Author}, {Title}, {Subtitle}, {Year}, {Series}, {SeriesPosition}, {PartNumber}. Use {PartNumber} for multi-file audiobooks.",
+            description="Variables: {Author}, {Title}, {Year}, {Series}, {SeriesPosition}, {Subtitle}, {PartNumber}",
+            default="{Author} - {Title}",
+            placeholder="{Author} - {Title}{ - Part }{PartNumber}",
+            show_when={"field": "FILE_ORGANIZATION_AUDIOBOOK", "value": "rename"},
+            universal_only=True,
+        ),
+        # Organize mode template - folders allowed
+        TextField(
+            key="TEMPLATE_AUDIOBOOK_ORGANIZE",
+            label="Path Template",
+            description="Use / to create folders. Variables: {Author}, {Title}, {Year}, {Series}, {SeriesPosition}, {Subtitle}, {PartNumber}",
             default="{Author}/{Title}",
             placeholder="{Author}/{Series/}{Title}{ - Part }{PartNumber}",
-            show_when={"field": "PROCESSING_MODE_AUDIOBOOK", "value": "library"},
-            universal_only=True,
-        ),
-        # === OPTIONS SECTION ===
-        HeadingField(
-            key="library_options_heading",
-            title="Options",
+            show_when={"field": "FILE_ORGANIZATION_AUDIOBOOK", "value": "organize"},
             universal_only=True,
         ),
         CheckboxField(
-            key="TORRENT_HARDLINK",
-            label="Hardlink Torrents in Library Mode",
-            description="Create hardlinks for torrent downloads instead of copying. Requires library and download paths on same filesystem.",
+            key="HARDLINK_TORRENTS_AUDIOBOOK",
+            label="Hardlink Audiobook Torrents",
+            description="Create hardlinks instead of copying. Preserves seeding but archives won't be extracted. Don't use if destination is a library ingest folder.",
             default=True,
             universal_only=True,
+        ),
+
+        # === OPTIONS SECTION ===
+        HeadingField(
+            key="options_heading",
+            title="Options",
         ),
         CheckboxField(
             key="AUTO_OPEN_DOWNLOADS_SIDEBAR",
@@ -820,6 +774,65 @@ def download_source_settings():
             key="AA_DONATOR_KEY",
             label="Anna's Archive Donator Key",
             description="Optional donator key for faster downloads from Anna's Archive.",
+        ),
+        HeadingField(
+            key="content_type_routing_heading",
+            title="Content-Type Routing",
+            description="Route downloads to different folders based on content type. Only applies to Anna's Archive downloads.",
+        ),
+        CheckboxField(
+            key="AA_CONTENT_TYPE_ROUTING",
+            label="Enable Content-Type Routing",
+            description="Override destination based on Anna's Archive content type metadata.",
+            default=False,
+        ),
+        TextField(
+            key="AA_CONTENT_TYPE_DIR_FICTION",
+            label="Fiction Books",
+            placeholder="/cwa-book-ingest/fiction",
+            show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
+        ),
+        TextField(
+            key="AA_CONTENT_TYPE_DIR_NON_FICTION",
+            label="Non-Fiction Books",
+            placeholder="/cwa-book-ingest/non-fiction",
+            show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
+        ),
+        TextField(
+            key="AA_CONTENT_TYPE_DIR_UNKNOWN",
+            label="Unknown Books",
+            placeholder="/cwa-book-ingest/unknown",
+            show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
+        ),
+        TextField(
+            key="AA_CONTENT_TYPE_DIR_MAGAZINE",
+            label="Magazines",
+            placeholder="/cwa-book-ingest/magazines",
+            show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
+        ),
+        TextField(
+            key="AA_CONTENT_TYPE_DIR_COMIC",
+            label="Comic Books",
+            placeholder="/cwa-book-ingest/comics",
+            show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
+        ),
+        TextField(
+            key="AA_CONTENT_TYPE_DIR_STANDARDS",
+            label="Standards Documents",
+            placeholder="/cwa-book-ingest/standards",
+            show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
+        ),
+        TextField(
+            key="AA_CONTENT_TYPE_DIR_MUSICAL_SCORE",
+            label="Musical Scores",
+            placeholder="/cwa-book-ingest/scores",
+            show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
+        ),
+        TextField(
+            key="AA_CONTENT_TYPE_DIR_OTHER",
+            label="Other",
+            placeholder="/cwa-book-ingest/other",
+            show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
         ),
     ]
 

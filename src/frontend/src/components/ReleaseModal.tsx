@@ -55,6 +55,85 @@ function setCachedReleases(provider: string, providerId: string, source: string,
   cacheTimestamps.set(key, Date.now());
 }
 
+// LocalStorage helpers for persisting sort preferences per source
+const SORT_STORAGE_PREFIX = 'cwa-bd-release-sort-';
+
+interface SortState {
+  key: string;
+  direction: 'asc' | 'desc';
+}
+
+function getSavedSort(sourceName: string): SortState | null {
+  try {
+    const saved = localStorage.getItem(`${SORT_STORAGE_PREFIX}${sourceName}`);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.key && parsed.direction) {
+        return parsed as SortState;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSort(sourceName: string, sortState: SortState): void {
+  try {
+    localStorage.setItem(`${SORT_STORAGE_PREFIX}${sourceName}`, JSON.stringify(sortState));
+  } catch {
+    // localStorage may be unavailable in private browsing
+  }
+}
+
+// Get nested value from an object using dot notation path
+function getNestedSortValue(obj: Record<string, unknown>, path: string): unknown {
+  return path.split('.').reduce<unknown>((current, key) => {
+    if (current && typeof current === 'object' && key in (current as Record<string, unknown>)) {
+      return (current as Record<string, unknown>)[key];
+    }
+    return undefined;
+  }, obj);
+}
+
+// Infer default sort direction from column render type
+function inferDefaultDirection(renderType: string): 'asc' | 'desc' {
+  // Numeric types sort descending by default (bigger is usually better)
+  if (renderType === 'size' || renderType === 'number' || renderType === 'peers') {
+    return 'desc';
+  }
+  // Text/badge types sort ascending (alphabetical)
+  return 'asc';
+}
+
+// Sort releases by a column
+function sortReleases(
+  releases: Release[],
+  sortKey: string,
+  direction: 'asc' | 'desc'
+): Release[] {
+  return [...releases].sort((a, b) => {
+    const aVal = getNestedSortValue(a as unknown as Record<string, unknown>, sortKey);
+    const bVal = getNestedSortValue(b as unknown as Record<string, unknown>, sortKey);
+
+    // Handle null/undefined - sort them to the end
+    if (aVal == null && bVal == null) return 0;
+    if (aVal == null) return 1;
+    if (bVal == null) return -1;
+
+    // Numeric comparison
+    if (typeof aVal === 'number' && typeof bVal === 'number') {
+      return direction === 'asc' ? aVal - bVal : bVal - aVal;
+    }
+
+    // String comparison (case-insensitive)
+    const aStr = String(aVal).toLowerCase();
+    const bStr = String(bVal).toLowerCase();
+    const cmp = aStr.localeCompare(bStr);
+    return direction === 'asc' ? cmp : -cmp;
+  });
+}
+
 // Default column configuration (fallback when backend doesn't provide one)
 const DEFAULT_COLUMN_CONFIG: ReleaseColumnConfig = {
   columns: [
@@ -575,6 +654,10 @@ export const ReleaseModal = ({
   const [formatFilter, setFormatFilter] = useState<string>('');
   const [languageFilter, setLanguageFilter] = useState<string[]>([LANGUAGE_OPTION_DEFAULT]);
 
+  // Sort state - keyed by source name, persisted to localStorage
+  // null means "Default" (backend order), undefined means "not set yet"
+  const [sortBySource, setSortBySource] = useState<Record<string, SortState | null>>({});
+
   // Description expansion
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [descriptionOverflows, setDescriptionOverflows] = useState(false);
@@ -943,12 +1026,85 @@ export const ReleaseModal = ({
     return getLanguageFilterValues(languageFilter, bookLanguages, defaultLanguages);
   }, [languageFilter, bookLanguages, defaultLanguages]);
 
-  // Filter releases based on settings and user selection
+  // Get column config from response or use default (moved before filteredReleases for sorting)
+  const columnConfig = useMemo((): ReleaseColumnConfig => {
+    const response = releasesBySource[activeTab];
+    if (response?.column_config) {
+      return response.column_config;
+    }
+    return DEFAULT_COLUMN_CONFIG;
+  }, [releasesBySource, activeTab]);
+
+  // Get sortable columns from column config
+  const sortableColumns = useMemo(() => {
+    return columnConfig.columns.filter(col => col.sortable) || [];
+  }, [columnConfig]);
+
+  // Get current sort state for active tab (from state, localStorage, or default to null = backend order)
+  const currentSort = useMemo((): SortState | null => {
+    // Check state first - explicit null means "Default" was selected
+    if (activeTab in sortBySource) {
+      return sortBySource[activeTab];
+    }
+    // Check localStorage
+    const saved = getSavedSort(activeTab);
+    if (saved) {
+      // Verify the saved sort is still valid for this source
+      const isValid = sortableColumns.some(col => (col.sort_key || col.key) === saved.key);
+      if (isValid) {
+        return saved;
+      }
+    }
+    // Default to null (backend order / no client-side sorting)
+    return null;
+  }, [activeTab, sortBySource, sortableColumns]);
+
+  // Handle sort change - null means "Default" (backend order), otherwise toggle direction or set new column
+  const handleSortChange = useCallback((sortKey: string | null, column: ColumnSchema | null) => {
+    if (sortKey === null) {
+      // "Default" selected - clear client-side sorting
+      setSortBySource(prev => {
+        const next = { ...prev };
+        delete next[activeTab];
+        return next;
+      });
+      // Clear from localStorage
+      try {
+        localStorage.removeItem(`${SORT_STORAGE_PREFIX}${activeTab}`);
+      } catch {
+        // Ignore localStorage errors
+      }
+      return;
+    }
+
+    const currentState = sortBySource[activeTab] ?? currentSort;
+    let newState: SortState;
+
+    if (currentState && currentState.key === sortKey) {
+      // Same column - toggle direction
+      newState = {
+        key: sortKey,
+        direction: currentState.direction === 'asc' ? 'desc' : 'asc',
+      };
+    } else {
+      // New column - use default direction for this column type
+      newState = {
+        key: sortKey,
+        direction: inferDefaultDirection(column!.render_type),
+      };
+    }
+
+    setSortBySource(prev => ({ ...prev, [activeTab]: newState }));
+    saveSort(activeTab, newState);
+  }, [activeTab, sortBySource, currentSort]);
+
+  // Filter and sort releases based on settings and user selection
   const filteredReleases = useMemo(() => {
     const releases = releasesBySource[activeTab]?.releases || [];
     const effectiveLower = effectiveFormats.map((f) => f.toLowerCase());
 
-    return releases.filter((r) => {
+    // First, filter
+    let filtered = releases.filter((r) => {
       // Format filtering
       const fmt = r.format?.toLowerCase();
 
@@ -969,16 +1125,14 @@ export const ReleaseModal = ({
 
       return true;
     });
-  }, [releasesBySource, activeTab, formatFilter, resolvedLanguageCodes, effectiveFormats, defaultLanguages]);
 
-  // Get column config from response or use default
-  const columnConfig = useMemo((): ReleaseColumnConfig => {
-    const response = releasesBySource[activeTab];
-    if (response?.column_config) {
-      return response.column_config;
+    // Then, sort if we have a current sort and sortable columns
+    if (currentSort && sortableColumns.length > 0) {
+      filtered = sortReleases(filtered, currentSort.key, currentSort.direction);
     }
-    return DEFAULT_COLUMN_CONFIG;
-  }, [releasesBySource, activeTab]);
+
+    return filtered;
+  }, [releasesBySource, activeTab, formatFilter, resolvedLanguageCodes, effectiveFormats, defaultLanguages, currentSort, sortableColumns]);
 
   // Pre-compute display field lookups to avoid repeated .find() calls in JSX
   const displayFields = useMemo(() => {
@@ -1280,6 +1434,89 @@ export const ReleaseModal = ({
                       ))}
                     </div>
                   </div>
+
+                  {/* Sort dropdown - only show if source has sortable columns */}
+                  {sortableColumns.length > 0 && (
+                    <Dropdown
+                      align="right"
+                      widthClassName="w-auto flex-shrink-0"
+                      panelClassName="w-48"
+                      renderTrigger={({ isOpen, toggle }) => (
+                        <button
+                          type="button"
+                          onClick={toggle}
+                          className={`relative p-2 rounded-full transition-colors hover-surface text-gray-500 dark:text-gray-400 ${
+                            isOpen ? 'bg-[var(--hover-surface)]' : ''
+                          }`}
+                          aria-label="Sort releases"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
+                          </svg>
+                          {currentSort && (
+                            <span className="absolute top-1 right-1 w-2 h-2 bg-emerald-500 rounded-full" />
+                          )}
+                        </button>
+                      )}
+                    >
+                      {({ close }) => (
+                        <div className="py-1">
+                          {/* Default option - no client-side sorting */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleSortChange(null, null);
+                              close();
+                            }}
+                            className={`w-full px-3 py-2 text-left text-sm flex items-center justify-between hover-surface rounded ${
+                              !currentSort
+                                ? 'text-emerald-600 dark:text-emerald-400 font-medium'
+                                : 'text-gray-700 dark:text-gray-300'
+                            }`}
+                          >
+                            <span>Default</span>
+                            {!currentSort && (
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                              </svg>
+                            )}
+                          </button>
+                          {sortableColumns.map((col) => {
+                            const sortKey = col.sort_key || col.key;
+                            const isSelected = currentSort?.key === sortKey;
+                            const direction = isSelected ? currentSort?.direction : null;
+                            return (
+                              <button
+                                key={sortKey}
+                                type="button"
+                                onClick={() => {
+                                  handleSortChange(sortKey, col);
+                                  // Don't close - allow toggling direction
+                                  if (!isSelected) close();
+                                }}
+                                className={`w-full px-3 py-2 text-left text-sm flex items-center justify-between hover-surface rounded ${
+                                  isSelected
+                                    ? 'text-emerald-600 dark:text-emerald-400 font-medium'
+                                    : 'text-gray-700 dark:text-gray-300'
+                                }`}
+                              >
+                                <span>{col.label}</span>
+                                {isSelected && direction && (
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                                    {direction === 'asc' ? (
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+                                    ) : (
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                                    )}
+                                  </svg>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </Dropdown>
+                  )}
 
                   {/* Filter funnel button - stays fixed */}
                   {/* Only show filter button if source supports at least one filter type */}

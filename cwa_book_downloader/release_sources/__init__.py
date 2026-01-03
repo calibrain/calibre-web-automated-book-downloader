@@ -92,6 +92,8 @@ class ColumnSchema:
     color_hint: Optional[ColumnColorHint] = None  # For BADGE render type
     fallback: str = "-"                           # Value to show when data is missing
     uppercase: bool = False                       # Force uppercase display
+    sortable: bool = False                        # Show in sort dropdown (opt-in)
+    sort_key: Optional[str] = None                # Field to sort by (defaults to `key` if None)
 
 
 class LeadingCellType(str, Enum):
@@ -138,6 +140,8 @@ def serialize_column_config(config: ReleaseColumnConfig) -> Dict[str, Any]:
                 } if col.color_hint else None,
                 "fallback": col.fallback,
                 "uppercase": col.uppercase,
+                "sortable": col.sortable,
+                "sort_key": col.sort_key,
             }
             for col in config.columns
         ],

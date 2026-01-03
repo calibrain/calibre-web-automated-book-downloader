@@ -21,7 +21,22 @@ CONTENT_TYPES = [
     "other",
 ]
 
-_CONTENT_TYPE_TO_CONFIG_KEY = {
+# Maps AA content types to their config keys for content-type routing
+# Used when AA_CONTENT_TYPE_ROUTING is enabled
+_AA_CONTENT_TYPE_TO_CONFIG_KEY = {
+    "book (fiction)": "AA_CONTENT_TYPE_DIR_FICTION",
+    "book (non-fiction)": "AA_CONTENT_TYPE_DIR_NON_FICTION",
+    "book (unknown)": "AA_CONTENT_TYPE_DIR_UNKNOWN",
+    "magazine": "AA_CONTENT_TYPE_DIR_MAGAZINE",
+    "comic book": "AA_CONTENT_TYPE_DIR_COMIC",
+    "audiobook": "AA_CONTENT_TYPE_DIR_AUDIOBOOK",
+    "standards document": "AA_CONTENT_TYPE_DIR_STANDARDS",
+    "musical score": "AA_CONTENT_TYPE_DIR_MUSICAL_SCORE",
+    "other": "AA_CONTENT_TYPE_DIR_OTHER",
+}
+
+# Legacy mapping - kept for backwards compatibility during migration
+_LEGACY_CONTENT_TYPE_TO_CONFIG_KEY = {
     "book (fiction)": "INGEST_DIR_BOOK_FICTION",
     "book (non-fiction)": "INGEST_DIR_BOOK_NON_FICTION",
     "book (unknown)": "INGEST_DIR_BOOK_UNKNOWN",
@@ -34,27 +49,90 @@ _CONTENT_TYPE_TO_CONFIG_KEY = {
 }
 
 
-def get_ingest_dir(content_type: Optional[str] = None) -> Path:
-    """Get the ingest directory for a content type, falling back to default."""
+def get_destination(is_audiobook: bool = False) -> Path:
+    """Get the base destination directory.
+
+    Args:
+        is_audiobook: If True, returns audiobook destination (with fallback to books destination)
+
+    Returns:
+        Path to the destination directory
+    """
     from cwa_book_downloader.core.config import config
 
-    default_ingest_dir = Path(config.get("INGEST_DIR", "/cwa-book-ingest"))
+    if is_audiobook:
+        # Audiobook destination with fallback to main destination
+        audiobook_dest = config.get("DESTINATION_AUDIOBOOK", "")
+        if audiobook_dest:
+            return Path(audiobook_dest)
+
+    # Main destination (also fallback for audiobooks)
+    # Check new setting first, then legacy INGEST_DIR
+    destination = config.get("DESTINATION", "") or config.get("INGEST_DIR", "/cwa-book-ingest")
+    return Path(destination)
+
+
+def get_aa_content_type_dir(content_type: Optional[str] = None) -> Optional[Path]:
+    """Get override directory for Anna's Archive content-type routing.
+
+    Only returns a path if AA_CONTENT_TYPE_ROUTING is enabled AND
+    a custom directory is configured for the given content type.
+
+    Args:
+        content_type: The AA content type (e.g., "book (fiction)", "magazine")
+
+    Returns:
+        Path to the override directory if configured, None otherwise
+    """
+    from cwa_book_downloader.core.config import config
+
+    # Check if content-type routing is enabled
+    if not config.get("AA_CONTENT_TYPE_ROUTING", False):
+        # Also check legacy setting for backwards compatibility
+        if not config.get("USE_CONTENT_TYPE_DIRECTORIES", False):
+            return None
 
     if not content_type:
-        return default_ingest_dir
+        return None
 
     # Normalize content type for lookup
     content_type_lower = content_type.lower().strip()
 
-    # Look up the config key for this content type
-    config_key = _CONTENT_TYPE_TO_CONFIG_KEY.get(content_type_lower)
-    if not config_key:
+    # Try new AA-specific config keys first
+    config_key = _AA_CONTENT_TYPE_TO_CONFIG_KEY.get(content_type_lower)
+    if config_key:
+        custom_dir = config.get(config_key, "")
+        if custom_dir:
+            return Path(custom_dir)
+
+    # Fall back to legacy config keys for backwards compatibility
+    legacy_key = _LEGACY_CONTENT_TYPE_TO_CONFIG_KEY.get(content_type_lower)
+    if legacy_key:
+        custom_dir = config.get(legacy_key, "")
+        if custom_dir:
+            return Path(custom_dir)
+
+    return None
+
+
+def get_ingest_dir(content_type: Optional[str] = None) -> Path:
+    """Get the ingest directory for a content type, falling back to default.
+
+    DEPRECATED: Use get_destination() and get_aa_content_type_dir() instead.
+    Kept for backwards compatibility during migration.
+    """
+    from cwa_book_downloader.core.config import config
+
+    # Check new DESTINATION setting first, then legacy INGEST_DIR
+    default_ingest_dir = Path(config.get("DESTINATION", "") or config.get("INGEST_DIR", "/cwa-book-ingest"))
+
+    if not content_type:
         return default_ingest_dir
 
-    # Get the custom directory from config (empty string means use default)
-    custom_dir = config.get(config_key, "")
-    if custom_dir:
-        return Path(custom_dir)
+    # Check for content-type override
+    override_dir = get_aa_content_type_dir(content_type)
+    if override_dir:
+        return override_dir
 
     return default_ingest_dir
 

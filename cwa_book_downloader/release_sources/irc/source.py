@@ -90,6 +90,7 @@ class IRCReleaseSource(ReleaseSource):
                     label="Server",
                     render_type=ColumnRenderType.TEXT,
                     width="100px",
+                    sortable=True,
                 ),
                 ColumnSchema(
                     key="format",
@@ -98,12 +99,15 @@ class IRCReleaseSource(ReleaseSource):
                     color_hint=ColumnColorHint(type="map", value="format"),
                     width="70px",
                     uppercase=True,
+                    sortable=True,
                 ),
                 ColumnSchema(
                     key="size",
                     label="Size",
                     render_type=ColumnRenderType.TEXT,
                     width="70px",
+                    sortable=True,
+                    sort_key="size_bytes",
                 ),
             ],
             grid_template="minmax(0,2fr) 100px 70px 70px",
@@ -283,20 +287,27 @@ class IRCReleaseSource(ReleaseSource):
 
     @staticmethod
     def _parse_size(size_str: str) -> Optional[int]:
-        """Parse human-readable size to bytes."""
+        """Parse human-readable size to bytes.
+
+        Handles formats like: 1.2MB, 1.2M, 500KB, 500K, 1GB, 1G, etc.
+        """
         if not size_str:
             return None
 
         size_str = size_str.strip().upper()
 
-        multipliers = {
-            'B': 1,
-            'KB': 1024,
-            'MB': 1024 * 1024,
-            'GB': 1024 * 1024 * 1024,
-        }
+        # Map suffixes to multipliers (check longer suffixes first)
+        multipliers = [
+            ('GB', 1024 * 1024 * 1024),
+            ('MB', 1024 * 1024),
+            ('KB', 1024),
+            ('G', 1024 * 1024 * 1024),
+            ('M', 1024 * 1024),
+            ('K', 1024),
+            ('B', 1),
+        ]
 
-        for suffix, mult in multipliers.items():
+        for suffix, mult in multipliers:
             if size_str.endswith(suffix):
                 try:
                     num = float(size_str[:-len(suffix)].strip())
@@ -304,4 +315,8 @@ class IRCReleaseSource(ReleaseSource):
                 except ValueError:
                     return None
 
-        return None
+        # Try parsing as plain number (bytes)
+        try:
+            return int(float(size_str))
+        except ValueError:
+            return None

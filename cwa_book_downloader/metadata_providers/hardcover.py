@@ -582,6 +582,9 @@ class HardcoverProvider(MetadataProvider):
                 # No contribution_types or length mismatch - use all names as fallback
                 authors = author_names
 
+            # Normalize whitespace in author names (some API data has multiple spaces)
+            authors = [" ".join(name.split()) for name in authors]
+
             cover_url = _extract_cover_url(item, "image")
             publish_year = _extract_publish_year(item)
             source_url = _build_source_url(item.get("slug", ""))
@@ -661,6 +664,9 @@ class HardcoverProvider(MetadataProvider):
                         authors.append(contrib["name"])
                 elif isinstance(contrib, str):
                     authors.append(contrib)
+
+        # Normalize whitespace in author names (some API data has multiple spaces)
+        authors = [" ".join(name.split()) for name in authors]
 
         cover_url = _extract_cover_url(book, "cached_image", "image")
         publish_year = _extract_publish_year(book)

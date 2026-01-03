@@ -280,6 +280,7 @@ class ProwlarrSource(ReleaseSource):
                     align=ColumnAlign.LEFT,
                     width="minmax(80px, 1fr)",
                     hide_mobile=True,
+                    sortable=True,
                 ),
                 ColumnSchema(
                     key="protocol",
@@ -299,6 +300,8 @@ class ProwlarrSource(ReleaseSource):
                     width="70px",
                     hide_mobile=True,
                     fallback="-",
+                    sortable=True,
+                    sort_key="seeders",
                 ),
                 ColumnSchema(
                     key="content_type",
@@ -318,6 +321,8 @@ class ProwlarrSource(ReleaseSource):
                     align=ColumnAlign.CENTER,
                     width="80px",
                     hide_mobile=False,
+                    sortable=True,
+                    sort_key="size_bytes",
                 ),
             ],
             grid_template="minmax(0,2fr) minmax(80px,1fr) 60px 70px 90px 80px",

@@ -36,8 +36,8 @@ from cwa_book_downloader.release_sources import direct_download
 from cwa_book_downloader.release_sources.direct_download import SearchUnavailable
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.config.env import TMP_DIR
-from cwa_book_downloader.core.utils import get_ingest_dir
-from cwa_book_downloader.core.naming import build_library_path, same_filesystem, assign_part_numbers
+from cwa_book_downloader.core.utils import get_ingest_dir, get_destination, get_aa_content_type_dir
+from cwa_book_downloader.core.naming import build_library_path, same_filesystem, assign_part_numbers, parse_naming_template, sanitize_filename
 from cwa_book_downloader.download.archive import is_archive, process_archive
 from cwa_book_downloader.release_sources import get_handler, get_source_display_name
 from cwa_book_downloader.core.logger import setup_logger
@@ -110,6 +110,153 @@ def stage_file(source_path: Path, task_id: str, copy: bool = False) -> Path:
         logger.debug(f"Moved to staging: {source_path} -> {staged_path}")
 
     return staged_path
+
+
+# =============================================================================
+# File Organization Helpers
+# =============================================================================
+
+
+def _get_file_organization(is_audiobook: bool) -> str:
+    """Get the file organization mode for the content type.
+
+    Returns:
+        One of: "none", "rename", "organize"
+    """
+    key = "FILE_ORGANIZATION_AUDIOBOOK" if is_audiobook else "FILE_ORGANIZATION"
+    mode = config.get(key, "rename")
+
+    # Handle legacy settings migration
+    if mode not in ("none", "rename", "organize"):
+        # Check legacy PROCESSING_MODE
+        legacy_key = "PROCESSING_MODE_AUDIOBOOK" if is_audiobook else "PROCESSING_MODE"
+        legacy_mode = config.get(legacy_key, "ingest")
+        if legacy_mode == "library":
+            return "organize"
+        # Check legacy USE_BOOK_TITLE for ingest mode
+        if config.get("USE_BOOK_TITLE", True):
+            return "rename"
+        return "none"
+
+    return mode
+
+
+def _get_template(is_audiobook: bool, organization_mode: str) -> str:
+    """Get the template for the content type and organization mode.
+
+    Returns:
+        Template string
+    """
+    # Build the key based on content type and organization mode
+    if is_audiobook:
+        if organization_mode == "organize":
+            key = "TEMPLATE_AUDIOBOOK_ORGANIZE"
+        else:
+            key = "TEMPLATE_AUDIOBOOK_RENAME"
+    else:
+        if organization_mode == "organize":
+            key = "TEMPLATE_ORGANIZE"
+        else:
+            key = "TEMPLATE_RENAME"
+
+    template = config.get(key, "")
+
+    # Try legacy keys if new setting is empty
+    if not template:
+        # Try old unified TEMPLATE key
+        legacy_key = "TEMPLATE_AUDIOBOOK" if is_audiobook else "TEMPLATE"
+        template = config.get(legacy_key, "")
+
+    if not template:
+        # Try even older LIBRARY_TEMPLATE key
+        legacy_key = "LIBRARY_TEMPLATE_AUDIOBOOK" if is_audiobook else "LIBRARY_TEMPLATE"
+        template = config.get(legacy_key, "")
+
+    # Use sensible default if still empty
+    if not template:
+        if organization_mode == "organize":
+            return "{Author}/{Title} ({Year})"
+        else:
+            return "{Author} - {Title} ({Year})"
+
+    return template
+
+
+def _should_hardlink(task: DownloadTask) -> bool:
+    """Determine if a download should be hardlinked instead of copied.
+
+    Hardlinking only applies to torrent downloads (Prowlarr source).
+    Uses per-content-type settings.
+
+    Returns:
+        True if hardlinking should be used
+    """
+    # Only Prowlarr downloads (torrents) can be hardlinked
+    if task.source != "prowlarr":
+        return False
+
+    # Only applies if we have an original download path from torrent client
+    if not task.original_download_path:
+        return False
+
+    # Check per-content-type setting
+    is_audiobook = task.content_type and "audiobook" in task.content_type.lower()
+    key = "HARDLINK_TORRENTS_AUDIOBOOK" if is_audiobook else "HARDLINK_TORRENTS"
+
+    # Check new setting first, then legacy TORRENT_HARDLINK
+    hardlink_enabled = config.get(key)
+    if hardlink_enabled is None:
+        # Fall back to legacy setting (but only if explicitly set)
+        hardlink_enabled = config.get("TORRENT_HARDLINK", False)
+
+    return bool(hardlink_enabled)
+
+
+def _should_extract_archives(task: DownloadTask) -> bool:
+    """Determine if archives should be extracted for this download.
+
+    Archives are NOT extracted when hardlinking is enabled (to preserve torrent seeding).
+    """
+    if _should_hardlink(task):
+        return False
+    return True
+
+
+def _get_final_destination(task: DownloadTask) -> Path:
+    """Get the final destination directory for a download.
+
+    Handles:
+    - Per-content-type destinations (books vs audiobooks)
+    - AA content-type routing override (for Direct mode downloads)
+
+    Returns:
+        Path to the destination directory
+    """
+    content_type = task.content_type.lower() if task.content_type else ""
+    is_audiobook = "audiobook" in content_type
+
+    # Get base destination
+    base_dest = get_destination(is_audiobook)
+
+    # For Anna's Archive (direct_download), check for content-type routing override
+    if task.source == "direct_download" and not is_audiobook:
+        override = get_aa_content_type_dir(task.content_type)
+        if override:
+            return override
+
+    return base_dest
+
+
+def _build_metadata_dict(task: DownloadTask) -> dict:
+    """Build metadata dictionary from task for template processing."""
+    return {
+        "Author": task.author,
+        "Title": task.title,
+        "Subtitle": task.subtitle,
+        "Year": task.year,
+        "Series": task.series_name,
+        "SeriesPosition": task.series_position,
+    }
 
 
 def _get_supported_formats(content_type: str = None) -> List[str]:
@@ -236,25 +383,39 @@ def process_directory(
             rejected_exts = sorted(set(f.suffix.lower() for f in rejected_files))
             logger.debug(f"Also found {len(rejected_files)} file(s) with unsupported formats: {', '.join(rejected_exts)}")
 
-        # Move each book file to ingest
+        # Move each book file to destination
         final_paths = []
+        content_type = task.content_type.lower() if task.content_type else ""
+        is_audiobook = "audiobook" in content_type
+        organization_mode = _get_file_organization(is_audiobook)
+
         for book_file in book_files:
             # For multi-file downloads (book packs, series), always preserve original filenames
             # since metadata title only applies to the searched book, not the whole pack.
-            # For single files, respect USE_BOOK_TITLE setting.
-            if len(book_files) == 1 and config.USE_BOOK_TITLE:
+            # For single files, respect FILE_ORGANIZATION setting.
+            if len(book_files) == 1 and organization_mode != "none":
                 # Update task format from actual file if not already set
                 # (Prowlarr releases may not know the format until download completes)
                 if not task.format:
                     task.format = book_file.suffix.lower().lstrip('.')
-                filename = task.get_filename() or book_file.name
+
+                # Apply template to generate filename
+                template = _get_template(is_audiobook, "rename")
+                metadata = _build_metadata_dict(task)
+                extension = book_file.suffix.lstrip('.') or task.format or ""
+
+                filename = parse_naming_template(template, metadata)
+                if filename and extension:
+                    filename = f"{sanitize_filename(filename)}.{extension}"
+                else:
+                    filename = book_file.name
             else:
                 filename = book_file.name
 
             dest_path = ingest_dir / filename
             final_path = _atomic_move(book_file, dest_path)
             final_paths.append(final_path)
-            logger.debug(f"Moved to ingest: {final_path.name}")
+            logger.debug(f"Moved to destination: {final_path.name}")
 
         shutil.rmtree(directory, ignore_errors=True)
 
@@ -608,113 +769,89 @@ def _download_task(task_id: str, cancel_flag: Event) -> Optional[str]:
         return None
 
 
-def _process_library_mode(
+def _process_organize_mode(
     temp_file: Path,
     task: DownloadTask,
     status_callback,
 ) -> Optional[str]:
-    """Process a download in Library Mode.
+    """Process a download with file organization (organize mode with folders).
 
-    Library mode organizes files directly into your library with template-based
-    naming (e.g., "{Author}/{Series}/{Title}"). Files are transferred as-is
-    with no processing.
-
-    Use ingest mode if you need archive extraction or custom scripts.
+    Organizes files into folders based on template (e.g., "{Author}/{Series/}{Title}").
+    Supports hardlinking for torrent downloads when enabled.
 
     Returns:
-        Path to library file if successful, None if library path not configured
+        Path to organized file if successful, None if failed
     """
-    # Check if this is an audiobook and use audiobook-specific settings if configured
     content_type = task.content_type.lower() if task.content_type else ""
     is_audiobook = "audiobook" in content_type
 
-    if is_audiobook:
-        # Use audiobook-specific settings, falling back to main settings
-        library_path = config.get("LIBRARY_PATH_AUDIOBOOK") or config.get("LIBRARY_PATH")
-        template = config.get("LIBRARY_TEMPLATE_AUDIOBOOK") or config.get("LIBRARY_TEMPLATE", "{Author}/{Title}")
-    else:
-        library_path = config.get("LIBRARY_PATH")
-        template = config.get("LIBRARY_TEMPLATE", "{Author}/{Title}")
+    # Get destination and template
+    destination = _get_final_destination(task)
+    template = _get_template(is_audiobook, "organize")
 
-    if not library_path:
-        logger.warning("Library mode enabled but no library path configured, falling back to ingest")
-        status_callback("resolving", "Library path not configured, using ingest")
+    # Validate destination path
+    if not destination.is_absolute():
+        logger.warning(f"Destination must be absolute: {destination}, falling back to flat mode")
+        status_callback("resolving", f"Destination must be absolute: {destination}")
         return None
 
-    # Validate library path
-    library_path_obj = Path(library_path)
-    if not library_path_obj.is_absolute():
-        logger.warning(f"Library path must be absolute: {library_path}, falling back to ingest")
-        status_callback("resolving", f"Library path must be absolute: {library_path}")
-        return None
-
-    if not library_path_obj.exists():
+    if not destination.exists():
         try:
-            library_path_obj.mkdir(parents=True, exist_ok=True)
+            destination.mkdir(parents=True, exist_ok=True)
         except (OSError, PermissionError) as e:
-            logger.warning(f"Cannot create library path: {e}, falling back to ingest")
-            status_callback("resolving", f"Cannot create library path: {e}")
+            logger.warning(f"Cannot create destination: {e}")
+            status_callback("resolving", f"Cannot create destination: {e}")
             return None
 
-    if not os.access(library_path_obj, os.W_OK):
-        logger.warning(f"Library path not writable: {library_path}, falling back to ingest")
-        status_callback("resolving", f"Library path not writable: {library_path}")
+    if not os.access(destination, os.W_OK):
+        logger.warning(f"Destination not writable: {destination}")
+        status_callback("resolving", f"Destination not writable: {destination}")
         return None
 
-    # Determine if we should use hardlinking (torrents only)
+    # Determine if we should use hardlinking
     use_hardlink = False
     hardlink_source = None
 
-    if task.original_download_path:
-        # Torrent with download client path available
-        torrent_hardlink_enabled = config.get("TORRENT_HARDLINK", True)
-        if torrent_hardlink_enabled:
-            hardlink_source = Path(task.original_download_path)
-            if hardlink_source.exists():
-                # Check same filesystem (required for hardlinks)
-                if same_filesystem(hardlink_source, library_path):
-                    use_hardlink = True
-                else:
-                    logger.warning(
-                        f"Cannot hardlink: {hardlink_source} and {library_path} are on different filesystems. "
-                        "Falling back to copy. To fix: ensure torrent client downloads to same filesystem as library."
-                    )
-                    status_callback("resolving", "Cannot hardlink (different filesystems), using copy")
+    if _should_hardlink(task):
+        hardlink_source = Path(task.original_download_path)
+        if hardlink_source.exists():
+            # Check same filesystem (required for hardlinks)
+            if same_filesystem(hardlink_source, destination):
+                use_hardlink = True
+            else:
+                logger.warning(
+                    f"Cannot hardlink: {hardlink_source} and {destination} are on different filesystems. "
+                    "Falling back to copy. To fix: ensure torrent client downloads to same filesystem as destination."
+                )
+                status_callback("resolving", "Cannot hardlink (different filesystems), using copy")
 
     # Build metadata dict for template
-    metadata = {
-        "Author": task.author,
-        "Title": task.title,
-        "Subtitle": task.subtitle,
-        "Year": task.year,
-        "Series": task.series_name,
-        "SeriesPosition": task.series_position,
-    }
+    metadata = _build_metadata_dict(task)
 
     try:
         if use_hardlink:
-            status_callback("resolving", "Creating library hardlinks")
+            status_callback("resolving", "Creating hardlinks")
         else:
-            status_callback("resolving", "Organizing in library")
+            status_callback("resolving", "Organizing files")
 
         # Use torrent client path for hardlinks, staging path for moves
         source = hardlink_source if use_hardlink else temp_file
 
         if source.is_dir():
             return _transfer_directory_to_library(
-                source, library_path, template, metadata, task, temp_file, status_callback, use_hardlink
+                source, str(destination), template, metadata, task, temp_file, status_callback, use_hardlink
             )
         else:
             return _transfer_file_to_library(
-                source, library_path, template, metadata, task, temp_file, status_callback, use_hardlink
+                source, str(destination), template, metadata, task, temp_file, status_callback, use_hardlink
             )
     except PermissionError as e:
-        logger.error(f"Permission denied in library mode: {e}")
+        logger.error(f"Permission denied: {e}")
         status_callback("error", f"Permission denied: {e}")
         return None
     except Exception as e:
-        logger.error_trace(f"Library mode failed: {e}")
-        status_callback("error", f"Library mode failed: {e}")
+        logger.error_trace(f"Organization failed: {e}")
+        status_callback("error", f"Organization failed: {e}")
         return None
 
 
@@ -975,9 +1112,13 @@ def _post_process_download(
     cancel_flag: Event,
     status_callback,
 ) -> Optional[str]:
-    """Post-process a downloaded file: handle archives and move to ingest.
+    """Post-process a downloaded file based on file organization settings.
 
     This runs uniformly for all download sources, ensuring consistent behavior.
+    Handles three organization modes:
+    - "none": Keep original filename, move to destination
+    - "rename": Apply template to filename, move to destination
+    - "organize": Apply template with folders, move to destination
 
     Args:
         temp_file: Path to downloaded file in temp directory
@@ -986,7 +1127,7 @@ def _post_process_download(
         status_callback: Callback for status updates
 
     Returns:
-        Final path in ingest directory, or None on failure
+        Final path in destination directory, or None on failure
     """
     content_type = task.content_type.lower() if task.content_type else ""
     is_audiobook = "audiobook" in content_type
@@ -997,40 +1138,26 @@ def _post_process_download(
     elif task.search_mode not in (SearchMode.DIRECT, SearchMode.UNIVERSAL):
         logger.warning(f"Task {task.task_id} has invalid search_mode '{task.search_mode}', defaulting to Direct mode behavior")
 
-    # Library mode and audiobook-specific directories only apply to Universal mode
-    is_universal = task.search_mode == SearchMode.UNIVERSAL
+    # Get file organization mode and destination
+    organization_mode = _get_file_organization(is_audiobook)
+    destination = _get_final_destination(task)
 
-    if is_universal:
-        # Determine processing mode based on content type
-        if is_audiobook:
-            processing_mode = config.get("PROCESSING_MODE_AUDIOBOOK", "ingest")
-        else:
-            processing_mode = config.get("PROCESSING_MODE", "ingest")
+    logger.debug(f"File organization: mode={organization_mode}, destination={destination}")
 
-        if processing_mode == "library":
-            result = _process_library_mode(temp_file, task, status_callback)
-            if result is not None:
-                return result
-            # If library mode fails, fall through to normal processing
+    # "Organize" mode with folders uses specialized handler
+    if organization_mode == "organize":
+        result = _process_organize_mode(temp_file, task, status_callback)
+        if result is not None:
+            return result
+        # If organize mode fails, fall through to flat mode
+        logger.warning("Organize mode failed, falling back to flat destination")
 
-    # Determine ingest directory
-    default_ingest_dir = get_ingest_dir()
+    # Ensure destination exists
+    os.makedirs(destination, exist_ok=True)
 
-    if is_universal and is_audiobook:
-        # Universal audiobooks use dedicated setting, falling back to main ingest dir
-        audiobook_ingest = config.get("INGEST_DIR_AUDIOBOOK", "")
-        ingest_dir = Path(audiobook_ingest) if audiobook_ingest else default_ingest_dir
-    else:
-        # Direct mode and non-audiobook content use content-type routing
-        ingest_dir = get_ingest_dir(content_type)
-
-    if ingest_dir != default_ingest_dir:
-        logger.debug(f"Routing '{content_type or 'default'}' to {ingest_dir}")
-    os.makedirs(ingest_dir, exist_ok=True)
-
-    # For torrents going to ingest mode, stage first to preserve seeding
+    # For torrents with hardlinking disabled, stage first to preserve seeding
     # (Torrent handler returns original path, not staged copy)
-    if _is_torrent_source(temp_file, task):
+    if _is_torrent_source(temp_file, task) and not _should_hardlink(task):
         status_callback("resolving", "Staging torrent files")
         staging_dir = get_staging_dir()
 
@@ -1053,15 +1180,15 @@ def _post_process_download(
 
         temp_file = staged_path
 
-    # Handle archive extraction (RAR/ZIP)
-    if is_archive(temp_file):
+    # Handle archive extraction (RAR/ZIP) - only if not hardlinking
+    if is_archive(temp_file) and _should_extract_archives(task):
         logger.info(f"Archive detected, extracting: {temp_file.name}")
         status_callback("resolving", "Extracting archive")
 
         result = process_archive(
             archive_path=temp_file,
             temp_dir=TMP_DIR,
-            ingest_dir=ingest_dir,
+            ingest_dir=destination,
             archive_id=task.task_id,
             task=task,
         )
@@ -1080,7 +1207,7 @@ def _post_process_download(
 
         final_paths, error = process_directory(
             directory=temp_file,
-            ingest_dir=ingest_dir,
+            ingest_dir=destination,
             task=task,
         )
 
@@ -1099,7 +1226,7 @@ def _post_process_download(
             status_callback("error", "No book files found")
             return None
 
-    # Non-archive: run custom script if configured, then move to ingest
+    # Non-archive: run custom script if configured, then move to destination
     if config.CUSTOM_SCRIPT:
         logger.info(f"Running custom script: {config.CUSTOM_SCRIPT}")
         try:
@@ -1132,24 +1259,34 @@ def _post_process_download(
 
     # Check cancellation before final move
     if cancel_flag.is_set():
-        logger.info(f"Download cancelled before ingest: {task.task_id}")
+        logger.info(f"Download cancelled before final move: {task.task_id}")
         temp_file.unlink(missing_ok=True)
         return None
 
-    # Generate filename: use formatted name if USE_BOOK_TITLE, else preserve original
-    if config.USE_BOOK_TITLE:
-        filename = task.get_filename()
-        if not filename:
-            filename = temp_file.name
-    else:
+    # Determine filename based on organization mode
+    if organization_mode == "none":
+        # Keep original filename
         filename = temp_file.name
+    else:
+        # "rename" mode - apply template to filename
+        template = _get_template(is_audiobook, "rename")
+        metadata = _build_metadata_dict(task)
+        extension = temp_file.suffix.lstrip('.') or task.format or ""
 
-    dest_path = ingest_dir / filename
+        # Parse template to generate filename
+        filename = parse_naming_template(template, metadata)
+        if filename and extension:
+            filename = f"{sanitize_filename(filename)}.{extension}"
+        elif not filename:
+            # Template produced empty result, fall back to original
+            filename = temp_file.name
+
+    dest_path = destination / filename
 
     try:
         final_path = _atomic_move(temp_file, dest_path)
     except Exception as e:
-        logger.error(f"Failed to move file to ingest: {e}")
+        logger.error(f"Failed to move file to destination: {e}")
         status_callback("error", f"Failed to move file: {e}")
         return None
 

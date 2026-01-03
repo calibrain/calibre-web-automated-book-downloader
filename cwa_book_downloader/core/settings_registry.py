@@ -311,6 +311,108 @@ def sync_env_to_config() -> None:
             save_config_file(tab.name, values_to_sync)
             logger.debug(f"Synced {len(values_to_sync)} ENV values to {tab.name} config: {list(values_to_sync.keys())}")
 
+    # Migrate legacy settings to new format
+    migrate_legacy_settings()
+
+
+def migrate_legacy_settings() -> None:
+    """Migrate legacy settings to new unified file destination format.
+
+    Maps old settings to new:
+    - PROCESSING_MODE + USE_BOOK_TITLE -> FILE_ORGANIZATION
+    - INGEST_DIR / LIBRARY_PATH -> DESTINATION
+    - LIBRARY_TEMPLATE -> TEMPLATE
+    - USE_CONTENT_TYPE_DIRECTORIES -> AA_CONTENT_TYPE_ROUTING
+    - INGEST_DIR_* -> AA_CONTENT_TYPE_DIR_*
+    - TORRENT_HARDLINK -> HARDLINK_TORRENTS / HARDLINK_TORRENTS_AUDIOBOOK
+    """
+    # Load existing downloads config
+    downloads_config = load_config_file("downloads")
+    source_config = load_config_file("download_sources")
+
+    # Skip migration if already using new settings
+    if "FILE_ORGANIZATION" in downloads_config or "DESTINATION" in downloads_config:
+        return
+
+    migrated_downloads = {}
+    migrated_sources = {}
+
+    # === BOOKS MIGRATION ===
+    old_mode = downloads_config.get("PROCESSING_MODE", "ingest")
+    old_ingest_dir = downloads_config.get("INGEST_DIR", "/cwa-book-ingest")
+    old_library_path = downloads_config.get("LIBRARY_PATH", "")
+    old_use_book_title = downloads_config.get("USE_BOOK_TITLE", True)
+    old_library_template = downloads_config.get("LIBRARY_TEMPLATE", "{Author}/{Title}")
+
+    # Map PROCESSING_MODE + USE_BOOK_TITLE -> FILE_ORGANIZATION
+    if old_mode == "library":
+        migrated_downloads["FILE_ORGANIZATION"] = "organize"
+        migrated_downloads["DESTINATION"] = old_library_path or "/books"
+        migrated_downloads["TEMPLATE"] = old_library_template
+    else:
+        if old_use_book_title:
+            migrated_downloads["FILE_ORGANIZATION"] = "rename"
+            migrated_downloads["TEMPLATE"] = "{Author} - {Title} ({Year})"
+        else:
+            migrated_downloads["FILE_ORGANIZATION"] = "none"
+        migrated_downloads["DESTINATION"] = old_ingest_dir
+
+    # === AUDIOBOOKS MIGRATION ===
+    old_mode_ab = downloads_config.get("PROCESSING_MODE_AUDIOBOOK", "ingest")
+    old_ingest_dir_ab = downloads_config.get("INGEST_DIR_AUDIOBOOK", "")
+    old_library_path_ab = downloads_config.get("LIBRARY_PATH_AUDIOBOOK", "")
+    old_library_template_ab = downloads_config.get("LIBRARY_TEMPLATE_AUDIOBOOK", "{Author}/{Title}")
+
+    if old_mode_ab == "library":
+        migrated_downloads["FILE_ORGANIZATION_AUDIOBOOK"] = "organize"
+        migrated_downloads["DESTINATION_AUDIOBOOK"] = old_library_path_ab or ""
+        migrated_downloads["TEMPLATE_AUDIOBOOK"] = old_library_template_ab
+    else:
+        migrated_downloads["FILE_ORGANIZATION_AUDIOBOOK"] = "rename"
+        migrated_downloads["TEMPLATE_AUDIOBOOK"] = "{Author} - {Title}"
+        if old_ingest_dir_ab:
+            migrated_downloads["DESTINATION_AUDIOBOOK"] = old_ingest_dir_ab
+
+    # === HARDLINK MIGRATION ===
+    old_torrent_hardlink = downloads_config.get("TORRENT_HARDLINK")
+    if old_torrent_hardlink is not None:
+        # Books default to False (ingest folder use case)
+        # Audiobooks default to True (library folder use case)
+        # But if explicitly set, apply to both
+        migrated_downloads["HARDLINK_TORRENTS"] = old_torrent_hardlink
+        migrated_downloads["HARDLINK_TORRENTS_AUDIOBOOK"] = old_torrent_hardlink
+
+    # === CONTENT-TYPE ROUTING MIGRATION ===
+    old_use_content_type = downloads_config.get("USE_CONTENT_TYPE_DIRECTORIES", False)
+    if old_use_content_type:
+        migrated_sources["AA_CONTENT_TYPE_ROUTING"] = True
+
+        # Map old keys to new keys
+        content_type_mapping = {
+            "INGEST_DIR_BOOK_FICTION": "AA_CONTENT_TYPE_DIR_FICTION",
+            "INGEST_DIR_BOOK_NON_FICTION": "AA_CONTENT_TYPE_DIR_NON_FICTION",
+            "INGEST_DIR_BOOK_UNKNOWN": "AA_CONTENT_TYPE_DIR_UNKNOWN",
+            "INGEST_DIR_MAGAZINE": "AA_CONTENT_TYPE_DIR_MAGAZINE",
+            "INGEST_DIR_COMIC_BOOK": "AA_CONTENT_TYPE_DIR_COMIC",
+            "INGEST_DIR_STANDARDS_DOCUMENT": "AA_CONTENT_TYPE_DIR_STANDARDS",
+            "INGEST_DIR_MUSICAL_SCORE": "AA_CONTENT_TYPE_DIR_MUSICAL_SCORE",
+            "INGEST_DIR_OTHER": "AA_CONTENT_TYPE_DIR_OTHER",
+        }
+
+        for old_key, new_key in content_type_mapping.items():
+            old_value = downloads_config.get(old_key, "")
+            if old_value:
+                migrated_sources[new_key] = old_value
+
+    # Save migrated settings
+    if migrated_downloads:
+        save_config_file("downloads", migrated_downloads)
+        logger.info(f"Migrated download settings: {list(migrated_downloads.keys())}")
+
+    if migrated_sources:
+        save_config_file("download_sources", migrated_sources)
+        logger.info(f"Migrated content-type routing settings: {list(migrated_sources.keys())}")
+
 
 def get_setting_value(field: SettingsField, tab_name: str) -> Any:
     if isinstance(field, (ActionButton, HeadingField)):
