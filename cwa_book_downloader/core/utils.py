@@ -62,7 +62,7 @@ def get_destination(is_audiobook: bool = False) -> Path:
 
     # Main destination (also fallback for audiobooks)
     # Check new setting first, then legacy INGEST_DIR
-    destination = config.get("DESTINATION", "") or config.get("INGEST_DIR", "/cwa-book-ingest")
+    destination = config.get("DESTINATION", "") or config.get("INGEST_DIR", "/books")
     return Path(destination)
 
 
@@ -95,7 +95,7 @@ def get_ingest_dir(content_type: Optional[str] = None) -> Path:
     from cwa_book_downloader.core.config import config
 
     # Check new DESTINATION setting first, then legacy INGEST_DIR
-    default_ingest_dir = Path(config.get("DESTINATION", "") or config.get("INGEST_DIR", "/cwa-book-ingest"))
+    default_ingest_dir = Path(config.get("DESTINATION", "") or config.get("INGEST_DIR", "/books"))
 
     if not content_type:
         return default_ingest_dir

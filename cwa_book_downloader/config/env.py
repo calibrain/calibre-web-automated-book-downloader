@@ -88,7 +88,7 @@ LOG_ROOT = Path(os.getenv("LOG_ROOT", "/var/log/"))
 LOG_DIR = LOG_ROOT / "cwa-book-downloader"
 LOG_FILE = LOG_DIR / "cwa-book-downloader.log"
 TMP_DIR = Path(os.getenv("TMP_DIR", "/tmp/cwa-book-downloader"))
-INGEST_DIR = Path(os.getenv("INGEST_DIR", "/cwa-book-ingest"))
+INGEST_DIR = Path(os.getenv("INGEST_DIR", "/books"))
 
 
 # =============================================================================

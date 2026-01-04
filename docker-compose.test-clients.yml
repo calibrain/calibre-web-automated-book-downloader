@@ -43,8 +43,8 @@ services:
       # Config and state
       - ./.local/test-clients/cwabd/config:/config
       - ./.local/test-clients/cwabd/log:/var/log/cwa-book-downloader
-      # Ingest directory (where completed books go)
-      - ./.local/test-clients/ingest:/cwa-book-ingest
+      # Book destination directory (where completed books go)
+      - ./.local/test-clients/books:/books
       # Staging directory
       - ./.local/test-clients/tmp:/tmp/cwa-book-downloader
       # CRITICAL: Mount client download directories so cwabd can access completed files

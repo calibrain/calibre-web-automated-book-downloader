@@ -12,9 +12,9 @@ services:
       DEBUG: true
     volumes:
       - ./.local/config:/config
-      - ./.local/ingest:/cwa-book-ingest
+      - ./.local/books:/books
       - ./.local/log:/var/log/cwa-book-downloader
       - ./.local/tmp:/tmp/cwa-book-downloader
       - ./cwa_book_downloader:/app/cwa_book_downloader:ro
-      # Download client mount (must match your torrent/usenet client's volume)
-      # - /path/to/downloads:/downloads
+      # Download client mount - path must match your torrent/usenet client's volume exactly
+      # - /path/to/downloads:/path/to/downloads

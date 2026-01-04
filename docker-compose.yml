@@ -10,7 +10,7 @@ services:
       - 8084:8084
     restart: unless-stopped
     volumes:
-      - /path/to/ingest:/cwa-book-ingest # Book ingest directory
+      - /path/to/books:/books # Book destination directory
       - /path/to/config:/config # App configuration
-      # Download client mount (must match your torrent/usenet client's volume)
-      # - /path/to/downloads:/downloads
+      # Download client mount - path must match your torrent/usenet client's volume exactly
+      # - /path/to/downloads:/path/to/downloads
