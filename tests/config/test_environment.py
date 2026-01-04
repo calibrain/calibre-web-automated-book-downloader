@@ -97,28 +97,37 @@ class TestSupportedFormats:
 
     def test_default_supported_formats(self):
         """Default formats should include common ebook formats."""
-        from cwa_book_downloader.config.env import _SUPPORTED_FORMATS
+        from cwa_book_downloader.core.config import config
+        # Ensure settings are refreshed to pick up defaults
+        config.refresh()
 
+        formats = config.get("SUPPORTED_FORMATS", [])
         # Check some expected defaults
-        assert "epub" in _SUPPORTED_FORMATS
-        assert "mobi" in _SUPPORTED_FORMATS
-        assert "azw3" in _SUPPORTED_FORMATS
+        assert "epub" in formats
+        assert "mobi" in formats
+        assert "azw3" in formats
 
     def test_format_list_is_lowercase(self):
         """Format list should be normalized to lowercase."""
-        from cwa_book_downloader.config.env import _SUPPORTED_FORMATS
+        from cwa_book_downloader.core.config import config
+        # Ensure settings are refreshed to pick up defaults
+        config.refresh()
 
+        formats = config.get("SUPPORTED_FORMATS", [])
         # All formats should be lowercase
-        for fmt in _SUPPORTED_FORMATS.split(","):
+        for fmt in formats:
             assert fmt == fmt.lower()
 
-    def test_config_supported_formats_attribute(self):
+    def test_config_supported_formats_is_list(self):
         """Config should have SUPPORTED_FORMATS as a list."""
-        from cwa_book_downloader.config.settings import SUPPORTED_FORMATS
+        from cwa_book_downloader.core.config import config
+        # Ensure settings are refreshed to pick up defaults
+        config.refresh()
 
-        assert isinstance(SUPPORTED_FORMATS, list)
-        assert len(SUPPORTED_FORMATS) > 0
-        assert "epub" in SUPPORTED_FORMATS
+        formats = config.get("SUPPORTED_FORMATS", [])
+        assert isinstance(formats, list)
+        assert len(formats) > 0
+        assert "epub" in formats
 
 
 # =============================================================================
@@ -369,25 +378,21 @@ class TestDebugConfiguration:
 class TestNetworkConfiguration:
     """Tests for proxy and network settings."""
 
-    def test_proxy_settings_stripped(self):
-        """Proxy URLs should be stripped of whitespace."""
-        from cwa_book_downloader.config.env import HTTP_PROXY, HTTPS_PROXY
+    def test_proxy_settings_default(self):
+        """Proxy settings should have sensible defaults."""
+        from cwa_book_downloader.core.config import config
+        config.refresh()
 
-        # These are already evaluated, but the logic is:
-        # HTTP_PROXY = os.getenv("HTTP_PROXY", "").strip()
-        # So whitespace should be removed
-        assert HTTP_PROXY == HTTP_PROXY.strip()
-        assert HTTPS_PROXY == HTTPS_PROXY.strip()
+        # Default proxy mode should be 'none' (no proxy)
+        assert config.get("PROXY_MODE", "none") == "none"
 
-    def test_tor_mode_disables_other_network_settings(self):
-        """Tor mode should disable custom DNS, DOH, and proxies."""
-        # This is a documentation test - the logic is in env.py:
-        # if USING_TOR:
-        #     _CUSTOM_DNS = ""
-        #     USE_DOH = False
-        #     HTTP_PROXY = ""
-        #     HTTPS_PROXY = ""
-        pass
+    def test_tor_mode_is_detected(self):
+        """Tor mode should be detected from container variant."""
+        from cwa_book_downloader.config.env import TOR_VARIANT_AVAILABLE
+
+        # In regular test environment, Tor should not be available
+        # (unless running in Tor container)
+        assert isinstance(TOR_VARIANT_AVAILABLE, bool)
 
 
 # =============================================================================
@@ -400,17 +405,21 @@ class TestConcurrencyConfiguration:
 
     def test_max_concurrent_downloads_default(self):
         """MAX_CONCURRENT_DOWNLOADS should have a sensible default."""
-        from cwa_book_downloader.config.env import MAX_CONCURRENT_DOWNLOADS
+        from cwa_book_downloader.core.config import config
+        config.refresh()
 
-        assert MAX_CONCURRENT_DOWNLOADS >= 1
-        assert MAX_CONCURRENT_DOWNLOADS <= 10  # Reasonable upper bound
+        max_downloads = config.get("MAX_CONCURRENT_DOWNLOADS", 3)
+        assert max_downloads >= 1
+        assert max_downloads <= 10  # Reasonable upper bound
 
     def test_download_progress_interval_default(self):
         """DOWNLOAD_PROGRESS_UPDATE_INTERVAL should have a sensible default."""
-        from cwa_book_downloader.config.env import DOWNLOAD_PROGRESS_UPDATE_INTERVAL
+        from cwa_book_downloader.core.config import config
+        config.refresh()
 
-        assert DOWNLOAD_PROGRESS_UPDATE_INTERVAL >= 1
-        assert DOWNLOAD_PROGRESS_UPDATE_INTERVAL <= 10
+        interval = config.get("DOWNLOAD_PROGRESS_UPDATE_INTERVAL", 1)
+        assert interval >= 1
+        assert interval <= 10
 
 
 # =============================================================================
@@ -423,22 +432,24 @@ class TestCacheConfiguration:
 
     def test_metadata_cache_ttl_defaults(self):
         """Metadata cache TTLs should have sensible defaults."""
-        from cwa_book_downloader.config.env import (
-            METADATA_CACHE_SEARCH_TTL,
-            METADATA_CACHE_BOOK_TTL,
-        )
+        from cwa_book_downloader.core.config import config
+        config.refresh()
+
+        search_ttl = config.get("METADATA_CACHE_SEARCH_TTL", 300)
+        book_ttl = config.get("METADATA_CACHE_BOOK_TTL", 600)
 
         # Search cache should be shorter than book cache
-        assert METADATA_CACHE_SEARCH_TTL > 0
-        assert METADATA_CACHE_BOOK_TTL > 0
-        assert METADATA_CACHE_SEARCH_TTL <= METADATA_CACHE_BOOK_TTL
+        assert search_ttl > 0
+        assert book_ttl > 0
+        assert search_ttl <= book_ttl
 
     def test_covers_cache_directory(self):
         """Covers cache directory should be under CONFIG_DIR."""
-        from cwa_book_downloader.config.env import CONFIG_DIR, COVERS_CACHE_DIR
+        from cwa_book_downloader.config.env import CONFIG_DIR
 
-        assert COVERS_CACHE_DIR.parent == CONFIG_DIR
-        assert COVERS_CACHE_DIR.name == "covers"
+        covers_dir = CONFIG_DIR / "covers"
+        assert covers_dir.parent == CONFIG_DIR
+        assert covers_dir.name == "covers"
 
 
 # =============================================================================

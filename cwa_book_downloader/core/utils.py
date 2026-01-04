@@ -1,12 +1,13 @@
-"""
-Shared utility functions for the CWA Book Downloader.
-
-Provides common helper functions used across the application.
-"""
+"""Shared utility functions for the CWA Book Downloader."""
 
 import base64
 from pathlib import Path
 from typing import Optional
+
+
+def is_audiobook(content_type: Optional[str]) -> bool:
+    """Check if content type indicates an audiobook."""
+    return bool(content_type and "audiobook" in content_type.lower())
 
 
 CONTENT_TYPES = [
@@ -50,14 +51,7 @@ _LEGACY_CONTENT_TYPE_TO_CONFIG_KEY = {
 
 
 def get_destination(is_audiobook: bool = False) -> Path:
-    """Get the base destination directory.
-
-    Args:
-        is_audiobook: If True, returns audiobook destination (with fallback to books destination)
-
-    Returns:
-        Path to the destination directory
-    """
+    """Get base destination directory. Audiobooks fall back to main destination."""
     from cwa_book_downloader.core.config import config
 
     if is_audiobook:
@@ -68,63 +62,40 @@ def get_destination(is_audiobook: bool = False) -> Path:
 
     # Main destination (also fallback for audiobooks)
     # Check new setting first, then legacy INGEST_DIR
-    destination = config.get("DESTINATION", "") or config.get("INGEST_DIR", "/cwa-book-ingest")
+    destination = config.get("DESTINATION", "") or config.get("INGEST_DIR", "/books")
     return Path(destination)
 
 
 def get_aa_content_type_dir(content_type: Optional[str] = None) -> Optional[Path]:
-    """Get override directory for Anna's Archive content-type routing.
-
-    Only returns a path if AA_CONTENT_TYPE_ROUTING is enabled AND
-    a custom directory is configured for the given content type.
-
-    Args:
-        content_type: The AA content type (e.g., "book (fiction)", "magazine")
-
-    Returns:
-        Path to the override directory if configured, None otherwise
-    """
+    """Get override directory for AA content-type routing if configured."""
     from cwa_book_downloader.core.config import config
 
-    # Check if content-type routing is enabled
-    if not config.get("AA_CONTENT_TYPE_ROUTING", False):
-        # Also check legacy setting for backwards compatibility
-        if not config.get("USE_CONTENT_TYPE_DIRECTORIES", False):
-            return None
+    # Check if content-type routing is enabled (new or legacy setting)
+    if not config.get("AA_CONTENT_TYPE_ROUTING", False) and not config.get("USE_CONTENT_TYPE_DIRECTORIES", False):
+        return None
 
     if not content_type:
         return None
 
-    # Normalize content type for lookup
     content_type_lower = content_type.lower().strip()
 
-    # Try new AA-specific config keys first
-    config_key = _AA_CONTENT_TYPE_TO_CONFIG_KEY.get(content_type_lower)
-    if config_key:
-        custom_dir = config.get(config_key, "")
-        if custom_dir:
-            return Path(custom_dir)
-
-    # Fall back to legacy config keys for backwards compatibility
-    legacy_key = _LEGACY_CONTENT_TYPE_TO_CONFIG_KEY.get(content_type_lower)
-    if legacy_key:
-        custom_dir = config.get(legacy_key, "")
-        if custom_dir:
-            return Path(custom_dir)
+    # Try new AA-specific config keys first, then legacy keys
+    for mapping in (_AA_CONTENT_TYPE_TO_CONFIG_KEY, _LEGACY_CONTENT_TYPE_TO_CONFIG_KEY):
+        config_key = mapping.get(content_type_lower)
+        if config_key:
+            custom_dir = config.get(config_key, "")
+            if custom_dir:
+                return Path(custom_dir)
 
     return None
 
 
 def get_ingest_dir(content_type: Optional[str] = None) -> Path:
-    """Get the ingest directory for a content type, falling back to default.
-
-    DEPRECATED: Use get_destination() and get_aa_content_type_dir() instead.
-    Kept for backwards compatibility during migration.
-    """
+    """DEPRECATED: Use get_destination() and get_aa_content_type_dir() instead."""
     from cwa_book_downloader.core.config import config
 
     # Check new DESTINATION setting first, then legacy INGEST_DIR
-    default_ingest_dir = Path(config.get("DESTINATION", "") or config.get("INGEST_DIR", "/cwa-book-ingest"))
+    default_ingest_dir = Path(config.get("DESTINATION", "") or config.get("INGEST_DIR", "/books"))
 
     if not content_type:
         return default_ingest_dir
@@ -138,20 +109,7 @@ def get_ingest_dir(content_type: Optional[str] = None) -> Path:
 
 
 def transform_cover_url(cover_url: Optional[str], cache_id: str) -> Optional[str]:
-    """
-    Transform an external cover URL to a local proxy URL when caching is enabled.
-
-    When cover caching is enabled, external cover image URLs are transformed
-    to local proxy URLs that cache the images on first access. This reduces
-    external requests and provides a consistent caching layer.
-
-    Args:
-        cover_url: Original cover URL (external or already local)
-        cache_id: Unique identifier for the cache entry (e.g., "provider_bookid")
-
-    Returns:
-        Transformed URL if caching enabled and URL is external, otherwise original URL
-    """
+    """Transform external cover URL to local proxy URL when caching is enabled."""
     if not cover_url:
         return cover_url
 

@@ -15,11 +15,11 @@ services:
       EXT_BYPASSER_TIMEOUT: 60000
     volumes:
       - ./.local/config:/config
-      - ./.local/ingest:/cwa-book-ingest
+      - ./.local/books:/books
       - ./.local/log:/var/log/cwa-book-downloader
       - ./.local/tmp:/tmp/cwa-book-downloader
-      # Download client mount (must match your torrent/usenet client's volume)
-      # - /path/to/downloads:/downloads
+      # Download client mount - path must match your torrent/usenet client's volume exactly
+      # - /path/to/downloads:/path/to/downloads
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest

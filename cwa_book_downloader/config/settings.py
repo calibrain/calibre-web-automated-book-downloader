@@ -9,23 +9,11 @@ from cwa_book_downloader.core.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# Log configuration values at DEBUG level, filtering out module imports and functions
-logger.debug("Environment configuration:")
-for key, value in env.__dict__.items():
-    # Skip private attributes, modules, types, and callables (functions)
-    if key.startswith('_'):
-        continue
-    if isinstance(value, type) or callable(value):
-        continue
-    # Don't log module objects (they have __name__ attribute)
-    if hasattr(value, '__name__') and hasattr(value, '__file__'):
-        continue
-    # Redact sensitive values
-    if key == "AA_DONATOR_KEY" and isinstance(value, str) and value.strip():
-        value = "REDACTED"
-    if key == "HARDCOVER_API_KEY" and isinstance(value, str) and value.strip():
-        value = "REDACTED"
-    logger.debug(f"  {key}: {value}")
+# Log bootstrap configuration values at DEBUG level
+logger.debug("Bootstrap configuration:")
+for key in ['CONFIG_DIR', 'LOG_DIR', 'TMP_DIR', 'INGEST_DIR', 'DEBUG', 'DOCKERMODE']:
+    if hasattr(env, key):
+        logger.debug(f"  {key}: {getattr(env, key)}")
 
 # Load supported book languages from data file
 # Path is relative to the package root, not this file
@@ -52,47 +40,20 @@ logger.debug(f"CROSS_FILE_SYSTEM: {CROSS_FILE_SYSTEM}")
 CUSTOM_DNS: list[str] = []
 DOH_SERVER: str = ""
 
-# Warn about external bypasser DNS limitations
-if env.USING_EXTERNAL_BYPASSER and env.USE_CF_BYPASS:
-    logger.warning(
-        "Using external bypasser (FlareSolverr). Note: FlareSolverr uses its own DNS resolution, "
-        "not this application's custom DNS settings. If you experience DNS-related blocks, "
-        "configure DNS at the Docker/system level for your FlareSolverr container, "
-        "or consider using the internal bypasser which integrates with the app's DNS system."
-    )
+# Recording directory for debugging internal cloudflare bypasser
+RECORDING_DIR = env.LOG_DIR / "recording"
 
-# Anna's Archive settings
-AA_BASE_URL = env._AA_BASE_URL
-AA_AVAILABLE_URLS = ["https://annas-archive.org", "https://annas-archive.se", "https://annas-archive.li"]
-AA_AVAILABLE_URLS.extend(env._AA_ADDITIONAL_URLS.split(","))
-AA_AVAILABLE_URLS = [url.strip() for url in AA_AVAILABLE_URLS if url.strip()]
 
-# File format settings
-SUPPORTED_FORMATS = env._SUPPORTED_FORMATS.split(",")
-logger.debug(f"SUPPORTED_FORMATS: {SUPPORTED_FORMATS}")
-SUPPORTED_AUDIOBOOK_FORMATS = env._SUPPORTED_AUDIOBOOK_FORMATS.split(",")
-logger.debug(f"SUPPORTED_AUDIOBOOK_FORMATS: {SUPPORTED_AUDIOBOOK_FORMATS}")
-
-# Complex language processing logic kept in config.py
-BOOK_LANGUAGE = env._BOOK_LANGUAGE.split(',')
-BOOK_LANGUAGE = [l for l in BOOK_LANGUAGE if l in [lang['code'] for lang in _SUPPORTED_BOOK_LANGUAGE]]
-if len(BOOK_LANGUAGE) == 0:
-    BOOK_LANGUAGE = ['en']
-
-# Custom script settings with validation logic
-CUSTOM_SCRIPT = env._CUSTOM_SCRIPT
-if CUSTOM_SCRIPT:
-    if not os.path.exists(CUSTOM_SCRIPT):
-        logger.warn(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} does not exist")
-        CUSTOM_SCRIPT = ""
-    elif not os.access(CUSTOM_SCRIPT, os.X_OK):
-        logger.warn(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} is not executable")
-        CUSTOM_SCRIPT = ""
-
-# Debugging settings
-if not env.USING_EXTERNAL_BYPASSER:
-    # Recording directory for debugging internal cloudflare bypasser
-    RECORDING_DIR = env.LOG_DIR / "recording"
+def _log_external_bypasser_warning() -> None:
+    """Log warning about external bypasser DNS limitations (called after config is available)."""
+    from cwa_book_downloader.core.config import config
+    if config.get("USING_EXTERNAL_BYPASSER", False) and config.get("USE_CF_BYPASS", True):
+        logger.warning(
+            "Using external bypasser (FlareSolverr). Note: FlareSolverr uses its own DNS resolution, "
+            "not this application's custom DNS settings. If you experience DNS-related blocks, "
+            "configure DNS at the Docker/system level for your FlareSolverr container, "
+            "or consider using the internal bypasser which integrates with the app's DNS system."
+        )
 
 
 from cwa_book_downloader.core.settings_registry import (
@@ -182,9 +143,7 @@ def _get_metadata_provider_options():
 
 def _get_metadata_provider_options_with_none():
     """Build metadata provider options with a 'Use main provider' option first."""
-    options = [{"value": "", "label": "Use book provider"}]
-    options.extend(_get_metadata_provider_options())
-    return options
+    return [{"value": "", "label": "Use book provider"}] + _get_metadata_provider_options()
 
 
 def _get_release_source_options():
@@ -492,7 +451,7 @@ def download_settings():
             key="DESTINATION",
             label="Destination",
             description="Directory where downloaded files are saved.",
-            default="/cwa-book-ingest",
+            default="/books",
             required=True,
         ),
         SelectField(
@@ -789,49 +748,49 @@ def download_source_settings():
         TextField(
             key="AA_CONTENT_TYPE_DIR_FICTION",
             label="Fiction Books",
-            placeholder="/cwa-book-ingest/fiction",
+            placeholder="/books/fiction",
             show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
         ),
         TextField(
             key="AA_CONTENT_TYPE_DIR_NON_FICTION",
             label="Non-Fiction Books",
-            placeholder="/cwa-book-ingest/non-fiction",
+            placeholder="/books/non-fiction",
             show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
         ),
         TextField(
             key="AA_CONTENT_TYPE_DIR_UNKNOWN",
             label="Unknown Books",
-            placeholder="/cwa-book-ingest/unknown",
+            placeholder="/books/unknown",
             show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
         ),
         TextField(
             key="AA_CONTENT_TYPE_DIR_MAGAZINE",
             label="Magazines",
-            placeholder="/cwa-book-ingest/magazines",
+            placeholder="/books/magazines",
             show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
         ),
         TextField(
             key="AA_CONTENT_TYPE_DIR_COMIC",
             label="Comic Books",
-            placeholder="/cwa-book-ingest/comics",
+            placeholder="/books/comics",
             show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
         ),
         TextField(
             key="AA_CONTENT_TYPE_DIR_STANDARDS",
             label="Standards Documents",
-            placeholder="/cwa-book-ingest/standards",
+            placeholder="/books/standards",
             show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
         ),
         TextField(
             key="AA_CONTENT_TYPE_DIR_MUSICAL_SCORE",
             label="Musical Scores",
-            placeholder="/cwa-book-ingest/scores",
+            placeholder="/books/scores",
             show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
         ),
         TextField(
             key="AA_CONTENT_TYPE_DIR_OTHER",
             label="Other",
-            placeholder="/cwa-book-ingest/other",
+            placeholder="/books/other",
             show_when={"field": "AA_CONTENT_TYPE_ROUTING", "value": True},
         ),
     ]

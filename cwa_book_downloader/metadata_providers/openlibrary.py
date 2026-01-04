@@ -1,9 +1,10 @@
 """Open Library metadata provider. No API key required, rate limited."""
 
+import re
 import time
 import threading
 from collections import deque
-from typing import Any, Deque, Dict, List, Optional, Union
+from typing import Any, Deque, Dict, List, Optional
 
 import requests
 
@@ -42,23 +43,14 @@ class RateLimiter:
     """Simple sliding window rate limiter."""
 
     def __init__(self, max_requests: int, window_seconds: int):
-        """Initialize rate limiter.
-
-        Args:
-            max_requests: Maximum requests allowed in the window.
-            window_seconds: Time window in seconds.
-        """
+        """Initialize rate limiter with max requests per time window."""
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.timestamps: Deque[float] = deque()
         self.lock = threading.Lock()
 
     def wait_if_needed(self) -> None:
-        """Block until a request is allowed.
-
-        Thread-safe implementation that calculates wait time with lock held,
-        then sleeps without holding the lock to avoid blocking other threads.
-        """
+        """Block until a request is allowed (thread-safe)."""
         wait_time = 0
 
         # Calculate wait time with lock held
@@ -139,14 +131,7 @@ class OpenLibraryProvider(MetadataProvider):
         return True
 
     def search(self, options: MetadataSearchOptions) -> List[BookMetadata]:
-        """Search for books using Open Library's search API.
-
-        Args:
-            options: Search options (query, type, sort, language, pagination, fields).
-
-        Returns:
-            List of BookMetadata objects.
-        """
+        """Search for books using Open Library's search API."""
         # Handle ISBN search separately
         if options.search_type == SearchType.ISBN:
             result = self.search_by_isbn(options.query)
@@ -159,15 +144,7 @@ class OpenLibraryProvider(MetadataProvider):
 
     @cacheable(ttl_key="METADATA_CACHE_SEARCH_TTL", ttl_default=300, key_prefix="openlibrary:search")
     def _search_cached(self, cache_key: str, options: MetadataSearchOptions) -> List[BookMetadata]:
-        """Cached search implementation.
-
-        Args:
-            cache_key: Cache key (used by decorator).
-            options: Search options.
-
-        Returns:
-            List of BookMetadata objects.
-        """
+        """Cached search implementation."""
         _rate_limiter.wait_if_needed()
 
         # Build query params
@@ -240,14 +217,7 @@ class OpenLibraryProvider(MetadataProvider):
 
     @cacheable(ttl_key="METADATA_CACHE_BOOK_TTL", ttl_default=600, key_prefix="openlibrary:book")
     def get_book(self, book_id: str) -> Optional[BookMetadata]:
-        """Get book details by Open Library work ID.
-
-        Args:
-            book_id: Open Library work ID (e.g., "OL12345W").
-
-        Returns:
-            BookMetadata or None if not found.
-        """
+        """Get book details by Open Library work ID (e.g., 'OL12345W')."""
         _rate_limiter.wait_if_needed()
 
         # Normalize the book_id format
@@ -281,14 +251,7 @@ class OpenLibraryProvider(MetadataProvider):
 
     @cacheable(ttl_key="METADATA_CACHE_BOOK_TTL", ttl_default=600, key_prefix="openlibrary:isbn")
     def search_by_isbn(self, isbn: str) -> Optional[BookMetadata]:
-        """Search for a book by ISBN.
-
-        Args:
-            isbn: ISBN-10 or ISBN-13.
-
-        Returns:
-            BookMetadata or None if not found.
-        """
+        """Search for a book by ISBN-10 or ISBN-13."""
         # Clean ISBN
         clean_isbn = isbn.replace("-", "").strip()
 
@@ -343,14 +306,7 @@ class OpenLibraryProvider(MetadataProvider):
             return None
 
     def _parse_search_doc(self, doc: dict) -> Optional[BookMetadata]:
-        """Parse a search document into BookMetadata.
-
-        Args:
-            doc: Search result document from Open Library.
-
-        Returns:
-            BookMetadata or None if parsing fails.
-        """
+        """Parse a search document into BookMetadata."""
         try:
             # Extract work ID from key
             key = doc.get("key", "")
@@ -364,17 +320,10 @@ class OpenLibraryProvider(MetadataProvider):
             if not isinstance(authors, list):
                 authors = [authors] if authors else []
 
-            # Get ISBNs
+            # Get ISBNs - find first ISBN-10 and ISBN-13
             isbns = doc.get("isbn", [])
-            isbn_10 = None
-            isbn_13 = None
-            for isbn in isbns:
-                if len(isbn) == 10 and not isbn_10:
-                    isbn_10 = isbn
-                elif len(isbn) == 13 and not isbn_13:
-                    isbn_13 = isbn
-                if isbn_10 and isbn_13:
-                    break
+            isbn_10 = next((i for i in isbns if len(i) == 10), None)
+            isbn_13 = next((i for i in isbns if len(i) == 13), None)
 
             # Get cover URL
             cover_id = doc.get("cover_i")
@@ -426,15 +375,7 @@ class OpenLibraryProvider(MetadataProvider):
             return None
 
     def _parse_work(self, work: dict, work_id: str) -> Optional[BookMetadata]:
-        """Parse a work object into BookMetadata.
-
-        Args:
-            work: Work data from Open Library API.
-            work_id: The work ID.
-
-        Returns:
-            BookMetadata or None if parsing fails.
-        """
+        """Parse a work object into BookMetadata."""
         try:
             title = work.get("title")
             if not title:
@@ -484,15 +425,7 @@ class OpenLibraryProvider(MetadataProvider):
             return None
 
     def _parse_edition(self, edition: dict, isbn: str) -> Optional[BookMetadata]:
-        """Parse an edition object into BookMetadata (fallback for ISBN lookup).
-
-        Args:
-            edition: Edition data from Open Library API.
-            isbn: The ISBN used for lookup.
-
-        Returns:
-            BookMetadata or None if parsing fails.
-        """
+        """Parse an edition object into BookMetadata (fallback for ISBN lookup)."""
         try:
             title = edition.get("title")
             if not title:
@@ -524,7 +457,6 @@ class OpenLibraryProvider(MetadataProvider):
             publish_date = edition.get("publish_date", "")
             if publish_date:
                 # Try to extract year from various formats
-                import re
                 year_match = re.search(r'\b(19|20)\d{2}\b', publish_date)
                 if year_match:
                     publish_year = int(year_match.group())
@@ -547,14 +479,7 @@ class OpenLibraryProvider(MetadataProvider):
             return None
 
     def _get_author_name(self, author_key: str) -> Optional[str]:
-        """Get author name from author key.
-
-        Args:
-            author_key: Open Library author key (e.g., "/authors/OL123A").
-
-        Returns:
-            Author name or None.
-        """
+        """Get author name from author key (e.g., '/authors/OL123A')."""
         _rate_limiter.wait_if_needed()
 
         try:

@@ -203,6 +203,11 @@ fi
 
 echo "Running command: '$command' as '$USERNAME' (debug=$is_debug)"
 
+# Set umask for file permissions (default: 0022 = files 644, dirs 755)
+UMASK_VALUE=${UMASK:-0022}
+echo "Setting umask to $UMASK_VALUE"
+umask $UMASK_VALUE
+
 # Stop logging
 exec 1>&3 2>&4
 exec 3>&- 4>&-

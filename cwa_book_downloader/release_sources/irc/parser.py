@@ -7,7 +7,7 @@ import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.core.logger import setup_logger
@@ -29,12 +29,12 @@ ALL_RECOGNIZED_FORMATS = {
 }
 
 
-def _get_supported_formats() -> List[str]:
+def _get_supported_formats() -> set[str]:
     """Get user's configured supported formats from settings."""
     formats = config.get("SUPPORTED_FORMATS", ["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"])
     if isinstance(formats, str):
-        return [fmt.strip().lower() for fmt in formats.split(",") if fmt.strip()]
-    return [fmt.lower() for fmt in formats]
+        return {fmt.strip().lower() for fmt in formats.split(",") if fmt.strip()}
+    return {fmt.lower() for fmt in formats}
 
 # Regex to parse result lines
 # Format: !Server Author - Title.format ::INFO:: size
@@ -75,14 +75,7 @@ class SearchResult:
 
 
 def parse_result_line(line: str) -> Optional[SearchResult]:
-    """Parse a single search result line.
-
-    Args:
-        line: Raw line from search results file
-
-    Returns:
-        SearchResult if parseable, None otherwise
-    """
+    """Parse a single search result line. Returns None if unparseable."""
     line = line.strip()
 
     # Must start with !
@@ -148,16 +141,9 @@ def parse_result_line(line: str) -> Optional[SearchResult]:
 
 
 def parse_results_file(content: str) -> list[SearchResult]:
-    """Parse a search results file.
-
-    Args:
-        content: Full file content
-
-    Returns:
-        List of parsed SearchResult objects
-    """
+    """Parse a search results file into SearchResult objects."""
     results = []
-    supported = set(_get_supported_formats())
+    supported = _get_supported_formats()
 
     for line in content.splitlines():
         result = parse_result_line(line)
@@ -171,16 +157,7 @@ def parse_results_file(content: str) -> list[SearchResult]:
 
 
 def extract_results_from_zip(zip_path: Path) -> str:
-    """Extract and return content from a search results ZIP.
-
-    Search results are sent as ZIP files containing a single text file.
-
-    Args:
-        zip_path: Path to downloaded ZIP file
-
-    Returns:
-        Text content of the results file
-    """
+    """Extract and return text content from a search results ZIP."""
     with zipfile.ZipFile(zip_path, 'r') as zf:
         # Should contain exactly one text file
         names = zf.namelist()

@@ -53,15 +53,7 @@ def _googlebooks_kwargs() -> Dict[str, Any]:
 
 @register_provider("googlebooks")
 class GoogleBooksProvider(MetadataProvider):
-    """Google Books metadata provider using REST API.
-
-    Attributes:
-        name: Internal provider identifier.
-        display_name: Human-readable name for UI.
-        requires_auth: True - requires API key.
-        supported_sorts: Only RELEVANCE and NEWEST supported.
-        search_fields: Author and title search fields.
-    """
+    """Google Books metadata provider using REST API."""
 
     name = "googlebooks"
     display_name = "Google Books"
@@ -81,11 +73,7 @@ class GoogleBooksProvider(MetadataProvider):
     ]
 
     def __init__(self, api_key: Optional[str] = None):
-        """Initialize provider with API key.
-
-        Args:
-            api_key: Google Books API key. If not provided, reads from config.
-        """
+        """Initialize provider with optional API key (falls back to config)."""
         self.api_key = api_key or app_config.get("GOOGLEBOOKS_API_KEY", "")
         self.session = requests.Session()
 
@@ -94,14 +82,7 @@ class GoogleBooksProvider(MetadataProvider):
         return bool(self.api_key)
 
     def search(self, options: MetadataSearchOptions) -> List[BookMetadata]:
-        """Search for books using Google Books API.
-
-        Args:
-            options: Search options (query, type, sort, pagination, fields).
-
-        Returns:
-            List of BookMetadata objects matching the search.
-        """
+        """Search for books using Google Books API."""
         if not self.api_key:
             logger.warning("Google Books API key not configured")
             return []
@@ -127,40 +108,29 @@ class GoogleBooksProvider(MetadataProvider):
     def _search_cached(
         self, cache_key: str, options: MetadataSearchOptions
     ) -> List[BookMetadata]:
-        """Cached search implementation.
-
-        Args:
-            cache_key: Cache key for this search (includes all options).
-            options: Search options.
-
-        Returns:
-            List of BookMetadata objects.
-        """
+        """Cached search implementation."""
         # Build query string with Google Books operators
         author_value = options.fields.get("author", "").strip()
         title_value = options.fields.get("title", "").strip()
 
         query_parts = []
 
-        if author_value and not title_value:
-            # Author-only search
-            query_parts.append(f"inauthor:{author_value}")
-        elif title_value and not author_value:
-            # Title-only search
+        # Add field-specific operators
+        if title_value:
             query_parts.append(f"intitle:{title_value}")
-        elif author_value and title_value:
-            # Both provided - combine
-            query_parts.append(f"intitle:{title_value}")
-            query_parts.append(f"inauthor:{author_value}")
         elif options.search_type == SearchType.TITLE:
             query_parts.append(f"intitle:{options.query}")
+
+        if author_value:
+            query_parts.append(f"inauthor:{author_value}")
         elif options.search_type == SearchType.AUTHOR:
             query_parts.append(f"inauthor:{options.query}")
-        else:
-            # General search
+
+        # Fall back to general search if no specific fields
+        if not query_parts:
             query_parts.append(options.query)
 
-        query = "+".join(query_parts) if query_parts else options.query
+        query = "+".join(query_parts)
 
         # Build request params
         params: Dict[str, Any] = {
@@ -205,14 +175,7 @@ class GoogleBooksProvider(MetadataProvider):
         key_prefix="googlebooks:book",
     )
     def get_book(self, book_id: str) -> Optional[BookMetadata]:
-        """Get book details by Google Books volume ID.
-
-        Args:
-            book_id: Google Books volume ID.
-
-        Returns:
-            BookMetadata or None if not found.
-        """
+        """Get book details by Google Books volume ID."""
         try:
             result = self._make_request(f"/volumes/{book_id}", {})
             if not result:
@@ -230,14 +193,7 @@ class GoogleBooksProvider(MetadataProvider):
         key_prefix="googlebooks:isbn",
     )
     def search_by_isbn(self, isbn: str) -> Optional[BookMetadata]:
-        """Search for a book by ISBN.
-
-        Args:
-            isbn: ISBN-10 or ISBN-13.
-
-        Returns:
-            BookMetadata or None if not found.
-        """
+        """Search for a book by ISBN-10 or ISBN-13."""
         # Clean ISBN (remove hyphens and spaces)
         clean_isbn = isbn.replace("-", "").replace(" ", "").strip()
 
@@ -266,15 +222,7 @@ class GoogleBooksProvider(MetadataProvider):
     def _make_request(
         self, endpoint: str, params: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """Make authenticated API request.
-
-        Args:
-            endpoint: API endpoint path (e.g., "/volumes").
-            params: Query parameters.
-
-        Returns:
-            Response JSON or None on error.
-        """
+        """Make authenticated API request to endpoint."""
         if not self.api_key:
             logger.warning("Google Books API key not configured")
             return None
@@ -313,14 +261,7 @@ class GoogleBooksProvider(MetadataProvider):
             return None
 
     def _parse_volume(self, volume: Dict[str, Any]) -> Optional[BookMetadata]:
-        """Parse a volume object into BookMetadata.
-
-        Args:
-            volume: Volume data from Google Books API.
-
-        Returns:
-            BookMetadata or None if parsing fails.
-        """
+        """Parse a volume object into BookMetadata."""
         try:
             volume_id = volume.get("id")
             volume_info = volume.get("volumeInfo", {})
@@ -419,14 +360,7 @@ class GoogleBooksProvider(MetadataProvider):
 
 
 def _test_googlebooks_connection(current_values: Dict[str, Any] = None) -> Dict[str, Any]:
-    """Test the Google Books API connection using current form values.
-
-    Args:
-        current_values: Current unsaved form values from the UI.
-
-    Returns:
-        Dict with 'success' bool and 'message' string.
-    """
+    """Test the Google Books API connection using current form values."""
     current_values = current_values or {}
 
     # Use current form values first, fall back to saved config

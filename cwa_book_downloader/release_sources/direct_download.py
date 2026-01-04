@@ -2,12 +2,11 @@
 
 import itertools
 import json
-import os
 import re
 import time
 from pathlib import Path
 from threading import Event
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional
 from urllib.parse import quote
 
 from bs4 import BeautifulSoup, NavigableString, Tag
@@ -84,29 +83,16 @@ def _is_source_enabled(source_id: str) -> bool:
     return False
 
 
-def _get_enabled_source_order() -> List[str]:
-    """Get ordered list of enabled source IDs."""
-    return [
-        item["id"]
-        for item in _get_source_priority()
-        if item.get("enabled", True)
-    ]
+_SIZE_UNIT_PATTERN = re.compile(r'(kb|mb|gb|tb)', re.IGNORECASE)
 
 
-def _get_source_position(source_id: str) -> int:
-    """Get the position of a source in the priority list (lower = higher priority).
-
-    Returns 999 if source not found or disabled.
-    """
-    for i, item in enumerate(_get_source_priority()):
-        if item["id"] == source_id and item.get("enabled", True):
-            return i
-    return 999
+def _normalize_size(size_str: str) -> str:
+    """Normalize size string by uppercasing units (e.g., '5.2 mb' -> '5.2 MB')."""
+    return _SIZE_UNIT_PATTERN.sub(lambda m: m.group(1).upper(), size_str.strip())
 
 
 class SearchUnavailable(Exception):
     """Raised when Anna's Archive cannot be reached via any mirror/DNS."""
-    pass
 
 
 def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
@@ -148,11 +134,9 @@ def search_books(query: str, filters: SearchFilters) -> List[BookInfo]:
 
     index = 1
     for filter_type, filter_values in vars(filters).items():
-        if (filter_type == "author" or filter_type == "title") and filter_values:
+        if filter_type in ("author", "title") and filter_values:
             for value in filter_values:
-                filters_query += (
-                    f"&termtype_{index}={filter_type}&termval_{index}={quote(value)}"
-                )
+                filters_query += f"&termtype_{index}={filter_type}&termval_{index}={quote(value)}"
                 index += 1
 
     selector = network.AAMirrorSelector()
@@ -272,26 +256,25 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str, fetch_download_coun
     data = soup.find_all("div", {"class": "main-inner"})[0].find_next("div")
     divs = list(data.children)
 
-    slow_urls_no_waitlist: List[str] = []
-    slow_urls_with_waitlist: List[str] = []
-
-    def _append_unique(lst: List[str], href: str) -> None:
-        if href and href not in lst:
-            lst.append(href)
+    slow_urls_no_waitlist: set[str] = set()
+    slow_urls_with_waitlist: set[str] = set()
 
     for anchor in soup.find_all("a"):
         try:
             text = anchor.text.strip().lower()
             href = anchor.get("href", "")
+            if not href:
+                continue
+
             next_text = ""
             if anchor.next and anchor.next.next:
                 next_text = getattr(anchor.next.next, 'text', str(anchor.next.next)).strip().lower()
 
             if text.startswith("slow partner server") and "waitlist" in next_text:
                 if "no waitlist" in next_text:
-                    _append_unique(slow_urls_no_waitlist, href)
+                    slow_urls_no_waitlist.add(href)
                 else:
-                    _append_unique(slow_urls_with_waitlist, href)
+                    slow_urls_with_waitlist.add(href)
         except Exception:
             pass
 
@@ -331,9 +314,8 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str, fetch_download_coun
         for f in _details:
             if format == "" and f.strip().lower() in config.SUPPORTED_FORMATS:
                 format = f.strip().lower()
-            if size == "" and any(u in f.strip().lower() for u in ["mb", "kb", "gb"]):
-                # Preserve original case but uppercase the unit (e.g., "5.2 mb" -> "5.2 MB")
-                size = re.sub(r'(kb|mb|gb|tb)', lambda m: m.group(1).upper(), f.strip(), flags=re.IGNORECASE)
+            if size == "" and any(u in f.strip().lower() for u in ("mb", "kb", "gb")):
+                size = _normalize_size(f)
             if content == "":
                 for ct in CONTENT_TYPES:
                     if ct in f.strip().lower():
@@ -345,8 +327,7 @@ def _parse_book_info_page(soup: BeautifulSoup, book_id: str, fetch_download_coun
                 if format == "" and stripped and " " not in stripped:
                     format = stripped
                 if size == "" and "." in stripped:
-                    # Uppercase any size units
-                    size = re.sub(r'(kb|mb|gb|tb)', lambda m: m.group(1).upper(), f.strip(), flags=re.IGNORECASE)
+                    size = _normalize_size(f)
 
     book_title = _find_in_divs(divs, "🔍")[0].strip("🔍").strip()
 
@@ -456,43 +437,28 @@ def _extract_book_description(soup: BeautifulSoup) -> Optional[str]:
 
 def _extract_book_metadata(metadata_divs) -> Dict[str, List[str]]:
     """Extract metadata from book info divs."""
-    info: Dict[str, List[str]] = {}
+    info: Dict[str, set[str]] = {}
 
-    # Process the first set of metadata
     sub_datas = metadata_divs.find_all("div")[0]
-    sub_datas = list(sub_datas.children)
-    for sub_data in sub_datas:
+    for sub_data in sub_datas.children:
         if sub_data.text.strip() == "":
             continue
-        sub_data = list(sub_data.children)
-        key = sub_data[0].text.strip()
-        value = sub_data[1].text.strip()
+        children = list(sub_data.children)
+        key = children[0].text.strip()
+        value = children[1].text.strip()
         if key not in info:
             info[key] = set()
         info[key].add(value)
 
-    # make set into list
-    for key, value in info.items():
-        info[key] = list(value)
-
-    # Filter relevant metadata
-    relevant_prefixes = [
-        "ISBN-",
-        "ALTERNATIVE",
-        "ASIN",
-        "Goodreads",
-        "Language",
-        "Year",
-    ]
+    relevant_prefixes = ("isbn-", "alternative", "asin", "goodreads", "language", "year")
     return {
-        k.strip(): v
+        k.strip(): list(v)
         for k, v in info.items()
-        if any(k.lower().startswith(prefix.lower()) for prefix in relevant_prefixes)
-        and "filename" not in k.lower()
+        if k.lower().startswith(relevant_prefixes) and "filename" not in k.lower()
     }
 
 
-def _get_source_info(link: str) -> Tuple[str, str]:
+def _get_source_info(link: str) -> tuple[str, str]:
     """Get source label and friendly name for a download link.
 
     Args:
@@ -514,14 +480,17 @@ def _get_source_info(link: str) -> Tuple[str, str]:
     return "unknown", "Mirror"
 
 
-def _label_source(link: str) -> str:
-    """Get lightweight source tag for logging/metrics."""
-    return _get_source_info(link)[0]
-
-
 def _friendly_source_name(link: str) -> str:
     """Get user-friendly name for a download source."""
     return _get_source_info(link)[1]
+
+
+def _group_urls_by_source(urls: List[str], urls_by_source: Dict[str, List[str]]) -> None:
+    """Group URLs into urls_by_source dict by their source type."""
+    for url in urls:
+        source_type = _url_source_types.get(url)
+        if source_type:
+            urls_by_source.setdefault(source_type, []).append(url)
 
 
 def _fetch_aa_page_urls(book_info: BookInfo, urls_by_source: Dict[str, List[str]]) -> None:
@@ -530,25 +499,13 @@ def _fetch_aa_page_urls(book_info: BookInfo, urls_by_source: Dict[str, List[str]
     Groups existing book_info.download_urls by source type. If book_info
     has no URLs, fetches the AA page fresh.
     """
-    # If book_info already has URLs, group them by source type
     if book_info.download_urls:
-        for url in book_info.download_urls:
-            source_type = _url_source_types.get(url)
-            if source_type:
-                if source_type not in urls_by_source:
-                    urls_by_source[source_type] = []
-                urls_by_source[source_type].append(url)
+        _group_urls_by_source(book_info.download_urls, urls_by_source)
         return
 
-    # Otherwise fetch the page fresh
     try:
         fresh_book_info = get_book_info(book_info.id, fetch_download_count=False)
-        for url in fresh_book_info.download_urls:
-            source_type = _url_source_types.get(url)
-            if source_type:
-                if source_type not in urls_by_source:
-                    urls_by_source[source_type] = []
-                urls_by_source[source_type].append(url)
+        _group_urls_by_source(fresh_book_info.download_urls, urls_by_source)
     except Exception as e:
         logger.warning(f"Failed to fetch AA page: {e}")
 
@@ -560,7 +517,6 @@ def _get_urls_for_source(
     cancel_flag: Optional[Event],
     status_callback: Optional[Callable[[str, Optional[str]], None]],
     urls_by_source: Dict[str, List[str]],
-    aa_page_fetched: bool
 ) -> List[str]:
     """Get URLs for a specific source, fetching lazily if needed."""
     # AA Fast - generate URL dynamically
@@ -585,7 +541,7 @@ def _get_urls_for_source(
 
     # AA page sources - fetch AA page if not already done
     if source_id in _AA_PAGE_SOURCES:
-        if not aa_page_fetched and not urls_by_source:
+        if not urls_by_source:
             if status_callback:
                 status_callback("resolving", "Fetching download sources")
             _fetch_aa_page_urls(book_info, urls_by_source)
@@ -686,7 +642,6 @@ def _download_book(
     selector = network.AAMirrorSelector()
     source_failures: dict[str, int] = {}
     urls_by_source: dict[str, list[str]] = {}
-    aa_page_fetched = False
     url_attempt_counter = 0
 
     # Get enabled sources in priority order
@@ -716,12 +671,8 @@ def _download_book(
         # Get URLs for this source (lazy-loads as needed)
         urls_to_try = _get_urls_for_source(
             source_id, book_info, selector, cancel_flag, status_callback,
-            urls_by_source, aa_page_fetched
+            urls_by_source,
         )
-
-        # Track if we fetched AA page
-        if source_id in _AA_PAGE_SOURCES and not aa_page_fetched:
-            aa_page_fetched = bool(urls_by_source)
 
         if not urls_to_try:
             continue
@@ -841,7 +792,7 @@ def _extract_slow_download_url(
     # The URL appears as plain text in <span class="bg-gray-200 ...">http://...</span>
     for span in soup.find_all("span", class_=lambda c: c and "bg-gray-200" in c):
         text = span.get_text(strip=True)
-        if text.startswith("http://") or text.startswith("https://"):
+        if text.startswith(("http://", "https://")):
             return text
 
     # Try "copy this URL" pattern (legacy)
@@ -875,14 +826,8 @@ def _extract_slow_download_url(
         logger.info(f"AA waitlist: {sleep_time}s for {title}")
 
         # Live countdown with status updates
-        remaining = sleep_time
-        while remaining > 0:
-            # Format countdown message with source context
-            if source_context:
-                wait_msg = f"{source_context} - Waiting {remaining}s"
-            else:
-                wait_msg = f"Waiting {remaining}s"
-
+        for remaining in range(sleep_time, 0, -1):
+            wait_msg = f"{source_context} - Waiting {remaining}s" if source_context else f"Waiting {remaining}s"
             if status_callback:
                 status_callback("resolving", wait_msg)
 
@@ -890,8 +835,6 @@ def _extract_slow_download_url(
             if cancel_flag and cancel_flag.wait(timeout=1):
                 logger.info(f"Cancelled wait for {title}")
                 return ""
-
-            remaining -= 1
 
         # After countdown, update status and re-fetch
         if status_callback and source_context:

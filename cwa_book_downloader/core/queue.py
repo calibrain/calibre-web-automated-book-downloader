@@ -12,11 +12,7 @@ from cwa_book_downloader.core.models import QueueStatus, QueueItem, DownloadTask
 
 
 class BookQueue:
-    """Thread-safe download queue manager with priority support and cancellation.
-
-    Stores DownloadTask objects which are source-agnostic download descriptors.
-    Works with both Direct Download and Universal modes.
-    """
+    """Thread-safe download queue manager with priority support and cancellation."""
 
     def __init__(self) -> None:
         self._queue: queue.PriorityQueue[QueueItem] = queue.PriorityQueue()
@@ -33,14 +29,7 @@ class BookQueue:
         return timedelta(seconds=app_config.get("STATUS_TIMEOUT", 3600))
 
     def add(self, task: DownloadTask) -> bool:
-        """Add a download task to the queue.
-
-        Args:
-            task: The download task to queue (includes task_id, priority, etc.)
-
-        Returns:
-            True if added successfully, False if already exists
-        """
+        """Add a download task to the queue. Returns False if already exists."""
         with self._lock:
             task_id = task.task_id
 
@@ -59,11 +48,7 @@ class BookQueue:
             return True
 
     def get_next(self) -> Optional[Tuple[str, Event]]:
-        """Get next task ID from queue with cancellation flag.
-
-        Returns:
-            Tuple of (task_id, cancel_flag) or None if queue is empty
-        """
+        """Get next task ID from queue with cancellation flag."""
         # Use iterative approach to avoid stack overflow if many items are cancelled
         while True:
             try:
@@ -85,14 +70,7 @@ class BookQueue:
                 return None
 
     def get_task(self, task_id: str) -> Optional[DownloadTask]:
-        """Get a task by its ID.
-
-        Args:
-            task_id: The task identifier
-
-        Returns:
-            The DownloadTask if found, None otherwise
-        """
+        """Get a task by its ID."""
         with self._lock:
             return self._task_data.get(task_id)
 
@@ -171,14 +149,7 @@ class BookQueue:
             return sorted(queue_items, key=lambda x: (x['priority'], x['added_time']))
 
     def cancel_download(self, task_id: str) -> bool:
-        """Cancel a download or clear a completed/errored item.
-
-        Args:
-            task_id: Task identifier to cancel or clear
-
-        Returns:
-            bool: True if cancellation/clearing was successful
-        """
+        """Cancel a download or clear a completed/errored item."""
         with self._lock:
             current_status = self._status.get(task_id)
 
@@ -205,15 +176,7 @@ class BookQueue:
             return False
 
     def set_priority(self, task_id: str, new_priority: int) -> bool:
-        """Change the priority of a queued task.
-
-        Args:
-            task_id: Task identifier
-            new_priority: New priority level (lower = higher priority)
-
-        Returns:
-            bool: True if priority was successfully changed
-        """
+        """Change the priority of a queued task (lower = higher priority)."""
         with self._lock:
             if task_id not in self._status or self._status[task_id] != QueueStatus.QUEUED:
                 return False
@@ -245,14 +208,7 @@ class BookQueue:
             return found
 
     def reorder_queue(self, task_priorities: Dict[str, int]) -> bool:
-        """Bulk reorder queue by setting new priorities.
-
-        Args:
-            task_priorities: Dict mapping task_id to new priority
-
-        Returns:
-            bool: True if reordering was successful
-        """
+        """Bulk reorder queue by mapping task_id to new priority."""
         with self._lock:
             # Extract all items from queue
             all_items = []
@@ -283,39 +239,18 @@ class BookQueue:
             return list(self._active_downloads.keys())
 
     def has_pending_work(self) -> bool:
-        """Check if there are any active downloads or queued items.
-
-        This is useful for determining if the bypasser should stay active
-        even when the UI is closed.
-
-        Returns:
-            bool: True if there are active downloads or queued items
-        """
+        """Check if there are any active downloads or queued items."""
         with self._lock:
-            # Check for active downloads
             if self._active_downloads:
                 return True
-
-            # Check for queued items (excluding cancelled ones)
-            for task_id, status in self._status.items():
-                if status == QueueStatus.QUEUED:
-                    return True
-
-            return False
+            return any(status == QueueStatus.QUEUED for status in self._status.values())
 
     def clear_completed(self) -> int:
-        """Remove all completed, errored, or cancelled tasks from tracking.
-
-        Returns:
-            int: Number of tasks removed
-        """
+        """Remove all completed, errored, or cancelled tasks from tracking."""
+        terminal_statuses = {QueueStatus.COMPLETE, QueueStatus.DONE, QueueStatus.AVAILABLE, QueueStatus.ERROR, QueueStatus.CANCELLED}
         with self._lock:
-            to_remove = []
-            for task_id, status in self._status.items():
-                if status in [QueueStatus.COMPLETE, QueueStatus.DONE, QueueStatus.AVAILABLE, QueueStatus.ERROR, QueueStatus.CANCELLED]:
-                    to_remove.append(task_id)
+            to_remove = [task_id for task_id, status in self._status.items() if status in terminal_statuses]
 
-            removed_count = len(to_remove)
             for task_id in to_remove:
                 self._status.pop(task_id, None)
                 self._status_timestamps.pop(task_id, None)
@@ -323,14 +258,13 @@ class BookQueue:
                 self._cancel_flags.pop(task_id, None)
                 self._active_downloads.pop(task_id, None)
 
-            return removed_count
+            return len(to_remove)
 
     def refresh(self) -> None:
         """Remove any tasks that are done downloading or have stale status."""
+        terminal_statuses = {QueueStatus.COMPLETE, QueueStatus.DONE, QueueStatus.ERROR, QueueStatus.AVAILABLE, QueueStatus.CANCELLED}
         with self._lock:
             current_time = datetime.now()
-
-            # Create a list of items to remove to avoid modifying dict during iteration
             to_remove = []
 
             for task_id, status in self._status.items():
@@ -338,28 +272,25 @@ class BookQueue:
                 if not task:
                     continue
 
-                path = task.download_path
-                if path and not Path(path).exists():
+                # Clear stale download paths
+                if task.download_path and not Path(task.download_path).exists():
                     task.download_path = None
-                    path = None
 
-                # Check for completed downloads
-                if status == QueueStatus.AVAILABLE:
-                    if not path:
-                        self._update_status(task_id, QueueStatus.DONE)
+                # Mark available downloads as done if file is gone
+                if status == QueueStatus.AVAILABLE and not task.download_path:
+                    self._update_status(task_id, QueueStatus.DONE)
 
                 # Check for stale status entries
                 last_update = self._status_timestamps.get(task_id)
                 if last_update and (current_time - last_update) > self._status_timeout:
-                    if status in [QueueStatus.COMPLETE, QueueStatus.DONE, QueueStatus.ERROR, QueueStatus.AVAILABLE, QueueStatus.CANCELLED]:
+                    if status in terminal_statuses:
                         to_remove.append(task_id)
 
             # Remove stale entries
             for task_id in to_remove:
-                del self._status[task_id]
-                del self._status_timestamps[task_id]
-                if task_id in self._task_data:
-                    del self._task_data[task_id]
+                self._status.pop(task_id, None)
+                self._status_timestamps.pop(task_id, None)
+                self._task_data.pop(task_id, None)
 
 # Global instance of BookQueue
 book_queue = BookQueue()

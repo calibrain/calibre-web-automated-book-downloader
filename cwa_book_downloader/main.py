@@ -135,6 +135,15 @@ def clear_failed_logins(username: str) -> None:
         logger.debug(f"Cleared failed login attempts for user: {username}")
 
 
+def get_client_ip() -> str:
+    """Extract client IP address from request, handling reverse proxy forwarding."""
+    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr) or 'unknown'
+    # X-Forwarded-For can contain multiple IPs, take the first one
+    if ',' in ip_address:
+        ip_address = ip_address.split(',')[0].strip()
+    return ip_address
+
+
 def get_auth_mode() -> str:
     """Determine which authentication mode is active.
 
@@ -171,44 +180,34 @@ if DEBUG:
     })
 
 # Custom log filter to exclude routine status endpoint polling and WebSocket noise
-class StatusEndpointFilter(logging.Filter):
-    """Filter out routine status endpoint requests and WebSocket upgrade errors to reduce log noise."""
-    def filter(self, record):
-        if hasattr(record, 'getMessage'):
-            message = record.getMessage()
-            # Exclude GET /api/status requests (polling noise)
-            if 'GET /api/status' in message:
-                return False
-            # Exclude WebSocket upgrade errors (benign - falls back to polling)
-            if 'write() before start_response' in message:
-                return False
-            # Exclude the Error on request line that precedes WebSocket errors
-            if 'Error on request:' in message and record.levelno == logging.ERROR:
-                return False
-        return True
+class LogNoiseFilter(logging.Filter):
+    """Filter out routine status endpoint requests and WebSocket upgrade errors to reduce log noise.
 
-
-class WebSocketErrorFilter(logging.Filter):
-    """Filter out WebSocket upgrade errors that occur in Werkzeug dev server.
-    
-    These errors are benign - Flask-SocketIO automatically falls back to polling transport.
+    WebSocket upgrade errors are benign - Flask-SocketIO automatically falls back to polling transport.
     The error occurs because Werkzeug's built-in server doesn't fully support WebSocket upgrades.
     """
     def filter(self, record):
-        # Filter out the AssertionError traceback for WebSocket upgrades
+        message = record.getMessage() if hasattr(record, 'getMessage') else str(record.msg)
+
+        # Exclude GET /api/status requests (polling noise)
+        if 'GET /api/status' in message:
+            return False
+
+        # Exclude WebSocket upgrade errors (benign - falls back to polling)
+        if 'write() before start_response' in message:
+            return False
+
+        # Exclude the Error on request line that precedes WebSocket errors
         if record.levelno == logging.ERROR:
-            message = record.getMessage() if hasattr(record, 'getMessage') else str(record.msg)
-            # Filter out the full traceback that includes the WebSocket assertion error
-            if 'write() before start_response' in message:
+            if 'Error on request:' in message:
                 return False
-            # Also filter the "Error on request" header that precedes it
+            # Filter WebSocket-related AssertionError tracebacks
             if hasattr(record, 'exc_info') and record.exc_info:
-                exc_type = record.exc_info[0]
+                exc_type, exc_value = record.exc_info[0], record.exc_info[1]
                 if exc_type and exc_type.__name__ == 'AssertionError':
-                    # Check if it's the WebSocket-related assertion
-                    exc_value = record.exc_info[1]
                     if exc_value and 'write() before start_response' in str(exc_value):
                         return False
+
         return True
 
 # Flask logger
@@ -218,17 +217,15 @@ app.logger.setLevel(logger.level)
 werkzeug_logger = logging.getLogger('werkzeug')
 werkzeug_logger.handlers = logger.handlers
 werkzeug_logger.setLevel(logger.level)
-# Add filters to suppress routine status endpoint polling logs and WebSocket upgrade errors
-werkzeug_logger.addFilter(StatusEndpointFilter())
-werkzeug_logger.addFilter(WebSocketErrorFilter())
+# Add filter to suppress routine status endpoint polling logs and WebSocket upgrade errors
+werkzeug_logger.addFilter(LogNoiseFilter())
 
 # Set up authentication defaults
 # The secret key will reset every time we restart, which will
 # require users to authenticate again
+from cwa_book_downloader.config.env import SESSION_COOKIE_SECURE_ENV, string_to_bool
 
-# Session cookie security - set to 'true' if exclusively using HTTPS
-session_cookie_secure_env = os.getenv('SESSION_COOKIE_SECURE', 'false').lower()
-SESSION_COOKIE_SECURE = session_cookie_secure_env in ['true', 'yes', '1']
+SESSION_COOKIE_SECURE = string_to_bool(SESSION_COOKIE_SECURE_ENV)
 
 app.config.update(
     SECRET_KEY = os.urandom(64),
@@ -238,7 +235,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME = 604800  # 7 days in seconds
 )
 
-logger.info(f"Session cookie secure setting: {SESSION_COOKIE_SECURE} (from env: {session_cookie_secure_env})")
+logger.info(f"Session cookie secure setting: {SESSION_COOKIE_SECURE} (from env: {SESSION_COOKIE_SECURE_ENV})")
 
 def login_required(f):
     @wraps(f)
@@ -304,10 +301,12 @@ if not app_config.get("USING_EXTERNAL_BYPASSER", False):
 
 if DEBUG:
     import subprocess
+
     if app_config.get("USING_EXTERNAL_BYPASSER", False):
-        STOP_GUI = lambda: None
+        _stop_gui = lambda: None
     else:
-        from cwa_book_downloader.bypass.internal_bypasser import _reset_driver as STOP_GUI
+        from cwa_book_downloader.bypass.internal_bypasser import _reset_driver as _stop_gui
+
     @app.route('/api/debug', methods=['GET'])
     @login_required
     def debug() -> Union[Response, Tuple[Response, int]]:
@@ -317,9 +316,8 @@ if DEBUG:
         And then return it to the user
         """
         try:
-            # Run the debug script
             logger.info("Debug endpoint called, stopping GUI and generating debug info...")
-            STOP_GUI()
+            _stop_gui()
             time.sleep(1)
             result = subprocess.run(['/app/genDebug.sh'], capture_output=True, text=True, check=True)
             if result.returncode != 0:
@@ -329,9 +327,8 @@ if DEBUG:
             if not os.path.exists(debug_file_path):
                 logger.error(f"Debug zip file not found at: {debug_file_path}")
                 return jsonify({"error": "Failed to generate debug information"}), 500
-                
+
             logger.info(f"Sending debug file: {debug_file_path}")
-            # Return the file to the user
             return send_file(
                 debug_file_path,
                 mimetype='application/zip',
@@ -345,7 +342,6 @@ if DEBUG:
             logger.error_trace(f"Debug endpoint error: {e}")
             return jsonify({"error": str(e)}), 500
 
-if DEBUG:
     @app.route('/api/restart', methods=['GET'])
     @login_required
     def restart() -> Union[Response, Tuple[Response, int]]:
@@ -441,10 +437,10 @@ def api_download() -> Union[Response, Tuple[Response, int]]:
 
     try:
         priority = int(request.args.get('priority', 0))
-        success = backend.queue_book(book_id, priority)
+        success, error_msg = backend.queue_book(book_id, priority)
         if success:
             return jsonify({"status": "queued", "priority": priority})
-        return jsonify({"error": "Failed to queue book"}), 500
+        return jsonify({"error": error_msg or "Failed to queue book"}), 500
     except Exception as e:
         logger.error_trace(f"Download error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -479,20 +475,14 @@ def api_download_release() -> Union[Response, Tuple[Response, int]]:
             return jsonify({"error": "source_id is required"}), 400
 
         priority = data.get('priority', 0)
-        success = backend.queue_release(data, priority)
+        success, error_msg = backend.queue_release(data, priority)
 
         if success:
             return jsonify({"status": "queued", "priority": priority})
-        return jsonify({"error": "Failed to queue release"}), 500
+        return jsonify({"error": error_msg or "Failed to queue release"}), 500
     except Exception as e:
         logger.error_trace(f"Release download error: {e}")
         return jsonify({"error": str(e)}), 500
-
-
-def _is_settings_enabled() -> bool:
-    """Check if the config directory is mounted and writable."""
-    from cwa_book_downloader.config.env import _is_config_dir_writable
-    return _is_config_dir_writable()
 
 
 @app.route('/api/config', methods=['GET'])
@@ -510,6 +500,7 @@ def api_config() -> Union[Response, Tuple[Response, int]]:
             get_provider_search_fields,
             get_provider_default_sort,
         )
+        from cwa_book_downloader.config.env import _is_config_dir_writable
 
         config = {
             "calibre_web_url": app_config.get("CALIBRE_WEB_URL", ""),
@@ -526,7 +517,7 @@ def api_config() -> Union[Response, Tuple[Response, int]]:
             "default_release_source": app_config.get("DEFAULT_RELEASE_SOURCE", "direct_download"),
             "auto_open_downloads_sidebar": app_config.get("AUTO_OPEN_DOWNLOADS_SIDEBAR", True),
             "download_to_browser": app_config.get("DOWNLOAD_TO_BROWSER", False),
-            "settings_enabled": _is_settings_enabled(),
+            "settings_enabled": _is_config_dir_writable(),
             # Default sort orders
             "default_sort": app_config.get("AA_DEFAULT_SORT", "relevance"),  # For direct mode (Anna's Archive)
             "metadata_default_sort": get_provider_default_sort(),  # For universal mode
@@ -541,11 +532,17 @@ def api_health() -> Union[Response, Tuple[Response, int]]:
     """
     Health check endpoint for container orchestration.
     No authentication required.
-    
+
     Returns:
-        flask.Response: JSON with status "ok".
+        flask.Response: JSON with status "ok" and optional degraded features.
     """
-    return jsonify({"status": "ok"})
+    response = {"status": "ok"}
+
+    # Report degraded features
+    if not backend.WEBSOCKET_AVAILABLE:
+        response["degraded"] = {"websocket": "WebSocket unavailable - real-time updates disabled"}
+
+    return jsonify(response)
 
 @app.route('/api/status', methods=['GET'])
 @login_required
@@ -874,12 +871,7 @@ def api_login() -> Union[Response, Tuple[Response, int]]:
     from cwa_book_downloader.core.settings_registry import load_config_file
 
     try:
-        # Get client IP address (handles reverse proxy forwarding)
-        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
-        if ip_address and ',' in ip_address:
-            # X-Forwarded-For can contain multiple IPs, take the first one
-            ip_address = ip_address.split(',')[0].strip()
-
+        ip_address = get_client_ip()
         data = request.get_json()
         if not data:
             return jsonify({"error": "No data provided"}), 400
@@ -983,11 +975,7 @@ def api_logout() -> Union[Response, Tuple[Response, int]]:
         flask.Response: JSON with success status.
     """
     try:
-        # Get client IP address (handles reverse proxy forwarding)
-        ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
-        if ip_address and ',' in ip_address:
-            ip_address = ip_address.split(',')[0].strip()
-        
+        ip_address = get_client_ip()
         username = session.get('user_id', 'unknown')
         session.clear()
         logger.info(f"Logout successful for user '{username}' from IP {ip_address}")

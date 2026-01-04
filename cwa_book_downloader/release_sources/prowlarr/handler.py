@@ -1,10 +1,4 @@
-"""
-Prowlarr download handler.
-
-Handles downloads from Prowlarr via external download clients.
-Supported torrent clients: qBittorrent, Transmission, Deluge.
-Supported usenet clients: NZBGet, SABnzbd.
-"""
+"""Prowlarr download handler - executes downloads via torrent/usenet clients."""
 
 import shutil
 from pathlib import Path
@@ -14,6 +8,7 @@ from typing import Callable, Optional
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.core.logger import setup_logger
 from cwa_book_downloader.core.models import DownloadTask
+from cwa_book_downloader.core.utils import is_audiobook
 from cwa_book_downloader.release_sources import DownloadHandler, register_handler
 from cwa_book_downloader.release_sources.prowlarr.cache import get_release, remove_release
 from cwa_book_downloader.release_sources.prowlarr.clients import (
@@ -34,31 +29,38 @@ class ProwlarrHandler(DownloadHandler):
     """Handler for Prowlarr downloads via configured torrent or usenet client."""
 
     def _get_category_for_task(self, client, task: DownloadTask) -> Optional[str]:
-        """Get the appropriate category based on content type.
-
-        Returns the audiobook-specific category if configured and the task is an audiobook,
-        otherwise returns None to let the client use its default category.
-        """
-        is_audiobook = task.content_type and "audiobook" in task.content_type.lower()
-
-        if not is_audiobook:
+        """Get audiobook category if configured and applicable, else None for default."""
+        if not is_audiobook(task.content_type):
             return None
 
         # Client-specific audiobook category config keys
-        audiobook_key = {
+        audiobook_keys = {
             "qbittorrent": "QBITTORRENT_CATEGORY_AUDIOBOOK",
             "transmission": "TRANSMISSION_CATEGORY_AUDIOBOOK",
             "deluge": "DELUGE_CATEGORY_AUDIOBOOK",
             "nzbget": "NZBGET_CATEGORY_AUDIOBOOK",
             "sabnzbd": "SABNZBD_CATEGORY_AUDIOBOOK",
-        }.get(client.name)
+        }
+        audiobook_key = audiobook_keys.get(client.name)
+        return config.get(audiobook_key, "") or None if audiobook_key else None
 
-        if audiobook_key:
-            audiobook_cat = config.get(audiobook_key, "")
-            if audiobook_cat:
-                return audiobook_cat
+    def _build_progress_message(self, status) -> str:
+        """Build a progress message from download status."""
+        msg = f"{status.progress:.0f}%"
 
-        return None  # Let client use its default
+        if status.download_speed and status.download_speed > 0:
+            speed_mb = status.download_speed / 1024 / 1024
+            msg += f" ({speed_mb:.1f} MB/s)"
+
+        if status.eta and status.eta > 0:
+            if status.eta < 60:
+                msg += f" - {status.eta}s left"
+            elif status.eta < 3600:
+                msg += f" - {status.eta // 60}m left"
+            else:
+                msg += f" - {status.eta // 3600}h {(status.eta % 3600) // 60}m left"
+
+        return msg
 
     def download(
         self,
@@ -67,18 +69,7 @@ class ProwlarrHandler(DownloadHandler):
         progress_callback: Callable[[float], None],
         status_callback: Callable[[str, Optional[str]], None],
     ) -> Optional[str]:
-        """
-        Execute a Prowlarr download.
-
-        Args:
-            task: Download task with task_id (Prowlarr source_id/GUID)
-            cancel_flag: Event to check for cancellation
-            progress_callback: Called with progress percentage (0-100)
-            status_callback: Called with (status, message) for status updates
-
-        Returns:
-            Path to downloaded file if successful, None otherwise
-        """
+        """Execute download via configured torrent/usenet client. Returns file path or None."""
         try:
             # Look up the cached release
             prowlarr_result = get_release(task.task_id)
@@ -205,24 +196,8 @@ class ProwlarrHandler(DownloadHandler):
                     client.remove(download_id, delete_files=True)
                     return None
 
-                # Build status message
-                # If client provided a specific message (e.g., "Stalled", "Fetching metadata"),
-                # use that. Otherwise, build a progress message.
-                if status.message:
-                    msg = status.message
-                else:
-                    msg = f"{status.progress:.0f}%"
-                    if status.download_speed and status.download_speed > 0:
-                        speed_mb = status.download_speed / 1024 / 1024
-                        msg += f" ({speed_mb:.1f} MB/s)"
-                    if status.eta and status.eta > 0:
-                        if status.eta < 60:
-                            msg += f" - {status.eta}s left"
-                        elif status.eta < 3600:
-                            msg += f" - {status.eta // 60}m left"
-                        else:
-                            msg += f" - {status.eta // 3600}h {(status.eta % 3600) // 60}m left"
-
+                # Build status message - use client message if provided, else build progress
+                msg = status.message or self._build_progress_message(status)
                 status_callback("downloading", msg)
 
                 # Wait for next poll (interruptible by cancel)
@@ -271,14 +246,7 @@ class ProwlarrHandler(DownloadHandler):
         task: DownloadTask,
         status_callback: Callable[[str, Optional[str]], None],
     ) -> Optional[str]:
-        """Handle completed download - stage or return path for orchestrator.
-
-        For torrents: returns original path directly (no copy). Orchestrator
-        will hardlink or copy as needed, avoiding unnecessary staging of
-        large files like audiobooks.
-
-        For usenet: stages to temp directory based on config.
-        """
+        """Handle completed download. Torrents return original path; usenet stages to temp."""
         try:
             # For torrents, skip staging - return original path directly
             # Orchestrator will hardlink (library mode) or copy (ingest mode) as needed
@@ -321,12 +289,7 @@ class ProwlarrHandler(DownloadHandler):
             return None
 
     def cancel(self, task_id: str) -> bool:
-        """
-        Cancel an in-progress download.
-
-        Note: Actual cancellation is handled via the cancel_flag in download().
-        This method is for cleanup if the cancel_flag mechanism fails.
-        """
+        """Cancel download and clean up cache. Primary cancellation is via cancel_flag."""
         logger.debug(f"Cancel requested for Prowlarr task: {task_id}")
         # Remove from cache if present
         remove_release(task_id)

@@ -1,23 +1,7 @@
 """Download queue orchestration and worker management.
 
-## Download Architecture
-
-All downloads follow a two-stage process:
-
-1. **Staging (TMP_DIR)**: Handlers download/copy files to a temp staging area.
-   - Direct downloads: Downloaded directly to staging
-   - Torrent downloads: Copied from torrent client's completed folder to staging
-   - NZB downloads: Moved from NZB client's completed folder to staging
-
-2. **Ingest (INGEST_DIR)**: Orchestrator moves staged files to the final location.
-   - Archive extraction (RAR/ZIP) happens here
-   - Custom scripts run here
-   - Final move to ingest folder
-
-This ensures:
-- Handlers don't need to know about ingest folder logic
-- Archive handling works uniformly for all sources
-- Single point of control for what enters the ingest folder
+Two-stage architecture: handlers stage to TMP_DIR, orchestrator moves to INGEST_DIR
+with archive extraction and custom script support.
 """
 
 import hashlib
@@ -36,9 +20,16 @@ from cwa_book_downloader.release_sources import direct_download
 from cwa_book_downloader.release_sources.direct_download import SearchUnavailable
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.config.env import TMP_DIR
-from cwa_book_downloader.core.utils import get_ingest_dir, get_destination, get_aa_content_type_dir
+from cwa_book_downloader.core.utils import get_ingest_dir, get_destination, get_aa_content_type_dir, is_audiobook as check_audiobook, transform_cover_url
 from cwa_book_downloader.core.naming import build_library_path, same_filesystem, assign_part_numbers, parse_naming_template, sanitize_filename
-from cwa_book_downloader.download.archive import is_archive, process_archive
+from cwa_book_downloader.download.archive import (
+    is_archive,
+    process_archive,
+    _get_file_organization,
+    _get_template,
+    _get_supported_formats as _get_book_formats,
+    _get_supported_audiobook_formats,
+)
 from cwa_book_downloader.release_sources import get_handler, get_source_display_name
 from cwa_book_downloader.core.logger import setup_logger
 from cwa_book_downloader.core.models import BookInfo, DownloadTask, QueueStatus, SearchFilters, SearchMode
@@ -54,25 +45,13 @@ logger = setup_logger(__name__)
 # The orchestrator handles moving staged files to the ingest folder.
 
 def get_staging_dir() -> Path:
-    """Get the staging directory for downloads.
-
-    All handlers should stage their downloads here. The orchestrator
-    handles moving staged files to the final ingest location.
-    """
+    """Get the staging directory for downloads."""
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     return TMP_DIR
 
 
 def get_staging_path(task_id: str, extension: str) -> Path:
-    """Get a staging path for a download.
-
-    Args:
-        task_id: Unique task identifier
-        extension: File extension (e.g., 'epub', 'zip')
-
-    Returns:
-        Path in staging directory for this download
-    """
+    """Get a staging path for a download."""
     staging_dir = get_staging_dir()
     # Hash task_id in case it contains invalid filename chars (e.g., Prowlarr URLs)
     safe_id = hashlib.md5(task_id.encode()).hexdigest()[:16]
@@ -80,19 +59,7 @@ def get_staging_path(task_id: str, extension: str) -> Path:
 
 
 def stage_file(source_path: Path, task_id: str, copy: bool = False) -> Path:
-    """Stage a file for ingest processing.
-
-    Use this when a download client has completed a download and the file
-    needs to be staged for orchestrator processing.
-
-    Args:
-        source_path: Path to the completed download
-        task_id: Unique task identifier
-        copy: If True, copy the file (for torrents). If False, move it.
-
-    Returns:
-        Path to the staged file
-    """
+    """Stage a file for ingest processing. Use copy=True for torrents to preserve seeding."""
     staging_dir = get_staging_dir()
     # Stage with original filename, add counter suffix if collision
     staged_path = staging_dir / source_path.name
@@ -112,85 +79,8 @@ def stage_file(source_path: Path, task_id: str, copy: bool = False) -> Path:
     return staged_path
 
 
-# =============================================================================
-# File Organization Helpers
-# =============================================================================
-
-
-def _get_file_organization(is_audiobook: bool) -> str:
-    """Get the file organization mode for the content type.
-
-    Returns:
-        One of: "none", "rename", "organize"
-    """
-    key = "FILE_ORGANIZATION_AUDIOBOOK" if is_audiobook else "FILE_ORGANIZATION"
-    mode = config.get(key, "rename")
-
-    # Handle legacy settings migration
-    if mode not in ("none", "rename", "organize"):
-        # Check legacy PROCESSING_MODE
-        legacy_key = "PROCESSING_MODE_AUDIOBOOK" if is_audiobook else "PROCESSING_MODE"
-        legacy_mode = config.get(legacy_key, "ingest")
-        if legacy_mode == "library":
-            return "organize"
-        # Check legacy USE_BOOK_TITLE for ingest mode
-        if config.get("USE_BOOK_TITLE", True):
-            return "rename"
-        return "none"
-
-    return mode
-
-
-def _get_template(is_audiobook: bool, organization_mode: str) -> str:
-    """Get the template for the content type and organization mode.
-
-    Returns:
-        Template string
-    """
-    # Build the key based on content type and organization mode
-    if is_audiobook:
-        if organization_mode == "organize":
-            key = "TEMPLATE_AUDIOBOOK_ORGANIZE"
-        else:
-            key = "TEMPLATE_AUDIOBOOK_RENAME"
-    else:
-        if organization_mode == "organize":
-            key = "TEMPLATE_ORGANIZE"
-        else:
-            key = "TEMPLATE_RENAME"
-
-    template = config.get(key, "")
-
-    # Try legacy keys if new setting is empty
-    if not template:
-        # Try old unified TEMPLATE key
-        legacy_key = "TEMPLATE_AUDIOBOOK" if is_audiobook else "TEMPLATE"
-        template = config.get(legacy_key, "")
-
-    if not template:
-        # Try even older LIBRARY_TEMPLATE key
-        legacy_key = "LIBRARY_TEMPLATE_AUDIOBOOK" if is_audiobook else "LIBRARY_TEMPLATE"
-        template = config.get(legacy_key, "")
-
-    # Use sensible default if still empty
-    if not template:
-        if organization_mode == "organize":
-            return "{Author}/{Title} ({Year})"
-        else:
-            return "{Author} - {Title} ({Year})"
-
-    return template
-
-
 def _should_hardlink(task: DownloadTask) -> bool:
-    """Determine if a download should be hardlinked instead of copied.
-
-    Hardlinking only applies to torrent downloads (Prowlarr source).
-    Uses per-content-type settings.
-
-    Returns:
-        True if hardlinking should be used
-    """
+    """Check if download should be hardlinked (Prowlarr torrents only)."""
     # Only Prowlarr downloads (torrents) can be hardlinked
     if task.source != "prowlarr":
         return False
@@ -200,7 +90,7 @@ def _should_hardlink(task: DownloadTask) -> bool:
         return False
 
     # Check per-content-type setting
-    is_audiobook = task.content_type and "audiobook" in task.content_type.lower()
+    is_audiobook = check_audiobook(task.content_type)
     key = "HARDLINK_TORRENTS_AUDIOBOOK" if is_audiobook else "HARDLINK_TORRENTS"
 
     # Check new setting first, then legacy TORRENT_HARDLINK
@@ -213,30 +103,13 @@ def _should_hardlink(task: DownloadTask) -> bool:
 
 
 def _should_extract_archives(task: DownloadTask) -> bool:
-    """Determine if archives should be extracted for this download.
-
-    Archives are NOT extracted when hardlinking is enabled (to preserve torrent seeding).
-    """
-    if _should_hardlink(task):
-        return False
-    return True
+    """Check if archives should be extracted (disabled when hardlinking)."""
+    return not _should_hardlink(task)
 
 
 def _get_final_destination(task: DownloadTask) -> Path:
-    """Get the final destination directory for a download.
-
-    Handles:
-    - Per-content-type destinations (books vs audiobooks)
-    - AA content-type routing override (for Direct mode downloads)
-
-    Returns:
-        Path to the destination directory
-    """
-    content_type = task.content_type.lower() if task.content_type else ""
-    is_audiobook = "audiobook" in content_type
-
-    # Get base destination
-    base_dest = get_destination(is_audiobook)
+    """Get final destination directory, with content-type routing support."""
+    is_audiobook = check_audiobook(task.content_type)
 
     # For Anna's Archive (direct_download), check for content-type routing override
     if task.source == "direct_download" and not is_audiobook:
@@ -244,7 +117,7 @@ def _get_final_destination(task: DownloadTask) -> Path:
         if override:
             return override
 
-    return base_dest
+    return get_destination(is_audiobook)
 
 
 def _build_metadata_dict(task: DownloadTask) -> dict:
@@ -261,32 +134,19 @@ def _build_metadata_dict(task: DownloadTask) -> dict:
 
 def _get_supported_formats(content_type: str = None) -> List[str]:
     """Get current supported formats from config singleton based on content type."""
-    if content_type and content_type.lower() == "audiobook":
-        formats = config.get("SUPPORTED_AUDIOBOOK_FORMATS", ["m4b", "mp3"])
-    else:
-        formats = config.get("SUPPORTED_FORMATS", ["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"])
-    # Handle both list (from MultiSelectField) and comma-separated string (legacy/env)
-    if isinstance(formats, str):
-        return [fmt.strip().lower() for fmt in formats.split(",") if fmt.strip()]
-    return [fmt.lower() for fmt in formats]
+    if check_audiobook(content_type):
+        return _get_supported_audiobook_formats()
+    return _get_book_formats()
 
 
 def _find_book_files_in_directory(directory: Path, content_type: str = None) -> Tuple[List[Path], List[Path]]:
-    """Find all book files in a directory matching supported formats.
-
-    Args:
-        directory: Directory to search recursively
-        content_type: Content type to determine format list (e.g., "audiobook")
-
-    Returns:
-        Tuple of (matching book files, rejected files with unsupported extensions)
-    """
+    """Find book files matching supported formats. Returns (matches, rejected)."""
     book_files = []
     rejected_files = []
     supported_formats = _get_supported_formats(content_type)
     supported_exts = {f".{fmt}" for fmt in supported_formats}
 
-    is_audiobook = content_type and content_type.lower() == "audiobook"
+    is_audiobook = check_audiobook(content_type)
     if is_audiobook:
         trackable_exts = {'.m4b', '.mp3', '.m4a', '.flac', '.ogg', '.wma', '.aac', '.wav'}
     else:
@@ -307,19 +167,7 @@ def process_directory(
     ingest_dir: Path,
     task: DownloadTask,
 ) -> Tuple[List[Path], Optional[str]]:
-    """Process a staged directory: find book files, handle archives, move to ingest.
-
-    For multi-file torrent/usenet downloads. If book files exist, moves them directly.
-    If only archives exist, extracts them to find book files inside.
-
-    Args:
-        directory: Staged directory containing downloaded files
-        ingest_dir: Final destination directory for book files
-        task: Download task for filename generation
-
-    Returns:
-        Tuple of (list of final paths, error message if failed)
-    """
+    """Process staged directory: find book files, extract archives, move to ingest."""
     try:
         content_type = task.content_type
         book_files, rejected_files = _find_book_files_in_directory(directory, content_type)
@@ -385,8 +233,7 @@ def process_directory(
 
         # Move each book file to destination
         final_paths = []
-        content_type = task.content_type.lower() if task.content_type else ""
-        is_audiobook = "audiobook" in content_type
+        is_audiobook = check_audiobook(task.content_type)
         organization_mode = _get_file_organization(is_audiobook)
 
         for book_file in book_files:
@@ -428,11 +275,14 @@ def process_directory(
 
 
 # WebSocket manager (initialized by app.py)
+# Track whether WebSocket is available for status reporting
+WEBSOCKET_AVAILABLE = True
 try:
     from cwa_book_downloader.api.websocket import ws_manager
 except ImportError:
-    logger.warning("WebSocket unavailable - real-time updates disabled")
+    logger.error("WebSocket unavailable - real-time updates disabled")
     ws_manager = None
+    WEBSOCKET_AVAILABLE = False
 
 # Progress update throttling - track last broadcast time per book
 _progress_last_broadcast: Dict[str, float] = {}
@@ -443,15 +293,7 @@ _last_activity: Dict[str, float] = {}
 STALL_TIMEOUT = 300  # 5 minutes without progress/status update = stalled
 
 def search_books(query: str, filters: SearchFilters) -> List[Dict[str, Any]]:
-    """Search for books matching the query.
-    
-    Args:
-        query: Search term
-        filters: Search filters object
-        
-    Returns:
-        List[Dict]: List of book information dictionaries
-    """
+    """Search for books matching the query."""
     try:
         books = direct_download.search_books(query, filters)
         return [_book_info_to_dict(book) for book in books]
@@ -462,17 +304,7 @@ def search_books(query: str, filters: SearchFilters) -> List[Dict[str, Any]]:
         raise
 
 def get_book_info(book_id: str) -> Optional[Dict[str, Any]]:
-    """Get detailed information for a specific book.
-
-    Args:
-        book_id: Book identifier
-
-    Returns:
-        Optional[Dict]: Book information dictionary if found, None if not found
-
-    Raises:
-        Exception: If there's an error fetching the book info
-    """
+    """Get detailed information for a specific book."""
     try:
         book = direct_download.get_book_info(book_id)
         return _book_info_to_dict(book)
@@ -480,25 +312,14 @@ def get_book_info(book_id: str) -> Optional[Dict[str, Any]]:
         logger.error_trace(f"Error getting book info: {e}")
         raise
 
-def queue_book(book_id: str, priority: int = 0, source: str = "direct_download") -> bool:
-    """Add a book to the download queue with specified priority.
-
-    Fetches display info and creates a DownloadTask. The handler will fetch
-    the full book details (including download URLs) when processing.
-
-    Args:
-        book_id: Book identifier (e.g., AA MD5 hash)
-        priority: Priority level (lower number = higher priority)
-        source: Release source handler to use (default: direct_download)
-
-    Returns:
-        bool: True if book was successfully queued
-    """
+def queue_book(book_id: str, priority: int = 0, source: str = "direct_download") -> Tuple[bool, Optional[str]]:
+    """Add a book to the download queue. Returns (success, error_message)."""
     try:
         book_info = direct_download.get_book_info(book_id, fetch_download_count=False)
         if not book_info:
-            logger.warning(f"Could not fetch book info for {book_id}")
-            return False
+            error_msg = f"Could not fetch book info for {book_id}"
+            logger.warning(error_msg)
+            return False, error_msg
 
         # Create a source-agnostic download task
         task = DownloadTask(
@@ -516,7 +337,7 @@ def queue_book(book_id: str, priority: int = 0, source: str = "direct_download")
 
         if not book_queue.add(task):
             logger.info(f"Book already in queue: {book_info.title}")
-            return False
+            return False, "Book is already in the download queue"
 
         logger.info(f"Book queued with priority {priority}: {book_info.title}")
 
@@ -524,28 +345,19 @@ def queue_book(book_id: str, priority: int = 0, source: str = "direct_download")
         if ws_manager:
             ws_manager.broadcast_status_update(queue_status())
 
-        return True
+        return True, None
+    except SearchUnavailable as e:
+        error_msg = f"Search service unavailable: {e}"
+        logger.warning(error_msg)
+        return False, error_msg
     except Exception as e:
-        logger.error_trace(f"Error queueing book: {e}")
-        return False
+        error_msg = f"Error queueing book: {e}"
+        logger.error_trace(error_msg)
+        return False, error_msg
 
 
-def queue_release(release_data: dict, priority: int = 0) -> bool:
-    """Add a release to the download queue.
-
-    This is used when downloading from the ReleaseModal where we already have
-    all the release data from the search - no need to re-fetch.
-
-    Creates a DownloadTask directly from the release data. The handler will
-    fetch full details when processing.
-
-    Args:
-        release_data: Release dictionary with source, source_id, title, format, etc.
-        priority: Priority level (lower number = higher priority)
-
-    Returns:
-        bool: True if release was successfully queued
-    """
+def queue_release(release_data: dict, priority: int = 0) -> Tuple[bool, Optional[str]]:
+    """Add a release to the download queue. Returns (success, error_message)."""
     try:
         source = release_data.get('source', 'direct_download')
         extra = release_data.get('extra', {})
@@ -581,7 +393,7 @@ def queue_release(release_data: dict, priority: int = 0) -> bool:
 
         if not book_queue.add(task):
             logger.info(f"Release already in queue: {task.title}")
-            return False
+            return False, "Release is already in the download queue"
 
         logger.info(f"Release queued with priority {priority}: {task.title}")
 
@@ -589,28 +401,29 @@ def queue_release(release_data: dict, priority: int = 0) -> bool:
         if ws_manager:
             ws_manager.broadcast_status_update(queue_status())
 
-        return True
+        return True, None
 
     except ValueError as e:
         # Handler not found for this source
-        logger.warning(f"Unknown release source: {e}")
-        return False
+        error_msg = f"Unknown release source: {e}"
+        logger.warning(error_msg)
+        return False, error_msg
+    except KeyError as e:
+        error_msg = f"Missing required field in release data: {e}"
+        logger.warning(error_msg)
+        return False, error_msg
     except Exception as e:
-        logger.error_trace(f"Error queueing release: {e}")
-        return False
+        error_msg = f"Error queueing release: {e}"
+        logger.error_trace(error_msg)
+        return False, error_msg
 
 def queue_status() -> Dict[str, Dict[str, Any]]:
-    """Get current status of the download queue.
-
-    Returns:
-        Dict: Queue status organized by status type with serialized task data
-    """
+    """Get current status of the download queue."""
     status = book_queue.get_status()
     for _, tasks in status.items():
         for _, task in tasks.items():
-            if task.download_path:
-                if not os.path.exists(task.download_path):
-                    task.download_path = None
+            if task.download_path and not os.path.exists(task.download_path):
+                task.download_path = None
 
     # Convert Enum keys to strings and DownloadTask objects to dicts for JSON serialization
     return {
@@ -622,14 +435,7 @@ def queue_status() -> Dict[str, Dict[str, Any]]:
     }
 
 def get_book_data(task_id: str) -> Tuple[Optional[bytes], Optional[DownloadTask]]:
-    """Get downloaded file data for a specific task.
-
-    Args:
-        task_id: Task identifier
-
-    Returns:
-        Tuple[Optional[bytes], Optional[DownloadTask]]: File data if available, and the task
-    """
+    """Get downloaded file data for a specific task."""
     task = None
     try:
         task = book_queue.get_task(task_id)
@@ -649,12 +455,7 @@ def get_book_data(task_id: str) -> Tuple[Optional[bytes], Optional[DownloadTask]
         return None, task
 
 def _book_info_to_dict(book: BookInfo) -> Dict[str, Any]:
-    """Convert BookInfo object to dictionary representation.
-
-    Transforms external preview URLs to local proxy URLs when cover caching is enabled.
-    """
-    from cwa_book_downloader.core.utils import transform_cover_url
-
+    """Convert BookInfo to dict, transforming cover URLs for caching."""
     result = {
         key: value for key, value in book.__dict__.items()
         if value is not None
@@ -668,14 +469,7 @@ def _book_info_to_dict(book: BookInfo) -> Dict[str, Any]:
 
 
 def _task_to_dict(task: DownloadTask) -> Dict[str, Any]:
-    """Convert DownloadTask object to dictionary representation.
-
-    Maps DownloadTask fields to the format expected by the frontend,
-    maintaining compatibility with the previous BookInfo-based format.
-    Transforms external preview URLs to local proxy URLs when cover caching is enabled.
-    """
-    from cwa_book_downloader.core.utils import transform_cover_url
-
+    """Convert DownloadTask to dict for frontend, transforming cover URLs."""
     # Transform external preview URLs to local proxy URLs
     preview = transform_cover_url(task.preview, task.task_id)
 
@@ -699,19 +493,7 @@ def _task_to_dict(task: DownloadTask) -> Dict[str, Any]:
 
 
 def _download_task(task_id: str, cancel_flag: Event) -> Optional[str]:
-    """Download a task with cancellation support.
-
-    Delegates to the appropriate handler based on the task's source.
-    Handlers return a temp file path, orchestrator handles post-processing
-    (archive extraction, moving to ingest) uniformly for all sources.
-
-    Args:
-        task_id: Task identifier
-        cancel_flag: Threading event to signal cancellation
-
-    Returns:
-        str: Path to the downloaded file if successful, None otherwise
-    """
+    """Download a task via appropriate handler, then post-process to ingest."""
     try:
         # Check for cancellation before starting
         if cancel_flag.is_set():
@@ -766,6 +548,11 @@ def _download_task(task_id: str, cancel_flag: Event) -> Optional[str]:
             logger.info(f"Download cancelled during error handling: {task_id}")
         else:
             logger.error_trace(f"Error downloading: {e}")
+            # Update task status so user sees the failure
+            task = book_queue.get_task(task_id)
+            if task:
+                book_queue.update_status(task_id, QueueStatus.ERROR)
+                book_queue.update_status_message(task_id, f"Download failed: {type(e).__name__}")
         return None
 
 
@@ -774,16 +561,8 @@ def _process_organize_mode(
     task: DownloadTask,
     status_callback,
 ) -> Optional[str]:
-    """Process a download with file organization (organize mode with folders).
-
-    Organizes files into folders based on template (e.g., "{Author}/{Series/}{Title}").
-    Supports hardlinking for torrent downloads when enabled.
-
-    Returns:
-        Path to organized file if successful, None if failed
-    """
-    content_type = task.content_type.lower() if task.content_type else ""
-    is_audiobook = "audiobook" in content_type
+    """Organize files into library folders using template. Supports hardlinking."""
+    is_audiobook = check_audiobook(task.content_type)
 
     # Get destination and template
     destination = _get_final_destination(task)
@@ -810,32 +589,25 @@ def _process_organize_mode(
 
     # Determine if we should use hardlinking
     use_hardlink = False
-    hardlink_source = None
+    source = temp_file
 
     if _should_hardlink(task):
         hardlink_source = Path(task.original_download_path)
-        if hardlink_source.exists():
-            # Check same filesystem (required for hardlinks)
-            if same_filesystem(hardlink_source, destination):
-                use_hardlink = True
-            else:
-                logger.warning(
-                    f"Cannot hardlink: {hardlink_source} and {destination} are on different filesystems. "
-                    "Falling back to copy. To fix: ensure torrent client downloads to same filesystem as destination."
-                )
-                status_callback("resolving", "Cannot hardlink (different filesystems), using copy")
+        if hardlink_source.exists() and same_filesystem(hardlink_source, destination):
+            use_hardlink = True
+            source = hardlink_source
+        elif hardlink_source.exists():
+            logger.warning(
+                f"Cannot hardlink: {hardlink_source} and {destination} are on different filesystems. "
+                "Falling back to copy. To fix: ensure torrent client downloads to same filesystem as destination."
+            )
+            status_callback("resolving", "Cannot hardlink (different filesystems), using copy")
 
     # Build metadata dict for template
     metadata = _build_metadata_dict(task)
 
     try:
-        if use_hardlink:
-            status_callback("resolving", "Creating hardlinks")
-        else:
-            status_callback("resolving", "Organizing files")
-
-        # Use torrent client path for hardlinks, staging path for moves
-        source = hardlink_source if use_hardlink else temp_file
+        status_callback("resolving", "Creating hardlinks" if use_hardlink else "Organizing files")
 
         if source.is_dir():
             return _transfer_directory_to_library(
@@ -865,108 +637,34 @@ def _is_torrent_source(source_path: Path, task: DownloadTask) -> bool:
         return False
 
 
-def _get_unique_path(dest_path: Path) -> Path:
-    """Return a unique path by appending counter if file already exists.
-
-    Note: Has TOCTOU race. Use _atomic_hardlink/_atomic_move for concurrent safety.
-    """
-    if not dest_path.exists():
-        return dest_path
-
-    base = dest_path.stem
-    ext = dest_path.suffix
+def _stage_torrent_path(source: Path) -> Path:
+    """Copy torrent source to staging directory to preserve seeding."""
+    staging_dir = get_staging_dir()
+    staged_path = staging_dir / source.name
     counter = 1
-    while dest_path.exists():
-        dest_path = dest_path.parent / f"{base}_{counter}{ext}"
-        counter += 1
 
-    logger.info(f"File already exists, saving as: {dest_path.name}")
-    return dest_path
+    if source.is_dir():
+        while staged_path.exists():
+            staged_path = staging_dir / f"{source.name}_{counter}"
+            counter += 1
+        shutil.copytree(str(source), str(staged_path))
+    else:
+        while staged_path.exists():
+            staged_path = staging_dir / f"{source.stem}_{counter}{source.suffix}"
+            counter += 1
+        shutil.copy2(str(source), str(staged_path))
 
-
-def _atomic_hardlink(source_path: Path, dest_path: Path, max_attempts: int = 100) -> Path:
-    """Create a hardlink with atomic collision detection. Retries with counter suffix on collision."""
-    base = dest_path.stem
-    ext = dest_path.suffix
-
-    for attempt in range(max_attempts):
-        try_path = dest_path if attempt == 0 else dest_path.parent / f"{base}_{attempt}{ext}"
-        try:
-            os.link(str(source_path), str(try_path))
-            if attempt > 0:
-                logger.info(f"File collision resolved: {try_path.name}")
-            return try_path
-        except FileExistsError:
-            continue
-
-    raise RuntimeError(f"Could not create hardlink after {max_attempts} attempts: {dest_path}")
+    logger.debug(f"Staged torrent {'directory' if source.is_dir() else 'file'}: {staged_path.name}")
+    return staged_path
 
 
-def _atomic_copy(source_path: Path, dest_path: Path, max_attempts: int = 100) -> Path:
-    """Copy a file with atomic collision detection. Retries with counter suffix on collision."""
-    base = dest_path.stem
-    ext = dest_path.suffix
-
-    for attempt in range(max_attempts):
-        try_path = dest_path if attempt == 0 else dest_path.parent / f"{base}_{attempt}{ext}"
-        try:
-            # Atomically claim the destination by creating an exclusive file
-            fd = os.open(str(try_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(fd)
-            try:
-                # Copy to temp file first, then replace to avoid partial files
-                temp_path = try_path.parent / f".{try_path.name}.tmp"
-                shutil.copy2(str(source_path), str(temp_path))
-                temp_path.replace(try_path)
-                if attempt > 0:
-                    logger.info(f"File collision resolved: {try_path.name}")
-                return try_path
-            except Exception:
-                try_path.unlink(missing_ok=True)
-                temp_path.unlink(missing_ok=True) if 'temp_path' in locals() else None
-                raise
-        except FileExistsError:
-            continue
-
-    raise RuntimeError(f"Could not copy file after {max_attempts} attempts: {dest_path}")
-
-
-def _atomic_move(source_path: Path, dest_path: Path, max_attempts: int = 100) -> Path:
-    """Move a file with atomic collision detection. Retries with counter suffix on collision."""
-    import errno
-
-    base = dest_path.stem
-    ext = dest_path.suffix
-
-    for attempt in range(max_attempts):
-        try_path = dest_path if attempt == 0 else dest_path.parent / f"{base}_{attempt}{ext}"
-        try:
-            os.link(str(source_path), str(try_path))
-            source_path.unlink()
-            if attempt > 0:
-                logger.info(f"File collision resolved: {try_path.name}")
-            return try_path
-        except FileExistsError:
-            continue
-        except OSError as e:
-            # Cross-filesystem - fall back to exclusive create
-            if e.errno not in (errno.EXDEV, errno.EMLINK):
-                raise
-            try:
-                fd = os.open(str(try_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.close(fd)
-                try:
-                    shutil.move(str(source_path), str(try_path))
-                    if attempt > 0:
-                        logger.info(f"File collision resolved: {try_path.name}")
-                    return try_path
-                except Exception:
-                    try_path.unlink(missing_ok=True)
-                    raise
-            except FileExistsError:
-                continue
-
-    raise RuntimeError(f"Could not move file after {max_attempts} attempts: {dest_path}")
+# Import atomic file operations from shared module
+# Re-exported here for backwards compatibility with existing tests/imports
+from cwa_book_downloader.download.fs import (
+    atomic_hardlink as _atomic_hardlink,
+    atomic_copy as _atomic_copy,
+    atomic_move as _atomic_move,
+)
 
 
 def _cleanup_staged_files(temp_file: Path, source_dir: Optional[Path] = None) -> None:
@@ -1023,7 +721,7 @@ def _transfer_file_to_library(
     if use_hardlink:
         _cleanup_staged_files(temp_file)
 
-    status_callback("complete", "Complete (library mode)")
+    status_callback("complete", "Complete")
     return str(final_path)
 
 
@@ -1100,8 +798,8 @@ def _transfer_directory_to_library(
     elif not is_torrent:
         _cleanup_staged_files(temp_file, source_dir)
 
-    count_msg = f" ({len(transferred_paths)} files," if len(transferred_paths) > 1 else " ("
-    status_callback("complete", f"Complete{count_msg} library mode)")
+    message = f"Complete ({len(transferred_paths)} files)" if len(transferred_paths) > 1 else "Complete"
+    status_callback("complete", message)
 
     return str(transferred_paths[0])
 
@@ -1112,25 +810,8 @@ def _post_process_download(
     cancel_flag: Event,
     status_callback,
 ) -> Optional[str]:
-    """Post-process a downloaded file based on file organization settings.
-
-    This runs uniformly for all download sources, ensuring consistent behavior.
-    Handles three organization modes:
-    - "none": Keep original filename, move to destination
-    - "rename": Apply template to filename, move to destination
-    - "organize": Apply template with folders, move to destination
-
-    Args:
-        temp_file: Path to downloaded file in temp directory
-        task: Download task with metadata
-        cancel_flag: Cancellation event
-        status_callback: Callback for status updates
-
-    Returns:
-        Final path in destination directory, or None on failure
-    """
-    content_type = task.content_type.lower() if task.content_type else ""
-    is_audiobook = "audiobook" in content_type
+    """Post-process download: extract archives, apply naming template, move to destination."""
+    is_audiobook = check_audiobook(task.content_type)
 
     # Validate search_mode
     if task.search_mode is None:
@@ -1150,7 +831,11 @@ def _post_process_download(
         if result is not None:
             return result
         # If organize mode fails, fall through to flat mode
-        logger.warning("Organize mode failed, falling back to flat destination")
+        logger.warning(
+            f"Organize mode failed for '{task.title}', falling back to flat destination. "
+            "Check destination folder permissions and ensure the path is writable."
+        )
+        status_callback("resolving", "Organization failed, using flat destination")
 
     # Ensure destination exists
     os.makedirs(destination, exist_ok=True)
@@ -1159,26 +844,7 @@ def _post_process_download(
     # (Torrent handler returns original path, not staged copy)
     if _is_torrent_source(temp_file, task) and not _should_hardlink(task):
         status_callback("resolving", "Staging torrent files")
-        staging_dir = get_staging_dir()
-
-        if temp_file.is_dir():
-            staged_path = staging_dir / temp_file.name
-            counter = 1
-            while staged_path.exists():
-                staged_path = staging_dir / f"{temp_file.name}_{counter}"
-                counter += 1
-            shutil.copytree(str(temp_file), str(staged_path))
-            logger.debug(f"Staged torrent directory: {staged_path.name}")
-        else:
-            staged_path = staging_dir / temp_file.name
-            counter = 1
-            while staged_path.exists():
-                staged_path = staging_dir / f"{temp_file.stem}_{counter}{temp_file.suffix}"
-                counter += 1
-            shutil.copy2(str(temp_file), str(staged_path))
-            logger.debug(f"Staged torrent file: {staged_path.name}")
-
-        temp_file = staged_path
+        temp_file = _stage_torrent_path(temp_file)
 
     # Handle archive extraction (RAR/ZIP) - only if not hardlinking
     if is_archive(temp_file) and _should_extract_archives(task):
@@ -1215,16 +881,13 @@ def _post_process_download(
             status_callback("error", error)
             return None
 
-        if final_paths:
-            if len(final_paths) == 1:
-                message = "Complete"
-            else:
-                message = f"Complete ({len(final_paths)} files)"
-            status_callback("complete", message)
-            return str(final_paths[0])
-        else:
+        if not final_paths:
             status_callback("error", "No book files found")
             return None
+
+        message = "Complete" if len(final_paths) == 1 else f"Complete ({len(final_paths)} files)"
+        status_callback("complete", message)
+        return str(final_paths[0])
 
     # Non-archive: run custom script if configured, then move to destination
     if config.CUSTOM_SCRIPT:
@@ -1297,14 +960,7 @@ def _post_process_download(
     return str(final_path)
 
 def update_download_progress(book_id: str, progress: float) -> None:
-    """Update download progress with throttled WebSocket broadcasts.
-
-    Progress is always stored in the queue, but WebSocket broadcasts are
-    throttled to avoid flooding clients with updates. Broadcasts occur:
-    - At most once per DOWNLOAD_PROGRESS_UPDATE_INTERVAL seconds
-    - Always at 0% (start) and 100% (complete)
-    - On significant progress jumps (>10%)
-    """
+    """Update download progress with throttled WebSocket broadcasts."""
     book_queue.update_progress(book_id, progress)
 
     # Track activity for stall detection
@@ -1339,13 +995,7 @@ def update_download_progress(book_id: str, progress: float) -> None:
             ws_manager.broadcast_download_progress(book_id, progress, 'downloading')
 
 def update_download_status(book_id: str, status: str, message: Optional[str] = None) -> None:
-    """Update download status with optional detailed message.
-    
-    Args:
-        book_id: Book identifier
-        status: Status string (e.g., 'resolving', 'downloading')
-        message: Optional detailed status message for UI display
-    """
+    """Update download status with optional message for UI display."""
     # Map string status to QueueStatus enum
     status_map = {
         'queued': QueueStatus.QUEUED,
@@ -1375,14 +1025,7 @@ def update_download_status(book_id: str, status: str, message: Optional[str] = N
             ws_manager.broadcast_status_update(queue_status())
 
 def cancel_download(book_id: str) -> bool:
-    """Cancel a download.
-    
-    Args:
-        book_id: Book identifier to cancel
-        
-    Returns:
-        bool: True if cancellation was successful
-    """
+    """Cancel a download."""
     result = book_queue.cancel_download(book_id)
     
     # Broadcast status update via WebSocket
@@ -1392,26 +1035,11 @@ def cancel_download(book_id: str) -> bool:
     return result
 
 def set_book_priority(book_id: str, priority: int) -> bool:
-    """Set priority for a queued book.
-    
-    Args:
-        book_id: Book identifier
-        priority: New priority level (lower = higher priority)
-        
-    Returns:
-        bool: True if priority was successfully changed
-    """
+    """Set priority for a queued book (lower = higher priority)."""
     return book_queue.set_priority(book_id, priority)
 
 def reorder_queue(book_priorities: Dict[str, int]) -> bool:
-    """Bulk reorder queue.
-    
-    Args:
-        book_priorities: Dict mapping book_id to new priority
-        
-    Returns:
-        bool: True if reordering was successful
-    """
+    """Bulk reorder queue by mapping book_id to new priority."""
     return book_queue.reorder_queue(book_priorities)
 
 def get_queue_order() -> List[Dict[str, Any]]:
@@ -1539,11 +1167,7 @@ _started = False
 
 
 def start() -> None:
-    """Start the download coordinator thread.
-
-    This should be called once during application startup.
-    Calling multiple times is safe - subsequent calls are no-ops.
-    """
+    """Start the download coordinator thread. Safe to call multiple times."""
     global _coordinator_thread, _started
 
     if _started:

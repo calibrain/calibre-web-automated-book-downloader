@@ -20,14 +20,13 @@ logger = setup_logger(__name__)
 
 def _clear_builtin_credentials() -> Dict[str, Any]:
     """Clear built-in credentials to allow public access."""
+    import json
+    from cwa_book_downloader.core.settings_registry import _get_config_file_path, _ensure_config_dir
+
     try:
         config = load_config_file("security")
         config.pop("BUILTIN_USERNAME", None)
         config.pop("BUILTIN_PASSWORD_HASH", None)
-
-        # Save the cleared config
-        from cwa_book_downloader.core.settings_registry import _get_config_file_path, _ensure_config_dir
-        import json
 
         _ensure_config_dir("security")
         config_path = _get_config_file_path("security")
@@ -102,9 +101,8 @@ def _on_save_security(values: Dict[str, Any]) -> Dict[str, Any]:
 def security_settings():
     """Security and authentication settings."""
     from cwa_book_downloader.config.env import CWA_DB_PATH
-    import os
 
-    cwa_db_available = CWA_DB_PATH and os.path.exists(CWA_DB_PATH)
+    cwa_db_available = CWA_DB_PATH is not None and CWA_DB_PATH.exists()
 
     fields = [
         TextField(

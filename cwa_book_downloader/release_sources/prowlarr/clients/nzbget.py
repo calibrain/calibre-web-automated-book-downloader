@@ -4,6 +4,7 @@ NZBGet download client for Prowlarr integration.
 Uses NZBGet's JSON-RPC API directly via requests (no external dependency).
 """
 
+import json
 from typing import Any, Optional, Tuple
 
 import requests
@@ -60,8 +61,6 @@ class NZBGetClient(DownloadClient):
         """
         rpc_url = f"{self.url}/jsonrpc"
 
-        # Build JSON-RPC 2.0 request
-        import json
         payload = json.dumps({
             "jsonrpc": "2.0",
             "id": 1,

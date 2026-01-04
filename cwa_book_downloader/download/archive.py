@@ -10,6 +10,8 @@ from typing import List, Optional, Tuple
 from cwa_book_downloader.core.logger import setup_logger
 from cwa_book_downloader.core.config import config
 from cwa_book_downloader.core.naming import parse_naming_template, sanitize_filename
+from cwa_book_downloader.core.utils import is_audiobook as check_audiobook
+from cwa_book_downloader.download.fs import atomic_write, atomic_move
 
 logger = setup_logger(__name__)
 
@@ -76,6 +78,8 @@ def _get_template(is_audiobook: bool, organization_mode: str) -> str:
         template = config.get(legacy_key, "")
 
     if not template:
+        if organization_mode == "organize":
+            return "{Author}/{Title} ({Year})"
         return "{Author} - {Title} ({Year})"
 
     return template
@@ -83,8 +87,7 @@ def _get_template(is_audiobook: bool, organization_mode: str) -> str:
 
 def _build_filename_from_task(task, extension: str, organization_mode: str) -> str:
     """Build a filename from task metadata using the configured template."""
-    content_type = task.content_type.lower() if task.content_type else ""
-    is_audiobook = "audiobook" in content_type
+    is_audiobook = check_audiobook(task.content_type)
 
     template = _get_template(is_audiobook, organization_mode)
     metadata = {
@@ -138,7 +141,7 @@ def is_archive(file_path: Path) -> bool:
 def _is_supported_file(file_path: Path, content_type: Optional[str] = None) -> bool:
     """Check if file matches user's supported formats setting based on content type."""
     ext = file_path.suffix.lower().lstrip(".")
-    if content_type and content_type.lower() == "audiobook":
+    if check_audiobook(content_type):
         supported_formats = _get_supported_audiobook_formats()
     else:
         supported_formats = _get_supported_formats()
@@ -156,19 +159,8 @@ def _filter_files(
     extracted_files: List[Path],
     content_type: Optional[str] = None,
 ) -> Tuple[List[Path], List[Path], List[Path]]:
-    """
-    Filter extracted files based on content type.
-
-    For audiobooks: filters to audio formats using SUPPORTED_AUDIOBOOK_FORMATS
-    For books: filters to book formats using SUPPORTED_FORMATS
-
-    Returns:
-        Tuple of (matched_files, rejected_format_files, other_files)
-        - matched_files: Match user's supported formats for this content type
-        - rejected_format_files: Valid formats for this type but not enabled by user
-        - other_files: Unrelated files (images, html, etc)
-    """
-    is_audiobook = content_type and content_type.lower() == "audiobook"
+    """Filter files by content type. Returns (matched, rejected_format, other)."""
+    is_audiobook = check_audiobook(content_type)
     known_extensions = ALL_AUDIO_EXTENSIONS if is_audiobook else ALL_EBOOK_EXTENSIONS
 
     matched_files = []
@@ -191,30 +183,7 @@ def extract_archive(
     output_dir: Path,
     content_type: Optional[str] = None,
 ) -> Tuple[List[Path], List[str], List[Path]]:
-    """
-    Extract files from an archive based on content type.
-
-    Extracts all files, then filters based on content type:
-    - Audiobooks: keeps files matching SUPPORTED_AUDIOBOOK_FORMATS
-    - Books: keeps files matching SUPPORTED_FORMATS
-    Non-matching files (HTML, images, etc.) are deleted.
-
-    Args:
-        archive_path: Path to the archive file
-        output_dir: Directory to extract files to
-        content_type: Content type (e.g., "audiobook") to determine which formats to keep
-
-    Returns:
-        Tuple of (matched_files, warnings, rejected_files)
-        - matched_files: Paths to extracted files matching supported formats
-        - warnings: List of warning messages
-        - rejected_files: Files that were rejected (format not enabled)
-
-    Raises:
-        ArchiveExtractionError: If extraction fails
-        PasswordProtectedError: If archive requires password
-        CorruptedArchiveError: If archive is corrupted
-    """
+    """Extract archive and filter by content type. Returns (matched, warnings, rejected)."""
     suffix = archive_path.suffix.lower().lstrip(".")
 
     if suffix == "zip":
@@ -224,7 +193,7 @@ def extract_archive(
     else:
         raise ArchiveExtractionError(f"Unsupported archive format: {suffix}")
 
-    is_audiobook = content_type and content_type.lower() == "audiobook"
+    is_audiobook = check_audiobook(content_type)
     file_type_label = "audiobook" if is_audiobook else "book"
 
     # Filter files based on content type
@@ -256,14 +225,46 @@ def extract_archive(
     return matched_files, warnings, rejected_files
 
 
-def _extract_zip(
-    archive_path: Path,
-    output_dir: Path,
-) -> Tuple[List[Path], List[str]]:
-    """Extract files from a ZIP archive."""
+def _extract_files_from_archive(archive, output_dir: Path) -> List[Path]:
+    """Extract files from ZipFile or RarFile to output_dir with security checks."""
     extracted_files = []
-    warnings = []
 
+    for info in archive.infolist():
+        if info.is_dir():
+            continue
+
+        # Use only filename, strip directory path (security: prevent path traversal)
+        filename = Path(info.filename).name
+        if not filename:
+            continue
+
+        # Security: reject filenames with null bytes or path separators
+        # Check both / and \ since archives may be created on different OSes
+        if "\x00" in filename or "/" in filename or "\\" in filename:
+            logger.warning(f"Skipping suspicious filename in archive: {info.filename!r}")
+            continue
+
+        # Extract to output_dir with flat structure
+        target_path = output_dir / filename
+
+        # Security: verify resolved path stays within output directory (defense-in-depth)
+        try:
+            target_path.resolve().relative_to(output_dir.resolve())
+        except ValueError:
+            logger.warning(f"Path traversal attempt blocked: {info.filename!r}")
+            continue
+
+        with archive.open(info) as src:
+            data = src.read()
+        final_path = atomic_write(target_path, data)
+        extracted_files.append(final_path)
+        logger.debug(f"Extracted: {filename}")
+
+    return extracted_files
+
+
+def _extract_zip(archive_path: Path, output_dir: Path) -> Tuple[List[Path], List[str]]:
+    """Extract files from a ZIP archive."""
     try:
         with zipfile.ZipFile(archive_path, "r") as zf:
             # Check for password protection
@@ -276,44 +277,18 @@ def _extract_zip(
             if bad_file:
                 raise CorruptedArchiveError(f"Corrupted file in archive: {bad_file}")
 
-            # Extract all files
-            for info in zf.infolist():
-                if info.is_dir():
-                    continue
-
-                # Use only filename, strip directory path (security: prevent path traversal)
-                filename = Path(info.filename).name
-                if not filename:
-                    continue
-
-                # Extract to output_dir with flat structure
-                target_path = output_dir / filename
-                target_path = _handle_duplicate_filename(target_path)
-
-                with zf.open(info) as src, open(target_path, "wb") as dst:
-                    dst.write(src.read())
-
-                extracted_files.append(target_path)
-                logger.debug(f"Extracted: {filename}")
+            return _extract_files_from_archive(zf, output_dir), []
 
     except zipfile.BadZipFile as e:
         raise CorruptedArchiveError(f"Invalid or corrupted ZIP: {e}")
     except PermissionError as e:
         raise ArchiveExtractionError(f"Permission denied: {e}")
 
-    return extracted_files, warnings
 
-
-def _extract_rar(
-    archive_path: Path,
-    output_dir: Path,
-) -> Tuple[List[Path], List[str]]:
+def _extract_rar(archive_path: Path, output_dir: Path) -> Tuple[List[Path], List[str]]:
     """Extract files from a RAR archive."""
     if not RAR_AVAILABLE:
         raise ArchiveExtractionError("RAR extraction not available - rarfile library not installed")
-
-    extracted_files = []
-    warnings = []
 
     try:
         with rarfile.RarFile(archive_path, "r") as rf:
@@ -324,25 +299,7 @@ def _extract_rar(
             # Test archive integrity
             rf.testrar()
 
-            # Extract all files
-            for info in rf.infolist():
-                if info.is_dir():
-                    continue
-
-                # Use only filename, strip directory path (security: prevent path traversal)
-                filename = Path(info.filename).name
-                if not filename:
-                    continue
-
-                # Extract to output_dir with flat structure
-                target_path = output_dir / filename
-                target_path = _handle_duplicate_filename(target_path)
-
-                with rf.open(info) as src, open(target_path, "wb") as dst:
-                    dst.write(src.read())
-
-                extracted_files.append(target_path)
-                logger.debug(f"Extracted: {filename}")
+            return _extract_files_from_archive(rf, output_dir), []
 
     except rarfile.BadRarFile as e:
         raise CorruptedArchiveError(f"Invalid or corrupted RAR: {e}")
@@ -350,25 +307,6 @@ def _extract_rar(
         raise ArchiveExtractionError("unrar binary not found - install unrar package")
     except PermissionError as e:
         raise ArchiveExtractionError(f"Permission denied: {e}")
-
-    return extracted_files, warnings
-
-
-def _handle_duplicate_filename(target_path: Path) -> Path:
-    """Handle duplicate filenames by appending counter."""
-    if not target_path.exists():
-        return target_path
-
-    base = target_path.stem
-    ext = target_path.suffix
-    parent = target_path.parent
-    counter = 1
-
-    while target_path.exists():
-        target_path = parent / f"{base}_{counter}{ext}"
-        counter += 1
-
-    return target_path
 
 
 @dataclass
@@ -388,27 +326,10 @@ def process_archive(
     archive_id: str,
     task: Optional["DownloadTask"] = None,
 ) -> ArchiveResult:
-    """
-    Process an archive file: extract, filter to supported files, move to ingest.
-
-    This is the main entry point for archive handling, usable by any download handler.
-    Filters files based on content type:
-    - Audiobooks: keeps files matching SUPPORTED_AUDIOBOOK_FORMATS
-    - Books: keeps files matching SUPPORTED_FORMATS
-
-    Args:
-        archive_path: Path to the downloaded archive file
-        temp_dir: Base temp directory for extraction (e.g., TMP_DIR)
-        ingest_dir: Final destination directory for files
-        archive_id: Unique identifier for temp directory naming
-        task: Optional download task for filename generation and content type
-
-    Returns:
-        ArchiveResult with success status, final paths, and status message
-    """
+    """Extract archive, filter to supported formats, move to ingest directory."""
     extract_dir = temp_dir / f"extract_{archive_id}"
     content_type = task.content_type if task else None
-    is_audiobook = content_type and content_type.lower() == "audiobook"
+    is_audiobook = check_audiobook(content_type)
     file_type_label = "audiobook" if is_audiobook else "book"
 
     try:
@@ -456,7 +377,7 @@ def process_archive(
         final_paths = []
 
         # Determine file organization mode
-        is_audiobook = task and task.content_type and "audiobook" in task.content_type.lower()
+        is_audiobook = check_audiobook(task.content_type) if task else False
         organization_mode = _get_file_organization(is_audiobook) if task else "none"
 
         for extracted_file in extracted_files:
@@ -472,9 +393,8 @@ def process_archive(
             else:
                 filename = extracted_file.name
 
-            final_path = ingest_dir / filename
-            final_path = _handle_duplicate_filename(final_path)
-            shutil.move(str(extracted_file), str(final_path))
+            dest_path = ingest_dir / filename
+            final_path = atomic_move(extracted_file, dest_path)
             final_paths.append(final_path)
             logger.debug(f"Moved to ingest: {final_path.name}")
 

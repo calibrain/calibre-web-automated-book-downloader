@@ -135,11 +135,7 @@ class HardcoverProvider(MetadataProvider):
     ]
 
     def __init__(self, api_key: Optional[str] = None):
-        """Initialize provider with API key.
-
-        Args:
-            api_key: Hardcover API key. If not provided, uses config singleton.
-        """
+        """Initialize provider with optional API key (falls back to config)."""
         raw_key = api_key or app_config.get("HARDCOVER_API_KEY", "")
         # Strip "Bearer " prefix if user pasted the full auth header from Hardcover
         self.api_key = raw_key.removeprefix("Bearer ").strip() if raw_key else ""
@@ -154,26 +150,32 @@ class HardcoverProvider(MetadataProvider):
         """Check if provider is configured with an API key."""
         return bool(self.api_key)
 
-    def search(self, options: MetadataSearchOptions) -> List[BookMetadata]:
-        """Search for books using Hardcover's search API.
+    def _build_search_params(
+        self, default_query: str, author: str, title: str, series: str
+    ) -> tuple[str, Optional[str], Optional[str]]:
+        """Build search query, fields, and weights based on provided values.
 
-        Args:
-            options: Search options (query, type, sort, pagination, fields).
-
-        Returns:
-            List of BookMetadata objects.
+        Returns (query, fields, weights) tuple. Fields/weights are None for general search.
         """
+        if series and not author and not title:
+            return series, "series_names", "1"
+        if author and not title and not series:
+            return author, "author_names", "1"
+        if title and not author and not series:
+            return title, "title,alternative_titles", "5,1"
+        if author and title and not series:
+            return f"{title} {author}", "title,alternative_titles,author_names", "5,1,3"
+        if series:
+            query = " ".join(p for p in [series, title, author] if p)
+            return query, "series_names,title,alternative_titles,author_names", "5,3,1,2"
+        return default_query, None, None
+
+    def search(self, options: MetadataSearchOptions) -> List[BookMetadata]:
+        """Search for books using Hardcover's search API."""
         return self.search_paginated(options).books
 
     def search_paginated(self, options: MetadataSearchOptions) -> SearchResult:
-        """Search for books with pagination info.
-
-        Args:
-            options: Search options (query, type, sort, pagination, fields).
-
-        Returns:
-            SearchResult with books and pagination info.
-        """
+        """Search for books with pagination info."""
         if not self.api_key:
             logger.warning("Hardcover API key not configured")
             return SearchResult(books=[], page=options.page, total_found=0, has_more=False)
@@ -193,36 +195,17 @@ class HardcoverProvider(MetadataProvider):
 
     @cacheable(ttl_key="METADATA_CACHE_SEARCH_TTL", ttl_default=300, key_prefix="hardcover:search")
     def _search_cached(self, cache_key: str, options: MetadataSearchOptions) -> SearchResult:
-        """Cached search implementation.
-
-        Args:
-            cache_key: Cache key (used by decorator).
-            options: Search options.
-
-        Returns:
-            SearchResult with books and pagination info.
-        """
+        """Cached search implementation."""
         # Determine query and fields based on custom search fields
         # Note: Hardcover API requires 'weights' when using 'fields' parameter
         author_value = options.fields.get("author", "").strip()
         title_value = options.fields.get("title", "").strip()
         series_value = options.fields.get("series", "").strip()
 
-        if series_value and not author_value and not title_value:
-            query, search_fields, search_weights = series_value, "series_names", "1"
-        elif author_value and not title_value and not series_value:
-            query, search_fields, search_weights = author_value, "author_names", "1"
-        elif title_value and not author_value and not series_value:
-            query, search_fields, search_weights = title_value, "title,alternative_titles", "5,1"
-        elif author_value and title_value and not series_value:
-            query = f"{title_value} {author_value}"
-            search_fields, search_weights = "title,alternative_titles,author_names", "5,1,3"
-        elif series_value:
-            query = " ".join(p for p in [series_value, title_value, author_value] if p)
-            search_fields, search_weights = "series_names,title,alternative_titles,author_names", "5,3,1,2"
-        else:
-            query, search_fields, search_weights = options.query, None, None
-
+        # Build query and field configuration based on which fields are provided
+        query, search_fields, search_weights = self._build_search_params(
+            options.query, author_value, title_value, series_value
+        )
 
         # Build GraphQL query - include fields/weights parameters only when needed
         if search_fields:
@@ -255,7 +238,6 @@ class HardcoverProvider(MetadataProvider):
         if search_fields:
             variables["fields"] = search_fields
             variables["weights"] = search_weights
-
 
         try:
             result = self._execute_query(graphql_query, variables)
@@ -314,15 +296,7 @@ class HardcoverProvider(MetadataProvider):
             return SearchResult(books=[], page=options.page, total_found=0, has_more=False)
 
     def _apply_series_ordering(self, books: List[BookMetadata], series_name: str) -> List[BookMetadata]:
-        """Filter books to exact series match and sort by series position.
-
-        Args:
-            books: List of books from search results.
-            series_name: The series name to match.
-
-        Returns:
-            Filtered and sorted list of books.
-        """
+        """Filter books to exact series match and sort by series position."""
         series_name_lower = series_name.lower()
         books_with_position = []
 
@@ -353,14 +327,7 @@ class HardcoverProvider(MetadataProvider):
 
     @cacheable(ttl_key="METADATA_CACHE_BOOK_TTL", ttl_default=600, key_prefix="hardcover:book")
     def get_book(self, book_id: str) -> Optional[BookMetadata]:
-        """Get book details by Hardcover ID.
-
-        Args:
-            book_id: Hardcover book ID.
-
-        Returns:
-            BookMetadata or None if not found.
-        """
+        """Get book details by Hardcover ID."""
         if not self.api_key:
             logger.warning("Hardcover API key not configured")
             return None
@@ -433,14 +400,7 @@ class HardcoverProvider(MetadataProvider):
 
     @cacheable(ttl_key="METADATA_CACHE_BOOK_TTL", ttl_default=600, key_prefix="hardcover:isbn")
     def search_by_isbn(self, isbn: str) -> Optional[BookMetadata]:
-        """Search for a book by ISBN.
-
-        Args:
-            isbn: ISBN-10 or ISBN-13.
-
-        Returns:
-            BookMetadata or None if not found.
-        """
+        """Search for a book by ISBN-10 or ISBN-13."""
         if not self.api_key:
             logger.warning("Hardcover API key not configured")
             return None
@@ -510,15 +470,7 @@ class HardcoverProvider(MetadataProvider):
             return None
 
     def _execute_query(self, query: str, variables: Dict[str, Any]) -> Optional[Dict]:
-        """Execute a GraphQL query.
-
-        Args:
-            query: GraphQL query string.
-            variables: Query variables.
-
-        Returns:
-            Response data dict or None on error.
-        """
+        """Execute a GraphQL query and return data or None on error."""
         try:
             response = self.session.post(
                 HARDCOVER_API_URL,
@@ -549,14 +501,7 @@ class HardcoverProvider(MetadataProvider):
             return None
 
     def _parse_search_result(self, item: Dict) -> Optional[BookMetadata]:
-        """Parse a search result item into BookMetadata.
-
-        Args:
-            item: Search result item dict.
-
-        Returns:
-            BookMetadata or None if parsing fails.
-        """
+        """Parse a search result item into BookMetadata."""
         try:
             book_id = item.get("id") or item.get("document", {}).get("id")
             title = item.get("title") or item.get("document", {}).get("title")
@@ -633,14 +578,7 @@ class HardcoverProvider(MetadataProvider):
             return None
 
     def _parse_book(self, book: Dict) -> BookMetadata:
-        """Parse a book object into BookMetadata.
-
-        Args:
-            book: Book data dict from GraphQL response.
-
-        Returns:
-            BookMetadata object.
-        """
+        """Parse a book object into BookMetadata."""
         # Extract authors - try contributions first (filtered), fall back to cached_contributors
         authors = []
         contributions = book.get("contributions") or []

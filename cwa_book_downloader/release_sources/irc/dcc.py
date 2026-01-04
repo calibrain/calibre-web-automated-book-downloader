@@ -60,29 +60,13 @@ class DCCConnectionError(DCCError):
 
 
 def int_to_ip(ip_int: int) -> str:
-    """Convert 32-bit integer to dotted IP notation.
-
-    DCC protocol sends IP addresses as 32-bit unsigned integers
-    in network byte order (big-endian).
-
-    Example: 2760158537 -> "164.132.173.73"
-    """
+    """Convert 32-bit integer (DCC format) to dotted IP notation."""
     packed = struct.pack('>I', ip_int)
     return '.'.join(str(b) for b in packed)
 
 
 def parse_dcc_send(text: str) -> DCCOffer:
-    """Parse a DCC SEND message into a DCCOffer.
-
-    Args:
-        text: Full IRC message containing DCC SEND
-
-    Returns:
-        DCCOffer with filename, ip, port, size
-
-    Raises:
-        DCCParseError: If message doesn't match expected format
-    """
+    """Parse a DCC SEND message into a DCCOffer. Raises DCCParseError on failure."""
     match = DCC_REGEX.search(text)
     if not match:
         raise DCCParseError(f"Invalid DCC SEND format: {text[:100]}")
@@ -107,23 +91,7 @@ def download_dcc(
     cancel_flag: Optional[Event] = None,
     timeout: float = 30.0,
 ) -> None:
-    """Download file via DCC protocol.
-
-    Uses a custom read loop with 4096-byte buffer which is faster than
-    Python's shutil.copyfileobj since DCC servers don't properly signal EOF.
-
-    Args:
-        offer: Parsed DCC offer with connection details
-        dest_path: Where to save the file
-        progress_callback: Called with percentage (0-100) during download
-        cancel_flag: If set, abort the download
-        timeout: Socket timeout in seconds
-
-    Raises:
-        DCCConnectionError: Failed to connect to sender
-        DCCSizeError: Downloaded bytes != expected size
-        DCCError: Other socket/IO errors
-    """
+    """Download file via DCC protocol to dest_path. Raises DCCError on failure."""
     logger.info(f"DCC connecting to {offer.ip}:{offer.port} for {offer.filename}")
 
     try:

@@ -1,6 +1,7 @@
 """qBittorrent download client for Prowlarr integration."""
 
 import time
+from types import SimpleNamespace
 from typing import List, Optional, Tuple
 
 from cwa_book_downloader.core.config import config
@@ -69,13 +70,7 @@ class QBittorrentClient(DownloadClient):
             )
             response.raise_for_status()
             torrents = response.json()
-
-            class TorrentInfo:
-                def __init__(self, data):
-                    for key, value in data.items():
-                        setattr(self, key, value)
-
-            return [TorrentInfo(t) for t in torrents]
+            return [SimpleNamespace(**t) for t in torrents]
         except requests.exceptions.HTTPError as e:
             if e.response is not None and e.response.status_code == 403:
                 logger.warning("qBittorrent auth failed - check credentials")

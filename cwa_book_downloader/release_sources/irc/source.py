@@ -70,7 +70,7 @@ class IRCReleaseSource(ReleaseSource):
 
     def __init__(self):
         # Track online servers from most recent search
-        self._online_servers: Optional[list[str]] = None
+        self._online_servers: Optional[set[str]] = None
 
     @classmethod
     def is_available(cls) -> bool:
@@ -78,11 +78,7 @@ class IRCReleaseSource(ReleaseSource):
         return config.get("IRC_ENABLED", False)
 
     def get_column_config(self) -> ReleaseColumnConfig:
-        """Configure UI columns for IRC results.
-
-        Includes online_servers from the most recent search, allowing
-        the frontend to show status indicators for each server.
-        """
+        """Configure UI columns for IRC results."""
         return ReleaseColumnConfig(
             columns=[
                 ColumnSchema(
@@ -124,17 +120,7 @@ class IRCReleaseSource(ReleaseSource):
         languages: Optional[List[str]] = None,
         content_type: str = "ebook"
     ) -> List[Release]:
-        """Search IRC Highway for books matching metadata.
-
-        Args:
-            book: Book metadata (title, authors, etc.)
-            expand_search: Ignored - IRC always uses title+author search
-            languages: Ignored - IRC doesn't support language filtering
-            content_type: Ignored - IRC doesn't differentiate content types
-
-        Returns:
-            List of matching releases
-        """
+        """Search IRC Highway for books matching metadata."""
         # Build search query
         query = self._build_query(book)
         if not query:
@@ -241,15 +227,9 @@ class IRCReleaseSource(ReleaseSource):
     }
 
     def _convert_to_releases(self, results: List[SearchResult]) -> List[Release]:
-        """Convert parsed results to Release objects.
-
-        Results are sorted by:
-        1. Online status (online servers first)
-        2. Format priority (epub > mobi > azw3 > ...)
-        3. Server name (alphabetically)
-        """
+        """Convert parsed results to Release objects, sorted by online/format/server."""
         releases = []
-        online_servers = self._online_servers or set()
+        online_servers = self._online_servers if self._online_servers else set()
 
         for result in results:
             release = Release(
@@ -287,10 +267,7 @@ class IRCReleaseSource(ReleaseSource):
 
     @staticmethod
     def _parse_size(size_str: str) -> Optional[int]:
-        """Parse human-readable size to bytes.
-
-        Handles formats like: 1.2MB, 1.2M, 500KB, 500K, 1GB, 1G, etc.
-        """
+        """Parse human-readable size (e.g., '1.2MB', '500K') to bytes."""
         if not size_str:
             return None
 

@@ -550,7 +550,7 @@ class TestPostProcessDownload:
         assert result is not None
         result_path = Path(result)
         assert library in result_path.parents or result_path.parent == library
-        status_cb.assert_called_with("complete", "Complete (library mode)")
+        status_cb.assert_called_with("complete", "Complete")
 
     def test_direct_mode_skips_library(self, temp_dirs, sample_direct_task):
         """Direct mode skips library mode even when configured."""
@@ -993,7 +993,7 @@ class TestDownloadProcessingIntegration:
         assert "The Way of Kings" in result_path.name
         # Staging file cleaned up
         assert not temp_file.exists()
-        status_cb.assert_called_with("complete", "Complete (library mode)")
+        status_cb.assert_called_with("complete", "Complete")
 
     def test_library_fallback_to_ingest(self, temp_dirs, sample_task):
         """Falls back to ingest when library mode fails."""

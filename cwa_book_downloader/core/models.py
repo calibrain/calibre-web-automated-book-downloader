@@ -146,12 +146,14 @@ class BookInfo:
         """
         # Resolve format if needed
         if not self.format:
-            for url in (self.download_urls[0] if self.download_urls else None, fallback_url):
-                if url:
-                    ext = url.split(".")[-1].lower()
-                    if ext and len(ext) <= 5 and ext.isalnum():
-                        self.format = ext
-                        break
+            urls = [self.download_urls[0]] if self.download_urls else []
+            if fallback_url:
+                urls.append(fallback_url)
+            for url in urls:
+                ext = url.split(".")[-1].lower()
+                if ext and len(ext) <= 5 and ext.isalnum():
+                    self.format = ext
+                    break
 
         return build_filename(self.title, self.author, self.year, self.format)
 

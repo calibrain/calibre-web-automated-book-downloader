@@ -604,7 +604,7 @@ class TestProwlarrHandlerFileStaging:
                 assert (staged_dir / "cover.jpg").exists()
 
     def test_handles_duplicate_filename(self):
-        """Test handling of duplicate filename during staging."""
+        """Test handling of duplicate filename during staging (usenet only - torrents skip staging)."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             source_file = Path(tmp_dir) / "source" / "book.epub"
             source_file.parent.mkdir(parents=True)
@@ -628,11 +628,12 @@ class TestProwlarrHandlerFileStaging:
             )
             mock_client.get_download_path.return_value = str(source_file)
 
+            # Use usenet protocol - torrents skip staging and return original path directly
             with patch(
                 "cwa_book_downloader.release_sources.prowlarr.handler.get_release",
                 return_value={
-                    "protocol": "torrent",
-                    "magnetUrl": "magnet:?xt=urn:btih:abc123",
+                    "protocol": "usenet",
+                    "downloadUrl": "https://indexer.example.com/download/123",
                 },
             ), patch(
                 "cwa_book_downloader.release_sources.prowlarr.handler.get_client",

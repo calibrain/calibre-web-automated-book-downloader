@@ -303,7 +303,7 @@ class TestHardlinkWithLibraryMode:
         assert source.exists()
         # Temp file should be cleaned up
         assert not temp_file.exists()
-        status_cb.assert_called_with("complete", "Complete (library mode)")
+        status_cb.assert_called_with("complete", "Complete")
 
     def test_transfer_file_move(self, tmp_path, sample_task):
         """Single file transferred via move."""
@@ -333,7 +333,7 @@ class TestHardlinkWithLibraryMode:
         assert result_path.exists()
         # Source should NOT exist (moved)
         assert not source.exists()
-        status_cb.assert_called_with("complete", "Complete (library mode)")
+        status_cb.assert_called_with("complete", "Complete")
 
     def test_transfer_directory_hardlink_multifile(self, tmp_path, sample_task):
         """Directory with multiple files transferred via hardlinks."""
@@ -477,7 +477,7 @@ class TestHardlinkDecisionLogic:
 
     def test_hardlink_enabled_same_filesystem(self, tmp_path, sample_task):
         """Hardlink used when enabled and same filesystem."""
-        from cwa_book_downloader.download.orchestrator import _process_library_mode
+        from cwa_book_downloader.download.orchestrator import _process_organize_mode
 
         library = tmp_path / "library"
         library.mkdir()
@@ -502,7 +502,7 @@ class TestHardlinkDecisionLogic:
                 "PROCESSING_MODE": "library",
             }.get(key, default))
 
-            result = _process_library_mode(staged, sample_task, status_cb)
+            result = _process_organize_mode(staged, sample_task, status_cb)
 
         assert result is not None
         # Source should still exist (hardlinked)
@@ -510,7 +510,7 @@ class TestHardlinkDecisionLogic:
 
     def test_hardlink_disabled_falls_back_to_move(self, tmp_path, sample_task):
         """Move used when hardlink disabled in config."""
-        from cwa_book_downloader.download.orchestrator import _process_library_mode
+        from cwa_book_downloader.download.orchestrator import _process_organize_mode
 
         library = tmp_path / "library"
         library.mkdir()
@@ -533,7 +533,7 @@ class TestHardlinkDecisionLogic:
                 "PROCESSING_MODE": "library",
             }.get(key, default))
 
-            result = _process_library_mode(staged, sample_task, status_cb)
+            result = _process_organize_mode(staged, sample_task, status_cb)
 
         assert result is not None
         # Staged file should be moved (not exist)
@@ -541,7 +541,7 @@ class TestHardlinkDecisionLogic:
 
     def test_no_original_path_uses_staging(self, tmp_path, sample_task):
         """Without original_download_path, moves from staging."""
-        from cwa_book_downloader.download.orchestrator import _process_library_mode
+        from cwa_book_downloader.download.orchestrator import _process_organize_mode
 
         library = tmp_path / "library"
         library.mkdir()
@@ -562,7 +562,7 @@ class TestHardlinkDecisionLogic:
                 "PROCESSING_MODE": "library",
             }.get(key, default))
 
-            result = _process_library_mode(staged, sample_task, status_cb)
+            result = _process_organize_mode(staged, sample_task, status_cb)
 
         assert result is not None
         # Staged file should be moved
@@ -803,7 +803,7 @@ class TestEdgeCases:
 
     def test_nonexistent_source_for_hardlink(self, tmp_path):
         """Missing source file prevents hardlink creation."""
-        from cwa_book_downloader.download.orchestrator import _process_library_mode
+        from cwa_book_downloader.download.orchestrator import _process_organize_mode
         from cwa_book_downloader.core.models import DownloadTask, SearchMode
 
         task = DownloadTask(
@@ -832,7 +832,7 @@ class TestEdgeCases:
                 "PROCESSING_MODE": "library",
             }.get(key, default))
 
-            result = _process_library_mode(staged, task, status_cb)
+            result = _process_organize_mode(staged, task, status_cb)
 
         # Should fall back to move since original doesn't exist
         assert result is not None
@@ -840,7 +840,7 @@ class TestEdgeCases:
 
     def test_permission_denied_library_path(self, tmp_path):
         """Handles permission denied on library path."""
-        from cwa_book_downloader.download.orchestrator import _process_library_mode
+        from cwa_book_downloader.download.orchestrator import _process_organize_mode
         from cwa_book_downloader.core.models import DownloadTask, SearchMode
 
         task = DownloadTask(
@@ -865,7 +865,7 @@ class TestEdgeCases:
                 "PROCESSING_MODE": "library",
             }.get(key, default))
 
-            result = _process_library_mode(staged, task, status_cb)
+            result = _process_organize_mode(staged, task, status_cb)
 
         # Should return None (fall back to ingest)
         assert result is None

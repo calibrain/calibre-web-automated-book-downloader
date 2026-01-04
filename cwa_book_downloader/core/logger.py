@@ -72,17 +72,7 @@ def setup_logger(name: str, log_file: Path = LOG_FILE) -> CustomLogger:
 
     # Create logger as CustomLogger instance
     logger = CustomLogger(name)
-    log_level = logging.INFO
-    if LOG_LEVEL == "DEBUG":
-        log_level = logging.DEBUG
-    elif LOG_LEVEL == "INFO":
-        log_level = logging.INFO
-    elif LOG_LEVEL == "WARNING":
-        log_level = logging.WARNING
-    elif LOG_LEVEL == "ERROR":
-        log_level = logging.ERROR
-    elif LOG_LEVEL == "CRITICAL":
-        log_level = logging.CRITICAL
+    log_level = getattr(logging, LOG_LEVEL, logging.INFO)
     logger.setLevel(log_level)
 
     formatter = logging.Formatter(
