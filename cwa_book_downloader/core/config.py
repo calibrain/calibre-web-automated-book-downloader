@@ -65,11 +65,12 @@ class Config:
 
     def _load_settings(self) -> None:
         """Load all settings from the registry."""
-        # Ensure all plugin settings are registered before loading
-        # This handles cases where config is accessed before plugins are imported
+        # Ensure all settings modules are imported before loading
+        # This handles cases where config is accessed before settings are registered
         try:
-            import cwa_book_downloader.release_sources  # noqa: F401
-            import cwa_book_downloader.metadata_providers  # noqa: F401
+            import cwa_book_downloader.config.settings  # noqa: F401 - main app settings
+            import cwa_book_downloader.release_sources  # noqa: F401 - plugin settings
+            import cwa_book_downloader.metadata_providers  # noqa: F401 - plugin settings
         except ImportError:
             pass
 

@@ -10,8 +10,6 @@ import urllib.parse
 import ipaddress
 
 from cwa_book_downloader.core.logger import setup_logger
-from cwa_book_downloader.config.settings import AA_BASE_URL, AA_AVAILABLE_URLS
-from cwa_book_downloader.config import settings as config
 from cwa_book_downloader.core.config import config as app_config
 from datetime import datetime, timedelta
 
@@ -124,7 +122,8 @@ def _save_state(aa_url=None, dns_provider=None):
 
 # AA URL failover state
 _current_aa_url_index = 0
-_aa_urls = AA_AVAILABLE_URLS.copy()
+_aa_urls: List[str] = []  # Initialized lazily in _initialize_aa_state()
+_aa_base_url: str = ""  # Current active AA URL
 
 def _ensure_initialized() -> None:
     """Lazy guard so runtime setup happens once and late calls still work."""
@@ -616,8 +615,8 @@ def switch_dns_provider() -> bool:
         name, servers, doh = DNS_PROVIDERS[_current_dns_index]
         CUSTOM_DNS = servers
         DOH_SERVER = doh
-        config.CUSTOM_DNS = servers
-        config.DOH_SERVER = doh
+        app_config.CUSTOM_DNS = servers
+        app_config.DOH_SERVER = doh
 
         logger.warning(f"Switched DNS provider to: {name} (using DoH)")
         _save_state(dns_provider=name)
@@ -646,20 +645,20 @@ def rotate_dns_and_reset_aa() -> bool:
     """
     Switch DNS provider (auto mode) and reset AA URL list to the first entry.
     Returns True if DNS switched; False if no providers left or not in auto mode.
-    
+
     Note: This function can be called during initialization, so we must NOT call
     _ensure_initialized() here to avoid recursive init loops.
     """
     if not rotate_dns_provider():
         return False
     # Reset AA URL to first available auto option if using auto AA
-    global AA_BASE_URL, _current_aa_url_index
-    if AA_BASE_URL == "auto" or AA_BASE_URL in _aa_urls:
+    global _aa_base_url, _current_aa_url_index
+    configured_url = app_config.get("AA_BASE_URL", "auto")
+    if configured_url == "auto" or _aa_base_url in _aa_urls:
         _current_aa_url_index = 0
-        AA_BASE_URL = _aa_urls[0]
-        config.AA_BASE_URL = AA_BASE_URL
-        logger.info(f"After DNS switch, resetting AA URL to: {AA_BASE_URL}")
-        _save_state(aa_url=AA_BASE_URL)
+        _aa_base_url = _aa_urls[0] if _aa_urls else "https://annas-archive.org"
+        logger.info(f"After DNS switch, resetting AA URL to: {_aa_base_url}")
+        _save_state(aa_url=_aa_base_url)
     return True
 
 def set_dns_provider(provider: str, manual_servers: list[str] | None = None, use_doh: bool | None = None) -> bool:
@@ -689,8 +688,8 @@ def set_dns_provider(provider: str, manual_servers: list[str] | None = None, use
             _dns_exhausted_logged = False
             CUSTOM_DNS = []
             DOH_SERVER = ""
-            config.CUSTOM_DNS = []
-            config.DOH_SERVER = ""
+            app_config.CUSTOM_DNS = []
+            app_config.DOH_SERVER = ""
             # Restore original system getaddrinfo
             socket.getaddrinfo = original_getaddrinfo
             logger.info("DNS set to system mode (using OS default resolver)")
@@ -704,8 +703,8 @@ def set_dns_provider(provider: str, manual_servers: list[str] | None = None, use
             _dns_exhausted_logged = False
             CUSTOM_DNS = []
             DOH_SERVER = ""
-            config.CUSTOM_DNS = []
-            config.DOH_SERVER = ""
+            app_config.CUSTOM_DNS = []
+            app_config.DOH_SERVER = ""
             logger.info("DNS set to auto mode (system DNS, will rotate on failure with DoH)")
             init_dns_resolvers()
             _notify_dns_rotation("auto", [], "")
@@ -718,8 +717,8 @@ def set_dns_provider(provider: str, manual_servers: list[str] | None = None, use
             _current_dns_index = -1  # Not using preset providers
             CUSTOM_DNS = manual_servers
             DOH_SERVER = ""  # No DoH for manual servers
-            config.CUSTOM_DNS = manual_servers
-            config.DOH_SERVER = ""
+            app_config.CUSTOM_DNS = manual_servers
+            app_config.DOH_SERVER = ""
             logger.info(f"DNS set to manual servers: {manual_servers}")
             init_dns_resolvers()
             _notify_dns_rotation("manual", manual_servers, "")
@@ -733,8 +732,8 @@ def set_dns_provider(provider: str, manual_servers: list[str] | None = None, use
                 CUSTOM_DNS = servers
                 # Only set DoH server if DoH is enabled
                 DOH_SERVER = doh if doh_enabled else ""
-                config.CUSTOM_DNS = servers
-                config.DOH_SERVER = DOH_SERVER
+                app_config.CUSTOM_DNS = servers
+                app_config.DOH_SERVER = DOH_SERVER
                 doh_status = "DoH enabled" if doh_enabled else "standard DNS"
                 logger.info(f"DNS set to: {name} ({doh_status})")
                 _save_state(dns_provider=name)
@@ -755,14 +754,14 @@ def init_dns_resolvers():
             name, servers, doh = DNS_PROVIDERS[_current_dns_index]
             CUSTOM_DNS = servers
             DOH_SERVER = doh
-            config.CUSTOM_DNS = servers
-            config.DOH_SERVER = doh
+            app_config.CUSTOM_DNS = servers
+            app_config.DOH_SERVER = doh
             logger.info(f"Using DNS provider: {name} (DoH enabled)")
         else:
             CUSTOM_DNS = []
             DOH_SERVER = ""
-            config.CUSTOM_DNS = []
-            config.DOH_SERVER = ""
+            app_config.CUSTOM_DNS = []
+            app_config.DOH_SERVER = ""
             logger.debug("Using system DNS (auto mode - will switch on failure)")
             socket.getaddrinfo = cast(Any, create_system_failover_getaddrinfo())
             return
@@ -811,13 +810,29 @@ def _looks_like_ip(s: str) -> bool:
     # Simple heuristic: contains only digits, dots, and colons
     return s.replace(".", "").replace(":", "").isdigit()
 
+def _build_aa_urls() -> List[str]:
+    """Build list of available AA URLs from config."""
+    urls = ["https://annas-archive.org", "https://annas-archive.se", "https://annas-archive.li"]
+    additional = app_config.get("AA_ADDITIONAL_URLS", "")
+    if additional:
+        urls.extend(u.strip() for u in additional.split(",") if u.strip())
+    return urls
+
+
 def _initialize_aa_state() -> None:
     """Restore or probe AA URL state."""
-    global AA_BASE_URL, _current_aa_url_index
-    if AA_BASE_URL == "auto":
+    global _aa_base_url, _current_aa_url_index, _aa_urls
+
+    # Build URL list from config
+    _aa_urls = _build_aa_urls()
+
+    # Get configured base URL from config
+    configured_url = app_config.get("AA_BASE_URL", "auto")
+
+    if configured_url == "auto":
         if state.get('aa_base_url') and state['aa_base_url'] in _aa_urls:
             _current_aa_url_index = _aa_urls.index(state['aa_base_url'])
-            AA_BASE_URL = state['aa_base_url']
+            _aa_base_url = state['aa_base_url']
         else:
             logger.debug(f"AA_BASE_URL: auto, checking available urls {_aa_urls}")
             for i, url in enumerate(_aa_urls):
@@ -825,21 +840,22 @@ def _initialize_aa_state() -> None:
                     response = requests.get(url, proxies=get_proxies(), timeout=3)
                     if response.status_code == 200:
                         _current_aa_url_index = i
-                        AA_BASE_URL = url
-                        _save_state(aa_url=AA_BASE_URL)
+                        _aa_base_url = url
+                        _save_state(aa_url=_aa_base_url)
                         break
                 except Exception:
                     pass
-            if AA_BASE_URL == "auto":
-                AA_BASE_URL = _aa_urls[0]
+            if not _aa_base_url or _aa_base_url == "auto":
+                _aa_base_url = _aa_urls[0]
                 _current_aa_url_index = 0
-    elif AA_BASE_URL not in _aa_urls:
-        logger.info(f"AA_BASE_URL set to custom value {AA_BASE_URL}; skipping auto-switch")
+    elif configured_url not in _aa_urls:
+        logger.info(f"AA_BASE_URL set to custom value {configured_url}; skipping auto-switch")
+        _aa_base_url = configured_url
     else:
-        _current_aa_url_index = _aa_urls.index(AA_BASE_URL)
+        _current_aa_url_index = _aa_urls.index(configured_url)
+        _aa_base_url = configured_url
 
-    config.AA_BASE_URL = AA_BASE_URL
-    logger.info(f"AA_BASE_URL: {AA_BASE_URL}")
+    logger.info(f"AA_BASE_URL: {_aa_base_url}")
 
 def init_dns(force: bool = False) -> None:
     """Initialize DNS state and resolvers using set_dns_provider() for consistency."""
@@ -913,7 +929,7 @@ def init(force: bool = False) -> None:
         if _initialized and not force:
             return
         # Do the work first, then set flag to prevent race conditions
-        # where another thread sees _initialized=True but AA_BASE_URL is still "auto"
+        # where another thread sees _initialized=True but _aa_base_url is still empty
         try:
             init_dns(force=force)
             init_aa(force=force)
@@ -926,7 +942,7 @@ def init(force: bool = False) -> None:
 def get_aa_base_url():
     """Get current AA base URL."""
     _ensure_initialized()
-    return AA_BASE_URL
+    return _aa_base_url
 
 def get_available_aa_urls():
     """Get list of configured AA URLs (copy)."""
@@ -936,14 +952,13 @@ def get_available_aa_urls():
 def set_aa_url_index(new_index: int) -> bool:
     """Set AA base URL by index in available list; returns True if applied."""
     _ensure_initialized()
-    global AA_BASE_URL, _current_aa_url_index
+    global _aa_base_url, _current_aa_url_index
     if new_index < 0 or new_index >= len(_aa_urls):
         return False
     _current_aa_url_index = new_index
-    AA_BASE_URL = _aa_urls[_current_aa_url_index]
-    config.AA_BASE_URL = AA_BASE_URL
-    logger.info(f"Set AA URL to: {AA_BASE_URL}")
-    _save_state(aa_url=AA_BASE_URL)
+    _aa_base_url = _aa_urls[_current_aa_url_index]
+    logger.info(f"Set AA URL to: {_aa_base_url}")
+    _save_state(aa_url=_aa_base_url)
     return True
 
 class AAMirrorSelector:

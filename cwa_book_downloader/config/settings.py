@@ -9,19 +9,11 @@ from cwa_book_downloader.core.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# Log configuration values at DEBUG level
-_SENSITIVE_KEYS = {"AA_DONATOR_KEY", "HARDCOVER_API_KEY"}
-logger.debug("Environment configuration:")
-for key, value in env.__dict__.items():
-    # Skip private attributes, modules, types, and callables
-    if key.startswith('_') or isinstance(value, type) or callable(value):
-        continue
-    if hasattr(value, '__name__') and hasattr(value, '__file__'):
-        continue
-    # Redact sensitive values
-    if key in _SENSITIVE_KEYS and isinstance(value, str) and value.strip():
-        value = "REDACTED"
-    logger.debug(f"  {key}: {value}")
+# Log bootstrap configuration values at DEBUG level
+logger.debug("Bootstrap configuration:")
+for key in ['CONFIG_DIR', 'LOG_DIR', 'TMP_DIR', 'INGEST_DIR', 'DEBUG', 'DOCKERMODE']:
+    if hasattr(env, key):
+        logger.debug(f"  {key}: {getattr(env, key)}")
 
 # Load supported book languages from data file
 # Path is relative to the package root, not this file
@@ -48,47 +40,20 @@ logger.debug(f"CROSS_FILE_SYSTEM: {CROSS_FILE_SYSTEM}")
 CUSTOM_DNS: list[str] = []
 DOH_SERVER: str = ""
 
-# Warn about external bypasser DNS limitations
-if env.USING_EXTERNAL_BYPASSER and env.USE_CF_BYPASS:
-    logger.warning(
-        "Using external bypasser (FlareSolverr). Note: FlareSolverr uses its own DNS resolution, "
-        "not this application's custom DNS settings. If you experience DNS-related blocks, "
-        "configure DNS at the Docker/system level for your FlareSolverr container, "
-        "or consider using the internal bypasser which integrates with the app's DNS system."
-    )
+# Recording directory for debugging internal cloudflare bypasser
+RECORDING_DIR = env.LOG_DIR / "recording"
 
-# Anna's Archive settings
-AA_BASE_URL = env._AA_BASE_URL
-AA_AVAILABLE_URLS = ["https://annas-archive.org", "https://annas-archive.se", "https://annas-archive.li"]
-AA_AVAILABLE_URLS.extend(env._AA_ADDITIONAL_URLS.split(","))
-AA_AVAILABLE_URLS = [url.strip() for url in AA_AVAILABLE_URLS if url.strip()]
 
-# File format settings
-SUPPORTED_FORMATS = env._SUPPORTED_FORMATS.split(",")
-logger.debug(f"SUPPORTED_FORMATS: {SUPPORTED_FORMATS}")
-SUPPORTED_AUDIOBOOK_FORMATS = env._SUPPORTED_AUDIOBOOK_FORMATS.split(",")
-logger.debug(f"SUPPORTED_AUDIOBOOK_FORMATS: {SUPPORTED_AUDIOBOOK_FORMATS}")
-
-# Filter book languages to only supported codes
-_VALID_LANGUAGE_CODES = {lang['code'] for lang in _SUPPORTED_BOOK_LANGUAGE}
-BOOK_LANGUAGE = [lang for lang in env._BOOK_LANGUAGE.split(',') if lang in _VALID_LANGUAGE_CODES]
-if not BOOK_LANGUAGE:
-    BOOK_LANGUAGE = ['en']
-
-# Custom script settings with validation logic
-CUSTOM_SCRIPT = env._CUSTOM_SCRIPT
-if CUSTOM_SCRIPT:
-    if not os.path.exists(CUSTOM_SCRIPT):
-        logger.warning(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} does not exist")
-        CUSTOM_SCRIPT = ""
-    elif not os.access(CUSTOM_SCRIPT, os.X_OK):
-        logger.warning(f"CUSTOM_SCRIPT {CUSTOM_SCRIPT} is not executable")
-        CUSTOM_SCRIPT = ""
-
-# Debugging settings
-if not env.USING_EXTERNAL_BYPASSER:
-    # Recording directory for debugging internal cloudflare bypasser
-    RECORDING_DIR = env.LOG_DIR / "recording"
+def _log_external_bypasser_warning() -> None:
+    """Log warning about external bypasser DNS limitations (called after config is available)."""
+    from cwa_book_downloader.core.config import config
+    if config.get("USING_EXTERNAL_BYPASSER", False) and config.get("USE_CF_BYPASS", True):
+        logger.warning(
+            "Using external bypasser (FlareSolverr). Note: FlareSolverr uses its own DNS resolution, "
+            "not this application's custom DNS settings. If you experience DNS-related blocks, "
+            "configure DNS at the Docker/system level for your FlareSolverr container, "
+            "or consider using the internal bypasser which integrates with the app's DNS system."
+        )
 
 
 from cwa_book_downloader.core.settings_registry import (
