@@ -4,12 +4,17 @@ import logging
 import sys
 from collections.abc import Mapping
 from logging.handlers import RotatingFileHandler
+from threading import Lock
 from typing import TYPE_CHECKING
 
 from shelfmark.config.env import ENABLE_LOGGING, LOG_FILE, LOG_LEVEL
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+_file_handlers: dict[Path, RotatingFileHandler] = {}
+_file_handlers_lock = Lock()
 
 
 class CustomLogger(logging.Logger):
@@ -122,6 +127,22 @@ def _normalize_log_extra(value: object) -> Mapping[str, object] | None:
     return None
 
 
+def _get_file_handler(log_file: Path, formatter: logging.Formatter) -> RotatingFileHandler:
+    """Return the process-wide rotating handler for a log file."""
+    with _file_handlers_lock:
+        handler = _file_handlers.get(log_file)
+        if handler is None:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            handler = RotatingFileHandler(
+                log_file,
+                maxBytes=10485760,  # 10MB
+                backupCount=5,
+            )
+            handler.setFormatter(formatter)
+            _file_handlers[log_file] = handler
+        return handler
+
+
 def setup_logger(name: str, log_file: Path = LOG_FILE) -> CustomLogger:
     """Set up and configure a logger instance.
 
@@ -163,16 +184,7 @@ def setup_logger(name: str, log_file: Path = LOG_FILE) -> CustomLogger:
     # File handler if log file is specified
     try:
         if ENABLE_LOGGING:
-            # Create log directory if it doesn't exist
-            log_dir = log_file.parent
-            log_dir.mkdir(parents=True, exist_ok=True)
-            file_handler = RotatingFileHandler(
-                log_file,
-                maxBytes=10485760,  # 10MB
-                backupCount=5,
-            )
-            file_handler.setFormatter(formatter)
-            logger.addHandler(file_handler)
+            logger.addHandler(_get_file_handler(log_file, formatter))
     except (OSError, TypeError, ValueError) as e:
         logger.error_trace(f"Failed to create log file: {e}", exc_info=True)
 
