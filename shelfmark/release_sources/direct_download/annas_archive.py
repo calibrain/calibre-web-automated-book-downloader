@@ -1,9 +1,8 @@
-"""Direct download source - Anna's Archive/Libgen with fallback cascade."""
+"""Anna's Archive search, metadata parsing, and MD5 mirror download cascade."""
 
 import itertools
 import json
 import re
-import threading
 import time
 import unicodedata
 from contextlib import contextmanager
@@ -11,7 +10,7 @@ from contextvars import ContextVar
 from dataclasses import replace
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, NoReturn, TypedDict
+from typing import TYPE_CHECKING, NoReturn, TypedDict
 from urllib.parse import quote, urlparse
 
 import requests
@@ -19,30 +18,33 @@ from bs4 import BeautifulSoup, Tag
 from bs4.element import NavigableString
 
 from shelfmark.bypass.challenge import MAX_CHALLENGE_HTML_CHARS, challenge_marker
-from shelfmark.config.env import DEBUG_SKIP_SOURCES, TMP_DIR
+from shelfmark.config.env import DEBUG_SKIP_SOURCES
 from shelfmark.core import search_deadline
 from shelfmark.core.config import config
-from shelfmark.core.languages import language_alias_map
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.models import DownloadTask, SearchFilters, build_filename
-from shelfmark.core.utils import CONTENT_TYPES, get_aa_content_type_dir
-from shelfmark.core.utils import is_audiobook as check_audiobook
+from shelfmark.core.models import SearchFilters
+from shelfmark.core.utils import CONTENT_TYPES
 from shelfmark.download import http as downloader
 from shelfmark.download import network
-from shelfmark.release_sources import (
-    BrowseRecord,
-    ColumnAlign,
-    ColumnColorHint,
-    ColumnRenderType,
-    ColumnSchema,
-    DownloadHandler,
-    Release,
-    ReleaseColumnConfig,
-    ReleaseProtocol,
-    ReleaseSource,
-    SourceUnavailableError,
-    register_handler,
-    register_source,
+from shelfmark.release_sources import BrowseRecord
+from shelfmark.release_sources.direct_download.common import (
+    MIN_VALID_FILE_SIZE as _MIN_VALID_FILE_SIZE,
+)
+from shelfmark.release_sources.direct_download.common import (
+    DirectDownloadUnavailableError,
+    ParsedSearchResult,
+    get_attr,
+    get_supported_formats,
+    html_response_text,
+    language_alias_to_code,
+    normalize_language_token,
+    normalize_requested_languages,
+    normalize_size,
+    parse_search_items,
+    parse_search_page,
+)
+from shelfmark.release_sources.direct_download.common import (
+    book_matches_requested_languages as _book_matches_requested_languages,
 )
 
 if TYPE_CHECKING:
@@ -65,18 +67,6 @@ class SourcePriorityEntry(TypedDict):
 
 def _raise_runtime_error(message: str) -> NoReturn:
     raise RuntimeError(message)
-
-
-def _coerce_str_list(value: object) -> list[str]:
-    """Return only string items from a config value."""
-    if not isinstance(value, list | tuple):
-        return []
-    return [item for item in value if isinstance(item, str)]
-
-
-def _get_supported_formats() -> list[str]:
-    """Return configured supported formats as a clean string list."""
-    return _coerce_str_list(config.SUPPORTED_FORMATS)
 
 
 def _parse_source_priority_entries(
@@ -108,13 +98,6 @@ def _parse_source_priority_entries(
     return entries
 
 
-def _html_response_text(response: str | tuple[str, str]) -> str:
-    """Extract the HTML body from downloader responses."""
-    if isinstance(response, tuple):
-        return response[0]
-    return response
-
-
 def _html_response_url(response: str | tuple[str, str]) -> str | None:
     """The URL that actually answered, when the downloader was asked to report it.
 
@@ -123,22 +106,6 @@ def _html_response_url(response: str | tuple[str, str]) -> str | None:
     if isinstance(response, tuple):
         return response[1] or None
     return None
-
-
-def _attr_to_str(value: object) -> str | None:
-    """Convert a BeautifulSoup attribute value to a plain string."""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        for item in value:
-            if isinstance(item, str):
-                return item
-    return None
-
-
-def _get_attr(tag: Tag, attr: str) -> str | None:
-    """Safely fetch a tag attribute as a string."""
-    return _attr_to_str(tag.get(attr))
 
 
 def _first_stripped_text(tag: Tag | None) -> str | None:
@@ -212,8 +179,8 @@ _DOWNLOAD_SOURCES = [
 ]
 
 _SOURCE_FAILURE_THRESHOLD = 4
-_MIN_VALID_FILE_SIZE = 10 * 1024
 _AA_COUNTDOWN_MAX_SECONDS = 300
+
 
 # --- Distant-path language detection ---
 
@@ -252,8 +219,6 @@ _LANGUAGE_CODE_TOKEN_PATTERN = re.compile(
     r"(?:^|[\s_./\\\-\[(])([A-Za-z]{2,3})(?=$|[\s_./\\\-)\]])"
 )
 _LANGUAGE_NAME_TOKEN_PATTERN = re.compile(r"[a-z]{4,}(?:-[a-z0-9]+)?")
-_LANGUAGE_ALIAS_TO_CODE: dict[str, str] | None = None
-_LANGUAGE_ALIAS_LOCK = threading.Lock()
 _LANGUAGE_PLACEHOLDERS = frozenset({"", "-", "--", "unknown", "unk", "n/a", "na"})
 # Short codes that appear in common words — require bracket/key context to accept
 _AMBIGUOUS_SHORT_LANGUAGE_CODES = frozenset({"de", "en", "it", "la", "no", "or", "is", "in"})
@@ -269,32 +234,9 @@ def _is_language_from_path_enabled() -> bool:
     return bool(config.get("DIRECT_DOWNLOAD_LANGUAGE_FROM_PATH", False))
 
 
-def _normalize_language_token(value: str) -> str:
-    normalized = value.strip().lower()
-    for dash in ("‑", "–", "—", "−"):
-        normalized = normalized.replace(dash, "-")
-    return normalized
-
-
 def _fold_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", value)
     return "".join(c for c in normalized if not unicodedata.combining(c)).lower()
-
-
-def _language_alias_to_code() -> dict[str, str]:
-    """Alias to code map, delegating to the shared language data."""
-    global _LANGUAGE_ALIAS_TO_CODE
-    cached = _LANGUAGE_ALIAS_TO_CODE
-    if cached is not None:
-        return cached
-
-    with _LANGUAGE_ALIAS_LOCK:
-        cached = _LANGUAGE_ALIAS_TO_CODE
-        if cached is not None:
-            return cached
-
-        _LANGUAGE_ALIAS_TO_CODE = language_alias_map()
-        return _LANGUAGE_ALIAS_TO_CODE
 
 
 def _extract_distant_path(row: Tag, *, enabled: bool) -> str | None:
@@ -342,7 +284,7 @@ def _detect_language_from_distant_path(path: str | None) -> str | None:
     if not path:
         return None
 
-    aliases = _language_alias_to_code()
+    aliases = language_alias_to_code()
     if not aliases:
         return None
 
@@ -350,12 +292,12 @@ def _detect_language_from_distant_path(path: str | None) -> str | None:
     strong_candidates: list[str] = []
 
     for code in _BRACKETED_LANGUAGE_CODE_PATTERN.findall(path):
-        normalized = _normalize_language_token(code)
+        normalized = normalize_language_token(code)
         if normalized in aliases:
             strong_candidates.append(aliases[normalized])
 
     for code in _KEYED_LANGUAGE_CODE_PATTERN.findall(path):
-        normalized = _normalize_language_token(code)
+        normalized = normalize_language_token(code)
         if normalized in aliases:
             strong_candidates.append(aliases[normalized])
 
@@ -364,7 +306,7 @@ def _detect_language_from_distant_path(path: str | None) -> str | None:
         return non_ambiguous[0]
 
     for token in _LANGUAGE_NAME_TOKEN_PATTERN.findall(folded_path):
-        normalized = _normalize_language_token(token)
+        normalized = normalize_language_token(token)
         if normalized in aliases:
             candidate = aliases[normalized]
             if candidate not in _AMBIGUOUS_SHORT_LANGUAGE_CODES:
@@ -374,7 +316,7 @@ def _detect_language_from_distant_path(path: str | None) -> str | None:
         return strong_candidates[0]
 
     for code in _LANGUAGE_CODE_TOKEN_PATTERN.findall(path):
-        normalized = _normalize_language_token(code)
+        normalized = normalize_language_token(code)
         if normalized in _AMBIGUOUS_SHORT_LANGUAGE_CODES:
             continue
         if normalized in aliases:
@@ -386,38 +328,7 @@ def _detect_language_from_distant_path(path: str | None) -> str | None:
 def _is_missing_or_placeholder_language(language: str | None) -> bool:
     if language is None:
         return True
-    return _normalize_language_token(language) in _LANGUAGE_PLACEHOLDERS
-
-
-def _normalize_requested_languages(languages: list[str] | None) -> set[str]:
-    if not languages:
-        return set()
-    aliases = _language_alias_to_code()
-    normalized: set[str] = set()
-    for value in languages:
-        token = _normalize_language_token(str(value))
-        if not token or token == "all":  # noqa: S105 - "all" is a language sentinel
-            continue
-        normalized.add(aliases.get(token, token))
-    return normalized
-
-
-def _book_matches_requested_languages(book_language: str | None, requested: set[str]) -> bool:
-    """Return True when a book's language matches the requested filter.
-
-    Books with unknown/missing language always pass — the server-side &lang= filter
-    already narrowed the result set, so dropping unlabelled rows hides valid results.
-    """
-    if not requested:
-        return True
-    if not book_language:
-        return True
-    aliases = _language_alias_to_code()
-    normalized_book = aliases.get(
-        _normalize_language_token(book_language),
-        _normalize_language_token(book_language),
-    )
-    return normalized_book in requested
+    return normalize_language_token(language) in _LANGUAGE_PLACEHOLDERS
 
 
 def _is_configured_zlib_link(url: str) -> bool:
@@ -516,7 +427,7 @@ def _is_source_enabled(source_id: str) -> bool:
     return False
 
 
-def _get_direct_download_unavailable_reason() -> str | None:
+def get_unavailable_reason() -> str | None:
     """Return a user-facing reason when Direct Download cannot be used."""
     from shelfmark.core import mirrors
 
@@ -534,23 +445,14 @@ def _get_direct_download_unavailable_reason() -> str | None:
     return None
 
 
-def _ensure_direct_download_available() -> None:
+def ensure_available() -> None:
     """Raise a source-unavailable error when Direct Download is disabled or unconfigured."""
-    reason = _get_direct_download_unavailable_reason()
+    reason = get_unavailable_reason()
     if reason:
         raise SearchUnavailableError(reason)
 
 
-_SIZE_UNIT_PATTERN = re.compile(r"(kb|mb|gb|tb)", re.IGNORECASE)
-
-
-def _normalize_size(size_str: str) -> str:
-    """Normalize size string by uppercasing units (e.g., '5.2 mb' -> '5.2 MB')."""
-    return _SIZE_UNIT_PATTERN.sub(lambda m: m.group(1).upper(), size_str.strip())
-
-
-class SearchUnavailableError(SourceUnavailableError):
-    """Raised when Anna's Archive cannot be reached via any mirror/DNS."""
+SearchUnavailableError = DirectDownloadUnavailableError
 
 
 # Markers that prove a 200 really came from Anna's Archive, and markers that mean we
@@ -599,7 +501,7 @@ _search_page_cache: ContextVar[dict[str, tuple[str, Tag | None]] | None] = Conte
 
 
 @contextmanager
-def _search_page_reuse() -> Iterator[None]:
+def search_page_reuse() -> Iterator[None]:
     """Fetch each distinct AA search URL at most once per search.
 
     One search asks AA for the same URL more than once. The language-filter retry in
@@ -717,7 +619,7 @@ def _fetch_search_table_uncached(
             allow_bypasser_fallback=True,
             include_response_url=True,
         )
-        html = _html_response_text(response)
+        html = html_response_text(response)
         # Checked on the body, not on `response`: with include_response_url the give-up
         # shape is the tuple ("", url), and a tuple is truthy.
         if not html:
@@ -808,7 +710,7 @@ def search_books(query: str, filters: SearchFilters) -> list[BrowseRecord]:
     filters_query = ""
 
     path_language_enabled = _is_language_from_path_enabled()
-    requested_langs = _normalize_requested_languages(filters.lang)
+    requested_langs = normalize_requested_languages(filters.lang)
 
     # When path-language inference is on and a language is requested, skip the
     # server-side &lang= filter: lgli files often have no AA language metadata
@@ -826,7 +728,7 @@ def search_books(query: str, filters: SearchFilters) -> list[BrowseRecord]:
         for value in filters.content:
             filters_query += f"&content={quote(value)}"
 
-    formats_to_use = filters.format or _get_supported_formats()
+    formats_to_use = filters.format or get_supported_formats()
 
     index = 1
     for filter_type, filter_values in vars(filters).items():
@@ -860,16 +762,18 @@ def search_books(query: str, filters: SearchFilters) -> list[BrowseRecord]:
         msg = f"Expected results table tag, got {type(tbody).__name__}"
         raise TypeError(msg)
 
-    books = []
-    for line_tr in tbody.find_all("tr"):
-        book = _parse_search_result_row(line_tr)
-        if book:
-            books.append(book)
+    books = parse_search_page(
+        tbody,
+        filters,
+        provider_id="annas_archive",
+        item_selector="tr",
+        extract_item=_extract_aa_search_result,
+    )
 
     if path_language_enabled and requested_langs:
         books = [b for b in books if _book_matches_requested_languages(b.language, requested_langs)]
 
-    supported_formats = _get_supported_formats()
+    supported_formats = get_supported_formats()
 
     books.sort(
         key=lambda x: (
@@ -905,13 +809,13 @@ def get_book_info(book_id: str, *, fetch_download_count: bool = True) -> BrowseR
         )
         raise SearchUnavailableError(f"Unable to reach download source. {detail}")
 
-    soup = BeautifulSoup(_html_response_text(html), "html.parser")
+    soup = BeautifulSoup(html_response_text(html), "html.parser")
 
     return _parse_book_info_page(soup, book_id, fetch_download_count=fetch_download_count)
 
 
-def _parse_search_result_row(row: Tag) -> BrowseRecord | None:
-    """Parse a single search result row into a browse record."""
+def _extract_aa_search_result(row: Tag) -> ParsedSearchResult | None:
+    """Extract Anna's Archive table fields for the shared parser."""
     try:
         if row.text.strip().lower().startswith("your ad here"):
             return None
@@ -921,7 +825,7 @@ def _parse_search_result_row(row: Tag) -> BrowseRecord | None:
         if len(cells) < 11 or not anchors:
             return None
 
-        record_id = (_get_attr(anchors[0], "href") or "").split("/")[-1]
+        record_id = (get_attr(anchors[0], "href") or "").split("/")[-1]
         if not record_id:
             return None
 
@@ -929,7 +833,7 @@ def _parse_search_result_row(row: Tag) -> BrowseRecord | None:
         distant_path = _extract_distant_path(row, enabled=path_language_enabled)
 
         preview_img = cells[0].find("img")
-        preview = _get_attr(preview_img, "src") if isinstance(preview_img, Tag) else None
+        preview = get_attr(preview_img, "src") if isinstance(preview_img, Tag) else None
 
         title_span = cells[1].find("span")
         if isinstance(title_span, Tag):
@@ -963,23 +867,35 @@ def _parse_search_result_row(row: Tag) -> BrowseRecord | None:
             detected = _detect_language_from_distant_path(distant_path)
             language = detected or "unknown"
 
-        return BrowseRecord(
-            id=record_id,
+        return ParsedSearchResult(
+            key=record_id,
+            record_id=record_id,
             title=title,
-            source="direct_download",
+            formats=(file_format.lower(),),
             preview=preview,
             author=author,
             publisher=publisher,
             year=year,
             language=language,
             content=content.lower() if content else None,
-            format=file_format.lower() if file_format else None,
             size=size,
             download_path=distant_path,
+            source_url=f"{network.get_aa_base_url()}/md5/{record_id}",
         )
     except (AttributeError, IndexError, KeyError, TypeError) as e:
         logger.error_trace(f"Error parsing search result row: {e}")
         return None
+
+
+def _parse_search_result_row(row: Tag) -> BrowseRecord | None:
+    """Compatibility wrapper for parsing one Anna's Archive result row."""
+    records = parse_search_items(
+        [row],
+        None,
+        provider_id="annas_archive",
+        extract_item=_extract_aa_search_result,
+    )
+    return records[0] if records else None
 
 
 def _parse_book_info_page(
@@ -999,7 +915,7 @@ def _parse_book_info_page(
 
     node = data.select_one("div:nth-of-type(1) > img")
     if isinstance(node, Tag):
-        preview = _get_attr(node, "src") or ""
+        preview = get_attr(node, "src") or ""
 
     main_inner = next(
         (tag for tag in soup.find_all("div", {"class": "main-inner"}) if isinstance(tag, Tag)),
@@ -1023,7 +939,7 @@ def _parse_book_info_page(
     for anchor in soup.find_all("a"):
         try:
             text = anchor.text.strip().lower()
-            href = _get_attr(anchor, "href")
+            href = get_attr(anchor, "href")
             if not href:
                 continue
 
@@ -1075,7 +991,7 @@ def _parse_book_info_page(
     file_format = ""
     size = ""
     content = ""
-    supported_formats = _get_supported_formats()
+    supported_formats = get_supported_formats()
 
     for _details in all_details:
         _details = _details.split(" · ")
@@ -1084,7 +1000,7 @@ def _parse_book_info_page(
             if file_format == "" and stripped_lower in supported_formats:
                 file_format = f.strip().lower()
             if size == "" and any(u in f.strip().lower() for u in ("mb", "kb", "gb")):
-                size = _normalize_size(f)
+                size = normalize_size(f)
             if content == "":
                 for ct in CONTENT_TYPES:
                     if ct in f.strip().lower():
@@ -1096,7 +1012,7 @@ def _parse_book_info_page(
                 if file_format == "" and stripped and " " not in stripped:
                     file_format = stripped
                 if size == "" and "." in stripped:
-                    size = _normalize_size(f)
+                    size = normalize_size(f)
 
     book_title = (_find_in_divs(divs, "🔍") or [""])[0].strip("🔍").strip()
 
@@ -1134,7 +1050,7 @@ def _parse_book_info_page(
                 summary_url, selector=network.AAMirrorSelector(), allow_bypasser_fallback=False
             )
             if summary_response:
-                summary_data = json.loads(_html_response_text(summary_response))
+                summary_data = json.loads(html_response_text(summary_response))
                 if "downloads_total" in summary_data:
                     info["Downloads"] = [str(summary_data["downloads_total"])]
         except (
@@ -1456,11 +1372,11 @@ def _get_download_urls_from_welib(
         logger.warning("Welib page empty for %s", book_id)
         return []
 
-    soup = BeautifulSoup(_html_response_text(html), "html.parser")
+    soup = BeautifulSoup(html_response_text(html), "html.parser")
     links = [
         downloader.get_absolute_url(url, href)
         for a in soup.find_all("a", href=True)
-        if (href := _get_attr(a, "href")) and "/slow_download/" in href
+        if (href := get_attr(a, "href")) and "/slow_download/" in href
     ]
     return list(dict.fromkeys(links))  # Dedupe while preserving order
 
@@ -1524,7 +1440,7 @@ def _extract_libgen_download_url(link: str, cancel_flag: Event | None = None) ->
         return download_url
 
 
-def _download_book(
+def download_book(
     book_info: BrowseRecord,
     book_path: Path,
     progress_callback: Callable[[float], None] | None = None,
@@ -1650,7 +1566,7 @@ def _get_download_url(
         page = downloader.html_get_page(
             link, selector=sel, cancel_flag=cancel_flag, status_callback=status_callback
         )
-        page_data = json.loads(_html_response_text(page))
+        page_data = json.loads(html_response_text(page))
         download_url = page_data.get("download_url", "")
         return (
             downloader.get_absolute_url(link, download_url) if isinstance(download_url, str) else ""
@@ -1665,7 +1581,7 @@ def _get_download_url(
     if not html:
         return ""
 
-    soup = BeautifulSoup(_html_response_text(html), "html.parser")
+    soup = BeautifulSoup(html_response_text(html), "html.parser")
     url = ""
 
     # Z-Library
@@ -1678,9 +1594,9 @@ def _get_download_url(
                 link, selector=sel, cancel_flag=cancel_flag, status_callback=status_callback
             )
             if html:
-                soup = BeautifulSoup(_html_response_text(html), "html.parser")
+                soup = BeautifulSoup(html_response_text(html), "html.parser")
                 dl = soup.find("a", href=True, class_="addDownloadedBook")
-        url = (_get_attr(dl, "href") or "") if isinstance(dl, Tag) else ""
+        url = (get_attr(dl, "href") or "") if isinstance(dl, Tag) else ""
 
     # AA slow download / partner servers
     elif "/slow_download/" in link:
@@ -1693,7 +1609,7 @@ def _get_download_url(
             soup, "Download"
         )
         if get_btn:
-            url = _get_attr(get_btn, "href") or ""
+            url = get_attr(get_btn, "href") or ""
         else:
             logger.warning("Unknown source type, couldn't find download link: %s", link)
             url = ""
@@ -1727,11 +1643,11 @@ def _extract_slow_download_url(
         soup, "Download now", contains=True
     )
     if dl_link:
-        return _get_attr(dl_link, "href") or ""
+        return get_attr(dl_link, "href") or ""
 
     for a_tag in soup.find_all("a", href=True):
         if a_tag.has_attr("download"):
-            href = _get_attr(a_tag, "href")
+            href = get_attr(a_tag, "href")
             if not href:
                 continue
             if href.startswith("http") and "/slow_download/" not in href:
@@ -1762,7 +1678,7 @@ def _extract_slow_download_url(
         parent = copy_text.parent
         next_link = parent.find_next("a", href=True)
         if isinstance(next_link, Tag):
-            next_href = _get_attr(next_link, "href")
+            next_href = get_attr(next_link, "href")
             if next_href:
                 return next_href
         code_elem = parent.find_next("code")
@@ -1825,7 +1741,7 @@ def _extract_slow_download_url(
         )
         if not html:
             return ""
-        new_soup = BeautifulSoup(_html_response_text(html), "html.parser")
+        new_soup = BeautifulSoup(html_response_text(html), "html.parser")
         return _extract_slow_download_url(
             new_soup,
             link,
@@ -1915,119 +1831,48 @@ def _parse_countdown_seconds_from_element(element: Tag) -> int | None:
     return None
 
 
-def _browse_record_to_release(record: BrowseRecord) -> Release:
-    """Convert a browse record to a Release object.
+class AnnasArchiveProvider:
+    """Anna's Archive provider, including its specialized MD5 mirror cascade."""
 
-    This bridges the direct source's browse data to the generic release model.
-    """
-    return Release(
-        source=record.source,
-        source_id=record.id,
-        title=record.title,
-        format=record.format,
-        language=record.language,  # Top-level language for filtering
-        size=record.size,
-        download_url=record.download_urls[0] if record.download_urls else None,
-        info_url=f"{network.get_aa_base_url()}/md5/{record.id}",
-        protocol=ReleaseProtocol.HTTP,
-        indexer="Direct Download",
-        content_type=record.content,  # Preserve content type from source
-        extra={
-            "author": record.author,
-            "publisher": record.publisher,
-            "year": record.year,
-            "language": record.language,
-            "preview": record.preview,
-            "description": record.description,
-            "download_urls": record.download_urls,
-            "info": record.info,
-        },
-    )
-
-
-@register_source("direct_download")
-class DirectDownloadSource(ReleaseSource):
-    """Direct download source - searches web sources for books.
-
-    This wraps the search_books() functionality to provide releases
-    via the plugin interface.
-    """
-
-    name = "direct_download"
-    display_name = "Direct Download"
-    supported_content_types: ClassVar[list[str]] = ["ebook"]  # Direct downloads only support ebooks
+    id = "annas_archive"
+    display_name = "Anna's Archive"
 
     def __init__(self) -> None:
-        """Initialize per-instance search state for direct downloads."""
-        # Tracks which search method was used in the last search() call
-        # "isbn" = ISBN search returned results, "title_author" = title+author was used
-        self._last_search_type: str = "title_author"
+        self._last_search_type = "title_author"
 
     @property
     def last_search_type(self) -> str:
-        """Returns the search type used in the last search() call."""
         return self._last_search_type
 
-    def get_column_config(self) -> ReleaseColumnConfig:
-        """Column configuration for Direct Download source.
+    def is_enabled(self) -> bool:
+        from shelfmark.core import mirrors
 
-        Shows language, format, and size badges for each release.
-        Language is hidden on mobile; format and size are shown.
-        """
-        return ReleaseColumnConfig(
-            columns=[
-                ColumnSchema(
-                    key="extra.language",
-                    label="Language",
-                    render_type=ColumnRenderType.BADGE,
-                    align=ColumnAlign.CENTER,
-                    width="60px",
-                    hide_mobile=False,  # Language shown on mobile
-                    color_hint=ColumnColorHint(type="map", value="language"),
-                    uppercase=True,
-                ),
-                ColumnSchema(
-                    key="format",
-                    label="Format",
-                    render_type=ColumnRenderType.BADGE,
-                    align=ColumnAlign.CENTER,
-                    width="80px",
-                    hide_mobile=False,  # Format shown on mobile
-                    color_hint=ColumnColorHint(type="map", value="format"),
-                    uppercase=True,
-                ),
-                ColumnSchema(
-                    key="size",
-                    label="Size",
-                    render_type=ColumnRenderType.SIZE,
-                    align=ColumnAlign.CENTER,
-                    width="80px",
-                    hide_mobile=False,  # Size shown on mobile
-                ),
-            ],
-            grid_template="minmax(0,2fr) 60px 80px 80px",
-            supported_filters=["format", "language"],  # AA has reliable language metadata
+        return mirrors.has_aa_mirror_configuration()
+
+    def handles(self, url: str) -> bool:
+        from shelfmark.core import mirrors
+
+        hostname = (urlparse(url).hostname or "").lower().rstrip(".")
+        if not hostname:
+            return False
+        return any(
+            hostname == (urlparse(base_url).hostname or "").lower().rstrip(".")
+            for base_url in mirrors.get_aa_mirrors()
         )
 
-    def get_record(
-        self,
-        record_id: str,
-        *,
-        fetch_download_count: bool = True,
-    ) -> BrowseRecord | None:
-        """Resolve a direct-download record for direct-mode info/download flows."""
-        _ensure_direct_download_available()
+    def get_record(self, record_id: str, *, fetch_download_count: bool = True) -> BrowseRecord:
+        ensure_available()
         return get_book_info(record_id, fetch_download_count=fetch_download_count)
 
-    def search_results_are_releases(self) -> bool:
-        """Direct search results already represent concrete downloadable releases."""
-        return True
-
-    def get_destination_override(self, task: DownloadTask) -> Path | None:
-        """Apply Anna's Archive content-type routing when configured."""
-        if check_audiobook(task.content_type):
-            return None
-        return get_aa_content_type_dir(task.content_type)
+    def download(
+        self,
+        book_info: BrowseRecord,
+        book_path: Path,
+        progress_callback: Callable[[float], None] | None,
+        cancel_flag: Event | None,
+        status_callback: Callable[[str, str | None], None] | None,
+    ) -> str | None:
+        return download_book(book_info, book_path, progress_callback, cancel_flag, status_callback)
 
     def _search_books_with_language_fallback(
         self,
@@ -2055,14 +1900,15 @@ class DirectDownloadSource(ReleaseSource):
         *,
         expand_search: bool = False,
         content_type: str = "ebook",
-    ) -> list[Release]:
-        """Search for releases using the book's metadata.
-
-        The whole fan-out runs under one page cache, so a URL built twice by different
-        passes is fetched once. See `_search_page_reuse`.
-        """
-        with _search_page_reuse():
-            return self._search(book, plan, expand_search=expand_search, content_type=content_type)
+    ) -> list[BrowseRecord]:
+        """Search for releases using the book's metadata with request-local page reuse."""
+        with search_page_reuse():
+            return self._search(
+                book,
+                plan,
+                expand_search=expand_search,
+                content_type=content_type,
+            )
 
     def _search(
         self,
@@ -2071,8 +1917,8 @@ class DirectDownloadSource(ReleaseSource):
         *,
         expand_search: bool = False,
         content_type: str = "ebook",
-    ) -> list[Release]:
-        """Search for releases using the book's metadata.
+    ) -> list[BrowseRecord]:
+        """Run Anna's Archive's ISBN-first and localized-title search strategy.
 
         Priority: ISBN search first (most precise), then title+author fallback.
         For non-English languages, uses localized titles from book.titles_by_language.
@@ -2085,7 +1931,7 @@ class DirectDownloadSource(ReleaseSource):
             content_type: Ignored - Direct download uses format filtering instead
 
         """
-        _ensure_direct_download_available()
+        ensure_available()
         lang_filter = plan.languages
 
         # Reset search type tracking
@@ -2102,7 +1948,7 @@ class DirectDownloadSource(ReleaseSource):
                 query, filters, search_label="manual"
             )
             self._last_search_type = "manual" if query else "title_author"
-            return [_browse_record_to_release(record) for record in results]
+            return results
 
         # ISBN search first (unless expand_search requested)
         if plan.manual_query:
@@ -2119,7 +1965,7 @@ class DirectDownloadSource(ReleaseSource):
                     if results:
                         logger.info("Found %s releases via ISBN", len(results))
                         self._last_search_type = "isbn"
-                        return [_browse_record_to_release(record) for record in results]
+                        return results
                     logger.debug("No ISBN results, falling back to title+author")
                 except SearchUnavailableError:
                     raise
@@ -2184,155 +2030,4 @@ class DirectDownloadSource(ReleaseSource):
                 except Exception:
                     logger.exception("Search error")
 
-        return [_browse_record_to_release(record) for record in all_results]
-
-    def is_available(self) -> bool:
-        """Check if Direct Download has been explicitly enabled and configured."""
-        return _get_direct_download_unavailable_reason() is None
-
-
-@register_handler("direct_download")
-class DirectDownloadHandler(DownloadHandler):
-    """Handler for direct HTTP downloads from Anna's Archive, Libgen, etc.
-
-    Receives a DownloadTask with task_id (AA MD5 hash) and cascades through
-    sources in priority order. The AA page is only fetched if AA slow sources
-    are enabled in the user's source priority configuration.
-    """
-
-    def download(
-        self,
-        task: DownloadTask,
-        cancel_flag: Event,
-        progress_callback: Callable[[float], None],
-        status_callback: Callable[[str, str | None], None],
-    ) -> str | None:
-        """Execute a direct HTTP download.
-
-        Uses task.task_id (AA MD5 hash) to cascade through sources in priority
-        order. The AA page is only fetched if AA slow sources are enabled.
-
-        Args:
-            task: Download task with task_id (AA MD5 hash)
-            cancel_flag: Event to check for cancellation
-            progress_callback: Called with progress percentage (0-100)
-            status_callback: Called with (status, message) for status updates
-
-        Returns:
-            Path to downloaded file if successful, None otherwise
-
-        """
-        try:
-            # Check for cancellation before starting
-            if cancel_flag.is_set():
-                logger.info("Download cancelled before starting: %s", task.task_id)
-                status_callback("cancelled", "Cancelled")
-                return None
-
-            # Create browse record from task data - NO AA page fetch here
-            # AA page is fetched lazily by _fetch_aa_page_urls only when
-            # we actually reach an AA slow source in the priority order
-            book_info = BrowseRecord(
-                id=task.task_id,
-                title=task.title,
-                source="direct_download",
-                author=task.author,
-                year=task.year,
-                format=task.format,
-                size=task.size,
-                preview=task.preview,
-            )
-
-            return self._execute_download(
-                book_info, cancel_flag, progress_callback, status_callback
-            )
-
-        except Exception as e:
-            if cancel_flag.is_set():
-                logger.info("Download cancelled during error handling: %s", task.task_id)
-                status_callback("cancelled", "Cancelled")
-            else:
-                logger.exception("Error downloading book")
-                status_callback("error", str(e))
-            return None
-
-    def _execute_download(
-        self,
-        book_info: BrowseRecord,
-        cancel_flag: Event,
-        progress_callback: Callable[[float], None],
-        status_callback: Callable[[str, str | None], None],
-    ) -> str | None:
-        """Execute the direct-download flow with a fetched browse record.
-
-        This contains the core download logic: cascade through sources,
-        handle bypass, move to final location.
-        """
-        try:
-            logger.debug("Starting download: %s", book_info.title)
-
-            # Prepare paths - use descriptive staging filename, orchestrator will rename
-            # based on FILE_ORGANIZATION setting
-            file_org = config.get("FILE_ORGANIZATION", "rename")
-            if file_org == "none":
-                book_name = f"{book_info.id}.{book_info.format or 'bin'}"
-            else:
-                book_name = build_filename(
-                    book_info.title,
-                    book_info.author,
-                    book_info.year,
-                    book_info.format,
-                )
-            book_path = TMP_DIR / book_name
-
-            # Check cancellation before download
-            if cancel_flag.is_set():
-                logger.info("Download cancelled before download call: %s", book_info.id)
-                status_callback("cancelled", "Cancelled")
-                return None
-
-            # Execute download via _download_book (handles cascade and bypass)
-            status_callback("resolving", "Finding download source")
-            success_url = _download_book(
-                book_info, book_path, progress_callback, cancel_flag, status_callback
-            )
-
-            # Check for cancellation after download
-            if cancel_flag.is_set():
-                logger.info("Download cancelled during download: %s", book_info.id)
-                if book_path.exists():
-                    book_path.unlink()
-                status_callback("cancelled", "Cancelled")
-                return None
-
-            if not success_url:
-                if network.dns_interference_detected():
-                    status_callback(
-                        "error",
-                        "All sources failed - your network/ISP appears to be blocking "
-                        "Anna's Archive. Enable DNS-over-HTTPS in settings.",
-                    )
-                else:
-                    status_callback("error", "All download sources failed")
-                return None
-
-            # Return temp path - orchestrator handles post-processing (archive extraction, ingest)
-            return str(book_path)
-
-        except Exception:
-            if cancel_flag.is_set():
-                logger.info("Download cancelled during error handling: %s", book_info.id)
-                status_callback("cancelled", "Cancelled")
-            else:
-                logger.exception("Error downloading book")
-            return None
-
-    def cancel(self, task_id: str) -> bool:
-        """Cancel an in-progress download.
-
-        Cancellation is handled via the cancel_flag passed to download().
-        This method exists for the interface but actual cancellation
-        happens through the Event flag mechanism.
-        """
-        # Cancellation is handled by the orchestrator via cancel_flag
-        return False
+        return all_results

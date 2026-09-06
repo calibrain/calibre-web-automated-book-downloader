@@ -10,6 +10,8 @@ unsolved challenge, telling users to go fix a bypasser that had just succeeded.
 import pytest
 from bs4 import Tag
 
+from shelfmark.release_sources.direct_download import annas_archive as aa
+
 # Verbatim from a live annas-archive.pk 403, trimmed of nothing that matters: this is
 # what an interstitial actually looks like, and it is under a kilobyte.
 DDOS_GUARD_INTERSTITIAL = (
@@ -58,7 +60,7 @@ class _Selector:
 
 
 def _patch_pages(monkeypatch, pages: list[str]):
-    import shelfmark.release_sources.direct_download as dd
+    from shelfmark.release_sources.direct_download import source as dd
 
     calls: list[str] = []
 
@@ -66,8 +68,8 @@ def _patch_pages(monkeypatch, pages: list[str]):
         calls.append(url)
         return pages[len(calls) - 1] if len(calls) <= len(pages) else ""
 
-    monkeypatch.setattr(dd.downloader, "html_get_page", fake_get)
-    monkeypatch.setattr(dd.network, "get_available_aa_urls", lambda: ["a", "b"])
+    monkeypatch.setattr(aa.downloader, "html_get_page", fake_get)
+    monkeypatch.setattr(aa.network, "get_available_aa_urls", lambda: ["a", "b"])
     return dd, calls
 
 
@@ -80,8 +82,6 @@ def search_logs():
     """
     import logging
 
-    import shelfmark.release_sources.direct_download as dd
-
     messages: list[str] = []
 
     class _Capture(logging.Handler):
@@ -89,38 +89,37 @@ def search_logs():
             messages.append(record.getMessage())
 
     handler = _Capture()
-    dd.logger.addHandler(handler)
-    previous = dd.logger.level
-    dd.logger.setLevel(logging.DEBUG)
+    aa.logger.addHandler(handler)
+    previous = aa.logger.level
+    aa.logger.setLevel(logging.DEBUG)
     # Logger.setLevel only invalidates the is-enabled cache through the manager, which
     # these loggers are not registered with; without this the DEBUG line stays filtered.
-    dd.logger._cache.clear()
+    aa.logger._cache.clear()
     try:
         yield messages
     finally:
-        dd.logger.removeHandler(handler)
-        dd.logger.setLevel(previous)
+        aa.logger.removeHandler(handler)
+        aa.logger.setLevel(previous)
 
 
 def test_the_size_guard_is_what_separates_a_real_page_from_an_interstitial():
     """The two inputs this bug turned on, checked directly."""
-    import shelfmark.release_sources.direct_download as dd
     from shelfmark.bypass.challenge import MAX_CHALLENGE_HTML_CHARS
 
     assert len(DDOS_GUARD_INTERSTITIAL) < MAX_CHALLENGE_HTML_CHARS
     assert len(AA_PAGE_WITHOUT_TABLE) > MAX_CHALLENGE_HTML_CHARS
     # Both contain "ddos-guard"; only one is a challenge.
     assert "ddos-guard" in AA_PAGE_WITHOUT_TABLE.lower()
-    assert dd._looks_like_challenge_page(DDOS_GUARD_INTERSTITIAL)
-    assert not dd._looks_like_challenge_page(AA_PAGE_WITHOUT_TABLE)
+    assert aa._looks_like_challenge_page(DDOS_GUARD_INTERSTITIAL)
+    assert not aa._looks_like_challenge_page(AA_PAGE_WITHOUT_TABLE)
 
 
 def test_real_aa_page_without_a_table_is_not_reported_as_a_challenge(monkeypatch):
     """The #1289 failure: a served AA page raised "unsolved protection challenge"."""
-    dd, calls = _patch_pages(monkeypatch, [AA_PAGE_WITHOUT_TABLE])
+    _dd, calls = _patch_pages(monkeypatch, [AA_PAGE_WITHOUT_TABLE])
     selector = _Selector(["https://real.test", "https://other.test"])
 
-    html, table = dd._fetch_search_table("https://real.test/search?q=malice", selector)
+    html, table = aa._fetch_search_table("https://real.test/search?q=malice", selector)
 
     assert table is None
     assert html == AA_PAGE_WITHOUT_TABLE
@@ -131,22 +130,22 @@ def test_real_aa_page_without_a_table_is_not_reported_as_a_challenge(monkeypatch
 
 def test_aa_markers_win_over_challenge_markers_on_the_same_page(monkeypatch):
     """Ordering, not just the size guard, keeps a marker-carrying AA page readable."""
-    dd, _calls = _patch_pages(monkeypatch, [AA_PAGE_WITHOUT_TABLE])
-    monkeypatch.setattr(dd, "_looks_like_challenge_page", lambda _html: True)
+    _dd, _calls = _patch_pages(monkeypatch, [AA_PAGE_WITHOUT_TABLE])
+    monkeypatch.setattr(aa, "_looks_like_challenge_page", lambda _html: True)
     selector = _Selector(["https://real.test", "https://other.test"])
 
-    _html, table = dd._fetch_search_table("https://real.test/search?q=malice", selector)
+    _html, table = aa._fetch_search_table("https://real.test/search?q=malice", selector)
 
     assert table is None
 
 
 def test_genuine_interstitial_still_raises(monkeypatch):
     """The behaviour the check exists for is untouched."""
-    dd, _calls = _patch_pages(monkeypatch, [DDOS_GUARD_INTERSTITIAL])
+    _dd, _calls = _patch_pages(monkeypatch, [DDOS_GUARD_INTERSTITIAL])
     selector = _Selector(["https://real.test", "https://other.test"])
 
-    with pytest.raises(dd.SearchUnavailableError, match="protection challenge"):
-        dd._fetch_search_table("https://real.test/search?q=malice", selector)
+    with pytest.raises(aa.SearchUnavailableError, match="protection challenge"):
+        aa._fetch_search_table("https://real.test/search?q=malice", selector)
 
     assert selector.quarantined == []
 
@@ -156,10 +155,10 @@ def test_results_table_is_still_returned(monkeypatch):
     page = AA_PAGE_WITHOUT_TABLE.replace(
         "<main>", "<main><table><tbody><tr><td>Malice</td></tr></tbody></table>"
     )
-    dd, _calls = _patch_pages(monkeypatch, [page])
+    _dd, _calls = _patch_pages(monkeypatch, [page])
     selector = _Selector(["https://real.test"])
 
-    _html, table = dd._fetch_search_table("https://real.test/search?q=malice", selector)
+    _html, table = aa._fetch_search_table("https://real.test/search?q=malice", selector)
 
     assert isinstance(table, Tag)
 
@@ -171,10 +170,10 @@ def test_untabled_page_is_fingerprinted_in_the_log(monkeypatch, search_logs):
     rather than reverse-engineered: size, whether the size guard applied, the AA markers
     found, and the challenge marker (or its absence).
     """
-    dd, _calls = _patch_pages(monkeypatch, [AA_PAGE_WITHOUT_TABLE])
+    _dd, _calls = _patch_pages(monkeypatch, [AA_PAGE_WITHOUT_TABLE])
     selector = _Selector(["https://real.test", "https://other.test"])
 
-    dd._fetch_search_table("https://real.test/search?q=malice", selector)
+    aa._fetch_search_table("https://real.test/search?q=malice", selector)
 
     verdict = next(m for m in search_logs if "no results table" in m)
     assert f"bytes={len(AA_PAGE_WITHOUT_TABLE)}" in verdict
@@ -190,11 +189,11 @@ def test_untabled_page_is_fingerprinted_in_the_log(monkeypatch, search_logs):
 
 def test_interstitial_fingerprint_names_the_marker_that_proved_it(monkeypatch, search_logs):
     """The same line must also settle the opposite case, without needing the body."""
-    dd, _calls = _patch_pages(monkeypatch, [DDOS_GUARD_INTERSTITIAL])
+    _dd, _calls = _patch_pages(monkeypatch, [DDOS_GUARD_INTERSTITIAL])
     selector = _Selector(["https://real.test", "https://other.test"])
 
-    with pytest.raises(dd.SearchUnavailableError):
-        dd._fetch_search_table("https://real.test/search?q=malice", selector)
+    with pytest.raises(aa.SearchUnavailableError):
+        aa._fetch_search_table("https://real.test/search?q=malice", selector)
 
     verdict = next(m for m in search_logs if "no results table" in m)
     assert "over_challenge_size_cap=False" in verdict
@@ -204,14 +203,14 @@ def test_interstitial_fingerprint_names_the_marker_that_proved_it(monkeypatch, s
 
 def test_fingerprint_failure_never_breaks_a_search(monkeypatch):
     """Diagnostics are best-effort; a bug in them must not cost the user their search."""
-    dd, _calls = _patch_pages(monkeypatch, [AA_PAGE_WITHOUT_TABLE])
+    _dd, _calls = _patch_pages(monkeypatch, [AA_PAGE_WITHOUT_TABLE])
 
     def boom(_html):
         raise RuntimeError("marker scan blew up")
 
-    monkeypatch.setattr(dd, "challenge_marker", boom)
+    monkeypatch.setattr(aa, "challenge_marker", boom)
     selector = _Selector(["https://real.test", "https://other.test"])
 
-    _html, table = dd._fetch_search_table("https://real.test/search?q=malice", selector)
+    _html, table = aa._fetch_search_table("https://real.test/search?q=malice", selector)
 
     assert table is None
