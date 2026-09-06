@@ -62,6 +62,14 @@ jobs:
           - target: shelfmark-lite
             image_name_suffix: "-lite"
     steps:
+      - name: Normalize Docker image name
+        id: image_name
+        env:
+          RAW_IMAGE_NAME: ${{ env.IMAGE_NAME }}
+        run: |
+          NORMALIZED_IMAGE_NAME=$(printf '%s' "$RAW_IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+          echo "name=$NORMALIZED_IMAGE_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Get current date
         id: date
         run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
@@ -86,7 +94,7 @@ jobs:
           # standard org.opencontainers.image.* annotations, including `created`.
           DOCKER_METADATA_ANNOTATIONS_LEVELS: index,manifest
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_name_suffix }}
+          images: ${{ env.REGISTRY }}/${{ steps.image_name.outputs.name }}${{ matrix.image_name_suffix }}
           tags: |
             type=raw,value=dev,enable={{is_default_branch}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
@@ -94,6 +102,11 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha
             type=ref,event=tag
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        with:
+          platforms: arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -113,11 +126,22 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
 
+      - name: Verify multi-platform image
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ steps.image_name.outputs.name }}${{ matrix.image_name_suffix }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          INSPECTION=$(docker buildx imagetools inspect "${IMAGE}@${DIGEST}")
+          echo "$INSPECTION"
+          grep -Eq 'Platform:[[:space:]]+linux/amd64([[:space:]]|$)' <<< "$INSPECTION"
+          grep -Eq 'Platform:[[:space:]]+linux/arm64(/v8)?([[:space:]]|$)' <<< "$INSPECTION"
+
       - name: Generate artifact attestation for ${{ matrix.target }} image
         if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.image_name_suffix }}
+          subject-name: ${{ env.REGISTRY }}/${{ steps.image_name.outputs.name }}${{ matrix.image_name_suffix }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
@@ -144,13 +168,21 @@ jobs:
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Create legacy aliases
+        env:
+          RAW_IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          RAW_LEGACY_OWNER: ${{ github.repository_owner }}
         run: |
+          # Docker repository paths must be lowercase. GitHub owner names retain
+          # their display casing (for example, "TomJansen"), so normalize them.
+          IMAGE_NAME=$(printf '%s' "$RAW_IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+          LEGACY_OWNER=$(printf '%s' "$RAW_LEGACY_OWNER" | tr '[:upper:]' '[:lower:]')
+
           # Current image names (follows repo name)
-          STANDARD="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          LITE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-lite"
+          STANDARD="${{ env.REGISTRY }}/${IMAGE_NAME}"
+          LITE="${{ env.REGISTRY }}/${IMAGE_NAME}-lite"
 
           # Legacy image names (hardcoded for backwards compatibility)
-          LEGACY="${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.LEGACY_NAME }}"
+          LEGACY="${{ env.REGISTRY }}/${LEGACY_OWNER}/${{ env.LEGACY_NAME }}"
           LEGACY_TOR="${LEGACY}-tor"
           LEGACY_EXTBP="${LEGACY}-extbp"
 
