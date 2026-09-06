@@ -1,9 +1,14 @@
 import { useState, useCallback, useMemo } from 'react';
+import type { ReactNode } from 'react';
 
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useMountEffect } from '../hooks/useMountEffect';
-import type { OnboardingStep, OnboardingStepCondition } from '../services/api';
+import type {
+  OnboardingFieldGroup,
+  OnboardingStep,
+  OnboardingStepCondition,
+} from '../services/api';
 import {
   getOnboarding,
   saveOnboarding,
@@ -12,6 +17,7 @@ import {
 } from '../services/api';
 import type { SettingsField, ActionResult, ShowWhenCondition } from '../types/settings';
 import { toBooleanValue, toStringArray, toStringValue } from '../utils/objectHelpers';
+import { getOnboardingStepValidationError } from '../utils/onboardingValidation';
 import {
   TextField,
   PasswordField,
@@ -170,6 +176,50 @@ const renderField = (
   }
 };
 
+interface OnboardingFieldGroupPanelProps {
+  group: OnboardingFieldGroup;
+  children: ReactNode;
+}
+
+const OnboardingFieldGroupPanel = ({ group, children }: OnboardingFieldGroupPanelProps) => {
+  const [isOpen, setIsOpen] = useState(group.defaultOpen ?? false);
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-(--border-muted)">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-4 bg-(--bg-soft) px-4 py-3 text-left transition-colors hover:bg-(--hover-surface)"
+        onClick={() => setIsOpen((current) => !current)}
+        aria-expanded={isOpen}
+        aria-controls={`onboarding-field-group-${group.id}`}
+      >
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold">{group.title}</span>
+          {group.description && (
+            <span className="mt-0.5 block text-xs opacity-60">{group.description}</span>
+          )}
+        </span>
+        <svg
+          className={`h-4 w-4 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          strokeWidth={2}
+          stroke="currentColor"
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+        </svg>
+      </button>
+      {isOpen && (
+        <div id={`onboarding-field-group-${group.id}`} className="space-y-5 px-4 py-4">
+          {children}
+        </div>
+      )}
+    </section>
+  );
+};
+
 export const OnboardingModal = ({
   isOpen,
   onClose,
@@ -223,6 +273,7 @@ const OnboardingModalSession = ({
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showStepValidationError, setShowStepValidationError] = useState(false);
 
   useMountEffect(() => {
     const fetchOnboarding = async () => {
@@ -261,6 +312,21 @@ const OnboardingModalSession = ({
     return currentStep.fields.filter((field) => isFieldVisible(field, values));
   }, [currentStep, values]);
 
+  const groupedFieldKeys = useMemo(
+    () => new Set(currentStep?.fieldGroups?.flatMap((group) => group.fieldKeys) ?? []),
+    [currentStep],
+  );
+
+  const ungroupedFields = useMemo(
+    () => visibleFields.filter((field) => !groupedFieldKeys.has(field.key)),
+    [groupedFieldKeys, visibleFields],
+  );
+
+  const stepValidationError = useMemo(
+    () => getOnboardingStepValidationError(currentStep, values),
+    [currentStep, values],
+  );
+
   // Handle field value changes
   const handleChange = useCallback((key: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [key]: value }));
@@ -268,13 +334,20 @@ const OnboardingModalSession = ({
 
   // Handle next step
   const handleNext = useCallback(() => {
+    if (stepValidationError) {
+      setShowStepValidationError(true);
+      return;
+    }
+
+    setShowStepValidationError(false);
     if (clampedStepIndex < visibleSteps.length - 1) {
       setCurrentStepIndex(clampedStepIndex + 1);
     }
-  }, [clampedStepIndex, visibleSteps.length]);
+  }, [clampedStepIndex, stepValidationError, visibleSteps.length]);
 
   // Handle previous step
   const handleBack = useCallback(() => {
+    setShowStepValidationError(false);
     if (clampedStepIndex > 0) {
       setCurrentStepIndex(clampedStepIndex - 1);
     }
@@ -415,6 +488,21 @@ const OnboardingModalSession = ({
   const isLastStep = clampedStepIndex === visibleSteps.length - 1;
   const progress = ((clampedStepIndex + 1) / visibleSteps.length) * 100;
 
+  const renderWrappedField = (field: SettingsField) => {
+    const isDisabled = 'fromEnv' in field ? (field.fromEnv ?? false) : false;
+    return (
+      <FieldWrapper key={field.key} field={field}>
+        {renderField(
+          field,
+          values[field.key],
+          (value) => handleChange(field.key, value),
+          () => handleAction(field.key),
+          isDisabled,
+        )}
+      </FieldWrapper>
+    );
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
@@ -475,20 +563,24 @@ const OnboardingModalSession = ({
         {/* Content */}
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="min-h-[280px] space-y-5 px-6 py-5">
-            {visibleFields.map((field) => {
-              const isDisabled = 'fromEnv' in field ? (field.fromEnv ?? false) : false;
+            {ungroupedFields.map(renderWrappedField)}
+            {currentStep?.fieldGroups?.map((group) => {
+              const groupFields = visibleFields.filter((field) =>
+                group.fieldKeys.includes(field.key),
+              );
+              if (groupFields.length === 0) return null;
+
               return (
-                <FieldWrapper key={field.key} field={field}>
-                  {renderField(
-                    field,
-                    values[field.key],
-                    (v) => handleChange(field.key, v),
-                    () => handleAction(field.key),
-                    isDisabled,
-                  )}
-                </FieldWrapper>
+                <OnboardingFieldGroupPanel key={group.id} group={group}>
+                  {groupFields.map(renderWrappedField)}
+                </OnboardingFieldGroupPanel>
               );
             })}
+            {showStepValidationError && stepValidationError && (
+              <p className="text-sm text-red-600 dark:text-red-400" role="alert">
+                {stepValidationError}
+              </p>
+            )}
           </div>
         </div>
 

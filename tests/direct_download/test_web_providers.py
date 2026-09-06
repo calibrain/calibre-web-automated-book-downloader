@@ -183,3 +183,31 @@ def test_provider_failure_is_suppressed_when_another_provider_succeeds(monkeypat
     releases = source.search(SimpleNamespace(title="Example"), SimpleNamespace())
 
     assert [release.source_id for release in releases] == ["working:1"]
+
+
+def test_provider_search_order_follows_slow_source_priority(monkeypatch):
+    class Provider:
+        def __init__(self, provider_id):
+            self.id = provider_id
+
+        def is_enabled(self):
+            return True
+
+    monkeypatch.setattr(
+        registry.config,
+        "get",
+        lambda key, default=None: {
+            "DIRECT_DOWNLOAD_ENABLED": True,
+            "SOURCE_PRIORITY": [
+                {"id": "oceanofpdf", "enabled": True},
+                {"id": "aa-slow-nowait", "enabled": True},
+            ],
+        }.get(key, default),
+    )
+
+    providers = (Provider("annas_archive"), Provider("oceanofpdf"))
+
+    assert [provider.id for provider in registry.enabled_providers(providers)] == [
+        "oceanofpdf",
+        "annas_archive",
+    ]

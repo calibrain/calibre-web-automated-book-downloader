@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from shelfmark.core.config import config
 from shelfmark.release_sources.direct_download.annas_archive import AnnasArchiveProvider
+from shelfmark.release_sources.direct_download.oceanofpdf import OceanofPDFProvider
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
     from shelfmark.release_sources.direct_download.common import DirectDownloadProvider
 
 
-PROVIDER_TYPES = (AnnasArchiveProvider,)
+PROVIDER_TYPES = (AnnasArchiveProvider, OceanofPDFProvider)
 _AA_MD5_PATTERN = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
 
 
@@ -28,7 +29,29 @@ def enabled_providers(
     if not config.get("DIRECT_DOWNLOAD_ENABLED", False):
         return ()
     candidates = providers if providers is not None else create_providers()
-    return tuple(provider for provider in candidates if provider.is_enabled())
+    enabled = [provider for provider in candidates if provider.is_enabled()]
+    priority = config.get("SOURCE_PRIORITY", [])
+    if not isinstance(priority, list):
+        return tuple(enabled)
+
+    positions = {
+        item["id"]: index
+        for index, item in enumerate(priority)
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    fallback_position = len(positions)
+
+    def _position(provider: DirectDownloadProvider) -> int:
+        if provider.id == "oceanofpdf":
+            return positions.get("oceanofpdf", fallback_position)
+        if provider.id == "annas_archive":
+            aa_positions = [
+                position for source_id, position in positions.items() if source_id != "oceanofpdf"
+            ]
+            return min(aa_positions, default=fallback_position)
+        return fallback_position
+
+    return tuple(sorted(enabled, key=_position))
 
 
 def get_unavailable_reason(

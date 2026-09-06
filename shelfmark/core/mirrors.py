@@ -36,6 +36,7 @@ _DOWNLOAD_SOURCE_MIRROR_LABELS = {
     "libgen": "LibGen",
     "zlib": "Z-Library",
     "welib": "Welib",
+    "oceanofpdf": "OceanofPDF",
 }
 
 
@@ -198,6 +199,22 @@ def has_welib_mirror_configuration() -> bool:
     return bool(get_welib_mirrors())
 
 
+def get_oceanofpdf_mirrors() -> list[str]:
+    """Get user-configured OceanofPDF mirrors, with the search mirror first."""
+    return _normalize_configured_urls(_get_config().get("OCEANOFPDF_MIRROR_URLS", None))
+
+
+def has_oceanofpdf_mirror_configuration() -> bool:
+    """Return True when at least one OceanofPDF mirror URL is configured."""
+    return bool(get_oceanofpdf_mirrors())
+
+
+def get_oceanofpdf_primary_url() -> str | None:
+    """Return the first configured OceanofPDF mirror, if present."""
+    mirrors = get_oceanofpdf_mirrors()
+    return mirrors[0] if mirrors else None
+
+
 def has_download_source_mirror_configuration(source_id: str) -> bool:
     """Return True when the requested direct-download source has mirror config."""
     if source_id in {"aa-fast", "aa-slow", "aa-slow-nowait", "aa-slow-wait"}:
@@ -208,6 +225,8 @@ def has_download_source_mirror_configuration(source_id: str) -> bool:
         return has_zlib_mirror_configuration()
     if source_id == "welib":
         return has_welib_mirror_configuration()
+    if source_id == "oceanofpdf":
+        return has_oceanofpdf_mirror_configuration()
     return False
 
 

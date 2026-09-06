@@ -10,6 +10,7 @@ def test_generated_env_docs_use_canonical_mirror_env_vars() -> None:
         "LIBGEN_MIRROR_URLS",
         "ZLIB_MIRROR_URLS",
         "WELIB_MIRROR_URLS",
+        "OCEANOFPDF_MIRROR_URLS",
     ):
         assert f"`{canonical_var}`" in docs
 

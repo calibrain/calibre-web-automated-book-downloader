@@ -2176,7 +2176,7 @@ Enable Moly.hu as a metadata provider for book searches
 | `DIRECT_DOWNLOAD_LANGUAGE_FROM_PATH` | When language metadata is missing or unknown, parse the distant path (file path shown in search results) for language tags like [BD FR] or [En]. Also enables local language filtering so lgli files without AA language metadata are not excluded before the distant path can be checked. | boolean | `false` |
 | `AA_DONATOR_KEY` | Enables fast download access on AA. Get this from your donator account page. | string (secret) | _none_ |
 | `FAST_SOURCES_DISPLAY` | Always tried first, no waiting or bypass required. | JSON array | _see UI for defaults_ |
-| `SOURCE_PRIORITY` | Fallback sources, may have waiting. Requires bypasser. Drag to reorder. | JSON array | _see UI for defaults_ |
+| `SOURCE_PRIORITY` | Fallback sources, some with waiting or bypass requirements. Drag to reorder. | JSON array | _see UI for defaults_ |
 | `MAX_RETRY` | Maximum retry attempts for failed downloads. | number | `10` |
 | `DEFAULT_SLEEP` | Wait time between download retry attempts. | number | `5` |
 | `RELEASE_SEARCH_TIMEOUT` | How long one release search may run before it gives up and reports why. A first search on a cold start pays for a browser solve, so leave room for one. If you use a reverse proxy, its read timeout should be at least this high or it will cut the search off with a 504 first. | number | `300` |
@@ -2233,7 +2233,7 @@ Always tried first, no waiting or bypass required.
 
 **Slow downloads**
 
-Fallback sources, may have waiting. Requires bypasser. Drag to reorder.
+Fallback sources, some with waiting or bypass requirements. Drag to reorder.
 
 - **Type:** JSON array
 - **Default:** _see UI for defaults_
@@ -2433,6 +2433,7 @@ How long the bypass helper process may sit unused before it is shut down. Higher
 | `LIBGEN_MIRROR_URLS` | Mirrors are tried in the order you add them until one works. | string (comma-separated) | _empty list_ |
 | `ZLIB_MIRROR_URLS` | Only the first mirror in the list is used. | string (comma-separated) | _empty list_ |
 | `WELIB_MIRROR_URLS` | Only the first mirror in the list is used. | string (comma-separated) | _empty list_ |
+| `OCEANOFPDF_MIRROR_URLS` | Only the first mirror in the list is used for searches. | string (comma-separated) | _empty list_ |
 
 <details>
 <summary>Detailed descriptions</summary>
@@ -2479,6 +2480,15 @@ Only the first mirror in the list is used.
 **Welib**
 
 Only the first mirror in the list is used.
+
+- **Type:** string (comma-separated)
+- **Default:** _empty list_
+
+#### `OCEANOFPDF_MIRROR_URLS`
+
+**Mirrors**
+
+Only the first mirror in the list is used for searches.
 
 - **Type:** string (comma-separated)
 - **Default:** _empty list_

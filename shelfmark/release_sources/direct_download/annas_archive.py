@@ -407,7 +407,7 @@ def _get_source_priority() -> list[SourcePriorityEntry]:
 
     slow_sources = _parse_source_priority_entries(
         config.get("SOURCE_PRIORITY"),
-        excluded_ids={"aa-fast", "libgen"},
+        excluded_ids={"aa-fast", "libgen", "oceanofpdf"},
     )
     for source in slow_sources:
         if not mirrors.has_download_source_mirror_configuration(source["id"]):

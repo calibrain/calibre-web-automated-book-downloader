@@ -1436,17 +1436,17 @@ def _get_fast_source_defaults() -> list[dict[str, str | bool]]:
 
 
 def _get_slow_source_options() -> list[dict[str, str | bool | None]]:
-    """Slow download sources - configurable order. All require bypasser."""
+    """Slow and fallback download sources in configurable order."""
     from shelfmark.core.config import config
     from shelfmark.core.mirrors import get_download_source_missing_mirror_reason
 
     bypass_enabled = config.get("USE_CF_BYPASS", True)
 
-    def _get_reason(source_id: str) -> str | None:
+    def _get_reason(source_id: str, *, requires_bypass: bool = True) -> str | None:
         mirror_reason = get_download_source_missing_mirror_reason(source_id)
         if mirror_reason:
             return mirror_reason
-        if not bypass_enabled:
+        if requires_bypass and not bypass_enabled:
             return "Requires Cloudflare bypass"
         return None
 
@@ -1479,6 +1479,13 @@ def _get_slow_source_options() -> list[dict[str, str | bool | None]]:
             "isLocked": _get_reason("zlib") is not None,
             "disabledReason": _get_reason("zlib"),
         },
+        {
+            "id": "oceanofpdf",
+            "label": "OceanofPDF",
+            "description": "Website downloads; bypass used when required",
+            "isLocked": _get_reason("oceanofpdf", requires_bypass=False) is not None,
+            "disabledReason": _get_reason("oceanofpdf", requires_bypass=False),
+        },
     ]
 
 
@@ -1491,6 +1498,7 @@ def _get_slow_source_defaults() -> list[dict[str, str | bool]]:
         {"id": "aa-slow-wait", "enabled": True},
         {"id": "welib", "enabled": _LEGACY_ALLOW_USE_WELIB},
         {"id": "zlib", "enabled": True},
+        {"id": "oceanofpdf", "enabled": True},
     ]
 
 
@@ -1540,7 +1548,9 @@ def download_source_settings() -> list[SettingsField]:
         OrderableListField(
             key="SOURCE_PRIORITY",
             label="Slow downloads",
-            description="Fallback sources, may have waiting. Requires bypasser. Drag to reorder.",
+            description=(
+                "Fallback sources, some with waiting or bypass requirements. Drag to reorder."
+            ),
             options=_get_slow_source_options,
             default=_get_slow_source_defaults(),
         ),
@@ -1720,6 +1730,7 @@ def _on_save_mirrors(values: dict[str, Any]) -> dict[str, Any]:
         "LIBGEN_MIRROR_URLS",
         "ZLIB_MIRROR_URLS",
         "WELIB_MIRROR_URLS",
+        "OCEANOFPDF_MIRROR_URLS",
     }
 
     for key in mirror_list_keys:
@@ -1804,6 +1815,19 @@ def mirror_settings() -> list[SettingsField]:
             label="Welib",
             description="Only the first mirror in the list is used.",
             placeholder="https://your-welib-mirror.example",
+        ),
+        # === OCEANOFPDF ===
+        HeadingField(
+            key="oceanofpdf_mirrors_heading",
+            title="OceanofPDF",
+            description="Add your own OceanofPDF mirror URL here.",
+        ),
+        TagListField(
+            key="OCEANOFPDF_MIRROR_URLS",
+            label="Mirrors",
+            description="Only the first mirror in the list is used for searches.",
+            placeholder="https://your-oceanofpdf-mirror.example",
+            default=[],
         ),
     ]
 

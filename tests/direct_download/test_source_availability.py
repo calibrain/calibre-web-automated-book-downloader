@@ -51,6 +51,23 @@ def test_direct_download_source_is_available_when_enabled_and_configured(monkeyp
     assert source.is_available() is True
 
 
+def test_oceanofpdf_can_make_source_available_without_aa(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "get",
+        _fake_config_get(
+            {
+                "DIRECT_DOWNLOAD_ENABLED": True,
+                "SOURCE_PRIORITY": [{"id": "oceanofpdf", "enabled": True}],
+            }
+        ),
+    )
+    monkeypatch.setattr("shelfmark.core.mirrors.has_aa_mirror_configuration", lambda: False)
+    monkeypatch.setattr("shelfmark.core.mirrors.has_oceanofpdf_mirror_configuration", lambda: True)
+
+    assert DirectDownloadSource().is_available() is True
+
+
 def test_get_source_priority_disables_entries_without_required_mirrors(monkeypatch):
 
     monkeypatch.setattr(
@@ -66,6 +83,7 @@ def test_get_source_priority_disables_entries_without_required_mirrors(monkeypat
                 "SOURCE_PRIORITY": [
                     {"id": "welib", "enabled": True},
                     {"id": "zlib", "enabled": True},
+                    {"id": "oceanofpdf", "enabled": True},
                 ],
             }
         ),
@@ -81,6 +99,7 @@ def test_get_source_priority_disables_entries_without_required_mirrors(monkeypat
     assert priority["libgen"] is True
     assert priority["welib"] is False
     assert priority["zlib"] is True
+    assert "oceanofpdf" not in priority
 
 
 def test_is_configured_zlib_link_uses_configured_mirror_domains(monkeypatch):

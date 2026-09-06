@@ -163,4 +163,14 @@ describe('requestPayload utilities', () => {
 
     expect(data.language).toBe('de');
   });
+
+  it('preserves the provider detail URL when downloading a direct-mode result', () => {
+    const data = buildReleaseDataFromDirectBook({
+      ...baseBook,
+      id: 'oceanofpdf:result-1',
+      source_url: 'https://oceanofpdf.com/book/result-1/',
+    });
+
+    expect(data.download_url).toBe('https://oceanofpdf.com/book/result-1/');
+  });
 });

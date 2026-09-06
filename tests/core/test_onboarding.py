@@ -31,7 +31,7 @@ def _group_save_calls(
 
 
 def test_get_onboarding_config_uses_release_source_settings_pages():
-    from shelfmark.core.onboarding import get_onboarding_config
+    from shelfmark.core.onboarding import ONBOARDING_RELEASE_SOURCES_KEY, get_onboarding_config
 
     config = get_onboarding_config()
     steps = {step["id"]: step for step in config["steps"]}
@@ -43,8 +43,21 @@ def test_get_onboarding_config_uses_release_source_settings_pages():
     assert "audiobookbay" in steps
     assert "irc" in steps
 
+    release_source_fields = {
+        field["key"]: field for field in steps["release_sources"]["fields"] if "key" in field
+    }
+    direct_download_option = next(
+        option
+        for option in release_source_fields[ONBOARDING_RELEASE_SOURCES_KEY]["options"]
+        if option["value"] == "direct_download"
+    )
+    assert direct_download_option["description"] == (
+        "Configure your own mirror URLs for direct ebook downloads."
+    )
+
+    direct_download_field_list = steps["direct_download_setup"]["fields"]
     direct_download_fields = {
-        field["key"] for field in steps["direct_download_setup"]["fields"] if "key" in field
+        field["key"] for field in direct_download_field_list if "key" in field
     }
     direct_download_bypass_fields = {
         field["key"]
@@ -63,8 +76,45 @@ def test_get_onboarding_config_uses_release_source_settings_pages():
     assert "SOURCE_PRIORITY" not in direct_download_fields
     assert "AA_DONATOR_KEY" in direct_download_fields
     assert "AA_MIRROR_URLS" in direct_download_fields
+    assert "OCEANOFPDF_MIRROR_URLS" in direct_download_fields
+    direct_download_fields_by_key = {
+        field["key"]: field for field in direct_download_field_list if "key" in field
+    }
+    assert (
+        direct_download_fields_by_key["direct_download_setup_onboarding_heading"]["title"]
+        == "Choose at least one download source"
+    )
+    assert (
+        direct_download_fields_by_key["AA_DONATOR_KEY"]["label"]
+        == "Anna's Archive Donator Key (optional)"
+    )
+    direct_download_field_keys = [field["key"] for field in direct_download_field_list]
+    assert direct_download_field_keys.index("AA_MIRROR_URLS") < direct_download_field_keys.index(
+        "AA_DONATOR_KEY"
+    )
     assert "LIBGEN_ADDITIONAL_URLS" not in direct_download_fields
     assert "ZLIB_PRIMARY_URL" not in direct_download_fields
+    direct_download_groups = {
+        group["id"]: group for group in steps["direct_download_setup"]["fieldGroups"]
+    }
+    assert direct_download_groups["annas_archive"] == {
+        "id": "annas_archive",
+        "title": "Anna's Archive",
+        "description": "Configure mirror URLs and an optional donator API key.",
+        "fieldKeys": ["AA_MIRROR_URLS", "AA_DONATOR_KEY"],
+        "defaultOpen": True,
+    }
+    assert direct_download_groups["oceanofpdf"] == {
+        "id": "oceanofpdf",
+        "title": "OceanOfPDF",
+        "description": "Configure the mirror URL used for searches and downloads.",
+        "fieldKeys": ["OCEANOFPDF_MIRROR_URLS"],
+        "defaultOpen": False,
+    }
+    assert (
+        steps["direct_download_setup_direct_mode"]["fieldGroups"]
+        == steps["direct_download_setup"]["fieldGroups"]
+    )
     assert "EXT_BYPASSER_TIMEOUT" not in direct_download_bypass_fields
     assert "PROWLARR_ENABLED" not in prowlarr_fields
     assert "PROWLARR_AUTO_EXPAND" not in prowlarr_fields
