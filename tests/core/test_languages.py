@@ -242,6 +242,40 @@ class TestCodesDoNotShadowEachOther:
             assert normalize_language(code) == code, f"{code} resolved elsewhere"
 
 
+class TestPortugueseVariants:
+    """Brazilian and European Portuguese are distinct entries alongside the
+    unqualified 'pt', mirroring the 'zh' / 'zh-Hant' split (issue #1320)."""
+
+    def test_unqualified_portuguese_is_unchanged(self):
+        assert normalize_language("pt") == "pt"
+        assert normalize_language("por") == "pt"
+        assert normalize_language("Portuguese") == "pt"
+
+    @pytest.mark.parametrize(
+        "spelling",
+        ["pt-BR", "pt-br", "pt_BR", "pt‑BR", "Brazilian Portuguese", "portugues brasileiro"],
+    )
+    def test_brazilian_portuguese_resolves(self, spelling):
+        assert normalize_language(spelling) == "pt-BR"
+
+    @pytest.mark.parametrize(
+        "spelling", ["pt-PT", "pt-pt", "pt_PT", "European Portuguese", "portugues europeu"]
+    )
+    def test_european_portuguese_resolves(self, spelling):
+        assert normalize_language(spelling) == "pt-PT"
+
+    def test_accented_portuguese_names_resolve(self):
+        assert normalize_language("Português (Brasil)") == "pt-BR"
+        assert normalize_language("Português (Portugal)") == "pt-PT"
+
+    def test_variants_do_not_shadow_the_base_code(self):
+        # 'pt' still resolves to itself even though 'pt-BR' / 'pt-PT' share its
+        # prefix and appear later in the data file.
+        assert normalize_language("pt") == "pt"
+        assert normalize_language("pt-BR") == "pt-BR"
+        assert normalize_language("pt-PT") == "pt-PT"
+
+
 class TestSubtagSeparators:
     """The U+2011 in the old Traditional Chinese code renders close enough to
     both a hyphen and an underscore that either is a plausible thing to type."""

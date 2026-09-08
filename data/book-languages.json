@@ -7,6 +7,8 @@
     { "language": "German", "code": "de", "aliases": ["deu", "ger"] },
     { "language": "Italian", "code": "it", "aliases": ["ita"] },
     { "language": "Portuguese", "code": "pt", "aliases": ["por"] },
+    { "language": "Portuguese (Brazil)", "code": "pt-BR", "aliases": ["pt-br", "brazilian portuguese", "portugues brasileiro", "portugues (brasil)"] },
+    { "language": "Portuguese (Portugal)", "code": "pt-PT", "aliases": ["pt-pt", "european portuguese", "portugues europeu", "portugues (portugal)"] },
     { "language": "Polish", "code": "pl", "aliases": ["pol"] },
     { "language": "Bulgarian", "code": "bg", "aliases": ["bul"] },
     { "language": "Dutch", "code": "nl", "aliases": ["dut", "nld"] },
