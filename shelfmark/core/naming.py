@@ -14,11 +14,12 @@ logger = setup_logger(__name__)
 
 
 # Known variable tokens, sorted longest-first to avoid partial matches
-# e.g., "SeriesPosition" must match before "Series"
+# e.g., "SeriesPosition" must match before "Series", "FirstAuthor" before "Author"
 KNOWN_TOKENS = [
     "seriesposition",
     "primarytitle",
     "originalname",
+    "firstauthor",
     "partnumber",
     "language",
     "subtitle",
@@ -28,6 +29,12 @@ KNOWN_TOKENS = [
     "year",
     "user",
 ]
+
+# Authors reach naming already joined as "First Author, Second Author, ...".
+# {FirstAuthor} keeps only the first entry. A single name written "Last, First"
+# is split on the comma too and renders as "Last" -- the source metadata does
+# not mark which form it is (see #930).
+AUTHOR_LIST_SEPARATOR = re.compile(r"\s*[,;]\s*")
 
 # Match any {...} block for template parsing
 BRACE_PATTERN = re.compile(r"\{([^}]+)\}")
@@ -54,6 +61,14 @@ def sanitize_filename(name: str | None, max_length: int = 245) -> str:
 
 # Alias for backwards compatibility
 sanitize_path_component = sanitize_filename
+
+
+def first_author(value: object) -> str:
+    """Return the first entry from an author string joined with ',' or ';'."""
+    text = " ".join(str(value or "").split())
+    if not text:
+        return ""
+    return AUTHOR_LIST_SEPARATOR.split(text, maxsplit=1)[0].strip()
 
 
 def format_series_position(position: str | float | None) -> str:
@@ -163,6 +178,8 @@ def parse_naming_template(
         value = normalized.get(placeholder_name)
         if placeholder_name == "seriesposition":
             value = format_series_position(value)
+        elif placeholder_name == "firstauthor" and not value:
+            value = first_author(normalized.get("author"))
         if value is None:
             return ""
         return str(value).strip()

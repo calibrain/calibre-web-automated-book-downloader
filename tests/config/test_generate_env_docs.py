@@ -53,7 +53,8 @@ def test_generated_env_docs_include_custom_component_value_fields() -> None:
 
     assert (
         "| `TEMPLATE_AUDIOBOOK_ORGANIZE` | Use / to create folders. Variables: "
-        "{Author}, {Title}, {Year}, {Language}, {User}, {OriginalName} "
+        "{Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, "
+        "{User}, {OriginalName} "
         "(source filename without extension), {Series}, {SeriesPosition}, {Subtitle}, "
         "{PrimaryTitle}, {PartNumber}. Use arbitrary prefix/suffix:"
     ) in docs
