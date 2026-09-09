@@ -3,11 +3,12 @@
 import asyncio
 import threading
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import requests
 
+import shelfmark.bypass.internal_bypasser as b
 from shelfmark.bypass import BypassCancelledError
 from shelfmark.bypass.waiting_room import WaitingRoomTimeoutError, is_aa_waiting_room
 
@@ -15,6 +16,29 @@ URL = "https://annas-archive.gl/slow_download/abc/0/0"
 WAIT = '<html><span class="js-partner-countdown">25</span></html>'
 ZERO = WAIT.replace(">25<", ">0<")
 READY = '<html><a href="https://files.example/book.epub">Download now</a></html>'
+
+
+def _snapshot(html=READY, *, waiting=False, title="Anna's Archive", body=None):
+    return {
+        "html": html,
+        "waiting": waiting,
+        "title": title,
+        "url": URL,
+        "body": body
+        if body is not None
+        else "Your download is ready. Follow the download link to obtain the requested file.",
+    }
+
+
+@pytest.fixture
+def cached_http(monkeypatch):
+    response = SimpleNamespace(status_code=200, text=WAIT)
+    cleared = Mock()
+    monkeypatch.setattr(b, "get_cf_cookies_for_domain", lambda _: {"cf_clearance": "valid"})
+    monkeypatch.setattr(b, "clear_cf_cookies", cleared)
+    monkeypatch.setattr(b.requests, "get", Mock(return_value=response))
+    monkeypatch.setattr(b.network, "host_cooldown_remaining", lambda _: 0)
+    return response, cleared
 
 
 @pytest.mark.parametrize(
@@ -32,8 +56,6 @@ def test_waiting_room_detection(url, html, expected):
 
 
 def test_get_keeps_same_tab_through_zero_reload_and_protection(monkeypatch):
-    import shelfmark.bypass.internal_bypasser as b
-
     page = SimpleNamespace(
         wait=AsyncMock(),
         get_current_url=AsyncMock(return_value=URL),
@@ -42,52 +64,48 @@ def test_get_keeps_same_tab_through_zero_reload_and_protection(monkeypatch):
     driver = SimpleNamespace(get=AsyncMock(return_value=page))
     monkeypatch.setattr(b, "_bypass", AsyncMock(return_value=True))
     # A transient protocol error and a protection page can occur during navigation.
-    read = AsyncMock(
+    read = AsyncMock(return_value=WAIT)
+    page.evaluate = AsyncMock(
         side_effect=[
-            WAIT,
-            ZERO,
+            _snapshot(WAIT, waiting=True),
+            _snapshot(ZERO, waiting=True),
             b.ProtocolException("navigating"),
-            "<html>DDOS-GUARD</html>",
-            READY,
+            _snapshot("<html>DDOS-GUARD</html>", title="DDOS-GUARD"),
+            _snapshot("", body=""),
+            _snapshot(),
         ]
     )
     monkeypatch.setattr(b, "_read_page_source", read)
-    monkeypatch.setattr(b, "_is_bypassed", AsyncMock(side_effect=[False, True]))
     cookies = AsyncMock()
     monkeypatch.setattr(b, "_extract_cookies_from_cdp", cookies)
     monkeypatch.setattr(b.asyncio, "sleep", AsyncMock())
 
     assert asyncio.run(b._get(URL, driver)) == READY
     driver.get.assert_awaited_once_with(URL)
-    assert all(call.args == (page,) for call in read.await_args_list)
+    read.assert_awaited_once_with(page)
     cookies.assert_awaited_once_with(driver, page, URL)
 
 
 def test_wait_can_be_cancelled(monkeypatch):
-    import shelfmark.bypass.internal_bypasser as b
-
     cancel = threading.Event()
 
     async def cancel_during_sleep(_delay):
         cancel.set()
 
     monkeypatch.setattr(b.asyncio, "sleep", cancel_during_sleep)
-    monkeypatch.setattr(b, "_read_page_source", AsyncMock(return_value=WAIT))
+    page = SimpleNamespace(evaluate=AsyncMock(return_value=_snapshot(WAIT, waiting=True)))
     with pytest.raises(BypassCancelledError):
-        asyncio.run(b._wait_for_aa_download_page(object(), URL, WAIT, cancel))
+        asyncio.run(b._wait_for_aa_download_page(page, URL, WAIT, cancel))
 
 
 def test_stuck_queue_has_a_deadline(monkeypatch):
-    import shelfmark.bypass.internal_bypasser as b
-
     monkeypatch.setattr(b, "_AA_WAITING_ROOM_TIMEOUT_SECONDS", 0.01)
     with pytest.raises(WaitingRoomTimeoutError, match="waiting room"):
-        asyncio.run(b._wait_for_aa_download_page(object(), URL, WAIT))
+        page = SimpleNamespace(evaluate=AsyncMock(return_value=_snapshot(WAIT, waiting=True)))
+        asyncio.run(b._wait_for_aa_download_page(page, URL, WAIT))
 
 
 def test_queue_timeout_does_not_open_another_browser(monkeypatch):
-    import shelfmark.bypass.internal_bypasser as b
-
     driver = object()
     create = AsyncMock(return_value=driver)
     close = AsyncMock()
@@ -105,22 +123,7 @@ def test_queue_timeout_does_not_open_another_browser(monkeypatch):
 
 @pytest.mark.parametrize("html", [READY, "<html>ordinary page</html>"])
 def test_non_waiting_page_returns_without_polling(html):
-    import shelfmark.bypass.internal_bypasser as b
-
     assert asyncio.run(b._wait_for_aa_download_page(object(), URL, html)) == html
-
-
-@pytest.mark.parametrize("cached", [WAIT, READY])
-def test_cached_timer_enters_browser_but_ready_link_does_not(monkeypatch, cached):
-    import shelfmark.bypass.internal_bypasser as b
-
-    monkeypatch.setattr(b.network, "host_cooldown_remaining", lambda _: 0)
-    monkeypatch.setattr(b, "_try_with_cached_cookies", lambda *_: cached)
-    calls = []
-    monkeypatch.setattr(b, "get", lambda url, **kw: calls.append(url) or READY)
-    selector = SimpleNamespace(rewrite=lambda url: url)
-    assert b.get_bypassed_page(URL, selector) == READY
-    assert calls == ([URL] if cached == WAIT else [])
 
 
 @pytest.mark.parametrize(
@@ -157,21 +160,16 @@ def test_http_200_timer_handoff_honors_browser_settings(
 
 
 def test_deadline_also_bounds_a_stalled_page_read(monkeypatch):
-    import shelfmark.bypass.internal_bypasser as b
-
-    async def stalled_read(_page):
+    async def stalled_read(_expression):
         await asyncio.Event().wait()
 
     monkeypatch.setattr(b, "_AA_WAITING_ROOM_TIMEOUT_SECONDS", 0.01)
-    monkeypatch.setattr(b.asyncio, "sleep", AsyncMock())
-    monkeypatch.setattr(b, "_read_page_source", stalled_read)
+    page = SimpleNamespace(evaluate=stalled_read)
     with pytest.raises(WaitingRoomTimeoutError):
-        asyncio.run(b._wait_for_aa_download_page(object(), URL, WAIT))
+        asyncio.run(b._wait_for_aa_download_page(page, URL, WAIT))
 
 
 def test_helper_preserves_waiting_room_timeout_type(monkeypatch):
-    import shelfmark.bypass.internal_bypasser as b
-
     monkeypatch.setattr(
         b,
         "_BYPASS_HELPER",
@@ -188,8 +186,6 @@ def test_helper_preserves_waiting_room_timeout_type(monkeypatch):
 
 
 def test_queue_timeout_does_not_rotate_mirror_and_restart_wait(monkeypatch):
-    import shelfmark.bypass.internal_bypasser as b
-
     monkeypatch.setattr(b.network, "host_cooldown_remaining", lambda _: 0)
     monkeypatch.setattr(b, "_try_with_cached_cookies", lambda *_: None)
 
@@ -219,11 +215,10 @@ def test_http_reports_queue_timeout_without_blaming_cloudflare(monkeypatch):
 
 
 @pytest.mark.parametrize("docker_mode", [False, True])
-def test_cached_timer_cannot_escape_through_browser_lock_recheck(monkeypatch, docker_mode):
-    import shelfmark.bypass.internal_bypasser as b
-
-    monkeypatch.setattr(b.network, "host_cooldown_remaining", lambda _: 0)
-    monkeypatch.setattr(b, "_try_with_cached_cookies", lambda *_: WAIT)
+@pytest.mark.parametrize("cached", [WAIT, READY])
+def test_cached_pages_through_both_entry_points(monkeypatch, cached_http, docker_mode, cached):
+    response, cleared = cached_http
+    response.text = cached
     monkeypatch.setattr(b.env, "DOCKERMODE", docker_mode)
     monkeypatch.delenv(b._BYPASS_CHILD_ENV, raising=False)
     calls = []
@@ -232,4 +227,68 @@ def test_cached_timer_cannot_escape_through_browser_lock_recheck(monkeypatch, do
     selector = SimpleNamespace(rewrite=lambda url: url)
 
     assert b.get_bypassed_page(URL, selector) == READY
-    assert calls == [URL]
+    assert calls == ([URL] if cached == WAIT else [])
+    # A waiting room does not invalidate the clearance cookies it was served with.
+    cleared.assert_not_called()
+
+
+def test_page_readiness_and_returned_html_belong_to_the_same_snapshot(monkeypatch):
+    old_page = "<html>DDOS-GUARD</html>"
+    page = SimpleNamespace(
+        evaluate=AsyncMock(
+            side_effect=[
+                _snapshot(old_page, title="DDOS-GUARD"),
+                _snapshot(),
+            ]
+        )
+    )
+    # Reproduce navigation after the HTML read: a separate live-page check already
+    # sees a ready page. The old loop incorrectly returned the captured interstitial.
+    monkeypatch.setattr(b, "_read_page_source", AsyncMock(return_value=old_page))
+    monkeypatch.setattr(b, "_is_bypassed", AsyncMock(return_value=True))
+    monkeypatch.setattr(b.asyncio, "sleep", AsyncMock())
+    assert asyncio.run(b._wait_for_aa_download_page(page, URL, WAIT)) == READY
+
+
+def test_cancellation_interrupts_a_stalled_browser_read(monkeypatch):
+    cancel = threading.Event()
+
+    async def stalled_read(_expression):
+        cancel.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(b, "_AA_WAITING_ROOM_POLL_SECONDS", 0.01)
+    page = SimpleNamespace(evaluate=stalled_read)
+    with pytest.raises(BypassCancelledError):
+        asyncio.run(b._wait_for_aa_download_page(page, URL, WAIT, cancel))
+
+
+def test_cancellation_after_read_wins_over_ready_result(monkeypatch):
+    cancel = threading.Event()
+
+    async def finish_and_cancel(_expression):
+        cancel.set()
+        return _snapshot()
+
+    page = SimpleNamespace(evaluate=finish_and_cancel)
+    with pytest.raises(BypassCancelledError):
+        asyncio.run(b._wait_for_aa_download_page(page, URL, WAIT, cancel))
+
+
+@pytest.mark.parametrize("transient", [TimeoutError(), TypeError("missing CDP result"), None])
+def test_transient_read_failure_keeps_the_same_tab(monkeypatch, transient):
+    page = SimpleNamespace(evaluate=AsyncMock(side_effect=[transient, _snapshot()]))
+    monkeypatch.setattr(b.asyncio, "sleep", AsyncMock())
+    assert asyncio.run(b._wait_for_aa_download_page(page, URL, WAIT)) == READY
+    assert page.evaluate.await_count == 2
+
+
+def test_slow_snapshot_is_not_cancelled_and_reissued(monkeypatch):
+    async def slow_read(_expression):
+        await asyncio.sleep(0.03)
+        return _snapshot()
+
+    monkeypatch.setattr(b, "_AA_WAITING_ROOM_POLL_SECONDS", 0.005)
+    page = SimpleNamespace(evaluate=AsyncMock(side_effect=slow_read))
+    assert asyncio.run(b._wait_for_aa_download_page(page, URL, WAIT)) == READY
+    page.evaluate.assert_awaited_once()
