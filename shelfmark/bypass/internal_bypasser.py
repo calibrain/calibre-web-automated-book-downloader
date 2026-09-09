@@ -37,6 +37,7 @@ from shelfmark.bypass.cookie_store import (
     store_extracted_cookies,
 )
 from shelfmark.bypass.fingerprint import get_screen_size
+from shelfmark.bypass.waiting_room import WaitingRoomTimeoutError, is_aa_waiting_room
 from shelfmark.config import env
 from shelfmark.config.env import LOG_DIR
 from shelfmark.config.settings import RECORDING_DIR
@@ -85,6 +86,8 @@ _HELPER_IDLE_TIMEOUT_DEFAULT = 180.0
 # How long to wait for a solved page to produce its document before the attempt is
 # abandoned. SeleniumBase's own get_page_source() allows one second; see _read_page_source.
 _PAGE_SOURCE_TIMEOUT_DEFAULT = 20.0
+# Leave time inside the existing browser watchdog for challenge solving and cleanup.
+_AA_WAITING_ROOM_TIMEOUT_SECONDS = 300.0
 _PARENT_WATCHDOG_INTERVAL_SECONDS = 5.0
 # How much of ffmpeg's stderr to quote when reporting that it died.
 _FFMPEG_ERROR_TAIL_CHARS = 500
@@ -831,6 +834,48 @@ async def _read_page_source(page: Any) -> str:
     return await element.get_html_async()
 
 
+async def _wait_for_aa_download_page(
+    page: Any, url: str, html: str, cancel_flag: Event | None = None
+) -> str:
+    """Let the waiting room's own JavaScript countdown and navigation finish.
+
+    Returning the timer HTML closes this incognito browser. Sleeping in the HTTP
+    downloader and fetching again then starts a different session, losing queue state.
+    Keep the original tab alive, including through zero and automatic page reloads.
+    """
+    if not is_aa_waiting_room(url, html):
+        return html
+
+    logger.info("Waiting for Anna's Archive queue in the same browser session...")
+    started = time.monotonic()
+    try:
+        async with asyncio.timeout(_AA_WAITING_ROOM_TIMEOUT_SECONDS):
+            while True:
+                _check_cancellation(cancel_flag, "Bypass cancelled in Anna's waiting room")
+                await asyncio.sleep(1)
+                _check_cancellation(cancel_flag, "Bypass cancelled in Anna's waiting room")
+                try:
+                    html = await _read_page_source(page)
+                    # Zero still belongs to the waiting room: its script will navigate.
+                    if is_aa_waiting_room(url, html):
+                        continue
+                    # Navigation can briefly produce an empty document or another
+                    # passive protection check. Neither is the completed download page.
+                    if not await _is_bypassed(page):
+                        continue
+                except TimeoutError, ProtocolException:
+                    # The document/context can disappear during automatic navigation.
+                    continue
+                logger.info(
+                    "Anna's Archive waiting room finished after %.0fs", time.monotonic() - started
+                )
+                return html
+    except TimeoutError as exc:
+        raise WaitingRoomTimeoutError(
+            f"Anna's Archive waiting room did not finish within {_AA_WAITING_ROOM_TIMEOUT_SECONDS:g}s"
+        ) from exc
+
+
 async def _get(url: str, driver: Any, cancel_flag: Event | None = None) -> str:
     """Fetch URL with Cloudflare bypass using a CDP browser."""
     _check_cancellation(cancel_flag, "Bypass cancelled before starting")
@@ -853,8 +898,10 @@ async def _get(url: str, driver: Any, cancel_flag: Event | None = None) -> str:
 
     logger.debug("Starting bypass process...")
     if await _bypass(page, cancel_flag=cancel_flag):
+        html = await _read_page_source(page)
+        html = await _wait_for_aa_download_page(page, url, html, cancel_flag)
         await _extract_cookies_from_cdp(driver, page, url)
-        return await _read_page_source(page)
+        return html
 
     logger.warning("Bypass completed but page still shows protection")
     try:
@@ -904,7 +951,8 @@ def _run_bypass_in_current_process(url: str, retry: int, cancel_flag: Event | No
                     result = await _get(url, driver, cancel_flag)
                     if result:
                         return result
-                except BypassCancelledError:
+                except BypassCancelledError, WaitingRoomTimeoutError:
+                    # Retrying would restart the same queue in another browser.
                     raise
                 except _CDP_OPERATION_ERRORS as e:
                     error_details = f"{type(e).__name__}: {e}"
@@ -1215,6 +1263,8 @@ def _get_via_subprocess(url: str, retry: int, cancel_flag: Event | None = None) 
         trace = result.get("traceback")
         if trace:
             logger.debug("Internal bypasser helper traceback: %s", trace)
+        if error_type == "WaitingRoomTimeoutError":
+            raise WaitingRoomTimeoutError(error)
         msg = f"{error_type}: {error}"
         raise RuntimeError(msg)
 
@@ -1230,7 +1280,7 @@ def get(url: str, retry: int | None = None, cancel_flag: Event | None = None) ->
     with LOCKED:
         # Try cookies first - another request may have completed bypass while waiting
         cached_result = _try_with_cached_cookies(url, urlparse(url).hostname or "")
-        if cached_result:
+        if cached_result and not is_aa_waiting_room(url, cached_result):
             return cached_result
 
         # Re-checked after the cached attempt, not just in get_bypassed_page: that check
@@ -1601,12 +1651,12 @@ def get_bypassed_page(
         raise network.RateLimitedError(msg)
 
     cached_result = _try_with_cached_cookies(attempt_url, hostname)
-    if cached_result:
+    if cached_result and not is_aa_waiting_room(attempt_url, cached_result):
         return cached_result
 
     try:
         response_html = get(attempt_url, cancel_flag=cancel_flag)
-    except BypassCancelledError:
+    except BypassCancelledError, WaitingRoomTimeoutError:
         raise
     except _CDP_OPERATION_ERRORS + _REQUEST_OPERATION_ERRORS:
         _check_cancellation(cancel_flag, "Bypass cancelled")
