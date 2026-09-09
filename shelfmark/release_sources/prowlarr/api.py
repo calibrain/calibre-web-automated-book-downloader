@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from contextlib import suppress
+from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import Any, TypedDict
 
@@ -234,6 +235,34 @@ class ProwlarrClient:
                 raise
             logger.exception("Failed to get indexers")
             return []
+
+    def get_disabled_indexers(self, *, now: datetime | None = None) -> dict[int, str]:
+        """Get indexers in failure back-off, keyed by ID with their disabledTill value."""
+        try:
+            entries = _normalize_json_object_list(
+                self._request("GET", "/api/v1/indexerstatus"),
+                context="Prowlarr indexer status",
+            )
+        except _PROWLARR_CLIENT_ERRORS:
+            logger.exception("Failed to get indexer status")
+            return {}
+
+        current = now or datetime.now(UTC)
+        disabled: dict[int, str] = {}
+        for entry in entries:
+            indexer_id = coerce_int_like(entry.get("indexerId"))
+            disabled_till_raw = entry.get("disabledTill")
+            if indexer_id is None or not disabled_till_raw:
+                continue
+            try:
+                disabled_till = datetime.fromisoformat(str(disabled_till_raw))
+            except ValueError:
+                continue
+            if disabled_till.tzinfo is None:
+                disabled_till = disabled_till.replace(tzinfo=UTC)
+            if disabled_till > current:
+                disabled[indexer_id] = str(disabled_till_raw)
+        return disabled
 
     def get_enabled_indexers_detailed(
         self, *, raise_on_error: bool = False
