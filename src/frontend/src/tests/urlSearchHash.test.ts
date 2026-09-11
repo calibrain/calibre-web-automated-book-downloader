@@ -127,4 +127,90 @@ describe('buildUrlSearchHash', () => {
     });
     expect(new URLSearchParams(unchecked).has('q')).toBe(false);
   });
+
+  it('omits filters still sitting at their defaults', () => {
+    const hash = buildUrlSearchHash({
+      queryValue: 'dune',
+      searchBy: 'general',
+      contentType: 'ebook',
+      combinedMode: false,
+      defaultSort: 'relevance',
+      defaultFormats: ['epub', 'mobi', 'azw3'],
+      advancedFilters: {
+        sort: 'relevance',
+        lang: ['default'],
+        formats: ['epub', 'mobi', 'azw3'],
+      },
+    });
+
+    expect(hash).toBe('q=dune');
+  });
+
+  it('treats a reordered default selection as the default', () => {
+    const hash = buildUrlSearchHash({
+      queryValue: 'dune',
+      searchBy: 'general',
+      contentType: 'ebook',
+      combinedMode: false,
+      defaultFormats: ['epub', 'mobi', 'azw3'],
+      advancedFilters: { formats: ['azw3', 'epub', 'mobi'] },
+    });
+
+    expect(hash).toBe('q=dune');
+  });
+
+  it('keeps filters the user actually changed', () => {
+    const params = new URLSearchParams(
+      buildUrlSearchHash({
+        queryValue: 'dune',
+        searchBy: 'general',
+        contentType: 'ebook',
+        combinedMode: false,
+        defaultSort: 'relevance',
+        defaultFormats: ['epub', 'mobi', 'azw3'],
+        advancedFilters: {
+          sort: 'newest',
+          lang: ['en', 'de'],
+          formats: ['epub'],
+        },
+      }),
+    );
+
+    expect(params.get('sort')).toBe('newest');
+    expect(params.getAll('lang')).toEqual(['en', 'de']);
+    expect(params.getAll('format')).toEqual(['epub']);
+  });
+
+  it('keeps a narrowed selection that happens to be the same length', () => {
+    const params = new URLSearchParams(
+      buildUrlSearchHash({
+        queryValue: 'dune',
+        searchBy: 'general',
+        contentType: 'ebook',
+        combinedMode: false,
+        defaultFormats: ['epub', 'mobi', 'azw3'],
+        advancedFilters: { formats: ['epub', 'mobi', 'pdf'] },
+      }),
+    );
+
+    expect(params.getAll('format')).toEqual(['epub', 'mobi', 'pdf']);
+  });
+
+  it('leaves a plain default-state search with no hash at all', () => {
+    const hash = buildUrlSearchHash({
+      queryValue: '',
+      searchBy: 'general',
+      contentType: 'ebook',
+      combinedMode: false,
+      defaultSort: 'relevance',
+      defaultFormats: ['epub', 'mobi', 'azw3'],
+      advancedFilters: {
+        sort: 'relevance',
+        lang: ['default'],
+        formats: ['epub', 'mobi', 'azw3'],
+      },
+    });
+
+    expect(hash).toBe('');
+  });
 });

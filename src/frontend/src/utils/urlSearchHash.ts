@@ -1,4 +1,5 @@
 import type { AdvancedFilterState, ContentType } from '../types';
+import { LANGUAGE_OPTION_DEFAULT } from './languageFilters';
 
 export interface UrlSearchHashState {
   /**
@@ -11,7 +12,29 @@ export interface UrlSearchHashState {
   contentType: ContentType;
   combinedMode: boolean;
   advancedFilters: Partial<AdvancedFilterState>;
+  /**
+   * Sort the app would apply on its own (the provider's default in Universal mode,
+   * the configured one in Direct). A sort matching it is left out of the hash.
+   */
+  defaultSort?: string;
+  /**
+   * Format selection the app starts from - `supported_formats` from the server config,
+   * not a fixed list, so an instance with a custom format list still gets a clean URL.
+   */
+  defaultFormats?: string[];
 }
+
+/** Selections are order-independent, so compare them as sets. */
+const isDefaultSelection = (values: string[] | undefined, defaults: string[]): boolean => {
+  if (!values) {
+    return true;
+  }
+  if (values.length !== defaults.length) {
+    return false;
+  }
+  const defaultSet = new Set(defaults);
+  return values.every((value) => defaultSet.has(value));
+};
 
 const serializeQueryValue = (value: string | number | boolean): string => {
   if (typeof value === 'boolean') {
@@ -26,6 +49,10 @@ const serializeQueryValue = (value: string | number | boolean): string => {
  *
  * Kept as a hash fragment (not query params) so it stays browser-side only,
  * rather than looking like a server-processed query string.
+ *
+ * Filters still sitting at their defaults are left out: they say nothing about what
+ * the user is looking at, and carrying every format and `lang=default` turns a plain
+ * search into a link several times longer than the query it shares.
  */
 export const buildUrlSearchHash = (state: UrlSearchHashState): string => {
   const params = new URLSearchParams();
@@ -49,13 +76,20 @@ export const buildUrlSearchHash = (state: UrlSearchHashState): string => {
   if (isbn) params.set('isbn', isbn);
   if (author) params.set('author', author);
   if (title) params.set('title', title);
-  if (sort) params.set('sort', sort);
+  if (sort && sort !== state.defaultSort) params.set('sort', sort);
   if (content) params.set('content', content);
-  for (const value of lang ?? []) {
-    if (value) params.append('lang', value);
+
+  // `[LANGUAGE_OPTION_DEFAULT]` is the untouched language selection, and it already means
+  // "whatever the server default is" - spelling it out in the URL adds nothing.
+  if (!isDefaultSelection(lang, [LANGUAGE_OPTION_DEFAULT])) {
+    for (const value of lang ?? []) {
+      if (value) params.append('lang', value);
+    }
   }
-  for (const value of formats ?? []) {
-    if (value) params.append('format', value);
+  if (!isDefaultSelection(formats, state.defaultFormats ?? [])) {
+    for (const value of formats ?? []) {
+      if (value) params.append('format', value);
+    }
   }
 
   return params.toString();
