@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from shelfmark.core.search_plan import ReleaseSearchPlan
     from shelfmark.metadata_providers import BookMetadata
 
+from shelfmark.core.author_match import AUTHOR_UNKNOWN, author_affinity
 from shelfmark.core.config import config
 from shelfmark.core.languages import normalize_language
 from shelfmark.core.logger import setup_logger
@@ -41,8 +42,6 @@ from shelfmark.release_sources.prowlarr.api import (
 )
 from shelfmark.release_sources.prowlarr.cache import cache_release
 from shelfmark.release_sources.prowlarr.utils import (
-    AUTHOR_UNKNOWN,
-    author_affinity,
     build_source_id,
     coerce_float_like,
     coerce_int_like,

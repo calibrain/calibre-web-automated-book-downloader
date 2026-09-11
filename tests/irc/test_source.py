@@ -7,6 +7,18 @@ from shelfmark.release_sources.irc.parser import SearchResult
 from shelfmark.release_sources.irc.source import IRCReleaseSource
 
 
+def _plan(title, author="", manual_query=None):
+    """A plan stub for tests that only need one to reach search().
+
+    Tests that care how a plan is built use build_release_search_plan instead.
+    """
+    return SimpleNamespace(
+        title_variants=[SimpleNamespace(title=title, author=author)],
+        author=author,
+        manual_query=manual_query,
+    )
+
+
 def test_convert_to_releases_marks_audiobook_results_and_sorts_audio_before_archives():
     source = IRCReleaseSource()
     source._online_servers = set()
@@ -73,7 +85,7 @@ def test_search_uses_cached_results_without_opening_a_connection(monkeypatch):
     monkeypatch.setattr(irc_source, "_emit_status", lambda *_args, **_kwargs: None)
 
     book = BookMetadata(provider="hardcover", provider_id="123", title="Cached Book")
-    plan = SimpleNamespace(primary_query="Cached Book")
+    plan = _plan("Cached Book")
 
     releases = source.search(book, plan)
 
@@ -144,7 +156,7 @@ def test_search_no_dcc_offer_releases_connection_and_caches_empty_result(monkeyp
     )
 
     book = BookMetadata(provider="hardcover", provider_id="abc", title="Missing Result")
-    plan = SimpleNamespace(primary_query="Missing Result")
+    plan = _plan("Missing Result")
 
     releases = source.search(book, plan, content_type="audiobook")
 
@@ -225,7 +237,7 @@ def test_audiobook_search_routes_to_configured_audiobook_channel_and_bot(monkeyp
     )
 
     book = BookMetadata(provider="hardcover", provider_id="ab", title="Audio Book")
-    plan = SimpleNamespace(primary_query="Audio Book")
+    plan = _plan("Audio Book")
 
     source.search(book, plan, content_type="audiobook")
 
@@ -292,7 +304,7 @@ def test_audiobook_search_reuses_main_bot_when_only_channel_configured(monkeypat
     )
 
     book = BookMetadata(provider="hardcover", provider_id="ab2", title="Audio Book")
-    plan = SimpleNamespace(primary_query="Audio Book")
+    plan = _plan("Audio Book")
 
     source.search(book, plan, content_type="audiobook")
 
@@ -332,7 +344,7 @@ def test_search_without_search_bot_never_posts_to_channel(monkeypatch):
     )
 
     book = BookMetadata(provider="hardcover", provider_id="nobot", title="No Bot")
-    plan = SimpleNamespace(primary_query="No Bot")
+    plan = _plan("No Bot")
 
     assert source.search(book, plan) == []
 
@@ -400,7 +412,7 @@ def test_search_send_budget_blocks_repost_and_returns_cache(monkeypatch):
         irc_source._record_message_sent(send_key)
 
     book = BookMetadata(provider="hardcover", provider_id="cd", title="Budget Book")
-    plan = SimpleNamespace(primary_query="Budget Book")
+    plan = _plan("Budget Book")
 
     # expand_search=True bypasses the top-level cache, forcing the budget path.
     releases = source.search(book, plan, expand_search=True)

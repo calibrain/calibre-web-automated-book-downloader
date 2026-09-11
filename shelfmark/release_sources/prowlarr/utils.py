@@ -14,20 +14,6 @@ if TYPE_CHECKING:
 
 _INTEGER_LIKE_PATTERN = re.compile(r"^[+-]?\d+$")
 _FLOAT_LIKE_PATTERN = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$")
-_AUTHOR_TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
-_AUTHOR_NOISE_TOKENS = frozenset(
-    {"jr", "sr", "ii", "iii", "iv", "phd", "md", "dr", "mr", "mrs", "ms", "et", "al", "and", "the"}
-)
-
-# Ordering tiers for author agreement between the requested book and what an
-# indexer reported. Lower sorts first.
-AUTHOR_MATCH = 0
-AUTHOR_UNKNOWN = 1
-AUTHOR_MISMATCH = 2
-
-# A mononym ("Homer") can only ever agree on one token; a longer name needs a
-# given name and a surname to agree before it counts as the same person.
-_AUTHOR_TOKENS_REQUIRED = 2
 
 
 def coerce_int_like(value: object) -> int | None:
@@ -44,49 +30,6 @@ def coerce_int_like(value: object) -> int | None:
         return None
 
     return int(normalized)
-
-
-def _author_tokens(value: object) -> list[str]:
-    """Split an author string into comparable lowercase name tokens."""
-    if not isinstance(value, str):
-        return []
-    tokens = [token.lower() for token in _AUTHOR_TOKEN_PATTERN.findall(value)]
-    return [token for token in tokens if token not in _AUTHOR_NOISE_TOKENS]
-
-
-def _author_tokens_compatible(wanted: str, offered: str) -> bool:
-    """Treat an abbreviated given name as the name it abbreviates."""
-    return wanted == offered or wanted.startswith(offered) or offered.startswith(wanted)
-
-
-def author_affinity(wanted: object, offered: object) -> int:
-    """Rank how far an indexer's author field is from the requested author.
-
-    Shelfmark ranks on this rather than filtering on it, so a wrong verdict only
-    costs a release its position in the list, never its visibility. That is what
-    makes the loose token comparison safe: "Tim"/"Timothy" and "T."/"Timothy"
-    agree, while a transliteration ("Dostoevsky"/"Dostoyevsky") is merely sorted
-    last instead of being hidden.
-
-    Three-way on purpose: an indexer that reports no author at all must not sort
-    below one that reports a wrong author, so "no metadata" ranks between
-    agreement and disagreement rather than counting as either.
-    """
-    wanted_tokens = _author_tokens(wanted)
-    offered_tokens = _author_tokens(offered)
-    if not wanted_tokens or not offered_tokens:
-        return AUTHOR_UNKNOWN
-
-    matched = sum(
-        1
-        for wanted_token in wanted_tokens
-        if any(
-            _author_tokens_compatible(wanted_token, offered_token)
-            for offered_token in offered_tokens
-        )
-    )
-    required = min(_AUTHOR_TOKENS_REQUIRED, len(wanted_tokens))
-    return AUTHOR_MATCH if matched >= required else AUTHOR_MISMATCH
 
 
 def build_source_id(result: dict) -> str:
