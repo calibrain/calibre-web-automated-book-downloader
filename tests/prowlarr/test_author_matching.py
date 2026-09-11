@@ -8,14 +8,14 @@ metadata provider's author spelling and the tracker's ("Timothy Ferriss" vs
 
 import pytest
 
-from shelfmark.metadata_providers import BookMetadata
-from shelfmark.release_sources.prowlarr.source import ProwlarrSource
-from shelfmark.release_sources.prowlarr.utils import (
+from shelfmark.core.author_match import (
     AUTHOR_MATCH,
     AUTHOR_MISMATCH,
     AUTHOR_UNKNOWN,
     author_affinity,
 )
+from shelfmark.metadata_providers import BookMetadata
+from shelfmark.release_sources.prowlarr.source import ProwlarrSource
 
 MAM_INDEXER_ID = 1
 

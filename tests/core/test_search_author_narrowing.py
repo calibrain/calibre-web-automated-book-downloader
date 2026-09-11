@@ -81,12 +81,19 @@ def test_manual_query_is_untouched():
 
 
 def test_irc_query_uses_one_author_too():
-    """The IRC source builds its own query and had the same verbatim preference."""
+    """The IRC source builds its own query and had the same verbatim preference.
+
+    It now posts the surname rather than the full name - a search bot ANDs its terms
+    against a filename - but the invariant this pins is unchanged: one contributor's
+    name reaches the query, never the whole credit list.
+    """
     from shelfmark.release_sources.irc.source import IRCReleaseSource
 
     book = _book(search_author=JOINED, authors=[a.strip() for a in JOINED.split(",")])
 
-    assert IRCReleaseSource()._build_query(book) == "Blindness José Saramago"
+    query = IRCReleaseSource()._build_query(book, build_release_search_plan(book))
+
+    assert query == "Blindness Saramago"
 
 
 def test_a_blank_leading_contributor_falls_back_instead_of_dropping_the_author():
@@ -105,7 +112,9 @@ def test_a_blank_leading_contributor_does_not_strand_the_irc_query_either():
 
     book = _book(search_author=", Giovanni Pontiero", authors=["", "Giovanni Pontiero"])
 
-    assert IRCReleaseSource()._build_query(book) == "Blindness Giovanni Pontiero"
+    query = IRCReleaseSource()._build_query(book, build_release_search_plan(book))
+
+    assert query == "Blindness Pontiero"
 
 
 def test_an_all_blank_author_leaves_a_clean_title_only_query():
@@ -115,7 +124,7 @@ def test_an_all_blank_author_leaves_a_clean_title_only_query():
     book = _book(search_author=", ,", authors=["", " "])
 
     assert _queries(book) == ["Blindness"]
-    assert IRCReleaseSource()._build_query(book) == "Blindness"
+    assert IRCReleaseSource()._build_query(book, build_release_search_plan(book)) == "Blindness"
 
 
 def test_a_bare_string_in_authors_is_not_iterated_character_by_character():
