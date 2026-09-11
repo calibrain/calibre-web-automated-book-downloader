@@ -28,6 +28,13 @@ export const NAMING_TEMPLATE_TOKENS: NamingTemplateToken[] = [
     group: 'Core',
   },
   {
+    token: 'FirstAuthor',
+    label: 'First author',
+    description: 'First author only, when metadata lists several',
+    value: 'Arthur Conan Doyle',
+    group: 'Core',
+  },
+  {
     token: 'Title',
     label: 'Full title',
     description: 'Title as provided by metadata',
@@ -104,6 +111,7 @@ const KNOWN_TOKENS = [
   'seriesposition',
   'primarytitle',
   'originalname',
+  'firstauthor',
   'partnumber',
   'language',
   'subtitle',
@@ -113,6 +121,10 @@ const KNOWN_TOKENS = [
   'year',
   'user',
 ];
+
+// Mirrors AUTHOR_LIST_SEPARATOR in shelfmark/core/naming.py: authors arrive
+// pre-joined with ',' or ';' and {FirstAuthor} keeps only the first entry.
+const firstAuthor = (value: string): string => value.split(/\s*[,;]\s*/)[0]?.trim() ?? '';
 
 const BRACE_PATTERN = /\{([^}]+)\}/g;
 const INVALID_CHARS_PATTERN = /[\\/:*?"<>|]/g;
@@ -163,6 +175,9 @@ export const renderNamingTemplate = (
   const unknownTokens: string[] = [];
 
   const placeholderValue = (placeholderName: string): string => {
+    if (placeholderName === 'firstauthor' && !normalized['firstauthor']) {
+      return firstAuthor(normalized['author'] ?? '');
+    }
     return (normalized[placeholderName] ?? '').trim();
   };
 

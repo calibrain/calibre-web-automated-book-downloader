@@ -40,6 +40,23 @@ describe('namingTemplatePreview', () => {
     expect(preview.value).toBe('Arthur Conan Doyle/The Hound of the Baskervilles');
   });
 
+  it('keeps only the first of several authors for FirstAuthor', () => {
+    const preview = renderNamingTemplate(
+      '{FirstAuthor}/{Year}',
+      { ...SAMPLE_NAMING_METADATA, Author: 'Terry Pratchett, Neil Gaiman', FirstAuthor: '' },
+      { allowPathSeparators: true },
+    );
+
+    expect(preview.value).toBe('Terry Pratchett/1902');
+  });
+
+  it('offers FirstAuthor as a core variable', () => {
+    const token = NAMING_TEMPLATE_TOKENS.find((t) => t.token === 'FirstAuthor');
+
+    expect(token?.group).toBe('Core');
+    expect(token?.audiobookOnly).toBeFalsy();
+  });
+
   it('reports unknown bare variables', () => {
     const preview = renderNamingTemplate('{Author}/{NotAThing}', SAMPLE_NAMING_METADATA, {
       allowPathSeparators: true,
