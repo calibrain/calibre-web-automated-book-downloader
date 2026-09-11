@@ -297,6 +297,7 @@ class _IndexerSearchOutcome:
     results: list[dict]
     attempted: int = 0
     failed: int = 0
+    skipped: int = 0
     last_error: str | None = None
 
 
@@ -1010,6 +1011,22 @@ class ProwlarrSource(ReleaseSource):
                 if time.monotonic() > deadline:
                     _raise_timeout_error(f"Prowlarr search timed out after {int(search_budget)}s")
 
+            # Prowlarr's own search skips an indexer in failure back-off; the
+            # per-indexer Torznab endpoint answers 429 instead.
+            try:
+                disabled_indexers = client.get_disabled_indexers()
+            except _PROWLARR_SOURCE_ERRORS as e:
+                logger.warning("Failed to load Prowlarr indexer status: %s", e)
+                disabled_indexers = {}
+            if disabled_indexers:
+                logger.info(
+                    "Prowlarr: skipping indexer(s) in failure back-off: %s",
+                    ", ".join(
+                        f"{indexer_id} (till {till})"
+                        for indexer_id, till in sorted(disabled_indexers.items())
+                    ),
+                )
+
             def search_indexers(query: str, cats: list[int] | None) -> _IndexerSearchOutcome:
                 """Search indexers with given categories via Torznab/Newznab.
 
@@ -1027,6 +1044,9 @@ class ProwlarrSource(ReleaseSource):
                     return outcome
 
                 for indexer_id in target_indexer_ids:
+                    if indexer_id in disabled_indexers:
+                        outcome.skipped += 1
+                        continue
                     _check_timeout()
                     outcome.attempted += 1
                     try:
@@ -1052,6 +1072,7 @@ class ProwlarrSource(ReleaseSource):
             all_results: list[dict] = []
             attempted_searches = 0
             failed_searches = 0
+            skipped_searches = 0
             last_search_error: str | None = None
 
             for idx, variant in enumerate(variants, start=1):
@@ -1070,6 +1091,7 @@ class ProwlarrSource(ReleaseSource):
                 if (
                     not outcome.results
                     and not outcome.failed
+                    and outcome.attempted
                     and categories
                     and auto_expand_enabled
                 ):
@@ -1082,11 +1104,13 @@ class ProwlarrSource(ReleaseSource):
                     outcome.results = expanded.results
                     outcome.attempted += expanded.attempted
                     outcome.failed += expanded.failed
+                    outcome.skipped += expanded.skipped
                     outcome.last_error = expanded.last_error or outcome.last_error
                     self.last_search_type = "expanded"
 
                 attempted_searches += outcome.attempted
                 failed_searches += outcome.failed
+                skipped_searches += outcome.skipped
                 last_search_error = outcome.last_error or last_search_error
 
                 for r in outcome.results:
@@ -1191,6 +1215,10 @@ class ProwlarrSource(ReleaseSource):
                     f"{failed_searches} of {attempted_searches} indexer searches failed "
                     f"({last_search_error})"
                 )
+                raise SourceUnavailableError(msg)
+            if not results and not attempted_searches and skipped_searches:
+                until = max(disabled_indexers.values(), default="later")
+                msg = f"every indexer is disabled by Prowlarr after recent failures (until {until})"
                 raise SourceUnavailableError(msg)
             return results
 
