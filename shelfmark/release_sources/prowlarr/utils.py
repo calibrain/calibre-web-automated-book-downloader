@@ -149,17 +149,19 @@ def get_protocol(result: dict) -> str:
     return "unknown"
 
 
-def get_preferred_download_url(result: dict) -> str:
+def get_preferred_download_url(result: dict, *, prefer_torrent_file: bool = False) -> str:
     """Pick the best URL to hand to a download client.
 
-    For torrent results, prefer magnetUrl when available (downloadUrl may be a
-    Prowlarr proxy URL that needs auth/headers).
+    For torrent results, prefer magnetUrl when available unless the configured
+    client needs the fetched .torrent bytes.
     """
     protocol = str(result.get("protocol", "")).lower()
     magnet_url = str(result.get("magnetUrl") or "").strip()
     download_url = sanitize_download_url(str(result.get("downloadUrl") or "").strip())
 
     if protocol == "torrent":
+        if prefer_torrent_file:
+            return download_url or magnet_url
         return magnet_url or download_url
     if protocol == "usenet":
         return download_url or magnet_url

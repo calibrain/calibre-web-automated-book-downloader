@@ -18,7 +18,11 @@ from shelfmark.download.clients import (
 from shelfmark.release_sources import Release, ReleaseProtocol
 from shelfmark.release_sources.prowlarr.cache import cache_release, remove_release
 from shelfmark.release_sources.prowlarr.handler import ProwlarrHandler
-from shelfmark.release_sources.prowlarr.utils import build_source_id, get_protocol
+from shelfmark.release_sources.prowlarr.utils import (
+    build_source_id,
+    get_preferred_download_url,
+    get_protocol,
+)
 
 
 class ProgressRecorder:
@@ -75,6 +79,16 @@ class TestGetProtocol:
         assert get_protocol({"protocol": "TORRENT"}) == "torrent"
         assert get_protocol({"protocol": "Usenet"}) == "usenet"
         assert get_protocol({"protocol": "USENET"}) == "usenet"
+
+
+def test_blackhole_prefers_torrent_file_over_magnet():
+    result = {
+        "protocol": "torrent",
+        "downloadUrl": "https://prowlarr.example/download/123",
+        "magnetUrl": "magnet:?xt=urn:btih:abc123",
+    }
+
+    assert get_preferred_download_url(result, prefer_torrent_file=True) == result["downloadUrl"]
 
 
 class TestProwlarrHandlerDownloadErrors:

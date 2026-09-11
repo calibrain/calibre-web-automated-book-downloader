@@ -29,6 +29,7 @@ from shelfmark.download.fs import run_blocking_io
 from shelfmark.download.postprocess.pipeline import is_torrent_source, safe_cleanup_path
 from shelfmark.download.postprocess.router import post_process_download
 from shelfmark.release_sources import (
+    HandoffResult,
     get_handler,
     get_source,
     get_source_display_name,
@@ -749,6 +750,21 @@ def _download_task(task_id: str, cancel_flag: Event) -> str | None:
         # Handler returns temp path - orchestrator handles post-processing
         if not temp_path:
             return None
+
+        if isinstance(temp_path, HandoffResult):
+            handoff_path = Path(temp_path.path)
+            if not run_blocking_io(handoff_path.exists):
+                logger.error("Handler returned non-existent handoff path: %s", handoff_path)
+                _capture_task_error(
+                    task,
+                    message=f"Download file missing: {handoff_path}",
+                    exc_type="MissingDownloadPath",
+                )
+                return None
+            status_callback("complete", temp_path.message)
+            handler.post_process_cleanup(task, success=True)
+            _clear_task_error_state(task)
+            return str(handoff_path)
 
         temp_file = Path(temp_path)
         if not run_blocking_io(temp_file.exists):

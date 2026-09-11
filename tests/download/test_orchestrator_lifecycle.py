@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from threading import Event
 from unittest.mock import ANY, MagicMock
 
 import pytest
+
+from shelfmark.core.models import DownloadTask
+from shelfmark.release_sources import HandoffResult
 
 
 class _StopLoop(BaseException):
@@ -225,3 +229,29 @@ def test_start_replaces_dead_coordinator_thread(monkeypatch):
     )
     new_thread.start.assert_called_once_with()
     assert orchestrator._coordinator_thread is new_thread
+
+
+def test_download_task_completes_blackhole_handoff_without_post_processing(monkeypatch, tmp_path):
+    import shelfmark.download.orchestrator as orchestrator
+
+    handoff_file = tmp_path / "release.torrent"
+    handoff_file.write_bytes(b"torrent-bytes")
+    task = DownloadTask(task_id="blackhole-task", source="prowlarr", title="Book")
+    queue = MagicMock()
+    queue.get_task.return_value = task
+    handler = MagicMock()
+    handler.download.return_value = HandoffResult(
+        path=str(handoff_file),
+        message=f"Torrent file saved to {handoff_file}",
+    )
+
+    monkeypatch.setattr(orchestrator, "book_queue", queue)
+    monkeypatch.setattr(orchestrator, "get_handler", lambda _source: handler)
+    monkeypatch.setattr(orchestrator, "_source_unavailable_message", lambda _source: None)
+    monkeypatch.setattr(orchestrator, "post_process_download", MagicMock())
+
+    result = orchestrator._download_task(task.task_id, Event())
+
+    assert result == str(handoff_file)
+    orchestrator.post_process_download.assert_not_called()
+    handler.post_process_cleanup.assert_called_once_with(task, success=True)

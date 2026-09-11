@@ -9,7 +9,12 @@ if TYPE_CHECKING:
 
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.request_helpers import normalize_optional_text
-from shelfmark.download.clients import DownloadClient, get_client, list_configured_clients
+from shelfmark.download.clients import (
+    DownloadClient,
+    client_prefers_torrent_file,
+    get_client,
+    list_configured_clients,
+)
 from shelfmark.download.clients.base_handler import (
     COMPLETED_PATH_MAX_ATTEMPTS as _DEFAULT_COMPLETED_PATH_MAX_ATTEMPTS,
 )
@@ -54,13 +59,15 @@ def _get_protocol(result: dict) -> str:
     return "usenet"
 
 
-def _get_download_url(result: dict) -> str:
+def _get_download_url(result: dict, *, prefer_torrent_file: bool = False) -> str:
     """Pick the best URL to hand to a download client."""
     protocol = _get_protocol(result)
     magnet_url = str(result.get("magnetUrl") or "").strip()
     download_url = str(result.get("downloadUrl") or "").strip()
 
     if protocol == "torrent":
+        if prefer_torrent_file:
+            return download_url or magnet_url
         return magnet_url or download_url
     return download_url or magnet_url
 
@@ -93,9 +100,15 @@ class NewznabHandler(ExternalClientHandler):
         if result is None:
             return {}
 
+        protocol = _get_protocol(result)
         return {
-            "retry_download_url": normalize_optional_text(_get_download_url(result)),
-            "retry_download_protocol": normalize_optional_text(_get_protocol(result)),
+            "retry_download_url": normalize_optional_text(
+                _get_download_url(
+                    result,
+                    prefer_torrent_file=client_prefers_torrent_file(protocol),
+                )
+            ),
+            "retry_download_protocol": normalize_optional_text(protocol),
         }
 
     @classmethod
@@ -137,14 +150,17 @@ class NewznabHandler(ExternalClientHandler):
             status_callback("error", "Release not found in cache (may have expired)")
             return None
 
-        download_url = _get_download_url(result)
-        if not download_url:
-            status_callback("error", "No download URL available")
-            return None
-
         protocol = _get_protocol(result)
         if protocol not in ("torrent", "usenet"):
             status_callback("error", "Could not determine download protocol")
+            return None
+
+        download_url = _get_download_url(
+            result,
+            prefer_torrent_file=client_prefers_torrent_file(protocol),
+        )
+        if not download_url:
+            status_callback("error", "No download URL available")
             return None
 
         release_name = result.get("title") or task.title or "Unknown"

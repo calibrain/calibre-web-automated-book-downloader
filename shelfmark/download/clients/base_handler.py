@@ -24,7 +24,7 @@ from shelfmark.download.clients import (
 )
 from shelfmark.download.fs import run_blocking_io
 from shelfmark.download.permissions_debug import log_path_permission_context
-from shelfmark.release_sources import DownloadHandler
+from shelfmark.release_sources import DownloadHandler, HandoffResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -762,8 +762,8 @@ class ExternalClientHandler(DownloadHandler, ABC):
         cancel_flag: Event,
         progress_callback: Callable[[float], None],
         status_callback: Callable[[str, str | None], None],
-    ) -> str | None:
-        """Execute download via configured torrent/usenet client. Returns file path or None."""
+    ) -> str | HandoffResult | None:
+        """Execute download via configured torrent/usenet client."""
         try:
             if cancel_flag.is_set():
                 status_callback("cancelled", "Cancelled")
@@ -897,7 +897,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
         cancel_flag: Event,
         progress_callback: Callable[[float], None],
         status_callback: Callable[[str, str | None], None],
-    ) -> str | None:
+    ) -> str | HandoffResult | None:
         """Poll the download client for progress and handle completion."""
         poll_interval = self._poll_interval()
         # Track consecutive "not found" errors - torrents may take time to appear in client
@@ -905,7 +905,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
         max_not_found_retries = 15  # 15 retries * poll interval ~= 30s grace period
 
         try:
-            result: str | None = None
+            result: str | HandoffResult | None = None
             logger.debug("Starting poll for %s (content_type=%s)", download_id, task.content_type)
             while not cancel_flag.is_set():
                 status = client.get_status(download_id)
@@ -1020,12 +1020,18 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 )
                 return None
 
-            result = self._handle_completed_file(
-                source_path=source_path_obj,
-                protocol=protocol,
-                task=task,
-                status_callback=status_callback,
-            )
+            if getattr(client, "handoff_only", False) is True:
+                result = HandoffResult(
+                    path=str(source_path_obj),
+                    message=f"Torrent file saved to {source_path_obj}",
+                )
+            else:
+                result = self._handle_completed_file(
+                    source_path=source_path_obj,
+                    protocol=protocol,
+                    task=task,
+                    status_callback=status_callback,
+                )
 
         except Exception as e:
             logger.exception("Error during download polling")
@@ -1036,7 +1042,8 @@ class ExternalClientHandler(DownloadHandler, ABC):
         # Clean up on success
         if result:
             self._on_download_complete(task)
-            self._cleanup_refs[task.task_id] = (client, download_id, protocol)
+            if not isinstance(result, HandoffResult):
+                self._cleanup_refs[task.task_id] = (client, download_id, protocol)
 
         return result
 

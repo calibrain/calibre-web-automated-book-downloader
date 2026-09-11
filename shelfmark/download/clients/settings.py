@@ -590,6 +590,7 @@ def prowlarr_clients_settings() -> list[SettingsField]:
             options=[
                 {"value": "", "label": "None"},
                 {"value": "alldebrid", "label": "AllDebrid"},
+                {"value": "blackhole", "label": "Blackhole"},
                 {"value": "qbittorrent", "label": "qBittorrent"},
                 {"value": "realdebrid", "label": "Real-Debrid"},
                 {"value": "transmission", "label": "Transmission"},
@@ -597,6 +598,13 @@ def prowlarr_clients_settings() -> list[SettingsField]:
                 {"value": "rtorrent", "label": "rTorrent"},
             ],
             default="",
+        ),
+        TextField(
+            key="BLACKHOLE_DIRECTORY",
+            label="Blackhole Directory",
+            description="Directory where Shelfmark saves .torrent files for another downloader",
+            placeholder="/blackhole",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "blackhole"},
         ),
         # --- AllDebrid Settings ---
         PasswordField(

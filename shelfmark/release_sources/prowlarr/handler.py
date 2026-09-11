@@ -12,6 +12,7 @@ from shelfmark.core.search_plan import build_release_search_plan
 from shelfmark.core.utils import normalize_http_url
 from shelfmark.download.clients import (
     DownloadClient,
+    client_prefers_torrent_file,
     get_client,
     list_configured_clients,
 )
@@ -247,16 +248,18 @@ class ProwlarrHandler(ExternalClientHandler):
                 status_callback("error", EXPIRED_LINK_REFRESH_ERROR)
                 return None
 
-        # Extract download URL
-        download_url = get_preferred_download_url(prowlarr_result)
-        if not download_url:
-            status_callback("error", "No download URL available")
-            return None
-
         # Determine protocol
         protocol = get_protocol(prowlarr_result)
         if protocol == "unknown":
             status_callback("error", "Could not determine download protocol")
+            return None
+
+        download_url = get_preferred_download_url(
+            prowlarr_result,
+            prefer_torrent_file=client_prefers_torrent_file(protocol),
+        )
+        if not download_url:
+            status_callback("error", "No download URL available")
             return None
 
         release_name = prowlarr_result.get("title") or task.title or "Unknown"

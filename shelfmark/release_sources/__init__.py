@@ -368,12 +368,21 @@ class ReleaseSource(ABC):
         return None
 
 
+@dataclass(frozen=True)
+class HandoffResult:
+    """An external handoff that completed without a Shelfmark book payload."""
+
+    path: str
+    message: str
+
+
 class DownloadHandler(ABC):
     """Interface for executing downloads.
 
     A handler may either:
     - download directly into ``TMP_DIR`` (managed by Shelfmark), or
     - return a path owned by an external client (e.g. torrent/usenet).
+    - finish an external handoff without producing a book payload.
 
     The orchestrator is responsible for post-processing (archive extraction, output mode
     handling) and transferring files into their final destination.
@@ -386,8 +395,8 @@ class DownloadHandler(ABC):
         cancel_flag: Event,
         progress_callback: Callable[[float], None],
         status_callback: Callable[[str, str | None], None],
-    ) -> str | None:
-        """Execute download and return a path to the downloaded payload."""
+    ) -> str | HandoffResult | None:
+        """Execute download and return a payload path or completed external handoff."""
 
     def post_process_cleanup(self, task: DownloadTask, *, success: bool) -> None:
         """Run optional cleanup after orchestrator post-processing.
