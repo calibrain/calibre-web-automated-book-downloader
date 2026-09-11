@@ -141,3 +141,26 @@ def test_get_welib_url_template_returns_none_without_config(monkeypatch):
     monkeypatch.setattr(mirrors, "_get_config", lambda: _DummyConfig({}))
 
     assert mirrors.get_welib_url_template() is None
+
+
+def test_oceanofpdf_mirrors_normalize_and_use_first_url(monkeypatch):
+    dummy = _DummyConfig(
+        {"OCEANOFPDF_MIRROR_URLS": "books.example/, https://books.example, https://backup.example/"}
+    )
+    monkeypatch.setattr(mirrors, "_get_config", lambda: dummy)
+
+    assert mirrors.get_oceanofpdf_mirrors() == ["https://books.example", "https://backup.example"]
+    assert mirrors.get_oceanofpdf_primary_url() == "https://books.example"
+    assert mirrors.has_download_source_mirror_configuration("oceanofpdf") is True
+    assert mirrors.get_download_source_missing_mirror_reason("oceanofpdf") is None
+
+
+def test_oceanofpdf_has_no_default_mirrors(monkeypatch):
+    monkeypatch.setattr(mirrors, "_get_config", lambda: _DummyConfig({}))
+
+    assert mirrors.get_oceanofpdf_mirrors() == []
+    assert mirrors.get_oceanofpdf_primary_url() is None
+    assert mirrors.has_download_source_mirror_configuration("oceanofpdf") is False
+    assert mirrors.get_download_source_missing_mirror_reason("oceanofpdf") == (
+        "Add at least one OceanofPDF mirror in Mirrors"
+    )

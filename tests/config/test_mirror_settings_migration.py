@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 def test_mirror_settings_use_canonical_tag_lists_for_all_non_base_mirror_sets():
     import shelfmark.config.settings  # noqa: F401
-    from shelfmark.core.settings_registry import TagListField, get_settings_tab
+    from shelfmark.core.settings_registry import HeadingField, TagListField, get_settings_tab
 
     tab = get_settings_tab("mirrors")
 
@@ -14,6 +14,10 @@ def test_mirror_settings_use_canonical_tag_lists_for_all_non_base_mirror_sets():
     assert isinstance(fields["LIBGEN_MIRROR_URLS"], TagListField)
     assert isinstance(fields["ZLIB_MIRROR_URLS"], TagListField)
     assert isinstance(fields["WELIB_MIRROR_URLS"], TagListField)
+    assert isinstance(fields["OCEANOFPDF_MIRROR_URLS"], TagListField)
+    assert isinstance(fields["oceanofpdf_mirrors_heading"], HeadingField)
+    assert fields["oceanofpdf_mirrors_heading"].title == "OceanofPDF"
+    assert fields["OCEANOFPDF_MIRROR_URLS"].label == "Mirrors"
 
 
 def test_migrate_mirror_settings_does_not_seed_defaults_on_fresh_install(monkeypatch):
@@ -201,3 +205,12 @@ def test_migrate_search_page_title_skips_when_env_var_is_set(monkeypatch):
     registry.migrate_search_page_title(existing_install=True, had_existing_value=False)
 
     saves.assert_not_called()
+
+
+def test_save_normalizes_oceanofpdf_mirrors():
+    from shelfmark.config.settings import _on_save_mirrors
+
+    result = _on_save_mirrors(
+        {"OCEANOFPDF_MIRROR_URLS": ["books.example/", "https://books.example", "auto", ""]}
+    )
+    assert result["values"]["OCEANOFPDF_MIRROR_URLS"] == ["https://books.example"]

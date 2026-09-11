@@ -351,7 +351,7 @@ def get_release_source_selection_fields() -> list[SettingsField]:
                 {
                     "value": "direct_download",
                     "label": "Direct Download",
-                    "description": "Configure your own Anna's Archive mirror URLs for direct ebook downloads.",
+                    "description": "Configure your own mirror URLs for direct ebook downloads.",
                 },
                 {
                     "value": "prowlarr",
@@ -379,17 +379,43 @@ def get_direct_download_setup_fields() -> list[SettingsField]:
     fields: list[SettingsField] = [
         HeadingField(
             key="direct_download_setup_onboarding_heading",
-            title="Direct Download Setup",
+            title="Choose at least one download source",
             description=(
-                "Add at least one Anna's Archive mirror URL to enable Direct Download. If you "
-                "have an Anna's Archive donator key, you can add it here too. You can configure "
-                "alternative mirrors later in Settings."
+                "Add at least one Anna's Archive or OceanofPDF mirror URL to enable Direct "
+                "Download. You can configure additional mirrors later in Settings."
             ),
         )
     ]
-    fields.extend(_get_fields_from_tab("download_sources", ["AA_DONATOR_KEY"]))
     fields.extend(_get_fields_from_tab("mirrors", ["AA_MIRROR_URLS"]))
+    donator_key = _get_field_from_tab("download_sources", "AA_DONATOR_KEY")
+    if donator_key:
+        fields.append(
+            _clone_field_with_overrides(
+                donator_key,
+                label="Anna's Archive Donator Key (optional)",
+            )
+        )
+    fields.extend(_get_fields_from_tab("mirrors", ["OCEANOFPDF_MIRROR_URLS"]))
     return fields
+
+
+def get_direct_download_field_groups() -> list[dict[str, Any]]:
+    """Group direct-download settings by provider for the onboarding UI."""
+    return [
+        {
+            "id": "annas_archive",
+            "title": "Anna's Archive",
+            "description": "Configure mirror URLs and an optional donator API key.",
+            "field_keys": ["AA_MIRROR_URLS", "AA_DONATOR_KEY"],
+            "default_open": True,
+        },
+        {
+            "id": "oceanofpdf",
+            "title": "OceanOfPDF",
+            "description": "Configure the mirror URL used for searches and downloads.",
+            "field_keys": ["OCEANOFPDF_MIRROR_URLS"],
+        },
+    ]
 
 
 def get_direct_download_bypass_fields() -> list[SettingsField]:
@@ -501,6 +527,7 @@ def get_onboarding_steps() -> list[dict[str, Any]]:
             "title": "Direct Download Setup",
             "tab": "download_sources",
             "get_fields": get_direct_download_setup_fields,
+            "field_groups": get_direct_download_field_groups(),
             "show_when": [{"field": "SEARCH_MODE", "value": "direct"}],
         },
         {
@@ -515,6 +542,7 @@ def get_onboarding_steps() -> list[dict[str, Any]]:
             "title": "Direct Download Setup",
             "tab": "download_sources",
             "get_fields": get_direct_download_setup_fields,
+            "field_groups": get_direct_download_field_groups(),
             "show_when": [
                 {"field": "SEARCH_MODE", "value": "universal"},
                 {"field": ONBOARDING_RELEASE_SOURCES_KEY, "value": "direct_download"},
@@ -605,6 +633,17 @@ def get_onboarding_config() -> dict[str, Any]:
             step["showWhen"] = step_config["show_when"]
         if step_config.get("optional"):
             step["optional"] = True
+        if "field_groups" in step_config:
+            step["fieldGroups"] = [
+                {
+                    "id": group["id"],
+                    "title": group["title"],
+                    "description": group.get("description", ""),
+                    "fieldKeys": group["field_keys"],
+                    "defaultOpen": group.get("default_open", False),
+                }
+                for group in step_config["field_groups"]
+            ]
 
         steps.append(step)
 

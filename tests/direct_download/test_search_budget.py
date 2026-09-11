@@ -10,13 +10,16 @@ a challenge failure became a gateway timeout (issue #1276).
 
 import pytest
 
-import shelfmark.release_sources.direct_download as dd
 from shelfmark.core import search_deadline
+from shelfmark.release_sources.direct_download import annas_archive as aa
+from shelfmark.release_sources.direct_download import source as dd
 
 
 @pytest.fixture(autouse=True)
-def _no_ambient_deadline():
+def _no_ambient_deadline(monkeypatch):
     token = search_deadline._current.set(None)
+    monkeypatch.setattr(dd.registry, "get_unavailable_reason", lambda _providers: None)
+    monkeypatch.setattr(dd.registry, "enabled_providers", lambda providers: (providers[0],))
     yield
     search_deadline._current.reset(token)
 
@@ -35,13 +38,13 @@ class _Selector:
 def test_fetch_search_table_gives_up_when_the_budget_is_spent(monkeypatch):
     """Every mirror shares the protection, so another mirror is another wasted solve."""
     fetches: list[str] = []
-    monkeypatch.setattr(dd.downloader, "html_get_page", lambda url, **_k: fetches.append(url) or "")
-    monkeypatch.setattr(dd.network, "get_available_aa_urls", lambda: ["https://annas-archive.gl"])
+    monkeypatch.setattr(aa.downloader, "html_get_page", lambda url, **_k: fetches.append(url) or "")
+    monkeypatch.setattr(aa.network, "get_available_aa_urls", lambda: ["https://annas-archive.gl"])
 
     with search_deadline.search_deadline(60) as deadline:
         deadline.event.set()
-        with pytest.raises(dd.SearchUnavailableError) as excinfo:
-            dd._fetch_search_table("https://annas-archive.gl/search?q=dune", _Selector())
+        with pytest.raises(aa.SearchUnavailableError) as excinfo:
+            aa._fetch_search_table("https://annas-archive.gl/search?q=dune", _Selector())
 
     assert fetches == [], "no fetch should have been attempted"
     assert "ran out of time" in str(excinfo.value)
@@ -49,11 +52,11 @@ def test_fetch_search_table_gives_up_when_the_budget_is_spent(monkeypatch):
 
 def test_fetch_search_table_runs_normally_within_budget(monkeypatch):
     page = "<html><body><main><table><tbody></tbody></table></main></body></html>"
-    monkeypatch.setattr(dd.downloader, "html_get_page", lambda _url, **_k: page)
-    monkeypatch.setattr(dd.network, "get_available_aa_urls", lambda: ["https://annas-archive.gl"])
+    monkeypatch.setattr(aa.downloader, "html_get_page", lambda _url, **_k: page)
+    monkeypatch.setattr(aa.network, "get_available_aa_urls", lambda: ["https://annas-archive.gl"])
 
     with search_deadline.search_deadline(60):
-        html, table = dd._fetch_search_table("https://annas-archive.gl/search?q=dune", _Selector())
+        html, table = aa._fetch_search_table("https://annas-archive.gl/search?q=dune", _Selector())
 
     assert table is not None
     assert html == page
@@ -98,8 +101,8 @@ def test_title_variants_stop_once_the_budget_is_spent(monkeypatch):
             deadline.event.set()
         return []
 
-    monkeypatch.setattr(dd, "search_books", fake_search_books)
-    monkeypatch.setattr(dd, "_ensure_direct_download_available", lambda: None)
+    monkeypatch.setattr(aa, "search_books", fake_search_books)
+    monkeypatch.setattr(aa, "ensure_available", lambda: None)
 
     source = dd.DirectDownloadSource()
     with search_deadline.search_deadline(60):
@@ -111,8 +114,8 @@ def test_title_variants_stop_once_the_budget_is_spent(monkeypatch):
 
 def test_all_title_variants_run_within_budget(monkeypatch):
     queries: list[str] = []
-    monkeypatch.setattr(dd, "search_books", lambda q, _f: queries.append(q) or [])
-    monkeypatch.setattr(dd, "_ensure_direct_download_available", lambda: None)
+    monkeypatch.setattr(aa, "search_books", lambda q, _f: queries.append(q) or [])
+    monkeypatch.setattr(aa, "ensure_available", lambda: None)
 
     source = dd.DirectDownloadSource()
     with search_deadline.search_deadline(60):
@@ -134,8 +137,8 @@ def test_language_filter_retry_is_skipped_on_a_spent_budget(monkeypatch):
                 deadline.event.set()
         return []
 
-    monkeypatch.setattr(dd, "search_books", fake_search_books)
-    monkeypatch.setattr(dd, "_ensure_direct_download_available", lambda: None)
+    monkeypatch.setattr(aa, "search_books", fake_search_books)
+    monkeypatch.setattr(aa, "ensure_available", lambda: None)
 
     source = dd.DirectDownloadSource()
     with search_deadline.search_deadline(60):

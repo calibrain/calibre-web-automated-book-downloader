@@ -1,5 +1,6 @@
 from threading import Event
 
+from shelfmark.core.config import config
 from shelfmark.core.models import DownloadTask
 from shelfmark.release_sources.direct_download import DirectDownloadHandler
 
@@ -13,11 +14,11 @@ def test_direct_download_handler_builds_staging_filename_from_browse_record(monk
         captured["path"] = book_path
         return "https://example.com/file.epub"
 
-    import shelfmark.release_sources.direct_download as dd
+    from shelfmark.release_sources.direct_download import handler as dd
 
     monkeypatch.setattr(dd, "_download_book", fake_download_book)
     monkeypatch.setattr(
-        dd.config,
+        config,
         "get",
         lambda key, default=None: "rename" if key == "FILE_ORGANIZATION" else default,
     )
@@ -47,11 +48,11 @@ def test_direct_download_handler_uses_source_id_filename_when_organization_disab
         captured["path"] = book_path
         return "https://example.com/file.epub"
 
-    import shelfmark.release_sources.direct_download as dd
+    from shelfmark.release_sources.direct_download import handler as dd
 
     monkeypatch.setattr(dd, "_download_book", fake_download_book)
     monkeypatch.setattr(
-        dd.config,
+        config,
         "get",
         lambda key, default=None: "none" if key == "FILE_ORGANIZATION" else default,
     )
@@ -78,7 +79,7 @@ def test_direct_download_handler_skips_download_when_cancelled_before_start(monk
     def unexpected_download(*_args, **_kwargs):
         raise AssertionError("_download_book should not run when the task is already cancelled")
 
-    import shelfmark.release_sources.direct_download as dd
+    from shelfmark.release_sources.direct_download import handler as dd
 
     monkeypatch.setattr(dd, "_download_book", unexpected_download)
 
@@ -113,12 +114,12 @@ def test_direct_download_handler_removes_partial_file_when_cancelled_after_downl
         cancel_flag.set()
         return "https://example.com/file.epub"
 
-    import shelfmark.release_sources.direct_download as dd
+    from shelfmark.release_sources.direct_download import handler as dd
 
     monkeypatch.setattr(dd, "_download_book", fake_download_book)
     monkeypatch.setattr(dd, "TMP_DIR", tmp_path)
     monkeypatch.setattr(
-        dd.config,
+        config,
         "get",
         lambda key, default=None: "rename" if key == "FILE_ORGANIZATION" else default,
     )

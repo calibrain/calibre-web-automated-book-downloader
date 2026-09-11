@@ -11,8 +11,10 @@ solve, tens of seconds for nothing. See issue #1285.
 import pytest
 from bs4 import BeautifulSoup
 
-import shelfmark.release_sources.direct_download as dd
 from shelfmark.core import search_deadline
+from shelfmark.core.config import config
+from shelfmark.core.models import SearchFilters
+from shelfmark.release_sources.direct_download import annas_archive as aa
 
 
 @pytest.fixture(autouse=True)
@@ -39,9 +41,9 @@ _PAGE = "<html><body><main><table><tbody></tbody></table></main></body></html>"
 def _count_fetches(monkeypatch) -> list[str]:
     fetched: list[str] = []
     monkeypatch.setattr(
-        dd.downloader, "html_get_page", lambda url, **_k: fetched.append(url) or _PAGE
+        aa.downloader, "html_get_page", lambda url, **_k: fetched.append(url) or _PAGE
     )
-    monkeypatch.setattr(dd.network, "get_available_aa_urls", lambda: ["https://annas-archive.gl"])
+    monkeypatch.setattr(aa.network, "get_available_aa_urls", lambda: ["https://annas-archive.gl"])
     return fetched
 
 
@@ -49,9 +51,9 @@ def test_repeated_url_is_fetched_once_within_one_search(monkeypatch):
     fetched = _count_fetches(monkeypatch)
     url = "https://annas-archive.gl/search?q=dune"
 
-    with dd._search_page_reuse():
-        first_html, first_table = dd._fetch_search_table(url, _Selector())
-        second_html, second_table = dd._fetch_search_table(url, _Selector())
+    with aa.search_page_reuse():
+        first_html, first_table = aa._fetch_search_table(url, _Selector())
+        second_html, second_table = aa._fetch_search_table(url, _Selector())
 
     assert fetched == [url], "the second ask should have been served from the search's cache"
     assert first_html == second_html
@@ -61,9 +63,9 @@ def test_repeated_url_is_fetched_once_within_one_search(monkeypatch):
 def test_distinct_urls_are_still_fetched_separately(monkeypatch):
     fetched = _count_fetches(monkeypatch)
 
-    with dd._search_page_reuse():
-        dd._fetch_search_table("https://annas-archive.gl/search?q=dune", _Selector())
-        dd._fetch_search_table("https://annas-archive.gl/search?q=dune&lang=en", _Selector())
+    with aa.search_page_reuse():
+        aa._fetch_search_table("https://annas-archive.gl/search?q=dune", _Selector())
+        aa._fetch_search_table("https://annas-archive.gl/search?q=dune&lang=en", _Selector())
 
     assert len(fetched) == 2
 
@@ -73,10 +75,10 @@ def test_cache_does_not_leak_between_searches(monkeypatch):
     fetched = _count_fetches(monkeypatch)
     url = "https://annas-archive.gl/search?q=dune"
 
-    with dd._search_page_reuse():
-        dd._fetch_search_table(url, _Selector())
-    with dd._search_page_reuse():
-        dd._fetch_search_table(url, _Selector())
+    with aa.search_page_reuse():
+        aa._fetch_search_table(url, _Selector())
+    with aa.search_page_reuse():
+        aa._fetch_search_table(url, _Selector())
 
     assert fetched == [url, url]
 
@@ -86,8 +88,8 @@ def test_without_the_context_every_fetch_still_goes_out(monkeypatch):
     fetched = _count_fetches(monkeypatch)
     url = "https://annas-archive.gl/search?q=dune"
 
-    dd._fetch_search_table(url, _Selector())
-    dd._fetch_search_table(url, _Selector())
+    aa._fetch_search_table(url, _Selector())
+    aa._fetch_search_table(url, _Selector())
 
     assert fetched == [url, url]
 
@@ -97,12 +99,12 @@ def test_a_failure_is_not_cached(monkeypatch):
     fetched = _count_fetches(monkeypatch)
     url = "https://annas-archive.gl/search?q=dune"
 
-    with dd._search_page_reuse():
+    with aa.search_page_reuse():
         with search_deadline.search_deadline(60) as deadline:
             deadline.event.set()
-            with pytest.raises(dd.SearchUnavailableError):
-                dd._fetch_search_table(url, _Selector())
-        dd._fetch_search_table(url, _Selector())
+            with pytest.raises(aa.SearchUnavailableError):
+                aa._fetch_search_table(url, _Selector())
+        aa._fetch_search_table(url, _Selector())
 
     assert fetched == [url], "the successful retry should be the only fetch"
 
@@ -119,14 +121,14 @@ def test_a_give_up_page_is_not_cached(monkeypatch):
     parked = "<html><body>This domain is for sale.</body></html>"
     fetched: list[str] = []
     monkeypatch.setattr(
-        dd.downloader, "html_get_page", lambda url, **_k: fetched.append(url) or parked
+        aa.downloader, "html_get_page", lambda url, **_k: fetched.append(url) or parked
     )
-    monkeypatch.setattr(dd.network, "get_available_aa_urls", lambda: ["https://annas-archive.gl"])
+    monkeypatch.setattr(aa.network, "get_available_aa_urls", lambda: ["https://annas-archive.gl"])
     url = "https://annas-archive.gl/search?q=dune"
 
-    with dd._search_page_reuse():
-        assert dd._fetch_search_table(url, _Selector()) == (parked, None)
-        assert dd._fetch_search_table(url, _Selector()) == (parked, None)
+    with aa.search_page_reuse():
+        assert aa._fetch_search_table(url, _Selector()) == (parked, None)
+        assert aa._fetch_search_table(url, _Selector()) == (parked, None)
 
     assert fetched == [url, url], "the second pass must not inherit the first's give-up"
 
@@ -136,14 +138,14 @@ def test_a_genuinely_empty_result_is_still_cached(monkeypatch):
     empty = "<html><body><main>No files found. <a href='/md5/x'>x</a></main></body></html>"
     fetched: list[str] = []
     monkeypatch.setattr(
-        dd.downloader, "html_get_page", lambda url, **_k: fetched.append(url) or empty
+        aa.downloader, "html_get_page", lambda url, **_k: fetched.append(url) or empty
     )
-    monkeypatch.setattr(dd.network, "get_available_aa_urls", lambda: ["https://annas-archive.gl"])
+    monkeypatch.setattr(aa.network, "get_available_aa_urls", lambda: ["https://annas-archive.gl"])
     url = "https://annas-archive.gl/search?q=nothing"
 
-    with dd._search_page_reuse():
-        assert dd._fetch_search_table(url, _Selector()) == (empty, None)
-        assert dd._fetch_search_table(url, _Selector()) == (empty, None)
+    with aa.search_page_reuse():
+        assert aa._fetch_search_table(url, _Selector()) == (empty, None)
+        assert aa._fetch_search_table(url, _Selector()) == (empty, None)
 
     assert fetched == [url], "an empty answer is an answer; re-solving for it buys nothing"
 
@@ -152,7 +154,7 @@ def test_language_retry_reuses_the_page_it_already_fetched(monkeypatch):
     """The end-to-end shape: language-from-path makes both passes build the same URL."""
     fetched = _count_fetches(monkeypatch)
 
-    original_get = dd.config.get
+    original_get = config.get
 
     def _fake_get(key: str, default=None, user_id=None):
         del user_id
@@ -160,15 +162,15 @@ def test_language_retry_reuses_the_page_it_already_fetched(monkeypatch):
             return True
         return original_get(key, default)
 
-    monkeypatch.setattr(dd.config, "get", _fake_get)
-    monkeypatch.setattr(dd.network, "get_aa_base_url", lambda: "https://annas-archive.gl")
+    monkeypatch.setattr(config, "get", _fake_get)
+    monkeypatch.setattr(aa.network, "get_aa_base_url", lambda: "https://annas-archive.gl")
 
-    filters_with_lang = dd.SearchFilters(lang=["en"])
-    filters_without = dd.SearchFilters()
+    filters_with_lang = SearchFilters(lang=["en"])
+    filters_without = SearchFilters()
 
-    with dd._search_page_reuse():
-        dd.search_books("dune", filters_with_lang)
-        dd.search_books("dune", filters_without)
+    with aa.search_page_reuse():
+        aa.search_books("dune", filters_with_lang)
+        aa.search_books("dune", filters_without)
 
     assert len(fetched) == 1, f"both passes build the same URL, got {fetched}"
     assert "lang=" not in fetched[0]
@@ -179,12 +181,12 @@ def test_soup_reuse_is_safe_for_repeated_parsing(monkeypatch):
     page = (
         "<html><body><main><table><tbody><tr><td>row</td></tr></tbody></table></main></body></html>"
     )
-    monkeypatch.setattr(dd.downloader, "html_get_page", lambda _url, **_k: page)
-    monkeypatch.setattr(dd.network, "get_available_aa_urls", lambda: ["https://annas-archive.gl"])
+    monkeypatch.setattr(aa.downloader, "html_get_page", lambda _url, **_k: page)
+    monkeypatch.setattr(aa.network, "get_available_aa_urls", lambda: ["https://annas-archive.gl"])
 
-    with dd._search_page_reuse():
-        _, first = dd._fetch_search_table("https://annas-archive.gl/search?q=dune", _Selector())
-        _, second = dd._fetch_search_table("https://annas-archive.gl/search?q=dune", _Selector())
+    with aa.search_page_reuse():
+        _, first = aa._fetch_search_table("https://annas-archive.gl/search?q=dune", _Selector())
+        _, second = aa._fetch_search_table("https://annas-archive.gl/search?q=dune", _Selector())
 
     assert first is not None
     assert second is not None

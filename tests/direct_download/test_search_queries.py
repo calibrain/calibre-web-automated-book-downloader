@@ -1,8 +1,10 @@
+from shelfmark.core.config import config
 from shelfmark.core.models import SearchFilters
 from shelfmark.core.search_plan import build_release_search_plan
 from shelfmark.metadata_providers import BookMetadata
 from shelfmark.release_sources import BrowseRecord
 from shelfmark.release_sources.direct_download import DirectDownloadSource
+from shelfmark.release_sources.direct_download import annas_archive as aa
 
 
 def _browse_record(record_id: str, title: str) -> BrowseRecord:
@@ -10,9 +12,9 @@ def _browse_record(record_id: str, title: str) -> BrowseRecord:
 
 
 def _enable_direct_download(monkeypatch):
-    import shelfmark.release_sources.direct_download as dd
+    from shelfmark.release_sources.direct_download import source as dd
 
-    original_get = dd.config.get
+    original_get = config.get
 
     def _fake_get(key: str, default=None, user_id=None):
         del user_id
@@ -20,7 +22,7 @@ def _enable_direct_download(monkeypatch):
             return True
         return original_get(key, default)
 
-    monkeypatch.setattr(dd.config, "get", _fake_get)
+    monkeypatch.setattr(config, "get", _fake_get)
     monkeypatch.setattr("shelfmark.core.mirrors.has_aa_mirror_configuration", lambda: True)
     return dd
 
@@ -33,9 +35,9 @@ class TestDirectDownloadSearchQueries:
             captured.append(query)
             return []
 
-        dd = _enable_direct_download(monkeypatch)
+        _enable_direct_download(monkeypatch)
 
-        monkeypatch.setattr(dd, "search_books", fake_search_books)
+        monkeypatch.setattr(aa, "search_books", fake_search_books)
 
         source = DirectDownloadSource()
         book = BookMetadata(
@@ -75,9 +77,9 @@ class TestDirectDownloadSearchQueries:
             captured.append((query, filters.lang))
             return records_by_query[query]
 
-        dd = _enable_direct_download(monkeypatch)
+        _enable_direct_download(monkeypatch)
 
-        monkeypatch.setattr(dd, "search_books", fake_search_books)
+        monkeypatch.setattr(aa, "search_books", fake_search_books)
 
         source = DirectDownloadSource()
         book = BookMetadata(
@@ -119,9 +121,9 @@ class TestDirectDownloadSearchQueries:
                 return []
             return fallback_results[query]
 
-        dd = _enable_direct_download(monkeypatch)
+        _enable_direct_download(monkeypatch)
 
-        monkeypatch.setattr(dd, "search_books", fake_search_books)
+        monkeypatch.setattr(aa, "search_books", fake_search_books)
 
         source = DirectDownloadSource()
         book = BookMetadata(
@@ -157,9 +159,9 @@ class TestDirectDownloadSearchQueries:
                 return []
             return [_browse_record("manual-1", "Manual result")]
 
-        dd = _enable_direct_download(monkeypatch)
+        _enable_direct_download(monkeypatch)
 
-        monkeypatch.setattr(dd, "search_books", fake_search_books)
+        monkeypatch.setattr(aa, "search_books", fake_search_books)
 
         source = DirectDownloadSource()
         book = BookMetadata(
@@ -188,9 +190,9 @@ class TestDirectDownloadSearchQueries:
 
 
 def _patch_path_language(monkeypatch, enabled: bool = True):
-    import shelfmark.release_sources.direct_download as dd
+    from shelfmark.release_sources.direct_download import source as dd
 
-    original_get = dd.config.get
+    original_get = config.get
 
     def _fake_get(key: str, default=None, user_id=None):
         del user_id
@@ -198,7 +200,7 @@ def _patch_path_language(monkeypatch, enabled: bool = True):
             return enabled
         return original_get(key, default)
 
-    monkeypatch.setattr(dd.config, "get", _fake_get)
+    monkeypatch.setattr(config, "get", _fake_get)
     return dd
 
 
@@ -228,59 +230,59 @@ def _make_row(distant_path: str, language: str = "", record_id: str = "rec-1") -
 
 
 def test_detects_bracketed_language_from_distant_path(monkeypatch):
-    dd = _patch_path_language(monkeypatch)
+    _patch_path_language(monkeypatch)
     row = _row_from_html(_make_row(r"lgli/N:\comics1\emule\2021.08.01\[BD FR] Scrameustache.cbz"))
-    record = dd._parse_search_result_row(row)
+    record = aa._parse_search_result_row(row)
     assert record is not None
     assert record.language == "fr"
     assert record.download_path is not None
 
 
 def test_detects_mixed_case_bracketed_language(monkeypatch):
-    dd = _patch_path_language(monkeypatch)
+    _patch_path_language(monkeypatch)
     row = _row_from_html(_make_row(r"lgli/V:\comics\_0DAY3\[Fr]\BDs [Fr]\!Pdf\S\Book.pdf"))
-    record = dd._parse_search_result_row(row)
+    record = aa._parse_search_result_row(row)
     assert record is not None
     assert record.language == "fr"
 
 
 def test_overrides_unknown_language_with_path_detection(monkeypatch):
-    dd = _patch_path_language(monkeypatch)
+    _patch_path_language(monkeypatch)
     row = _row_from_html(_make_row(r"lgli/V:\comics\_0DAY3\[Fr]\Book.pdf", language="unknown"))
-    record = dd._parse_search_result_row(row)
+    record = aa._parse_search_result_row(row)
     assert record is not None
     assert record.language == "fr"
 
 
 def test_sets_unknown_when_path_has_no_language(monkeypatch):
-    dd = _patch_path_language(monkeypatch)
+    _patch_path_language(monkeypatch)
     row = _row_from_html(_make_row(r"lgli/N:\comics1\emule\NoLanguageHere.epub"))
-    record = dd._parse_search_result_row(row)
+    record = aa._parse_search_result_row(row)
     assert record is not None
     assert record.language == "unknown"
 
 
 def test_avoids_en_false_positive_when_french_present(monkeypatch):
-    dd = _patch_path_language(monkeypatch)
+    _patch_path_language(monkeypatch)
     row = _row_from_html(
         _make_row(r"lgli/V:\comics\_0DAY2\Stripboeken Frans - BD en Français\[BD Fr] Book.cbr")
     )
-    record = dd._parse_search_result_row(row)
+    record = aa._parse_search_result_row(row)
     assert record is not None
     assert record.language == "fr"
 
 
 def test_keeps_row_with_missing_language_when_toggle_disabled(monkeypatch):
-    dd = _patch_path_language(monkeypatch, enabled=False)
+    _patch_path_language(monkeypatch, enabled=False)
     row = _row_from_html(_make_row(r"lgli/N:\comics1\[BD FR] Scrameustache.cbz"))
-    record = dd._parse_search_result_row(row)
+    record = aa._parse_search_result_row(row)
     assert record is not None
     assert record.language is None
 
 
 def test_keeps_sparse_lgli_row(monkeypatch):
     """lgli rows missing author/publisher/year must not be dropped."""
-    dd = _patch_path_language(monkeypatch)
+    _patch_path_language(monkeypatch)
     html = r"""
     <tr>
       <td><a href="/md5/sparse-1"><img src="cover.jpg"></a></td>
@@ -292,7 +294,7 @@ def test_keeps_sparse_lgli_row(monkeypatch):
       <td><span>lgli/N:\comics1\ftp\[BD.FR] French Comics\Book.cbz</span></td>
     </tr>
     """
-    record = dd._parse_search_result_row(_row_from_html(html))
+    record = aa._parse_search_result_row(_row_from_html(html))
     assert record is not None
     assert record.id == "sparse-1"
     assert record.language == "fr"
@@ -300,9 +302,9 @@ def test_keeps_sparse_lgli_row(monkeypatch):
 
 
 def test_search_books_filters_locally_when_path_language_enabled(monkeypatch):
-    dd = _patch_path_language(monkeypatch)
-    monkeypatch.setattr(dd.network, "get_aa_base_url", lambda: "https://mirror.example")
-    monkeypatch.setattr(dd.network, "AAMirrorSelector", lambda: object())
+    _patch_path_language(monkeypatch)
+    monkeypatch.setattr(aa.network, "get_aa_base_url", lambda: "https://mirror.example")
+    monkeypatch.setattr(aa.network, "AAMirrorSelector", lambda: object())
 
     captured_url: dict[str, str] = {}
 
@@ -332,9 +334,9 @@ def test_search_books_filters_locally_when_path_language_enabled(monkeypatch):
         </table>
         """
 
-    monkeypatch.setattr(dd.downloader, "html_get_page", _fake_html_get_page)
+    monkeypatch.setattr(aa.downloader, "html_get_page", _fake_html_get_page)
 
-    records = dd.search_books("demo", SearchFilters(lang=["fr"], format=["pdf"]))
+    records = aa.search_books("demo", SearchFilters(lang=["fr"], format=["pdf"]))
 
     assert "&lang=" not in captured_url["url"]
     assert len(records) == 1
@@ -343,9 +345,8 @@ def test_search_books_filters_locally_when_path_language_enabled(monkeypatch):
 
 
 def test_book_matches_requested_languages_logic():
-    import shelfmark.release_sources.direct_download as dd
 
-    assert dd._book_matches_requested_languages(None, {"fr"}) is True
-    assert dd._book_matches_requested_languages(None, set()) is True
-    assert dd._book_matches_requested_languages("en", {"fr"}) is False
-    assert dd._book_matches_requested_languages("fr", {"fr"}) is True
+    assert aa._book_matches_requested_languages(None, {"fr"}) is True
+    assert aa._book_matches_requested_languages(None, set()) is True
+    assert aa._book_matches_requested_languages("en", {"fr"}) is False
+    assert aa._book_matches_requested_languages("fr", {"fr"}) is True

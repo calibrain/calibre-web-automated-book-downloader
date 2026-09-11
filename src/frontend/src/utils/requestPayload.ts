@@ -105,6 +105,7 @@ export const buildReleaseDataFromDirectBook = (book: Book) => {
     year: book.year,
     format: book.format,
     size: book.size,
+    download_url: book.source_url,
     preview: book.preview,
     content_type: 'ebook' as const,
     // Browsing a source directly means the book record IS the release record.

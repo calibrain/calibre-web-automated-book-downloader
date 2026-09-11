@@ -446,6 +446,7 @@ def test_slow_source_options_lock_entries_until_mirror_dependencies_exist(monkey
     monkeypatch.setattr("shelfmark.core.mirrors.has_aa_mirror_configuration", lambda: True)
     monkeypatch.setattr("shelfmark.core.mirrors.has_welib_mirror_configuration", lambda: False)
     monkeypatch.setattr("shelfmark.core.mirrors.has_zlib_mirror_configuration", lambda: False)
+    monkeypatch.setattr("shelfmark.core.mirrors.has_oceanofpdf_mirror_configuration", lambda: False)
 
     options = {option["id"]: option for option in _get_slow_source_options()}
 
@@ -455,3 +456,27 @@ def test_slow_source_options_lock_entries_until_mirror_dependencies_exist(monkey
     assert options["welib"]["disabledReason"] == "Add at least one Welib mirror in Mirrors"
     assert options["zlib"]["isLocked"] is True
     assert options["zlib"]["disabledReason"] == "Add at least one Z-Library mirror in Mirrors"
+    assert options["oceanofpdf"]["isLocked"] is True
+    assert options["oceanofpdf"]["disabledReason"] == (
+        "Add at least one OceanofPDF mirror in Mirrors"
+    )
+
+
+def test_oceanofpdf_slow_source_only_requires_its_mirror(monkeypatch):
+    from shelfmark.config.settings import _get_slow_source_defaults, _get_slow_source_options
+
+    monkeypatch.setattr(
+        "shelfmark.core.config.config.get",
+        lambda key, default=None, user_id=None: False if key == "USE_CF_BYPASS" else default,
+    )
+    monkeypatch.setattr("shelfmark.core.mirrors.has_aa_mirror_configuration", lambda: True)
+    monkeypatch.setattr("shelfmark.core.mirrors.has_welib_mirror_configuration", lambda: True)
+    monkeypatch.setattr("shelfmark.core.mirrors.has_zlib_mirror_configuration", lambda: True)
+    monkeypatch.setattr("shelfmark.core.mirrors.has_oceanofpdf_mirror_configuration", lambda: True)
+
+    options = {option["id"]: option for option in _get_slow_source_options()}
+    defaults = {item["id"]: item["enabled"] for item in _get_slow_source_defaults()}
+
+    assert options["oceanofpdf"]["isLocked"] is False
+    assert options["oceanofpdf"]["disabledReason"] is None
+    assert defaults["oceanofpdf"] is True

@@ -765,6 +765,14 @@ export interface OnboardingStepCondition {
   notEmpty?: boolean;
 }
 
+export interface OnboardingFieldGroup {
+  id: string;
+  title: string;
+  description?: string;
+  fieldKeys: string[];
+  defaultOpen?: boolean;
+}
+
 export interface OnboardingStep {
   id: string;
   title: string;
@@ -772,6 +780,7 @@ export interface OnboardingStep {
   fields: SettingsField[];
   showWhen?: OnboardingStepCondition[]; // Array of conditions (all must be true)
   optional?: boolean;
+  fieldGroups?: OnboardingFieldGroup[];
 }
 
 interface OnboardingConfig {
