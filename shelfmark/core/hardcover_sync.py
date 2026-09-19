@@ -33,13 +33,18 @@ def _configured_token() -> str:
 
 def _configured_statuses() -> list[int]:
     raw = app_config.get("HARDCOVER_SYNC_STATUSES", list(DEFAULT_SYNC_STATUSES))
+    values: list[object]
     if isinstance(raw, str):
-        raw = [raw]
+        values = [raw]
+    elif isinstance(raw, (list, tuple)):
+        values = list(raw)
+    else:
+        values = []
     statuses: list[int] = []
-    for value in raw or []:
+    for value in values:
         try:
-            statuses.append(int(value))
-        except (TypeError, ValueError):
+            statuses.append(int(str(value).strip()))
+        except ValueError:
             continue
     return statuses or [int(s) for s in DEFAULT_SYNC_STATUSES]
 
@@ -142,8 +147,8 @@ def sync_wishlist(
 ) -> dict[str, int]:
     """Sync configured Hardcover shelves into pending requests.
 
-    Returns a summary dict: ``{"added", "skipped", "errors"}``. Requires a configured
-    token; enable-gating is the caller's responsibility (see hardcover_scheduler).
+    Returns a summary dict: ``{"added", "skipped", "in_library", "errors"}``. Requires a
+    configured token; enable-gating is the caller's responsibility (see hardcover_scheduler).
     """
     summary = {"added": 0, "skipped": 0, "in_library": 0, "errors": 0}
 

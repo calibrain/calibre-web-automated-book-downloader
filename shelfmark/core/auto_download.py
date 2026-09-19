@@ -21,7 +21,9 @@ from typing import TYPE_CHECKING, Any
 from shelfmark.core.config import config as app_config
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.release_search import search_book_releases
+from shelfmark.core.request_helpers import coerce_int
 from shelfmark.core.text_match import (
+    DEFAULT_TITLE_MATCH_THRESHOLD,
     author_surname,
     title_tokens_match,
 )
@@ -38,9 +40,8 @@ if TYPE_CHECKING:
 
 logger = setup_logger(__name__)
 
-# Title threshold: fraction of significant book-title tokens that must appear in the
-# release title. Kept as a module constant so it's easy to tune.
-TITLE_MATCH_THRESHOLD = 0.85
+# Fraction of significant book-title tokens that must appear in the release title.
+TITLE_MATCH_THRESHOLD = DEFAULT_TITLE_MATCH_THRESHOLD
 
 DEFAULT_AUDIOBOOK_FORMATS = ("m4b", "mp3")
 EBOOK_FORMAT_MARKERS = (
@@ -73,9 +74,14 @@ class AutoDownloadOutcome:
 
 def _audiobook_formats() -> set[str]:
     configured = app_config.get("SUPPORTED_AUDIOBOOK_FORMATS", list(DEFAULT_AUDIOBOOK_FORMATS))
+    values: list[object]
     if isinstance(configured, str):
-        configured = [configured]
-    formats = {str(fmt).strip().lower() for fmt in (configured or []) if str(fmt).strip()}
+        values = [configured]
+    elif isinstance(configured, (list, tuple, set)):
+        values = list(configured)
+    else:
+        values = []
+    formats = {str(fmt).strip().lower() for fmt in values if str(fmt).strip()}
     return formats or set(DEFAULT_AUDIOBOOK_FORMATS)
 
 
@@ -337,10 +343,7 @@ def auto_download_pending(
         return {"queued": 0, "no_match": 0, "in_library": 0, "skipped": 0, "error": 0}
 
     content_type = str(app_config.get("HARDCOVER_SYNC_CONTENT_TYPE", "audiobook") or "audiobook")
-    try:
-        min_seeders = int(app_config.get("AUTO_DOWNLOAD_MIN_SEEDERS", 1))
-    except (TypeError, ValueError):
-        min_seeders = 1
+    min_seeders = coerce_int(app_config.get("AUTO_DOWNLOAD_MIN_SEEDERS", 1), 1)
 
     sources = _configured_source_priority()
     if not sources:

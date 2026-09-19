@@ -49,9 +49,10 @@ def configure(
 
 
 def _interval_seconds() -> float:
+    raw = app_config.get("HARDCOVER_SYNC_INTERVAL", 6)
     try:
-        value = float(app_config.get("HARDCOVER_SYNC_INTERVAL", 6))
-    except (TypeError, ValueError):
+        value = float(raw) if isinstance(raw, (int, float, str)) else 6.0
+    except ValueError:
         value = 6.0
     unit = str(app_config.get("HARDCOVER_SYNC_INTERVAL_UNIT", "hours") or "hours").strip().lower()
     multiplier = _UNIT_SECONDS.get(unit, _UNIT_SECONDS["hours"])
@@ -132,8 +133,6 @@ def start(
         if _thread is not None and _thread.is_alive():
             logger.debug("Hardcover scheduler already running")
             return
-        _thread = threading.Thread(
-            target=_scheduler_loop, daemon=True, name="HardcoverScheduler"
-        )
+        _thread = threading.Thread(target=_scheduler_loop, daemon=True, name="HardcoverScheduler")
         _thread.start()
     logger.info("Hardcover scheduler thread launched")
