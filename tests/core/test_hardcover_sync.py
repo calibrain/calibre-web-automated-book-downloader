@@ -258,3 +258,36 @@ class TestSyncWishlist:
 
         assert summary == {"added": 0, "skipped": 0, "in_library": 0, "errors": 1}
         assert user_db.list_requests() == []
+
+
+class TestResolveRequestOwner:
+    def test_returns_lowest_id_admin(self, user_db):
+        user_db.create_user(username="reader", role="user")
+        first_admin = user_db.create_user(username="ops", role="admin")
+        user_db.create_user(username="second", role="admin")
+
+        assert hardcover_sync.resolve_request_owner(user_db) == first_admin["id"]
+
+    def test_returns_none_without_admins(self, user_db):
+        user_db.create_user(username="reader", role="user")
+
+        assert hardcover_sync.resolve_request_owner(user_db) is None
+
+    def test_sync_without_admin_counts_an_error_and_creates_nothing(self, user_db, db_path):
+        user_db.create_user(username="reader", role="user")
+
+        summary = hardcover_sync.sync_wishlist(user_db, db_path=db_path)
+
+        assert summary == {"added": 0, "skipped": 0, "in_library": 0, "errors": 1}
+        assert user_db.list_requests() == []
+
+    def test_sync_defaults_to_the_lowest_id_admin(self, user_db, db_path, monkeypatch):
+        user_db.create_user(username="reader", role="user")
+        admin = user_db.create_user(username="ops", role="admin")
+        provider = _Provider({1: [[_book(1, "Dungeon Crawler Carl")]]})
+        monkeypatch.setattr(hardcover_sync, "_build_provider", lambda: provider)
+
+        summary = hardcover_sync.sync_wishlist(user_db, db_path=db_path)
+
+        assert summary["added"] == 1
+        assert user_db.list_requests()[0]["user_id"] == admin["id"]

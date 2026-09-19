@@ -373,3 +373,14 @@ class TestAutoDownloadRequest:
 
         assert outcome.status == "skipped"
         assert outcome.detail == "no usable provider/id"
+
+
+def test_pending_pass_without_an_admin_queues_nothing(user_db, monkeypatch):
+    monkeypatch.setattr(auto_download, "app_config", _Config(AUTO_DOWNLOAD_ENABLED=True))
+    user_db.create_user(username="reader", role="user")
+
+    summary = auto_download.auto_download_pending(
+        user_db, queue_release=lambda *_args, **_kwargs: (True, None)
+    )
+
+    assert summary == {"queued": 0, "no_match": 0, "in_library": 0, "skipped": 0, "error": 0}
