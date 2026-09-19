@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from shelfmark.core.config import config as app_config
 from shelfmark.core.logger import setup_logger
+from shelfmark.core.utils import transform_cover_url
 
 if TYPE_CHECKING:
     from shelfmark.core.user_db import UserDB
@@ -79,10 +80,9 @@ def _book_to_book_data(book: BookMetadata, content_type: str) -> dict[str, Any]:
         "provider_id": str(book.provider_id),
         "content_type": content_type,
     }
-    # Only set preview when we actually have a cover, so the lazy backfill in
-    # _populate_requests_metadata can still try later if it's missing.
+    # Proxy the cover the same way search results are, so the row is ready for the UI.
     if book.cover_url:
-        book_data["preview"] = book.cover_url
+        book_data["preview"] = transform_cover_url(book.cover_url, f"hardcover_{book.provider_id}")
     if book.publish_year:
         book_data["year"] = book.publish_year
     if book.subtitle:
