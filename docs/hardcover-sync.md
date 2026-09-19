@@ -19,9 +19,14 @@ A book is skipped when:
 
 ### Automatic downloads
 
-When enabled, each pending request that came from Hardcover is searched across your release sources in the configured priority order. The first source that yields a **strict match** wins, and the best candidate from that source is queued through the normal request fulfilment path, so it appears in the activity view and download history exactly like a request an admin approved.
+When enabled, each pending request that came from Hardcover is searched across your release sources in the priority order configured for its content type (audiobook requests use the audiobook list, ebook requests the ebook list). The first source that yields a **strict match** wins, and the best candidate from that source is queued through the normal request fulfilment path, so it appears in the activity view and download history exactly like a request an admin approved.
 
 A release is a strict match only when all of the following hold:
+
+- at least 85% of the significant words in the book's title appear in the release title;
+- the author's surname appears in the release title, indexer name or author field (a book with no author metadata matches on title alone);
+- the format fits the request — an audiobook request needs an audiobook signal (`m4b`/`mp3`, or "audiobook"/"unabridged" in the title) and is never an ebook-only file; an ebook request needs one of your **Supported Book Formats** (or an `.epub`-style marker in the title) and no audiobook signal;
+- for torrents, the seeder count meets **Minimum seeders**.
 
 - at least 85% of the significant title words appear in the release title
 - the author's surname appears in the release title, indexer name, or author field
@@ -43,11 +48,12 @@ The check **fails closed** here: if an enabled library cannot be read and has no
 | `HARDCOVER_SYNC_ENABLED` | Enable scheduled sync | Off | Runs shelf sync on the interval below |
 | `HARDCOVER_SYNC_TOKEN` | Hardcover API Token | — | Leave blank to reuse the Hardcover metadata provider's token |
 | `HARDCOVER_SYNC_STATUSES` | Shelves to sync | Want to Read | Hardcover reading status to pull from |
-| `HARDCOVER_SYNC_CONTENT_TYPE` | Request as | Audiobooks | Content type given to synced requests and targeted by automatic downloads |
+| `HARDCOVER_SYNC_CONTENT_TYPE` | Request as | Audiobooks | `Audiobooks`, `Ebooks`, or `Ebooks and audiobooks` — the last creates one request of each per shelf book, each checked against its own library |
 | `HARDCOVER_SYNC_INTERVAL` | Sync interval | 6 | Combined with the unit below |
 | `HARDCOVER_SYNC_INTERVAL_UNIT` | Interval unit | Hours | Minutes or hours. The effective interval never drops below 60 seconds |
 | `AUTO_DOWNLOAD_ENABLED` | Enable automatic downloads | Off | Auto-approve and queue strict matches for Hardcover requests |
-| `AUTO_DOWNLOAD_SOURCE_PRIORITY` | Source priority | All usable sources | Drag to order. Sources you disable here, or that are not configured, are skipped |
+| `AUTO_DOWNLOAD_SOURCE_PRIORITY` | Audiobook source priority | All usable sources | Drag to order; used for audiobook requests. Sources you disable here, or that are not configured, are skipped |
+| `AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY` | Ebook source priority | All usable sources | Same, for ebook requests |
 | `AUTO_DOWNLOAD_MIN_SEEDERS` | Minimum seeders (torrents) | 1 | Torrent releases below this are ignored |
 
 One action button sits at the bottom of the tab:
@@ -72,7 +78,7 @@ Only one run happens at a time. If a scheduled cycle is in progress, **Sync now*
 
 **Sync adds nothing and the log says "no Hardcover token configured"** — set **Hardcover API Token** on this tab, or configure the token on the Hardcover metadata provider. A sync without a usable token counts as an error and creates no requests.
 
-**Requests appear but nothing downloads** — check **Enable automatic downloads** is on, that **Source priority** contains at least one configured source that supports audiobooks, and look for `no strict match` lines in the log. Lowering **Minimum seeders** helps on quiet trackers; loosening the title or author match is deliberately not an option.
+**Requests appear but nothing downloads** — check **Enable automatic downloads** is on, that the source-priority list for the request's content type contains at least one configured source, and look for `no strict match` lines in the log. Lowering **Minimum seeders** helps on quiet trackers; loosening the title or author match is deliberately not an option.
 
 **Books you own keep being added** — enable the library check for the format you request (see [Library Check](library-check.md)) and use its test button. A library that cannot be read shows up in the log as a skipped cycle.
 

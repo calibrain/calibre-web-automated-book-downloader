@@ -55,6 +55,9 @@ EBOOK_FORMAT_MARKERS = (
     "cbz",
     "cbr",
 )
+DEFAULT_EBOOK_FORMATS = ("epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr")
+# Ebook format ranking for tie-breaking within a single source.
+_EBOOK_FORMAT_RANK = {"epub": 4, "kepub": 3, "azw3": 3, "mobi": 2, "azw": 2, "fb2": 1, "pdf": 1}
 # Audiobook signals we recognise in free-text release titles in addition to formats.
 AUDIOBOOK_TITLE_MARKERS = ("audiobook", "unabridged", "m4b", "audio book")
 
@@ -72,8 +75,8 @@ class AutoDownloadOutcome:
     source: str | None = None
 
 
-def _audiobook_formats() -> set[str]:
-    configured = app_config.get("SUPPORTED_AUDIOBOOK_FORMATS", list(DEFAULT_AUDIOBOOK_FORMATS))
+def _configured_formats(key: str, default: tuple[str, ...]) -> set[str]:
+    configured = app_config.get(key, list(default))
     values: list[object]
     if isinstance(configured, str):
         values = [configured]
@@ -82,7 +85,15 @@ def _audiobook_formats() -> set[str]:
     else:
         values = []
     formats = {str(fmt).strip().lower() for fmt in values if str(fmt).strip()}
-    return formats or set(DEFAULT_AUDIOBOOK_FORMATS)
+    return formats or set(default)
+
+
+def _audiobook_formats() -> set[str]:
+    return _configured_formats("SUPPORTED_AUDIOBOOK_FORMATS", DEFAULT_AUDIOBOOK_FORMATS)
+
+
+def _ebook_formats() -> set[str]:
+    return _configured_formats("SUPPORTED_FORMATS", DEFAULT_EBOOK_FORMATS)
 
 
 def _author_surname_tokens(book: BookMetadata) -> list[str]:
@@ -110,21 +121,31 @@ def _author_match(book: BookMetadata, release: Release) -> bool:
     return all(tok in haystack for tok in surname)
 
 
-def _format_match(release: Release, audiobook_formats: set[str]) -> bool:
-    """Require a real audiobook signal and reject ebook-only releases."""
+def _audiobook_signal(release: Release, audiobook_formats: set[str]) -> bool:
     fmt = (release.format or "").strip().lower()
     title_l = (release.title or "").lower()
-
-    has_audiobook_signal = (
+    return (
         fmt in audiobook_formats
         or any(marker in title_l for marker in AUDIOBOOK_TITLE_MARKERS)
         or any(f".{af}" in title_l or f" {af}" in title_l for af in audiobook_formats)
     )
-    if not has_audiobook_signal:
-        return False
 
-    # Reject things that are clearly an ebook and nothing else.
-    return fmt not in EBOOK_FORMAT_MARKERS
+
+def _format_match(
+    release: Release,
+    content_type: str,
+    audiobook_formats: set[str],
+    ebook_formats: set[str],
+) -> bool:
+    """Require a format signal for the requested content type and reject the other kind."""
+    fmt = (release.format or "").strip().lower()
+    if content_type == "audiobook":
+        # Reject things that are clearly an ebook and nothing else.
+        return _audiobook_signal(release, audiobook_formats) and fmt not in EBOOK_FORMAT_MARKERS
+
+    title_l = (release.title or "").lower()
+    has_ebook_signal = fmt in ebook_formats or any(f".{ef}" in title_l for ef in ebook_formats)
+    return has_ebook_signal and not _audiobook_signal(release, audiobook_formats)
 
 
 def _seeders_ok(release: Release, min_seeders: int) -> bool:
@@ -141,34 +162,37 @@ def strict_match(
     release: Release,
     book: BookMetadata,
     *,
+    content_type: str = "audiobook",
     min_seeders: int = 1,
     audiobook_formats: set[str] | None = None,
+    ebook_formats: set[str] | None = None,
 ) -> bool:
-    """Return True only if the release confidently matches the requested audiobook."""
-    formats = audiobook_formats if audiobook_formats is not None else _audiobook_formats()
+    """Return True only if the release confidently matches the requested book and format."""
+    audio = audiobook_formats if audiobook_formats is not None else _audiobook_formats()
+    ebook = ebook_formats if ebook_formats is not None else _ebook_formats()
     return (
         _title_match(book, release.title or "")
         and _author_match(book, release)
-        and _format_match(release, formats)
+        and _format_match(release, content_type, audio, ebook)
         and _seeders_ok(release, min_seeders)
     )
 
 
-def _release_sort_key(release: Release) -> tuple[int, int, int]:
+def _release_sort_key(release: Release, content_type: str) -> tuple[int, int, int]:
     fmt = (release.format or "").strip().lower()
-    if fmt not in _FORMAT_RANK and "m4b" in (release.title or "").lower():
-        fmt = "m4b"
-    return (
-        _FORMAT_RANK.get(fmt, 0),
-        release.seeders or 0,
-        release.size_bytes or 0,
-    )
+    if content_type == "audiobook":
+        if fmt not in _FORMAT_RANK and "m4b" in (release.title or "").lower():
+            fmt = "m4b"
+        rank = _FORMAT_RANK.get(fmt, 0)
+    else:
+        rank = _EBOOK_FORMAT_RANK.get(fmt, 0)
+    return (rank, release.seeders or 0, release.size_bytes or 0)
 
 
-def pick_best_release(releases: list[Release]) -> Release | None:
+def pick_best_release(releases: list[Release], content_type: str = "audiobook") -> Release | None:
     if not releases:
         return None
-    return max(releases, key=_release_sort_key)
+    return max(releases, key=lambda release: _release_sort_key(release, content_type))
 
 
 def build_release_data(release: Release, book: BookMetadata, content_type: str) -> dict[str, Any]:
@@ -203,14 +227,26 @@ def build_release_data(release: Release, book: BookMetadata, content_type: str) 
     return {key: value for key, value in payload.items() if value is not None}
 
 
-def _configured_source_priority() -> list[str]:
-    """Return enabled release-source names in configured priority order."""
+_SOURCE_PRIORITY_KEYS = {
+    "audiobook": "AUTO_DOWNLOAD_SOURCE_PRIORITY",
+    "ebook": "AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY",
+}
+
+
+def _configured_source_priority(content_type: str) -> list[str]:
+    """Return enabled release-source names for ``content_type`` in configured priority order."""
     from shelfmark.release_sources import list_available_sources
 
-    available = list_available_sources()
+    def _supports(src: dict[str, Any]) -> bool:
+        supported = src.get("supported_content_types") or ["ebook", "audiobook"]
+        return content_type in supported
+
+    available = [src for src in list_available_sources() if _supports(src)]
     available_by_name = {src["name"]: src for src in available}
 
-    raw = app_config.get("AUTO_DOWNLOAD_SOURCE_PRIORITY", [])
+    raw = app_config.get(
+        _SOURCE_PRIORITY_KEYS.get(content_type, "AUTO_DOWNLOAD_SOURCE_PRIORITY"), []
+    )
     ordered: list[str] = []
     if isinstance(raw, list):
         for item in raw:
@@ -227,7 +263,7 @@ def _configured_source_priority() -> list[str]:
 
     if ordered:
         return ordered
-    # Fallback: every usable source, registry order.
+    # Fallback: every usable source for this content type, registry order.
     return [src["name"] for src in available if src.get("enabled")]
 
 
@@ -289,6 +325,7 @@ def auto_download_request(
         return AutoDownloadOutcome(request_id, "in_library", "already in library")
 
     audiobook_formats = _audiobook_formats()
+    ebook_formats = _ebook_formats()
 
     # Walk sources in priority order; take the first source with a strict match.
     for source_name in sources:
@@ -304,11 +341,13 @@ def auto_download_request(
             if strict_match(
                 release,
                 book,
+                content_type=content_type,
                 min_seeders=min_seeders,
                 audiobook_formats=audiobook_formats,
+                ebook_formats=ebook_formats,
             )
         ]
-        chosen = pick_best_release(candidates)
+        chosen = pick_best_release(candidates, content_type)
         if chosen is None:
             continue
 
@@ -345,11 +384,14 @@ def auto_download_pending(
 ) -> dict[str, int]:
     """Run the auto-download pass over all eligible pending requests.
 
-    Returns a summary count dict. No-ops (returns zeros) unless AUTO_DOWNLOAD_ENABLED.
-    ``admin_user_id`` defaults to the lowest-id admin, who fulfils the requests.
+    Each request is handled for its own content type (ebook or audiobook): its source
+    priority list, format guard and library check all follow the request. Returns a summary
+    count dict. No-ops (returns zeros) unless AUTO_DOWNLOAD_ENABLED. ``admin_user_id``
+    defaults to the lowest-id admin, who fulfils the requests.
     """
+    zeros = {"queued": 0, "no_match": 0, "in_library": 0, "skipped": 0, "error": 0}
     if not bool(app_config.get("AUTO_DOWNLOAD_ENABLED", False)):
-        return {"queued": 0, "no_match": 0, "in_library": 0, "skipped": 0, "error": 0}
+        return zeros
 
     if admin_user_id is None:
         from shelfmark.core.hardcover_sync import resolve_request_owner
@@ -357,18 +399,13 @@ def auto_download_pending(
         admin_user_id = resolve_request_owner(user_db)
     if admin_user_id is None:
         logger.warning("auto-download: no admin user exists to fulfil requests")
-        return {"queued": 0, "no_match": 0, "in_library": 0, "skipped": 0, "error": 0}
+        return zeros
 
-    content_type = str(app_config.get("HARDCOVER_SYNC_CONTENT_TYPE", "audiobook") or "audiobook")
     min_seeders = coerce_int(app_config.get("AUTO_DOWNLOAD_MIN_SEEDERS", 1), 1)
-
-    sources = _configured_source_priority()
-    if not sources:
-        logger.warning("auto-download: no usable release sources configured")
-        return {"queued": 0, "no_match": 0, "in_library": 0, "skipped": 0, "error": 0}
+    sources_by_type: dict[str, list[str]] = {}
 
     pending = user_db.list_requests(status="pending")
-    summary = {"queued": 0, "no_match": 0, "in_library": 0, "skipped": 0, "error": 0}
+    summary = dict(zeros)
 
     for row in pending:
         book_data = row.get("book_data") or {}
@@ -378,6 +415,22 @@ def auto_download_pending(
             continue
         # Only act on requests that haven't already been dispatched.
         if str(row.get("delivery_state") or "none").lower() not in {"none", ""}:
+            continue
+
+        content_type = str(
+            row.get("content_type")
+            or (book_data.get("content_type") if isinstance(book_data, dict) else None)
+            or "ebook"
+        ).lower()
+        if content_type not in sources_by_type:
+            sources_by_type[content_type] = _configured_source_priority(content_type)
+            if not sources_by_type[content_type]:
+                logger.warning(
+                    "auto-download: no usable %s release sources configured", content_type
+                )
+        sources = sources_by_type[content_type]
+        if not sources:
+            summary["skipped"] += 1
             continue
 
         outcome = auto_download_request(

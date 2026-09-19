@@ -219,13 +219,13 @@ class TestConfiguredSourcePriority:
             ],
         )
 
-        assert auto_download._configured_source_priority() == ["second"]
+        assert auto_download._configured_source_priority("audiobook") == ["second"]
 
     @pytest.mark.parametrize("priority", [[], "garbage", [{"id": "unknown"}]])
     def test_falls_back_to_all_enabled_sources(self, monkeypatch, priority):
         self._configure(monkeypatch, priority)
 
-        assert auto_download._configured_source_priority() == ["first", "second"]
+        assert auto_download._configured_source_priority("audiobook") == ["first", "second"]
 
 
 class TestAutoDownloadPending:
@@ -414,3 +414,110 @@ def test_pending_pass_without_an_admin_queues_nothing(user_db, monkeypatch):
     )
 
     assert summary == {"queued": 0, "no_match": 0, "in_library": 0, "skipped": 0, "error": 0}
+
+
+class TestContentTypeAwareMatching:
+    def test_epub_matches_an_ebook_request_but_not_an_audiobook_one(self):
+        release = _release(format="epub", title="Dungeon Crawler Carl - Matt Dinniman.epub")
+
+        assert auto_download.strict_match(release, _book(), content_type="ebook")
+        assert not auto_download.strict_match(release, _book(), content_type="audiobook")
+
+    def test_m4b_matches_an_audiobook_request_but_not_an_ebook_one(self):
+        release = _release(format="m4b", title="Dungeon Crawler Carl - Matt Dinniman [M4B]")
+
+        assert auto_download.strict_match(release, _book(), content_type="audiobook")
+        assert not auto_download.strict_match(release, _book(), content_type="ebook")
+
+    def test_ebook_signal_in_title_counts_without_a_format(self):
+        release = _release(format=None, title="Dungeon Crawler Carl - Matt Dinniman.epub")
+
+        assert auto_download.strict_match(release, _book(), content_type="ebook")
+
+    def test_audiobook_marker_disqualifies_an_ebook_match(self):
+        release = _release(format="epub", title="Dungeon Crawler Carl - Matt Dinniman (Unabridged)")
+
+        assert not auto_download.strict_match(release, _book(), content_type="ebook")
+
+    def test_ebook_ranking_prefers_epub_then_azw3_then_mobi(self):
+        mobi = _release(format="mobi", seeders=50)
+        azw3 = _release(format="azw3", seeders=1)
+        epub = _release(format="epub", seeders=0)
+
+        assert auto_download.pick_best_release([mobi, azw3, epub], "ebook") is epub
+        assert auto_download.pick_best_release([mobi, azw3], "ebook") is azw3
+
+    def test_ebook_formats_follow_supported_formats_setting(self, monkeypatch):
+        monkeypatch.setattr(auto_download, "app_config", _Config(SUPPORTED_FORMATS=["pdf"]))
+
+        assert auto_download._ebook_formats() == {"pdf"}
+        assert auto_download.strict_match(
+            _release(format="pdf", title="Dungeon Crawler Carl - Matt Dinniman"),
+            _book(),
+            content_type="ebook",
+        )
+
+
+class TestContentTypeSourcePriority:
+    @pytest.fixture(autouse=True)
+    def _sources(self, monkeypatch):
+        monkeypatch.setattr(
+            "shelfmark.release_sources.list_available_sources",
+            lambda: [
+                {"name": "audio_only", "enabled": True, "supported_content_types": ["audiobook"]},
+                {"name": "ebook_only", "enabled": True, "supported_content_types": ["ebook"]},
+                {"name": "both", "enabled": True},
+            ],
+        )
+
+    def test_ebook_priority_uses_its_own_key_and_only_ebook_capable_sources(self, monkeypatch):
+        monkeypatch.setattr(
+            auto_download,
+            "app_config",
+            _Config(
+                AUTO_DOWNLOAD_SOURCE_PRIORITY=[{"id": "audio_only"}],
+                AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY=[{"id": "both"}, {"id": "audio_only"}],
+            ),
+        )
+
+        assert auto_download._configured_source_priority("ebook") == ["both"]
+        assert auto_download._configured_source_priority("audiobook") == ["audio_only"]
+
+    def test_fallback_is_filtered_by_content_type(self, monkeypatch):
+        monkeypatch.setattr(auto_download, "app_config", _Config())
+
+        assert auto_download._configured_source_priority("ebook") == ["ebook_only", "both"]
+        assert auto_download._configured_source_priority("audiobook") == ["audio_only", "both"]
+
+
+def test_pending_pass_follows_each_request_content_type(user_db, monkeypatch):
+    monkeypatch.setattr(auto_download, "app_config", _Config(AUTO_DOWNLOAD_ENABLED=True))
+    admin = user_db.create_user(username="admin", role="admin")
+    for content_type in ("ebook", "audiobook"):
+        user_db.create_request(
+            user_id=admin["id"],
+            content_type=content_type,
+            request_level="book",
+            policy_mode="request_book",
+            book_data={"title": "T", "author": "A", "provider": "hardcover", "provider_id": "1"},
+        )
+    seen: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(
+        auto_download,
+        "_configured_source_priority",
+        lambda content_type: ["src"] if content_type == "ebook" else [],
+    )
+
+    def _fake_request(_user_db, row, *, sources, content_type, **_kwargs):
+        seen.append((content_type, sources))
+        return auto_download.AutoDownloadOutcome(int(row["id"]), "no_match")
+
+    monkeypatch.setattr(auto_download, "auto_download_request", _fake_request)
+
+    summary = auto_download.auto_download_pending(
+        user_db, queue_release=lambda *_args, **_kwargs: (True, None)
+    )
+
+    assert seen == [("ebook", ["src"])]
+    assert summary["no_match"] == 1
+    assert summary["skipped"] == 1  # the audiobook request had no usable sources

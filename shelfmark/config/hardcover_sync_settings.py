@@ -19,6 +19,7 @@ from shelfmark.core.settings_registry import (
 _CONTENT_TYPE_OPTIONS = [
     {"value": "audiobook", "label": "Audiobooks"},
     {"value": "ebook", "label": "Ebooks"},
+    {"value": "both", "label": "Ebooks and audiobooks"},
 ]
 
 
@@ -28,14 +29,14 @@ def _status_options() -> list[dict[str, str]]:
     return [{"value": str(status["id"]), "label": status["label"]} for status in HARDCOVER_STATUSES]
 
 
-def _audiobook_source_options() -> list[dict[str, Any]]:
-    """Orderable-list options: release sources that can return audiobooks."""
+def _source_options(content_type: str) -> list[dict[str, Any]]:
+    """Orderable-list options: release sources that can return ``content_type``."""
     from shelfmark.release_sources import list_available_sources
 
     options: list[dict[str, Any]] = []
     for src in list_available_sources():
         supported = src.get("supported_content_types") or ["ebook", "audiobook"]
-        if "audiobook" not in supported:
+        if content_type not in supported:
             continue
         enabled = bool(src.get("enabled"))
         options.append(
@@ -48,6 +49,14 @@ def _audiobook_source_options() -> list[dict[str, Any]]:
             }
         )
     return options
+
+
+def _audiobook_source_options() -> list[dict[str, Any]]:
+    return _source_options("audiobook")
+
+
+def _ebook_source_options() -> list[dict[str, Any]]:
+    return _source_options("ebook")
 
 
 def _sync_now(current_values: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -101,7 +110,11 @@ def hardcover_sync_settings() -> list[SettingsField]:
         SelectField(
             key="HARDCOVER_SYNC_CONTENT_TYPE",
             label="Request as",
-            description="Content type assigned to synced requests and targeted for downloads.",
+            description=(
+                'Content type for synced requests. "Ebooks and audiobooks" creates one request '
+                "of each per shelf book; every request is checked against its own library and "
+                "downloaded with its own format guard and source priority."
+            ),
             options=_CONTENT_TYPE_OPTIONS,
             default="audiobook",
         ),
@@ -128,8 +141,10 @@ def hardcover_sync_settings() -> list[SettingsField]:
             title="Automatic Downloads",
             description=(
                 "When enabled, synced requests are auto-approved and downloaded from the "
-                "first source below that yields a strict title/author/format match. If no "
-                "confident match is found, the request is left pending for manual review."
+                "first source in the matching list below that yields a strict title/author/"
+                "format match for the request's content type (ebook formats for ebook "
+                "requests, audiobook formats for audiobook requests). If no confident match "
+                "is found, the request is left pending for manual review."
             ),
         ),
         CheckboxField(
@@ -140,15 +155,25 @@ def hardcover_sync_settings() -> list[SettingsField]:
         ),
         OrderableListField(
             key="AUTO_DOWNLOAD_SOURCE_PRIORITY",
-            label="Source priority",
+            label="Audiobook source priority",
             description=(
-                "Drag to set which release sources are tried first. The first source with "
-                "a strict match wins. Disabled sources are skipped."
+                "Drag to set which release sources are tried first for audiobook requests. "
+                "The first source with a strict match wins. Disabled sources are skipped."
             ),
             options=_audiobook_source_options,
             # Default left empty so registration never imports release_sources (which would
             # deadlock the registry lock). When empty, all available sources are used in
             # registry order (see auto_download._configured_source_priority).
+            default=[],
+        ),
+        OrderableListField(
+            key="AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY",
+            label="Ebook source priority",
+            description=(
+                "Drag to set which release sources are tried first for ebook requests. "
+                "The first source with a strict match wins. Disabled sources are skipped."
+            ),
+            options=_ebook_source_options,
             default=[],
         ),
         NumberField(

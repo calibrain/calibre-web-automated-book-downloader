@@ -10,6 +10,7 @@ from __future__ import annotations
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
+from shelfmark.core import library_index
 from shelfmark.core.config import config as app_config
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.utils import transform_cover_url
@@ -48,6 +49,16 @@ def _configured_statuses() -> list[int]:
         except ValueError:
             continue
     return statuses or [int(s) for s in DEFAULT_SYNC_STATUSES]
+
+
+_CONTENT_TYPES = {"ebook": ["ebook"], "audiobook": ["audiobook"], "both": ["ebook", "audiobook"]}
+DEFAULT_SYNC_CONTENT_TYPE = "audiobook"
+
+
+def _configured_content_types() -> list[str]:
+    """Content types to request for every shelf book ("both" → an ebook and an audiobook)."""
+    raw = str(app_config.get("HARDCOVER_SYNC_CONTENT_TYPE", DEFAULT_SYNC_CONTENT_TYPE) or "")
+    return list(_CONTENT_TYPES.get(raw.strip().lower(), _CONTENT_TYPES[DEFAULT_SYNC_CONTENT_TYPE]))
 
 
 def _build_provider() -> Any | None:
@@ -96,19 +107,21 @@ def _book_to_book_data(book: BookMetadata, content_type: str) -> dict[str, Any]:
     return book_data
 
 
-def _existing_provider_ids(user_db: UserDB) -> set[str]:
-    ids: set[str] = set()
+def _existing_request_keys(user_db: UserDB) -> set[tuple[str, str]]:
+    """``(provider_id, content_type)`` pairs already requested, in any status."""
+    keys: set[tuple[str, str]] = set()
     for row in user_db.list_requests():
         book_data = row.get("book_data") or {}
         if isinstance(book_data, dict):
             pid = book_data.get("provider_id") or book_data.get("id")
             if pid is not None:
-                ids.add(str(pid))
-    return ids
+                content_type = str(row.get("content_type") or book_data.get("content_type") or "")
+                keys.add((str(pid), content_type.lower()))
+    return keys
 
 
-def _already_downloaded(db_path: str | None, title: str, author: str) -> bool:
-    """Best-effort check that a title/author isn't already in download_history."""
+def _already_downloaded(db_path: str | None, title: str, author: str, content_type: str) -> bool:
+    """Best-effort check that a title/author isn't already in download_history for this type."""
     if not db_path:
         return False
     try:
@@ -116,8 +129,9 @@ def _already_downloaded(db_path: str | None, title: str, author: str) -> bool:
         try:
             row = conn.execute(
                 "SELECT 1 FROM download_history "
-                "WHERE LOWER(title) = ? AND LOWER(author) = ? LIMIT 1",
-                (title.strip().lower(), author.strip().lower()),
+                "WHERE LOWER(title) = ? AND LOWER(author) = ? "
+                "AND (content_type IS NULL OR LOWER(content_type) = ?) LIMIT 1",
+                (title.strip().lower(), author.strip().lower(), content_type.lower()),
             ).fetchone()
             return row is not None
         finally:
@@ -153,7 +167,9 @@ def sync_wishlist(
 ) -> dict[str, int]:
     """Sync configured Hardcover shelves into pending requests.
 
-    Returns a summary dict: ``{"added", "skipped", "in_library", "errors"}``. Requires a
+    One request is created per shelf book and configured content type ("both" means an
+    ebook and an audiobook request each), so each format is checked against its own
+    library. Returns ``{"added", "skipped", "in_library", "errors"}``. Requires a
     configured token; enable-gating is the caller's responsibility (see hardcover_scheduler).
     """
     summary = {"added": 0, "skipped": 0, "in_library": 0, "errors": 0}
@@ -170,17 +186,17 @@ def sync_wishlist(
         summary["errors"] += 1
         return summary
 
-    content_type = str(app_config.get("HARDCOVER_SYNC_CONTENT_TYPE", "audiobook") or "audiobook")
-    from shelfmark.core import library_index
+    content_types = _configured_content_types()
 
     try:
-        library_index.require_ready(content_type)
+        for content_type in content_types:
+            library_index.require_ready(content_type)
     except library_index.LibraryUnavailableError as exc:
         # Requesting now would queue books the library may already hold.
         logger.warning("hardcover-sync: %s; skipping this sync", exc)
         summary["errors"] += 1
         return summary
-    known_provider_ids = _existing_provider_ids(user_db)
+    known_requests = _existing_request_keys(user_db)
 
     from shelfmark.core.requests_service import RequestServiceError, create_request
 
@@ -189,44 +205,63 @@ def sync_wishlist(
             provider_id = str(book.provider_id)
             author = _primary_author(book)
 
-            if provider_id in known_provider_ids:
-                summary["skipped"] += 1
-                continue
-            if _already_downloaded(db_path, book.title, author):
-                summary["skipped"] += 1
-                continue
-            if library_index.is_in_library(book, content_type):
-                summary["in_library"] += 1
-                logger.info("hardcover-sync: '%s' already in your library; skipping", book.title)
-                continue
-
-            try:
-                create_request(
-                    user_db,
-                    user_id=user_id,
-                    source_hint=None,
-                    content_type=content_type,
-                    request_level="book",
-                    policy_mode="request_book",
-                    book_data=_book_to_book_data(book, content_type),
-                    note=None,
-                )
-            except RequestServiceError as exc:
-                # Duplicate / max-pending / validation: treat as skip, not failure.
-                if exc.code in {"duplicate_pending_request", "max_pending_reached"}:
+            for content_type in content_types:
+                if (provider_id, content_type) in known_requests:
                     summary["skipped"] += 1
-                else:
-                    logger.warning("hardcover-sync: could not add '%s': %s", book.title, exc)
-                    summary["errors"] += 1
-                continue
-            except Exception:
-                logger.exception("hardcover-sync: unexpected error adding '%s'", book.title)
-                summary["errors"] += 1
-                continue
+                    continue
+                if _already_downloaded(db_path, book.title, author, content_type):
+                    summary["skipped"] += 1
+                    continue
+                if library_index.is_in_library(book, content_type):
+                    summary["in_library"] += 1
+                    logger.info(
+                        "hardcover-sync: '%s' (%s) already in library; skipping",
+                        book.title,
+                        content_type,
+                    )
+                    continue
 
-            known_provider_ids.add(provider_id)
-            summary["added"] += 1
-            logger.info("hardcover-sync: added request for '%s' by %s", book.title, author)
+                try:
+                    create_request(
+                        user_db,
+                        user_id=user_id,
+                        source_hint=None,
+                        content_type=content_type,
+                        request_level="book",
+                        policy_mode="request_book",
+                        book_data=_book_to_book_data(book, content_type),
+                        note=None,
+                    )
+                except RequestServiceError as exc:
+                    # Duplicate / max-pending / validation: treat as skip, not failure.
+                    if exc.code in {"duplicate_pending_request", "max_pending_reached"}:
+                        summary["skipped"] += 1
+                    else:
+                        logger.warning(
+                            "hardcover-sync: could not add '%s' (%s): %s",
+                            book.title,
+                            content_type,
+                            exc,
+                        )
+                        summary["errors"] += 1
+                    continue
+                except Exception:
+                    logger.exception(
+                        "hardcover-sync: unexpected error adding '%s' (%s)",
+                        book.title,
+                        content_type,
+                    )
+                    summary["errors"] += 1
+                    continue
+
+                known_requests.add((provider_id, content_type))
+                summary["added"] += 1
+                logger.info(
+                    "hardcover-sync: added %s request for '%s' by %s",
+                    content_type,
+                    book.title,
+                    author,
+                )
 
     logger.info("hardcover-sync complete: %s", summary)
     return summary
