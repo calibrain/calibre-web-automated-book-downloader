@@ -28,12 +28,7 @@ A release is a strict match only when all of the following hold:
 - the format fits the request — an audiobook request needs an audiobook signal (`m4b`/`mp3`, or "audiobook"/"unabridged" in the title) and is never an ebook-only file; an ebook request needs one of your **Supported Book Formats** (or an `.epub`-style marker in the title) and no audiobook signal;
 - for torrents, the seeder count meets **Minimum seeders**.
 
-- at least 85% of the significant title words appear in the release title
-- the author's surname appears in the release title, indexer name, or author field
-- the release is an audiobook: an audiobook format (`m4b`, `mp3`, or your configured audiobook formats), or "audiobook"/"unabridged" in the title. Ebook-only formats such as `epub` and `pdf` are rejected
-- for torrents, seeders meet **Minimum seeders**; other protocols ignore this check
-
-Among matching releases from the winning source, `m4b` outranks `mp3`, then more seeders, then larger size. If no source produces a confident match the request stays **pending** for manual review; nothing is guessed.
+Among matching releases from the winning source, format ranks first (`m4b` over `mp3` for audiobooks; `epub` over `azw3` over `mobi` for ebooks), then more seeders, then larger size. If no source produces a confident match the request stays **pending** for manual review; nothing is guessed.
 
 ### Library check
 
