@@ -15,6 +15,7 @@ Design goals:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -63,6 +64,18 @@ AUDIOBOOK_TITLE_MARKERS = ("audiobook", "unabridged", "m4b", "audio book")
 
 # Audiobook format ranking for tie-breaking within a single source.
 _FORMAT_RANK = {"m4b": 3, "m4a": 2, "mp3": 1}
+
+# Multi-book packs masquerade as a match because the wanted title appears inside theirs
+# ("Jack Reacher 1-28 + Short Stories - Complete to date"). Any of these in the release
+# title, when the requested title itself does not carry it, marks the release as a pack.
+_PACK_MARKERS = re.compile(
+    r"\b(?:complete|collection|boxset|box set|omnibus|anthology|bundle|megapack"
+    r"|all \d+ (?:audio)?books|books? \d{1,3}\s*(?:-|–|to|thru|through)\s*\d{1,3})\b"
+    r"|\(#?\d{1,3}\s*[-–]\s*\d{1,3}\)"  # "(#1-24)", "(1-22)"
+    r"|\b\d{1,3}\s*[-–]\s*\d{1,3}\s*\+"  # "1-28 +"
+    r"|\+\s*short stories",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -153,6 +166,15 @@ def _format_match(
     return has_ebook_signal and not _audiobook_signal(release, audiobook_formats)
 
 
+def _looks_like_pack(release_title: str | None, book_title: str | None) -> bool:
+    """True when the release advertises a multi-book pack the requested title does not."""
+    wanted = (book_title or "").lower()
+    for match in _PACK_MARKERS.finditer(release_title or ""):
+        if match.group(0).lower() not in wanted:
+            return True
+    return False
+
+
 def _seeders_ok(release: Release, min_seeders: int) -> bool:
     from shelfmark.release_sources import ReleaseProtocol
 
@@ -178,6 +200,7 @@ def strict_match(
     return (
         _title_match(book, release.title or "")
         and _author_match(book, release)
+        and not _looks_like_pack(release.title, book.search_title or book.title)
         and _format_match(release, content_type, audio, ebook)
         and _seeders_ok(release, min_seeders)
     )

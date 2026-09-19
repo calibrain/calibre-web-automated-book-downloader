@@ -532,3 +532,38 @@ def test_pending_pass_follows_each_request_content_type(user_db, monkeypatch):
     assert seen == [("ebook", ["src"])]
     assert summary["no_match"] == 1
     assert summary["skipped"] == 1  # the audiobook request had no usable sources
+
+
+class TestPackGuard:
+    @pytest.mark.parametrize(
+        "pack_title",
+        [
+            "Jack Reacher 1-28 + Short Stories - Complete to date as of 2023 Dick Hill, Jeff Harding",
+            "Jack Reacher (#1-24)",
+            "Jack Reacher Series Books 1 to 17 ( Multi-file )",
+            "Jack Reacher Collection (1-22)",
+            "Jack Reacher Series (All 17 Audiobooks)",
+            "Jack Reacher 29 In Too Deep + Short Stories, Killing Floor better quality || Complete to date 2024",
+        ],
+    )
+    def test_multi_book_packs_are_rejected(self, pack_title):
+        book = BookMetadata(
+            provider="hardcover", provider_id="1", title="In Too Deep", authors=["Lee Child"]
+        )
+        release = _release(title=pack_title, format="m4b", extra={"author": "Lee Child"})
+
+        assert auto_download._looks_like_pack(release.title, book.title)
+        assert not auto_download.strict_match(release, book, content_type="audiobook")
+
+    @pytest.mark.parametrize(
+        ("wanted", "release_title"),
+        [
+            ("61 Hours", "61 Hours (JR Book 14)"),
+            ("Deep Down", "Jack Reacher 16.5: Deep Down"),
+            ("The Midnight Line", "[Jack Reacher 22] - The Midnight Line"),
+            ("The Complete Persepolis", "The Complete Persepolis - Marjane Satrapi"),
+            ("Catch-22", "Catch-22 - Joseph Heller"),
+        ],
+    )
+    def test_single_titles_are_not_mistaken_for_packs(self, wanted, release_title):
+        assert not auto_download._looks_like_pack(release_title, wanted)

@@ -25,6 +25,7 @@ A release is a strict match only when all of the following hold:
 
 - at least 85% of the significant words in the book's title appear in the release title;
 - the author's surname appears in the release title, indexer name or author field (a book with no author metadata matches on title alone);
+- the release is not a multi-book pack — ranges like `1-24` or `Books 1 to 17`, or words like *complete*, *collection*, *box set*, *omnibus*, *+ short stories* — unless the requested title itself carries them;
 - the format fits the request — an audiobook request needs an audiobook signal (`m4b`/`mp3`, a release from an audiobook-only source, or "audiobook"/"unabridged" in the title) and is never an ebook-only file; an ebook request needs one of your **Supported Book Formats** (or an `.epub`-style marker in the title) and no audiobook signal;
 - for torrents that report a seeder count, it meets **Minimum seeders** — sources that report none (AudiobookBay) are not judged on seeders.
 
