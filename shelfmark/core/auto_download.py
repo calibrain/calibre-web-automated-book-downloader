@@ -126,6 +126,7 @@ def _audiobook_signal(release: Release, audiobook_formats: set[str]) -> bool:
     title_l = (release.title or "").lower()
     return (
         fmt in audiobook_formats
+        or (release.content_type or "").lower() == "audiobook"
         or any(marker in title_l for marker in AUDIOBOOK_TITLE_MARKERS)
         or any(f".{af}" in title_l or f" {af}" in title_l for af in audiobook_formats)
     )
@@ -144,7 +145,11 @@ def _format_match(
         return _audiobook_signal(release, audiobook_formats) and fmt not in EBOOK_FORMAT_MARKERS
 
     title_l = (release.title or "").lower()
-    has_ebook_signal = fmt in ebook_formats or any(f".{ef}" in title_l for ef in ebook_formats)
+    has_ebook_signal = (
+        fmt in ebook_formats
+        or (release.content_type or "").lower() == "ebook"
+        or any(f".{ef}" in title_l for ef in ebook_formats)
+    )
     return has_ebook_signal and not _audiobook_signal(release, audiobook_formats)
 
 
@@ -154,7 +159,7 @@ def _seeders_ok(release: Release, min_seeders: int) -> bool:
     if release.protocol != ReleaseProtocol.TORRENT:
         return True  # Non-torrent protocols have no seeder concept.
     if release.seeders is None:
-        return min_seeders <= 0
+        return True  # The source reports no count (e.g. AudiobookBay); nothing to judge.
     return release.seeders >= min_seeders
 
 

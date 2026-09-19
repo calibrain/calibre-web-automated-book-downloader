@@ -109,12 +109,23 @@ class TestStrictMatch:
         release = _release(title="Dungeon Crawler Carl by Matt Dinniman (Unabridged)", format=None)
         assert _strict(release) is True
 
-    @pytest.mark.parametrize("seeders", [0, None])
+    @pytest.mark.parametrize("seeders", [0])
     def test_torrent_below_minimum_seeders_rejected(self, seeders):
         assert _strict(_release(seeders=seeders), min_seeders=1) is False
 
-    def test_torrent_without_seeder_count_allowed_when_minimum_is_zero(self):
-        assert _strict(_release(seeders=None), min_seeders=0) is True
+    def test_torrent_without_seeder_count_is_not_judged_on_seeders(self):
+        release = _release(seeders=None)
+
+        assert auto_download.strict_match(release, _book(), min_seeders=1)
+        assert auto_download.strict_match(release, _book(), min_seeders=50)
+
+    def test_audiobook_only_source_counts_as_an_audiobook_signal(self):
+        release = _release(
+            format=None, title="Dungeon Crawler Carl - Matt Dinniman", content_type="audiobook"
+        )
+
+        assert auto_download.strict_match(release, _book())
+        assert not auto_download.strict_match(release, _book(), content_type="ebook")
 
     def test_non_torrent_ignores_seeders(self):
         release = _release(protocol=ReleaseProtocol.NZB, seeders=None)
