@@ -239,7 +239,7 @@ def auto_download_request(
     content_type: str,
     min_seeders: int,
     queue_release: Callable[..., tuple[bool, str | None]],
-    admin_user_id: int = 1,
+    admin_user_id: int,
 ) -> AutoDownloadOutcome:
     """Search, strict-match, and queue a single pending request."""
     from shelfmark.core.requests_service import RequestServiceError, fulfil_request
@@ -334,12 +334,22 @@ def auto_download_pending(
     *,
     queue_release: Callable[..., tuple[bool, str | None]],
     provider_filter: str | None = "hardcover",
+    admin_user_id: int | None = None,
 ) -> dict[str, int]:
     """Run the auto-download pass over all eligible pending requests.
 
     Returns a summary count dict. No-ops (returns zeros) unless AUTO_DOWNLOAD_ENABLED.
+    ``admin_user_id`` defaults to the lowest-id admin, who fulfils the requests.
     """
     if not bool(app_config.get("AUTO_DOWNLOAD_ENABLED", False)):
+        return {"queued": 0, "no_match": 0, "in_library": 0, "skipped": 0, "error": 0}
+
+    if admin_user_id is None:
+        from shelfmark.core.hardcover_sync import resolve_request_owner
+
+        admin_user_id = resolve_request_owner(user_db)
+    if admin_user_id is None:
+        logger.warning("auto-download: no admin user exists to fulfil requests")
         return {"queued": 0, "no_match": 0, "in_library": 0, "skipped": 0, "error": 0}
 
     content_type = str(app_config.get("HARDCOVER_SYNC_CONTENT_TYPE", "audiobook") or "audiobook")
@@ -370,6 +380,7 @@ def auto_download_pending(
             content_type=content_type,
             min_seeders=min_seeders,
             queue_release=queue_release,
+            admin_user_id=admin_user_id,
         )
         summary[outcome.status] = summary.get(outcome.status, 0) + 1
 

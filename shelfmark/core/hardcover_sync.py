@@ -64,6 +64,12 @@ def _build_provider() -> Any | None:
     return provider
 
 
+def resolve_request_owner(user_db: UserDB) -> int | None:
+    """Return the lowest-id admin, who owns synced requests and approves auto-downloads."""
+    admins = [user for user in user_db.list_users() if user.get("role") == "admin"]
+    return int(admins[0]["id"]) if admins else None
+
+
 def _primary_author(book: BookMetadata) -> str:
     if book.search_author:
         return book.search_author
@@ -143,7 +149,7 @@ def sync_wishlist(
     user_db: UserDB,
     *,
     db_path: str | None = None,
-    user_id: int = 1,
+    user_id: int | None = None,
 ) -> dict[str, int]:
     """Sync configured Hardcover shelves into pending requests.
 
@@ -151,6 +157,13 @@ def sync_wishlist(
     configured token; enable-gating is the caller's responsibility (see hardcover_scheduler).
     """
     summary = {"added": 0, "skipped": 0, "in_library": 0, "errors": 0}
+
+    if user_id is None:
+        user_id = resolve_request_owner(user_db)
+    if user_id is None:
+        logger.warning("hardcover-sync: no admin user exists to own synced requests")
+        summary["errors"] += 1
+        return summary
 
     provider = _build_provider()
     if provider is None:
