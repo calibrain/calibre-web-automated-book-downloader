@@ -206,7 +206,16 @@ def strict_match(
     )
 
 
-def _release_sort_key(release: Release, content_type: str) -> tuple[int, int, int]:
+def _download_count(release: Release) -> int:
+    """Download count reported by the source (direct-download puts it in ``extra``), else 0."""
+    raw = getattr(release, "downloads", None)
+    if raw is None and isinstance(release.extra, dict):
+        raw = release.extra.get("downloads")
+    return coerce_int(raw, 0)
+
+
+def _release_sort_key(release: Release, content_type: str) -> tuple[int, int, int, int]:
+    """Best format first, then the copy others chose (download count, then seeders), then size."""
     fmt = (release.format or "").strip().lower()
     if content_type == "audiobook":
         if fmt not in _FORMAT_RANK and "m4b" in (release.title or "").lower():
@@ -214,7 +223,7 @@ def _release_sort_key(release: Release, content_type: str) -> tuple[int, int, in
         rank = _FORMAT_RANK.get(fmt, 0)
     else:
         rank = _EBOOK_FORMAT_RANK.get(fmt, 0)
-    return (rank, release.seeders or 0, release.size_bytes or 0)
+    return (rank, _download_count(release), release.seeders or 0, release.size_bytes or 0)
 
 
 def pick_best_release(releases: list[Release], content_type: str = "audiobook") -> Release | None:

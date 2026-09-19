@@ -427,6 +427,30 @@ def test_pending_pass_without_an_admin_queues_nothing(user_db, monkeypatch):
     assert summary == {"queued": 0, "no_match": 0, "in_library": 0, "skipped": 0, "error": 0}
 
 
+class TestDownloadCountRanking:
+    def test_most_downloaded_copy_wins_before_size(self):
+        big_obscure = _release(
+            format="epub", seeders=None, size_bytes=9_000_000, extra={"downloads": 3}
+        )
+        popular = _release(
+            format="epub", seeders=None, size_bytes=1_000_000, extra={"downloads": 4_200}
+        )
+
+        assert auto_download.pick_best_release([big_obscure, popular], "ebook") is popular
+
+    def test_format_still_outranks_download_count(self):
+        popular_mobi = _release(format="mobi", extra={"downloads": 10_000})
+        quiet_epub = _release(format="epub", extra={"downloads": 2})
+
+        assert auto_download.pick_best_release([popular_mobi, quiet_epub], "ebook") is quiet_epub
+
+    def test_torrents_without_download_stats_fall_back_to_seeders(self):
+        few = _release(format="m4b", seeders=2)
+        many = _release(format="m4b", seeders=40)
+
+        assert auto_download.pick_best_release([few, many], "audiobook") is many
+
+
 class TestContentTypeAwareMatching:
     def test_epub_matches_an_ebook_request_but_not_an_audiobook_one(self):
         release = _release(format="epub", title="Dungeon Crawler Carl - Matt Dinniman.epub")
