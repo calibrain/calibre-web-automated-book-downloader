@@ -26,6 +26,8 @@ from shelfmark.core.request_helpers import coerce_int
 from shelfmark.core.text_match import (
     DEFAULT_TITLE_MATCH_THRESHOLD,
     author_surname,
+    extra_work_tokens,
+    is_bundle_title,
     title_tokens_match,
 )
 from shelfmark.core.text_match import (
@@ -65,16 +67,10 @@ AUDIOBOOK_TITLE_MARKERS = ("audiobook", "unabridged", "m4b", "audio book")
 # Audiobook format ranking for tie-breaking within a single source.
 _FORMAT_RANK = {"m4b": 3, "m4a": 2, "mp3": 1}
 
-# Multi-book packs masquerade as a match because the wanted title appears inside theirs
-# ("Jack Reacher 1-28 + Short Stories - Complete to date"). Any of these in the release
-# title, when the requested title itself does not carry it, marks the release as a pack.
-_PACK_MARKERS = re.compile(
-    r"\b(?:complete|collection|boxset|box set|omnibus|anthology|bundle|megapack"
-    r"|all \d+ (?:audio)?books|books? \d{1,3}\s*(?:-|–|to|thru|through)\s*\d{1,3})\b"
-    r"|\(#?\d{1,3}\s*[-–]\s*\d{1,3}\)"  # "(#1-24)", "(1-22)"
-    r"|\b\d{1,3}\s*[-–]\s*\d{1,3}\s*\+"  # "1-28 +"
-    r"|\+\s*short stories",
-    re.IGNORECASE,
+# Separators a release name puts between the title and everything else it carries:
+# author, narrator, series, format tags ("Dune - Frank Herbert (Narrated by ...) [m4b]").
+_RELEASE_SEGMENT_SPLIT = re.compile(
+    r"\s+[-\u2013\u2014|/]\s+|\s+by\s+|:\s+|[\[\](){}]", re.IGNORECASE
 )
 
 
@@ -166,13 +162,38 @@ def _format_match(
     return has_ebook_signal and not _audiobook_signal(release, audiobook_formats)
 
 
-def _looks_like_pack(release_title: str | None, book_title: str | None) -> bool:
-    """True when the release advertises a multi-book pack the requested title does not."""
-    wanted = (book_title or "").lower()
-    for match in _PACK_MARKERS.finditer(release_title or ""):
-        if match.group(0).lower() not in wanted:
-            return True
-    return False
+def _names_other_work(book: BookMetadata, release_title: str | None) -> bool:
+    """True when the release names a different work that contains the requested title.
+
+    "Dune" is a subset of "Dune Messiah", so the token match alone accepts a sequel.
+    The library check rejects a shelf title that adds a word the search did not ask
+    for; release names also carry narrators and uploader tags, so the same rule is
+    applied only to the parts of the name that hold the title.
+    """
+    title = book.search_title or book.title
+    context = set(
+        _tokens(
+            " ".join(
+                [
+                    *(book.authors or []),
+                    book.search_author or "",
+                    book.series_name or "",
+                    book.subtitle or "",
+                ]
+            )
+        )
+    )
+    segments = [seg for seg in _RELEASE_SEGMENT_SPLIT.split(release_title or "") if seg.strip()]
+    holding = [
+        seg
+        for seg in segments
+        if title_tokens_match(title, set(_tokens(seg)), TITLE_MATCH_THRESHOLD)
+    ]
+    # A title the separators split apart ("Star Wars: Thrawn") is judged whole.
+    return all(
+        extra_work_tokens(set(_tokens(seg)), title, context)
+        for seg in holding or [release_title or ""]
+    )
 
 
 def _seeders_ok(release: Release, min_seeders: int) -> bool:
@@ -200,7 +221,8 @@ def strict_match(
     return (
         _title_match(book, release.title or "")
         and _author_match(book, release)
-        and not _looks_like_pack(release.title, book.search_title or book.title)
+        and not _names_other_work(book, release.title)
+        and not is_bundle_title(release.title, book.search_title or book.title)
         and _format_match(release, content_type, audio, ebook)
         and _seeders_ok(release, min_seeders)
     )

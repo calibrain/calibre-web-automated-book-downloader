@@ -2,7 +2,7 @@
 
 import pytest
 
-from shelfmark.core import auto_download, library_index
+from shelfmark.core import auto_download, library_index, text_match
 from shelfmark.core.user_db import UserDB
 from shelfmark.metadata_providers import BookMetadata
 from shelfmark.release_sources import Release, ReleaseProtocol
@@ -576,7 +576,7 @@ class TestPackGuard:
         )
         release = _release(title=pack_title, format="m4b", extra={"author": "Lee Child"})
 
-        assert auto_download._looks_like_pack(release.title, book.title)
+        assert text_match.is_bundle_title(release.title, book.title)
         assert not auto_download.strict_match(release, book, content_type="audiobook")
 
     @pytest.mark.parametrize(
@@ -590,4 +590,56 @@ class TestPackGuard:
         ],
     )
     def test_single_titles_are_not_mistaken_for_packs(self, wanted, release_title):
-        assert not auto_download._looks_like_pack(release_title, wanted)
+        assert not text_match.is_bundle_title(release_title, wanted)
+
+
+class TestOtherWorkGuard:
+    @pytest.mark.parametrize(
+        ("wanted", "release_title"),
+        [
+            ("Dune", "Dune Messiah - Frank Herbert [m4b]"),
+            ("Dune", "Frank Herbert - Children of Dune (Unabridged)"),
+            ("Dune", "Dune Messiah (Dune Chronicles #2) by Frank Herbert"),
+            ("Dune", "Frank.Herbert.-.Dune.Messiah.2007.m4b"),
+        ],
+    )
+    def test_a_longer_title_naming_another_work_is_rejected(self, wanted, release_title):
+        book = _book(title=wanted, authors=["Frank Herbert"])
+        release = _release(title=release_title)
+
+        assert not auto_download.strict_match(release, book, audiobook_formats=AUDIOBOOK_FORMATS)
+
+    @pytest.mark.parametrize(
+        ("wanted", "author", "series", "release_title"),
+        [
+            ("Dune", "Frank Herbert", None, "Dune - Frank Herbert (Narrated by Scott Brick) [m4b]"),
+            (
+                "Dune",
+                "Frank Herbert",
+                None,
+                "Dune by Frank Herbert - Read by Simon Vance [Unabridged]",
+            ),
+            ("Dune", "Frank Herbert", None, "Dune: Deluxe Edition - Frank Herbert [m4b]"),
+            ("Dune", "Frank Herbert", None, "Frank.Herbert.-.Dune.2007.Unabridged.m4b"),
+            (
+                "Leviathan Wakes",
+                "James S. A. Corey",
+                None,
+                "Leviathan Wakes: The Expanse, Book 1 - James S. A. Corey [m4b]",
+            ),
+            (
+                "Cross Kill",
+                "James Patterson",
+                "Alex Cross",
+                "Alex Cross 25 - Cross Kill - James Patterson [m4b]",
+            ),
+            ("Star Wars: Thrawn", "Timothy Zahn", None, "Star Wars: Thrawn - Timothy Zahn [m4b]"),
+        ],
+    )
+    def test_the_same_book_wrapped_in_release_noise_still_matches(
+        self, wanted, author, series, release_title
+    ):
+        book = _book(title=wanted, authors=[author], series_name=series)
+        release = _release(title=release_title)
+
+        assert auto_download.strict_match(release, book, audiobook_formats=AUDIOBOOK_FORMATS)
