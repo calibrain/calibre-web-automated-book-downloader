@@ -24,8 +24,9 @@ from typing import TYPE_CHECKING, Any
 
 from shelfmark.core.config import config as app_config
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.release_search import search_book_releases
+from shelfmark.core.release_search import search_source_releases
 from shelfmark.core.request_helpers import coerce_int
+from shelfmark.core.request_policy import normalize_content_type
 from shelfmark.core.text_match import (
     DEFAULT_TITLE_MATCH_THRESHOLD,
     author_surname,
@@ -37,6 +38,10 @@ from shelfmark.core.text_match import (
     tokens as _tokens,
 )
 from shelfmark.core.utils import AUDIOBOOK_FORMATS
+from shelfmark.download.postprocess.policy import (
+    get_supported_audiobook_formats,
+    get_supported_formats,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -50,7 +55,6 @@ logger = setup_logger(__name__)
 # Fraction of significant book-title tokens that must appear in the release title.
 TITLE_MATCH_THRESHOLD = DEFAULT_TITLE_MATCH_THRESHOLD
 
-DEFAULT_AUDIOBOOK_FORMATS = ("m4b", "mp3")
 EBOOK_FORMAT_MARKERS = (
     "epub",
     "mobi",
@@ -62,14 +66,14 @@ EBOOK_FORMAT_MARKERS = (
     "cbz",
     "cbr",
 )
-DEFAULT_EBOOK_FORMATS = ("epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr")
 # Ebook format ranking for tie-breaking within a single source.
 _EBOOK_FORMAT_RANK = {"epub": 4, "kepub": 3, "azw3": 3, "mobi": 2, "azw": 2, "fb2": 1, "pdf": 1}
 # Audiobook signals we recognise in free-text release titles in addition to formats.
 AUDIOBOOK_TITLE_MARKERS = ("audiobook", "unabridged", "m4b", "audio book")
 
-# Audiobook format ranking for tie-breaking within a single source.
-_FORMAT_RANK = {"m4b": 3, "m4a": 2, "mp3": 1}
+# Audiobook format ranking for tie-breaking within a single source. Every format
+# Shelfmark can process outranks an unrecognised one; m4b, m4a and mp3 are preferred.
+_FORMAT_RANK = {**dict.fromkeys(AUDIOBOOK_FORMATS, 1), "mp3": 2, "m4a": 3, "m4b": 4}
 
 # Separators a release name puts between the title and everything else it carries:
 # author, narrator, series, format tags ("Dune - Frank Herbert (Narrated by ...) [m4b]").
@@ -88,25 +92,12 @@ class AutoDownloadOutcome:
     source: str | None = None
 
 
-def _configured_formats(key: str, default: tuple[str, ...]) -> set[str]:
-    configured = app_config.get(key, list(default))
-    values: list[object]
-    if isinstance(configured, str):
-        values = [configured]
-    elif isinstance(configured, (list, tuple, set)):
-        values = list(configured)
-    else:
-        values = []
-    formats = {str(fmt).strip().lower() for fmt in values if str(fmt).strip()}
-    return formats or set(default)
-
-
 def _audiobook_formats() -> set[str]:
-    return _configured_formats("SUPPORTED_AUDIOBOOK_FORMATS", DEFAULT_AUDIOBOOK_FORMATS)
+    return set(get_supported_audiobook_formats())
 
 
 def _ebook_formats() -> set[str]:
-    return _configured_formats("SUPPORTED_FORMATS", DEFAULT_EBOOK_FORMATS)
+    return set(get_supported_formats())
 
 
 def _author_surname_tokens(book: BookMetadata) -> list[str]:
@@ -581,15 +572,17 @@ def auto_download_request(
 
     # Walk sources in priority order; take the first source with a strict match.
     for source_name in sources:
-        _all, by_source, _errors = search_book_releases(
+        # The requester's id lets the search plan apply their default languages.
+        _source, releases, _error = search_source_releases(
+            source_name,
             book,
-            sources=[source_name],
-            content_type=content_type,
             expand_search=True,
+            content_type=content_type,
+            user_id=coerce_int(request_row.get("user_id"), 0) or None,
         )
         candidates = [
             release
-            for release in by_source.get(source_name, [])
+            for release in releases
             if strict_match(
                 release,
                 book,
@@ -693,11 +686,10 @@ def auto_download_pending(
         if str(row.get("delivery_state") or "none").lower() not in {"none", ""}:
             continue
 
-        content_type = str(
+        content_type = normalize_content_type(
             row.get("content_type")
             or (book_data.get("content_type") if isinstance(book_data, dict) else None)
-            or "ebook"
-        ).lower()
+        )
         if content_type not in sources_by_type:
             sources_by_type[content_type] = _configured_source_priority(content_type)
             if not sources_by_type[content_type]:
