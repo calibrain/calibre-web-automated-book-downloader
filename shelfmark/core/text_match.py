@@ -77,6 +77,7 @@ COLLECTION_MARKERS = frozenset(
         "box",
         "set",
         "bundle",
+        "megapack",
         "anthology",
         "compendium",
         "trilogy",
@@ -110,6 +111,17 @@ EDITION_MARKERS = frozenset(
 
 # Neither kind is evidence that the shelf holds a different book.
 PACKAGING_MARKERS = COLLECTION_MARKERS | EDITION_MARKERS
+
+
+def bundle_markers(
+    title_tokens: set[str] | frozenset[str], search_title: str | None = None
+) -> set[str]:
+    """Collection words in a title that the searched title does not carry itself.
+
+    "The Complete Maus" searched against a shelf holding "The Complete Maus" is the
+    book itself, not a collection containing it.
+    """
+    return (set(title_tokens) & COLLECTION_MARKERS) - set(tokens(search_title))
 
 
 def extra_work_tokens(

@@ -21,8 +21,8 @@ from typing import TYPE_CHECKING, Any
 from shelfmark.core.library_providers import all_providers
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.text_match import (
-    COLLECTION_MARKERS,
     author_surname,
+    bundle_markers,
     extra_work_tokens,
     isbn_variants,
     title_tokens_match,
@@ -174,7 +174,7 @@ def match_entries(book: BookMetadata, entries: list[LibraryEntry]) -> str | None
         # another work disqualify it; packaging words do not.
         if extra_work_tokens(set(entry.title_tokens), title, set(entry.context_tokens)):
             continue
-        if entry.title_tokens & COLLECTION_MARKERS:
+        if bundle_markers(entry.title_tokens, title):
             collection = "collection"
             continue
         return "owned"

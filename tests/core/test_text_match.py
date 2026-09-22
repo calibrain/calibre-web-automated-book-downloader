@@ -75,3 +75,16 @@ def test_title_tokens_match_without_significant_tokens_is_false(title):
 )
 def test_normalize_isbn(value, expected):
     assert text_match.normalize_isbn(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("title", "search", "expected"),
+    [
+        ("Dune Omnibus", "Dune", {"omnibus"}),
+        ("The Complete Maus", "The Complete Maus", set()),
+        ("Foundation Trilogy", "Foundation", {"trilogy"}),
+        ("Dune", "Dune", set()),
+    ],
+)
+def test_bundle_markers_ignore_words_the_search_title_carries(title, search, expected) -> None:
+    assert text_match.bundle_markers(set(text_match.tokens(title)), search) == expected
