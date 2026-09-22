@@ -44,13 +44,14 @@ def _book(provider_id, title, author="Matt Dinniman", **overrides):
     return BookMetadata(**fields)
 
 
-def _insert_history(db_path, *, title, author):
+def _insert_history(db_path, *, title, author, final_status="complete", content_type=None):
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
-            "INSERT INTO download_history (task_id, source, title, author, final_status) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (f"task-{title}", "prowlarr", title, author, "complete"),
+            "INSERT INTO download_history "
+            "(task_id, source, title, author, final_status, content_type) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (f"task-{title}-{final_status}", "prowlarr", title, author, final_status, content_type),
         )
         conn.commit()
     finally:
@@ -173,6 +174,23 @@ def test_already_downloaded_matches_history_case_insensitively(user_db, db_path)
     )
     assert not hardcover_sync._already_downloaded(
         None, "Dungeon Crawler Carl", "Matt Dinniman", "audiobook"
+    )
+
+
+@pytest.mark.parametrize(
+    ("final_status", "counts"),
+    [("complete", True), ("active", True), ("error", False), ("cancelled", False)],
+)
+def test_only_a_finished_or_running_download_counts(user_db, db_path, final_status, counts):
+    _insert_history(
+        db_path, title="Dungeon Crawler Carl", author="Matt Dinniman", final_status=final_status
+    )
+
+    assert (
+        hardcover_sync._already_downloaded(
+            db_path, "Dungeon Crawler Carl", "Matt Dinniman", "ebook"
+        )
+        is counts
     )
 
 
@@ -340,13 +358,9 @@ def test_configured_content_types(monkeypatch, raw, expected):
 
 
 def test_already_downloaded_is_per_content_type(user_db, db_path):
-    _insert_history(db_path, title="Dungeon Crawler Carl", author="Matt Dinniman")
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute("UPDATE download_history SET content_type = 'ebook'")
-        conn.commit()
-    finally:
-        conn.close()
+    _insert_history(
+        db_path, title="Dungeon Crawler Carl", author="Matt Dinniman", content_type="ebook"
+    )
 
     assert hardcover_sync._already_downloaded(
         db_path, "Dungeon Crawler Carl", "Matt Dinniman", "ebook"
