@@ -88,3 +88,22 @@ def test_normalize_isbn(value, expected):
 )
 def test_bundle_markers_ignore_words_the_search_title_carries(title, search, expected) -> None:
     assert text_match.bundle_markers(set(text_match.tokens(title)), search) == expected
+
+
+@pytest.mark.parametrize(
+    ("title", "search", "expected"),
+    [
+        ("Jack Reacher 1-28 + Short Stories - Complete to date", "Killing Floor", True),
+        ("Dungeon Crawler Carl Books 1-6", "Dungeon Crawler Carl", True),
+        ("The Expanse (#1-9)", "Leviathan Wakes", True),
+        ("All 7 Audiobooks - J.K. Rowling", "Harry Potter", True),
+        ("Foundation Trilogy - Isaac Asimov", "Foundation", True),
+        ("Dune Megapack", "Dune", True),
+        ("Dune - Frank Herbert (Complete and Unabridged) [m4b]", "Dune", False),
+        ("Dune - Frank Herbert [m4b]", "Dune", False),
+        ("The Complete Maus - Art Spiegelman", "The Complete Maus", False),
+        ("Dune (Books 1-6)", "Dune Books 1-6", False),
+    ],
+)
+def test_is_bundle_title(title, search, expected) -> None:
+    assert text_match.is_bundle_title(title, search) is expected

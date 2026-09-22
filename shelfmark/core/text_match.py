@@ -124,6 +124,34 @@ def bundle_markers(
     return (set(title_tokens) & COLLECTION_MARKERS) - set(tokens(search_title))
 
 
+# Numbered forms a bundle title takes, which single words cannot express: "Books 1-6",
+# "(#1-24)", "1-28 +", "All 5 Books", "+ Short Stories".
+_BUNDLE_RANGE = re.compile(
+    r"\bbooks?\s*\d{1,3}\s*(?:-|\u2013|to|thru|through)\s*\d{1,3}\b"
+    r"|\(#?\d{1,3}\s*[-\u2013]\s*\d{1,3}\)"
+    r"|\b\d{1,3}\s*[-\u2013]\s*\d{1,3}\s*\+"
+    r"|\ball\s+\d+\s+(?:audio)?books\b"
+    r"|\+\s*short\s+stories\b",
+    re.IGNORECASE,
+)
+
+# "Complete and Unabridged" describes one book's recording, not a set of them.
+_UNABRIDGED_PHRASE = re.compile(r"\bcomplete\s*(?:&|and)\s*unabridged\b", re.IGNORECASE)
+
+
+def is_bundle_title(title: str | None, search_title: str | None = None) -> bool:
+    """True when a raw title (a release name, say) bundles several works.
+
+    Checks the collection words and the numbered ranges, ignoring any the searched
+    title carries itself. Use ``bundle_markers`` when only tokens are available.
+    """
+    text = _UNABRIDGED_PHRASE.sub(" ", title or "")
+    if bundle_markers(set(tokens(text)), search_title):
+        return True
+    wanted = (search_title or "").lower()
+    return any(match.group(0).lower() not in wanted for match in _BUNDLE_RANGE.finditer(text))
+
+
 def extra_work_tokens(
     shelf_title_tokens: set[str],
     search_title: str | None,
