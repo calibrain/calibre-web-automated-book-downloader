@@ -692,6 +692,11 @@ _RETRYABLE_DELIVERY_STATES = frozenset({QueueStatus.ERROR.value, QueueStatus.QUE
 _INTERRUPTED = "interrupted"
 _FAILED = "failed"
 
+# The message the startup sweep gives a download it finds orphaned (it also closes the row
+# out as "error"). It is the word the activity API already uses for such a row, and it has to
+# match: an interrupted download is not a failed release.
+_INTERRUPTED_MESSAGE = "interrupted"
+
 
 def _parse_timestamp(value: object) -> datetime | None:
     """A stored request timestamp (SQLite's or ISO with an offset) as an aware datetime."""
@@ -713,9 +718,9 @@ def _last_delivery_change(row: dict[str, Any]) -> datetime | None:
     return None
 
 
-def _latest_history_statuses(db_path: str, request_ids: list[int]) -> dict[int, str]:
-    """The newest download_history status for each request id; requests with none are absent."""
-    latest: dict[int, str] = {}
+def _latest_history(db_path: str, request_ids: list[int]) -> dict[int, tuple[str, str | None]]:
+    """The newest (status, message) in download_history per request id; none means absent."""
+    latest: dict[int, tuple[str, str | None]] = {}
     if not request_ids:
         return latest
     conn = sqlite3.connect(db_path)
@@ -724,27 +729,33 @@ def _latest_history_statuses(db_path: str, request_ids: list[int]) -> dict[int, 
             chunk = request_ids[start : start + 500]
             marks = ",".join("?" * len(chunk))
             rows = conn.execute(
-                "SELECT request_id, final_status FROM download_history "  # noqa: S608 - placeholders only
+                "SELECT request_id, final_status, status_message FROM download_history "  # noqa: S608 - placeholders only
                 f"WHERE request_id IN ({marks}) ORDER BY id",
                 chunk,
             )
-            for request_id, final_status in rows:
-                latest[int(request_id)] = str(final_status)
+            for request_id, final_status, status_message in rows:
+                latest[int(request_id)] = (str(final_status), status_message)
     finally:
         conn.close()
     return latest
 
 
-def _failure_kind(latest_history: str | None) -> str | None:
+def _failure_kind(latest: tuple[str, str | None] | None) -> str | None:
     """Why a request whose delivery never completed never arrived, from its latest history row.
 
-    A row still "active" (or none at all) means the process stopped under the download, so
-    nothing was wrong with the release. "error" means the download itself failed. Anything
-    else disagrees with the request, so it is left alone rather than guessed at.
+    No row, a row still "active", or an error the startup sweep labelled "Interrupted" all mean
+    the process stopped under the download, so nothing was wrong with the release. Any other
+    error means the download itself failed. Anything else disagrees with the request, so it is
+    left alone rather than guessed at.
     """
-    if latest_history in (None, "active"):
+    if latest is None:
         return _INTERRUPTED
-    if latest_history == "error":
+    final_status, message = latest
+    if final_status == "active":
+        return _INTERRUPTED
+    if final_status == "error":
+        if (message or "").strip().lower() == _INTERRUPTED_MESSAGE:
+            return _INTERRUPTED
         return _FAILED
     return None
 
@@ -813,7 +824,7 @@ def reopen_stale_failures(
         return 0
 
     try:
-        history = _latest_history_statuses(db_path, [int(row["id"]) for _, row, _ in stale])
+        history = _latest_history(db_path, [int(row["id"]) for _, row, _ in stale])
     except sqlite3.Error as exc:
         logger.warning("auto-download: no retries this pass, could not read history: %s", exc)
         return 0

@@ -1789,6 +1789,7 @@ class TestRetryAfterCooldown:
         provider_id,
         state="error",
         history="active",
+        history_message="x",
         days_ago=8.0,
         status="fulfilled",
         provider="hardcover",
@@ -1827,7 +1828,9 @@ class TestRetryAfterCooldown:
                 origin="requested",
             )
             if history != "active":
-                service.finalize_download(task_id=task_id, final_status=history, status_message="x")
+                service.finalize_download(
+                    task_id=task_id, final_status=history, status_message=history_message
+                )
         return row
 
     def _reopen(self, user_db, **kwargs):
@@ -1852,6 +1855,21 @@ class TestRetryAfterCooldown:
         assert "7-day cooldown" in stored["last_failure_reason"]
         # Nothing was wrong with the release, so it is not held against it.
         assert "failed_releases" not in stored["book_data"]
+
+    def test_an_error_the_startup_sweep_labelled_interrupted_is_not_held_against_its_release(
+        self, user_db
+    ):
+        row = self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            history="error",
+            history_message="Interrupted",
+        )
+
+        assert self._reopen(user_db) == 1
+
+        assert "failed_releases" not in user_db.get_request(row["id"])["book_data"]
 
     def test_a_request_stuck_queued_with_no_history_counts_as_interrupted(self, user_db):
         row = self._request(
