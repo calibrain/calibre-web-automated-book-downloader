@@ -102,7 +102,9 @@ class TestRunOnce:
 
         assert result == {"status": "ok", "sync": None, "auto_download": {"queued": 1}}
         assert calls["sync"] == []
-        assert calls["auto"] == [(user_db, {"queue_release": queue_release})]
+        assert calls["auto"] == [
+            (user_db, {"queue_release": queue_release, "db_path": "/data/users.db"})
+        ]
 
     def test_forced_run_syncs_regardless_of_toggle(self, calls):
         user_db = object()

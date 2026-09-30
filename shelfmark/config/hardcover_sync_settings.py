@@ -188,9 +188,11 @@ def hardcover_sync_settings() -> list[SettingsField]:
             key="AUTO_DOWNLOAD_RETRY_DAYS",
             label="Retry failed downloads after (days)",
             description=(
-                "A synced request whose download failed, was cancelled or never left the "
-                "queue goes back to pending after this many days and is tried again, a few "
-                "per pass. 0 turns retries off. Reject a request to stop it being retried."
+                "A synced request whose download failed, or was interrupted (a restart, say), "
+                "goes back to pending after this many days and is tried again, a few per pass. "
+                "A release that failed is not picked again, and a request is given up on after "
+                "three failed retries. Cancelled and rejected requests are never retried. "
+                "0 turns retries off."
             ),
             default=7,
             min_value=0,
