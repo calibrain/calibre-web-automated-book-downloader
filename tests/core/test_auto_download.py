@@ -1,5 +1,7 @@
 """Tests for strict release matching and auto-download of pending requests."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from shelfmark.core import auto_download, library_index, text_match
@@ -1764,3 +1766,173 @@ class TestAuthorLookup:
         )
 
         assert outcome.status == "no_match"
+
+
+class TestRetryAfterCooldown:
+    """A failed synced download goes back to pending once it has sat failed for a week."""
+
+    NOW = datetime(2026, 9, 30, 12, 0, tzinfo=UTC)
+
+    @classmethod
+    def _failed(
+        cls,
+        user_db,
+        user_id,
+        *,
+        provider_id,
+        state="error",
+        days_ago=8.0,
+        status="fulfilled",
+        provider="hardcover",
+    ):
+        row = _pending_request(user_db, user_id, provider=provider, provider_id=provider_id)
+        stamp = (cls.NOW - timedelta(days=days_ago)).isoformat(timespec="seconds")
+        return user_db.update_request(
+            row["id"],
+            status=status,
+            delivery_state=state,
+            delivery_updated_at=stamp,
+            release_data={"source": "audiobookbay", "source_id": f"rel-{provider_id}"},
+        )
+
+    def _reopen(self, user_db, **kwargs):
+        kwargs.setdefault("cooldown_days", 7)
+        return auto_download.reopen_stale_failures(user_db, now=self.NOW, **kwargs)
+
+    def test_a_failure_older_than_the_cooldown_is_reopened(self, user_db):
+        user = user_db.create_user(username="reader", role="user")
+        row = self._failed(user_db, user["id"], provider_id="1")
+
+        assert self._reopen(user_db) == 1
+
+        stored = user_db.get_request(row["id"])
+        assert stored["status"] == "pending"
+        assert stored["delivery_state"] == "none"
+        assert stored["release_data"] is None
+        assert "7-day cooldown" in stored["last_failure_reason"]
+        assert "error" in stored["last_failure_reason"]
+
+    @pytest.mark.parametrize(("days_ago", "reopened"), [(6.99, 0), (7.01, 1)])
+    def test_the_cooldown_is_seven_days(self, user_db, days_ago, reopened):
+        user = user_db.create_user(username="reader", role="user")
+        self._failed(user_db, user["id"], provider_id="1", days_ago=days_ago)
+
+        assert self._reopen(user_db) == reopened
+
+    @pytest.mark.parametrize(
+        ("state", "status", "reopened"),
+        [
+            ("error", "fulfilled", True),
+            ("cancelled", "fulfilled", True),
+            ("queued", "fulfilled", True),  # nothing stays queued for a week
+            ("complete", "fulfilled", False),
+            ("none", "fulfilled", False),
+            ("none", "rejected", False),  # a rejection is a decision, never retried
+            ("error", "rejected", False),
+        ],
+    )
+    def test_only_failed_deliveries_are_retried(self, user_db, state, status, reopened):
+        user = user_db.create_user(username="reader", role="user")
+        row = self._failed(user_db, user["id"], provider_id="1", state=state, status=status)
+
+        assert self._reopen(user_db) == int(reopened)
+        assert user_db.get_request(row["id"])["status"] == ("pending" if reopened else status)
+
+    def test_requests_from_other_providers_are_left_alone(self, user_db):
+        user = user_db.create_user(username="reader", role="user")
+        row = self._failed(user_db, user["id"], provider_id="1", provider="openlibrary")
+
+        assert self._reopen(user_db) == 0
+        assert user_db.get_request(row["id"])["status"] == "fulfilled"
+
+    def test_a_backlog_is_spread_over_passes_oldest_first(self, user_db):
+        user = user_db.create_user(username="reader", role="user")
+        ages = [30, 12, 9, 20, 8, 15, 25]
+        rows = {
+            days: self._failed(user_db, user["id"], provider_id=str(days), days_ago=days)
+            for days in ages
+        }
+
+        assert self._reopen(user_db, max_reopen=5) == 5
+
+        reopened = {
+            days
+            for days, row in rows.items()
+            if user_db.get_request(row["id"])["status"] == "pending"
+        }
+        assert reopened == {30, 25, 20, 15, 12}  # the five oldest; 9 and 8 wait for the next pass
+
+        assert self._reopen(user_db, max_reopen=5) == 2  # the rest go on the next pass
+
+    @pytest.mark.parametrize("days", [0, -3])
+    def test_a_zero_or_negative_cooldown_turns_retries_off(self, user_db, days):
+        user = user_db.create_user(username="reader", role="user")
+        row = self._failed(user_db, user["id"], provider_id="1", days_ago=400)
+
+        assert self._reopen(user_db, cooldown_days=days) == 0
+        assert user_db.get_request(row["id"])["status"] == "fulfilled"
+
+    def test_an_unstamped_failure_ages_from_when_it_was_created(self, user_db):
+        user = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, user["id"], provider="hardcover", provider_id="1")
+        user_db.update_request(row["id"], status="fulfilled", delivery_state="error")
+        created = datetime.now(UTC)
+
+        assert (
+            auto_download.reopen_stale_failures(
+                user_db, cooldown_days=7, now=created + timedelta(days=6)
+            )
+            == 0
+        )
+        assert (
+            auto_download.reopen_stale_failures(
+                user_db, cooldown_days=7, now=created + timedelta(days=8)
+            )
+            == 1
+        )
+
+    def test_a_reopened_request_is_picked_up_in_the_same_pass(
+        self, user_db, fake_app_config, monkeypatch
+    ):
+        fake_app_config.values.update(AUTO_DOWNLOAD_ENABLED=True)
+        admin = user_db.create_user(username="admin", role="admin")
+        row = self._failed(user_db, admin["id"], provider_id="1", days_ago=8)
+        monkeypatch.setattr(auto_download, "_configured_source_priority", lambda _t: ["src"])
+        seen: list[int] = []
+
+        def _fake_request(_user_db, request_row, **_kwargs):
+            seen.append(int(request_row["id"]))
+            return auto_download.AutoDownloadOutcome(int(request_row["id"]), "no_match")
+
+        monkeypatch.setattr(auto_download, "auto_download_request", _fake_request)
+        monkeypatch.setattr(
+            auto_download, "reopen_stale_failures", self._with_fixed_clock(auto_download)
+        )
+
+        auto_download.auto_download_pending(
+            user_db, queue_release=lambda *_args, **_kwargs: (True, None)
+        )
+
+        assert seen == [row["id"]]
+
+    def test_the_setting_can_turn_retries_off(self, user_db, fake_app_config, monkeypatch):
+        fake_app_config.values.update(AUTO_DOWNLOAD_ENABLED=True, AUTO_DOWNLOAD_RETRY_DAYS=0)
+        admin = user_db.create_user(username="admin", role="admin")
+        self._failed(user_db, admin["id"], provider_id="1", days_ago=400)
+        monkeypatch.setattr(auto_download, "_configured_source_priority", lambda _t: ["src"])
+        monkeypatch.setattr(
+            auto_download,
+            "auto_download_request",
+            lambda *_a, **_k: pytest.fail("a retry must not run with the setting at 0"),
+        )
+        monkeypatch.setattr(
+            auto_download, "reopen_stale_failures", self._with_fixed_clock(auto_download)
+        )
+
+        auto_download.auto_download_pending(
+            user_db, queue_release=lambda *_args, **_kwargs: (True, None)
+        )
+
+    def _with_fixed_clock(self, module):
+        real = module.reopen_stale_failures
+        return lambda *args, **kwargs: real(*args, now=self.NOW, **kwargs)

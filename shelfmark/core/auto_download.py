@@ -17,17 +17,21 @@ from __future__ import annotations
 
 import math
 import re
+import sqlite3
 import statistics
 import unicodedata
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from shelfmark.core import search_deadline
 from shelfmark.core.config import config as app_config
 from shelfmark.core.logger import setup_logger
+from shelfmark.core.models import QueueStatus
 from shelfmark.core.release_search import search_source_releases
 from shelfmark.core.request_helpers import coerce_int
 from shelfmark.core.request_policy import normalize_content_type
+from shelfmark.core.request_validation import RequestStatus
 from shelfmark.core.text_match import (
     DEFAULT_TITLE_MATCH_THRESHOLD,
     PACKAGING_MARKERS,
@@ -670,6 +674,91 @@ def build_release_data(release: Release, book: BookMetadata, content_type: str) 
     return {key: value for key, value in payload.items() if value is not None}
 
 
+RETRY_DAYS_SETTING = "AUTO_DOWNLOAD_RETRY_DAYS"
+DEFAULT_RETRY_DAYS = 7
+
+# A failed download is retried once it has sat failed for the cooldown. A backlog that is
+# already past it (a bad week, or the first pass after this rule was introduced) would
+# otherwise all retry at once, so each pass reopens only this many, oldest first.
+MAX_RETRIES_PER_PASS = 5
+
+# States that mean the download did not arrive. A request sitting "queued" this long has
+# lost its queue entry (the queue does not hold anything for a week), so it counts too.
+_RETRYABLE_DELIVERY_STATES = frozenset(
+    {QueueStatus.ERROR.value, QueueStatus.CANCELLED.value, QueueStatus.QUEUED.value}
+)
+
+
+def _parse_timestamp(value: object) -> datetime | None:
+    """A stored request timestamp (SQLite's or ISO with an offset) as an aware datetime."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).strip())
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _last_delivery_change(row: dict[str, Any]) -> datetime | None:
+    """When the request last changed delivery state, falling back to older stamps."""
+    for key in ("delivery_updated_at", "reviewed_at", "created_at"):
+        stamp = _parse_timestamp(row.get(key))
+        if stamp is not None:
+            return stamp
+    return None
+
+
+def reopen_stale_failures(
+    user_db: UserDB,
+    *,
+    cooldown_days: int,
+    provider_filter: str | None = "hardcover",
+    max_reopen: int = MAX_RETRIES_PER_PASS,
+    now: datetime | None = None,
+) -> int:
+    """Return synced requests whose download failed to pending once the cooldown has passed.
+
+    Nothing else retries them: the sync treats a request in any status as handled, and
+    the auto-download pass only acts on pending ones. Reopening goes through
+    ``UserDB.reopen_failed_request`` (upstream's own path for a failed request), which
+    clears the chosen release and records why, so the normal pass picks the request up
+    and searches again. A rejected request is a decision and is never touched. Returns
+    how many were reopened; ``cooldown_days`` of 0 or less turns retries off.
+    """
+    if cooldown_days <= 0:
+        return 0
+    cutoff = (now or datetime.now(UTC)) - timedelta(days=cooldown_days)
+
+    stale: list[tuple[datetime, dict[str, Any], str]] = []
+    for row in user_db.list_requests(status=RequestStatus.FULFILLED):
+        state = str(row.get("delivery_state") or "none").lower()
+        if state not in _RETRYABLE_DELIVERY_STATES:
+            continue
+        book_data = row.get("book_data")
+        if provider_filter and (
+            not isinstance(book_data, dict) or book_data.get("provider") != provider_filter
+        ):
+            continue
+        changed = _last_delivery_change(row)
+        if changed is None or changed > cutoff:
+            continue
+        stale.append((changed, row, state))
+
+    stale.sort(key=lambda item: item[0])
+    reopened = 0
+    for _changed, row, state in stale[:max_reopen]:
+        reason = f"Retrying after a {cooldown_days}-day cooldown (delivery was {state})"
+        try:
+            result = user_db.reopen_failed_request(int(row["id"]), failure_reason=reason)
+        except sqlite3.Error as exc:
+            logger.warning("auto-download: could not reopen request %s: %s", row["id"], exc)
+            continue
+        if result is not None:
+            reopened += 1
+    return reopened
+
+
 _SOURCE_PRIORITY_KEYS = {
     "audiobook": "AUTO_DOWNLOAD_SOURCE_PRIORITY",
     "ebook": "AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY",
@@ -870,6 +959,19 @@ def auto_download_pending(
     if admin_user_id is None:
         logger.warning("auto-download: no admin user exists to fulfil requests")
         return zeros
+
+    retry_days = coerce_int(
+        app_config.get(RETRY_DAYS_SETTING, DEFAULT_RETRY_DAYS), DEFAULT_RETRY_DAYS
+    )
+    reopened = reopen_stale_failures(
+        user_db, cooldown_days=retry_days, provider_filter=provider_filter
+    )
+    if reopened:
+        logger.info(
+            "auto-download: reopened %d failed request(s) after the %d-day cooldown",
+            reopened,
+            retry_days,
+        )
 
     min_seeders = coerce_int(app_config.get("AUTO_DOWNLOAD_MIN_SEEDERS", 1), 1)
     sources_by_type: dict[str, list[str]] = {}

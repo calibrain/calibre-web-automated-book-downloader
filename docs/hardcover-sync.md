@@ -35,6 +35,8 @@ AudiobookBay requires every word of a query, and its posts for one volume of a m
 
 Among matching releases from the winning source, format ranks first (`m4b` over `mp3` for audiobooks; `epub` over `azw3` over `mobi` for ebooks), then the copy other people chose — more downloads (direct-download sources report them), then more seeders — then larger size. If no source produces a confident match the request stays **pending** for manual review; nothing is guessed.
 
+A download that fails, is cancelled, or never leaves the queue does not stay failed forever. Once it has sat failed for **Retry failed downloads after (days)** (7 by default), the request goes back to pending and the next pass searches again. Each pass reopens at most five, oldest first, so a backlog is spread out instead of hitting your sources at once. Set it to 0 to turn retries off. Rejecting a request is a decision and is never retried, so reject one you don't want. Cancelling a download by hand counts as a failure for this, so it comes back after the cooldown unless you reject the request.
+
 ### Library check
 
 Both shelf sync and automatic downloads ask the libraries you have enabled under [Library Check](library-check.md) whether the book is already there, for the content type being requested, and skip it if so. There is no separate switch on this tab. A library that is not enabled, or that does not hold the requested content type, never causes a skip.
