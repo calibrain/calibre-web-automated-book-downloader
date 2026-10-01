@@ -157,9 +157,10 @@ def _already_downloaded(db_path: str | None, title: str, author: str, content_ty
         return False
 
 
-def _fetch_status_books(provider: Any, status_id: int) -> list[BookMetadata]:
-    """Page through a Hardcover status shelf, returning all books."""
+def _fetch_status_books(provider: Any, status_id: int) -> tuple[list[BookMetadata], bool]:
+    """Page through a Hardcover status shelf: the books read, and whether a fetch failed."""
     books: list[BookMetadata] = []
+    failed = False
     for page in range(1, _MAX_PAGES + 1):
         try:
             result = provider._fetch_current_user_books_by_status(status_id, page, _PAGE_LIMIT)
@@ -167,12 +168,13 @@ def _fetch_status_books(provider: Any, status_id: int) -> list[BookMetadata]:
             logger.warning(
                 "hardcover-sync: fetch failed (status=%s page=%s): %s", status_id, page, exc
             )
+            failed = True
             break
         page_books = list(result.books or [])
         books.extend(page_books)
         if not result.has_more or not page_books:
             break
-    return books
+    return books, failed
 
 
 def sync_wishlist(
@@ -217,7 +219,10 @@ def sync_wishlist(
     from shelfmark.core.requests_service import RequestServiceError, create_request
 
     for status_id in _configured_statuses():
-        for book in _fetch_status_books(provider, status_id):
+        shelf, fetch_failed = _fetch_status_books(provider, status_id)
+        if fetch_failed:
+            summary["errors"] += 1
+        for book in shelf:
             provider_id = str(book.provider_id)
             author = _primary_author(book)
 

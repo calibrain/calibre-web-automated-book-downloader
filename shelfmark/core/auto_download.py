@@ -975,17 +975,20 @@ def auto_download_request(
     skipped_pack = False
     # Releases that already failed for this request, so a retry does not pick the same one.
     failed_releases = _failed_release_keys(book_data)
+    source_errors: list[str] = []
 
     # Walk sources in priority order; take the first source with a strict match.
     for source_name in sources:
         # The requester's id lets the search plan apply their default languages.
-        _source, releases, _error = search_source_releases(
+        _source, releases, search_error = search_source_releases(
             source_name,
             book,
             expand_search=True,
             content_type=content_type,
             user_id=coerce_int(request_row.get("user_id"), 0) or None,
         )
+        if search_error:
+            source_errors.append(f"{source_name}: {search_error}")
         match_kwargs: dict[str, Any] = {
             "content_type": content_type,
             "min_seeders": min_seeders,
@@ -1042,6 +1045,12 @@ def auto_download_request(
             chosen.title,
         )
         return AutoDownloadOutcome(request_id, "queued", chosen.title, source=source_name)
+
+    if source_errors:
+        # A source that failed has not said the book is missing.
+        detail = "search failed: " + "; ".join(source_errors)
+        logger.warning("auto-download: request %s (%s): %s", request_id, book.title, detail)
+        return AutoDownloadOutcome(request_id, "error", detail)
 
     if skipped_pack:
         logger.info("auto-download: request %s (%s): only multi-book packs", request_id, book.title)
@@ -1121,15 +1130,21 @@ def auto_download_pending(
             summary["skipped"] += 1
             continue
 
-        outcome = auto_download_request(
-            user_db,
-            row,
-            sources=sources,
-            content_type=content_type,
-            min_seeders=min_seeders,
-            queue_release=queue_release,
-            admin_user_id=admin_user_id,
-        )
+        try:
+            outcome = auto_download_request(
+                user_db,
+                row,
+                sources=sources,
+                content_type=content_type,
+                min_seeders=min_seeders,
+                queue_release=queue_release,
+                admin_user_id=admin_user_id,
+            )
+        except Exception:
+            # One bad request must not take the rest of the pass with it.
+            logger.exception("auto-download: request %s failed unexpectedly", row.get("id"))
+            summary["error"] += 1
+            continue
         summary[outcome.status] = summary.get(outcome.status, 0) + 1
 
     logger.info("auto-download pass complete: %s", summary)

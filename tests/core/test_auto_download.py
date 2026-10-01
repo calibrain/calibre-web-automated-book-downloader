@@ -503,6 +503,60 @@ class TestAutoDownloadRequest:
         assert "library" in outcome.detail
         assert user_db.get_request(row["id"])["status"] == "pending"
 
+    def test_a_source_that_errored_is_an_error_not_a_missing_book(self, user_db, monkeypatch):
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        _stub_provider(monkeypatch, _book())
+        monkeypatch.setattr(
+            auto_download,
+            "search_source_releases",
+            lambda *_args, **_kwargs: (None, [], "indexer returned HTTP 503"),
+        )
+
+        outcome = self._run(user_db, row, admin)
+
+        assert outcome.status == "error"
+        assert "HTTP 503" in outcome.detail
+        assert user_db.get_request(row["id"])["status"] == "pending"
+
+    def test_a_working_source_still_queues_when_an_earlier_one_errored(self, user_db, monkeypatch):
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        _stub_provider(monkeypatch, _book())
+        good = _release(title="Dune [M4B]")
+        answers = {"first": (None, [], "timeout"), "second": (None, [good], None)}
+        monkeypatch.setattr(
+            auto_download,
+            "search_source_releases",
+            lambda source, *_args, **_kwargs: answers[source],
+        )
+        monkeypatch.setattr(auto_download, "strict_match", lambda *_a, **_k: True)
+        queued = []
+
+        outcome = self._run(
+            user_db,
+            row,
+            admin,
+            sources=["first", "second"],
+            queue_release=lambda *a, **k: queued.append(a) or (True, None),
+        )
+
+        assert outcome.status == "queued"
+        assert queued
+
+    def test_every_source_clean_and_empty_is_still_no_match(self, user_db, monkeypatch):
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        _stub_provider(monkeypatch, _book())
+        monkeypatch.setattr(
+            auto_download, "search_source_releases", lambda *_a, **_k: (None, [], None)
+        )
+
+        assert self._run(user_db, row, admin).status == "no_match"
+
     # --- multi-book packs: the UI asks "single book or split?"; auto-download cannot ask -----
 
     @staticmethod
@@ -2177,3 +2231,29 @@ class TestRetryAfterCooldown:
     def _with_fixed_clock(self, module):
         real = module.reopen_stale_failures
         return lambda *args, **kwargs: real(*args, now=self.NOW, **kwargs)
+
+
+def test_one_request_that_blows_up_does_not_abort_the_pass(user_db, monkeypatch):
+    user_db.create_user(username="admin", role="admin")
+    reader = user_db.create_user(username="reader", role="user")
+    first = _pending_request(user_db, reader["id"], provider_id="1")
+    second = _pending_request(user_db, reader["id"], provider_id="2")
+    monkeypatch.setattr(auto_download, "app_config", _Config(AUTO_DOWNLOAD_ENABLED=True))
+    monkeypatch.setattr(auto_download, "_configured_source_priority", lambda _t: ["src"])
+    seen = []
+
+    def _fake_request(_user_db, row, **_kwargs):
+        seen.append(int(row["id"]))
+        if len(seen) == 1:  # whichever request is walked first
+            raise RuntimeError("provider exploded")
+        return auto_download.AutoDownloadOutcome(int(row["id"]), "queued")
+
+    monkeypatch.setattr(auto_download, "auto_download_request", _fake_request)
+
+    summary = auto_download.auto_download_pending(
+        user_db, queue_release=lambda *_args, **_kwargs: (True, None)
+    )
+
+    assert sorted(seen) == sorted([int(first["id"]), int(second["id"])])
+    assert summary["error"] == 1
+    assert summary["queued"] == 1

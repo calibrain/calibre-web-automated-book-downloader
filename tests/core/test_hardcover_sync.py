@@ -211,6 +211,38 @@ class TestSyncWishlist:
     def _use_provider(self, monkeypatch, provider):
         monkeypatch.setattr(hardcover_sync, "_build_provider", lambda: provider)
 
+    def test_a_failed_shelf_fetch_is_counted_as_an_error(self, user_db, db_path, monkeypatch):
+        user = user_db.create_user(username="reader", role="user")
+
+        class _Down(_Provider):
+            def _fetch_current_user_books_by_status(self, status_id, page, limit):
+                raise OSError("hardcover is down")
+
+        self._use_provider(monkeypatch, _Down({}))
+
+        summary = hardcover_sync.sync_wishlist(user_db, db_path=db_path, user_id=user["id"])
+
+        assert summary["errors"] >= 1
+        assert summary["added"] == 0
+
+    def test_a_fetch_that_fails_on_a_later_page_keeps_the_books_already_read(
+        self, user_db, db_path, monkeypatch
+    ):
+        user = user_db.create_user(username="reader", role="user")
+
+        class _Flaky(_Provider):
+            def _fetch_current_user_books_by_status(self, status_id, page, limit):
+                if page == 2:
+                    raise OSError("rate limited")
+                return SimpleNamespace(books=[_book(1, "Dungeon Crawler Carl")], has_more=True)
+
+        self._use_provider(monkeypatch, _Flaky({}))
+
+        summary = hardcover_sync.sync_wishlist(user_db, db_path=db_path, user_id=user["id"])
+
+        assert summary["added"] == 1
+        assert summary["errors"] >= 1
+
     def test_adds_new_requests_across_pages(self, user_db, db_path, monkeypatch):
         user = user_db.create_user(username="reader", role="user")
         provider = _Provider(
