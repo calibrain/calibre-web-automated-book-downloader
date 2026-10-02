@@ -206,6 +206,17 @@ def _seeders_ok(release: Release, min_seeders: int) -> bool:
     return release.seeders >= min_seeders
 
 
+def _listing_is_bundle(release: Release, book: BookMetadata) -> bool:
+    """True when the source's own listing title names a multi-book pack.
+
+    Some sources show a pack's contents as one row per book, titled after the book, and keep
+    the pack's name in ``extra["title_raw"]``. ``release.title`` alone then looks like a single
+    book.
+    """
+    raw = release.extra.get("title_raw") if isinstance(release.extra, dict) else None
+    return isinstance(raw, str) and is_bundle_title(raw, book.search_title or book.title)
+
+
 def strict_match(
     release: Release,
     book: BookMetadata,
@@ -223,6 +234,7 @@ def strict_match(
         and _author_match(book, release)
         and not _names_other_work(book, release.title)
         and not is_bundle_title(release.title, book.search_title or book.title)
+        and not _listing_is_bundle(release, book)
         and _format_match(release, content_type, audio, ebook)
         and _seeders_ok(release, min_seeders)
     )
@@ -246,6 +258,24 @@ def _release_sort_key(release: Release, content_type: str) -> tuple[int, int, in
     else:
         rank = _EBOOK_FORMAT_RANK.get(fmt, 0)
     return (rank, _download_count(release), release.seeders or 0, release.size_bytes or 0)
+
+
+# The UI inspects a release and asks "single book or split?" before queueing. Auto-download
+# cannot ask, so it inspects the best few candidates itself and passes over packs.
+MAX_PACK_CHECKS = 3
+
+
+def _is_multi_book_pack(release_data: dict[str, Any]) -> bool:
+    """True when inspection says the release holds several books. Any failure counts as no."""
+    try:
+        from shelfmark.core.release_inspect_routes import inspect_release
+
+        result = inspect_release(release_data)
+        plan = result.get("plan") if result.get("inspected") else None
+        return bool(plan and plan.get("is_pack"))
+    except Exception as exc:  # noqa: BLE001 — inspection is advisory; never block a download
+        logger.warning("auto-download: pack inspection failed, queueing anyway: %s", exc)
+        return False
 
 
 def pick_best_release(releases: list[Release], content_type: str = "audiobook") -> Release | None:
@@ -385,6 +415,7 @@ def auto_download_request(
 
     audiobook_formats = _audiobook_formats()
     ebook_formats = _ebook_formats()
+    skipped_pack = False
 
     # Walk sources in priority order; take the first source with a strict match.
     for source_name in sources:
@@ -406,11 +437,22 @@ def auto_download_request(
                 ebook_formats=ebook_formats,
             )
         ]
-        chosen = pick_best_release(candidates, content_type)
+        chosen = None
+        release_data: dict[str, Any] = {}
+        ranked = sorted(candidates, key=lambda r: _release_sort_key(r, content_type), reverse=True)
+        for index, candidate in enumerate(ranked):
+            if index >= MAX_PACK_CHECKS:
+                break  # the best few were all packs; don't queue an uninspected tail
+            data = build_release_data(candidate, book, content_type)
+            if _is_multi_book_pack(data):
+                logger.info("auto-download: skipping multi-book pack %s", candidate.title)
+                skipped_pack = True
+                continue
+            chosen, release_data = candidate, data
+            break
         if chosen is None:
             continue
 
-        release_data = build_release_data(chosen, book, content_type)
         try:
             fulfil_request(
                 user_db,
@@ -430,6 +472,9 @@ def auto_download_request(
         )
         return AutoDownloadOutcome(request_id, "queued", chosen.title, source=source_name)
 
+    if skipped_pack:
+        logger.info("auto-download: request %s (%s): only multi-book packs", request_id, book.title)
+        return AutoDownloadOutcome(request_id, "no_match", "only multi-book packs found")
     logger.info("auto-download: no strict match for request %s (%s)", request_id, book.title)
     return AutoDownloadOutcome(request_id, "no_match", "no strict match across sources")
 

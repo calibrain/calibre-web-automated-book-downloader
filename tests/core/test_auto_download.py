@@ -91,6 +91,20 @@ class TestStrictMatch:
     def test_matching_release_passes(self):
         assert _strict(_release()) is True
 
+    def test_a_pack_named_in_the_listing_title_is_rejected_even_if_the_row_shows_one_book(self):
+        # AudioBookBay lists a pack's files as rows titled after each book, but the listing
+        # keeps the pack's own name in extra["title_raw"].
+        release = _release(
+            extra={"title_raw": "Dungeon Crawler Carl (#1-7) - Matt Dinniman"},
+        )
+
+        assert _strict(release) is False
+
+    def test_a_single_book_listing_title_still_passes(self):
+        release = _release(extra={"title_raw": "Dungeon Crawler Carl - Matt Dinniman [M4B]"})
+
+        assert _strict(release) is True
+
     def test_title_mismatch_rejected(self):
         assert _strict(_release(title="Some Other Book - Matt Dinniman [M4B]")) is False
 
@@ -403,6 +417,87 @@ class TestAutoDownloadRequest:
         assert outcome.status == "error"
         assert "library" in outcome.detail
         assert user_db.get_request(row["id"])["status"] == "pending"
+
+    # --- multi-book packs: the UI asks "single book or split?"; auto-download cannot ask -----
+
+    @staticmethod
+    def _inspector(monkeypatch, packs, calls=None, raises=None):
+        """Stand in for the pre-download inspection the UI uses; `packs` are the pack source ids."""
+
+        def _inspect(data):
+            if calls is not None:
+                calls.append(data["source_id"])
+            if raises is not None:
+                raise raises
+            is_pack = data["source_id"] in packs
+            return {"inspected": True, "plan": {"is_pack": is_pack, "books": []}}
+
+        monkeypatch.setattr("shelfmark.core.release_inspect_routes.inspect_release", _inspect)
+
+    def _pack_run(self, user_db, monkeypatch, releases):
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        _stub_provider(monkeypatch, _book())
+        monkeypatch.setattr(
+            auto_download, "search_source_releases", lambda *_a, **_k: (None, releases, None)
+        )
+        queued = []
+
+        def _queue(release_data, priority, *, user_id, username):
+            queued.append(release_data["source_id"])
+            return True, None
+
+        return self._run(user_db, row, admin, queue_release=_queue, sources=("first",)), queued
+
+    def test_a_pack_is_skipped_for_the_next_best_single_book(self, user_db, monkeypatch):
+        self._inspector(monkeypatch, packs={"pack"})
+        releases = [
+            _release(source="audiobookbay", source_id="pack", seeders=50),
+            _release(source="audiobookbay", source_id="single", seeders=5),
+        ]
+
+        outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert (outcome.status, queued) == ("queued", ["single"])
+
+    def test_when_every_candidate_is_a_pack_nothing_is_queued(self, user_db, monkeypatch):
+        self._inspector(monkeypatch, packs={"p1", "p2"})
+        releases = [_release(source_id="p1", seeders=9), _release(source_id="p2", seeders=8)]
+
+        outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert (outcome.status, queued) == ("no_match", [])
+        assert "pack" in outcome.detail
+
+    def test_only_the_best_few_candidates_are_inspected(self, user_db, monkeypatch):
+        calls: list[str] = []
+        ids = [f"p{n}" for n in range(6)]
+        self._inspector(monkeypatch, packs=set(ids), calls=calls)
+        releases = [_release(source_id=sid, seeders=100 - n) for n, sid in enumerate(ids)]
+
+        outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert len(calls) == auto_download.MAX_PACK_CHECKS == 3
+        assert calls == ["p0", "p1", "p2"]  # best first
+        assert (outcome.status, queued) == ("no_match", [])
+
+    def test_a_release_the_source_cannot_inspect_is_queued_as_before(self, user_db, monkeypatch):
+        monkeypatch.setattr(
+            "shelfmark.core.release_inspect_routes.inspect_release",
+            lambda _d: {"inspected": False, "plan": None},
+        )
+
+        outcome, queued = self._pack_run(user_db, monkeypatch, [_release(source_id="only")])
+
+        assert (outcome.status, queued) == ("queued", ["only"])
+
+    def test_an_inspector_that_fails_does_not_stop_the_download(self, user_db, monkeypatch):
+        self._inspector(monkeypatch, packs=set(), raises=OSError("detail page down"))
+
+        outcome, queued = self._pack_run(user_db, monkeypatch, [_release(source_id="only")])
+
+        assert (outcome.status, queued) == ("queued", ["only"])
 
     def test_unregistered_provider_is_skipped(self, user_db, monkeypatch):
         admin = user_db.create_user(username="admin", role="admin")
