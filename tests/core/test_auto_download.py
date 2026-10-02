@@ -1934,6 +1934,71 @@ class TestRetryAfterCooldown:
         assert user_db.get_request(with_history["id"])["status"] == "fulfilled"
         assert user_db.get_request(without["id"])["status"] == "fulfilled"
 
+    STALL_MESSAGE = "Download stalled (no activity for 300s)"
+
+    def test_a_download_the_stall_timer_cancelled_is_retried_with_its_release_remembered(
+        self, user_db
+    ):
+        row = self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            state="cancelled",
+            history="cancelled",
+            history_message=self.STALL_MESSAGE,
+        )
+
+        assert self._reopen(user_db) == 1
+
+        stored = user_db.get_request(row["id"])
+        assert stored["status"] == "pending"
+        assert "stalled" in stored["last_failure_reason"]
+        assert stored["book_data"]["failed_releases"] == [
+            {"source": "audiobookbay", "source_id": "rel-1"}
+        ]
+
+    @pytest.mark.parametrize("message", ["Cancelled", "Queued", "Fetching metadata", ""])
+    def test_any_other_cancel_stays_a_decision(self, user_db, message):
+        row = self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            state="cancelled",
+            history="cancelled",
+            history_message=message,
+        )
+
+        assert self._reopen(user_db) == 0
+        assert user_db.get_request(row["id"])["status"] == "fulfilled"
+
+    def test_a_stall_cancelled_request_is_given_up_on_after_three_tries(self, user_db):
+        tried = [{"source": "audiobookbay", "source_id": f"old-{n}"} for n in range(3)]
+        row = self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            state="cancelled",
+            history="cancelled",
+            history_message=self.STALL_MESSAGE,
+            failed_releases=tried,
+        )
+
+        assert self._reopen(user_db) == 0
+        assert user_db.get_request(row["id"])["status"] == "fulfilled"
+
+    def test_a_stall_cancel_obeys_the_cooldown(self, user_db):
+        self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            state="cancelled",
+            history="cancelled",
+            history_message=self.STALL_MESSAGE,
+            days_ago=6.99,
+        )
+
+        assert self._reopen(user_db) == 0
+
     @pytest.mark.parametrize(("days_ago", "reopened"), [(6.99, 0), (7.01, 1)])
     def test_the_cooldown_is_seven_days(self, user_db, days_ago, reopened):
         self._request(user_db, self._user(user_db)["id"], provider_id="1", days_ago=days_ago)

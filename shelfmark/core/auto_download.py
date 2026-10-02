@@ -686,11 +686,18 @@ MAX_RETRIES_PER_PASS = 5
 MAX_FAILURE_RETRIES = 3
 
 # Delivery states that can mean a download never arrived. "cancelled" is deliberately absent:
-# someone or something chose to stop it, and it stays stopped until an admin says otherwise.
+# someone chose to stop it, and it stays stopped until an admin says otherwise. The one
+# exception is a cancel the stall timer made (see _STALLED), which no one chose.
 _RETRYABLE_DELIVERY_STATES = frozenset({QueueStatus.ERROR.value, QueueStatus.QUEUED.value})
+_CANCELLED = QueueStatus.CANCELLED.value
 
 _INTERRUPTED = "interrupted"
 _FAILED = "failed"
+_STALLED = "stalled"
+
+# The message the stall timer records when it ends a download. A person cancelling leaves the
+# last status message instead, so this prefix is what tells a timeout from a decision.
+_STALL_MESSAGE_PREFIX = "download stalled"
 
 # The message the startup sweep gives a download it finds orphaned (it also closes the row
 # out as "error"). It is the word the activity API already uses for such a row, and it has to
@@ -757,6 +764,10 @@ def _failure_kind(latest: tuple[str, str | None] | None) -> str | None:
         if (message or "").strip().lower() == _INTERRUPTED_MESSAGE:
             return _INTERRUPTED
         return _FAILED
+    if final_status == "cancelled" and (message or "").strip().lower().startswith(
+        _STALL_MESSAGE_PREFIX
+    ):
+        return _STALLED
     return None
 
 
@@ -797,9 +808,9 @@ def reopen_stale_failures(
 
     Interrupted downloads are reopened as they were, and the same release may be picked again:
     a torrent already in the client is joined rather than added twice. A download that itself
-    failed has its release remembered on the request and skipped next time, and is given up on
-    after ``MAX_FAILURE_RETRIES``. Cancelled and rejected requests are decisions and are never
-    touched. Returns how many were reopened; ``cooldown_days`` of 0 or less turns retries off,
+    failed, or that the stall timer cancelled, has its release remembered on the request and
+    skipped next time, and is given up on after ``MAX_FAILURE_RETRIES``. Other cancelled requests
+    and rejected ones are decisions and are never touched. Returns how many were reopened; ``cooldown_days`` of 0 or less turns retries off,
     and without readable history nothing is retried, since guessing would be worse.
     """
     if cooldown_days <= 0:
@@ -809,7 +820,7 @@ def reopen_stale_failures(
     stale: list[tuple[datetime, dict[str, Any], str]] = []
     for row in user_db.list_requests(status=RequestStatus.FULFILLED):
         state = str(row.get("delivery_state") or "none").lower()
-        if state not in _RETRYABLE_DELIVERY_STATES:
+        if state not in _RETRYABLE_DELIVERY_STATES and state != _CANCELLED:
             continue
         book_data = row.get("book_data")
         if provider_filter and (
@@ -836,10 +847,10 @@ def reopen_stale_failures(
             break
         request_id = int(row["id"])
         kind = _failure_kind(history.get(request_id))
-        if kind is None:
+        if kind is None or (state == _CANCELLED and kind != _STALLED):
             continue
         try:
-            if kind == _FAILED:
+            if kind in (_FAILED, _STALLED):
                 book_data = dict(row["book_data"])
                 tried = list(book_data.get("failed_releases") or [])
                 if len(tried) >= MAX_FAILURE_RETRIES:

@@ -191,7 +191,8 @@ def hardcover_sync_settings() -> list[SettingsField]:
                 "A synced request whose download failed, or was interrupted (a restart, say), "
                 "goes back to pending after this many days and is tried again, a few per pass. "
                 "A release that failed is not picked again, and a request is given up on after "
-                "three failed retries. Cancelled and rejected requests are never retried. "
+                "three failed retries. A download the stall timer cancelled counts as failed; one "
+                "cancelled by a person, and rejected requests, are never retried. "
                 "0 turns retries off."
             ),
             default=7,
