@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 import re
 import statistics
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -220,6 +221,75 @@ def _listing_is_bundle(release: Release, book: BookMetadata) -> bool:
     return isinstance(raw, str) and is_bundle_title(raw, book.search_title or book.title)
 
 
+# Languages whose titles are not written in Latin letters. When one of these is wanted, a title
+# in that script is not a mismatch.
+_NON_LATIN_LANGUAGES = frozenset(
+    {
+        "ru",
+        "uk",
+        "bg",
+        "sr",
+        "mk",
+        "be",
+        "el",
+        "he",
+        "ar",
+        "fa",
+        "ur",
+        "hi",
+        "bn",
+        "ta",
+        "te",
+        "th",
+        "zh",
+        "ja",
+        "ko",
+    }
+)
+_TITLE_LANGUAGE = re.compile(
+    r"[(\[]\s*(?:in\s+)?([A-Za-z]{3,12})\s+(?:edition|version|translation|audiobook|audio|narration|language)\s*[)\]]",
+    re.IGNORECASE,
+)
+
+
+def _wanted_languages(user_id: int | None) -> list[str] | None:
+    """The requester's default book languages as ISO codes; None means every language."""
+    try:
+        from shelfmark.core.search_plan import _normalize_languages
+
+        return _normalize_languages(None, user_id)
+    except Exception:  # noqa: BLE001 - a settings problem must not turn the filter off
+        logger.warning("auto-download: could not read the default languages, assuming English")
+        return ["en"]
+
+
+def _mostly_non_latin(text: str) -> bool:
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return False
+    other = sum(1 for ch in letters if not unicodedata.name(ch, "").startswith("LATIN"))
+    return other / len(letters) > 0.5
+
+
+def _language_ok(release: Release, languages: list[str] | None) -> bool:
+    """True unless the release is known, or visibly, in a language nobody asked for."""
+    if not languages:
+        return True
+    from shelfmark.core.languages import normalize_language
+
+    if release.language:
+        code = normalize_language(release.language)
+        if code:
+            return code in languages
+    title = release.title or ""
+    named = _TITLE_LANGUAGE.search(title)
+    if named:
+        code = normalize_language(named.group(1))
+        if code and code not in languages:
+            return False
+    return not (_mostly_non_latin(title) and not _NON_LATIN_LANGUAGES.intersection(languages))
+
+
 def strict_match(
     release: Release,
     book: BookMetadata,
@@ -228,6 +298,7 @@ def strict_match(
     min_seeders: int = 1,
     audiobook_formats: set[str] | None = None,
     ebook_formats: set[str] | None = None,
+    languages: list[str] | None = None,
 ) -> bool:
     """Return True only if the release confidently matches the requested book and format."""
     audio = audiobook_formats if audiobook_formats is not None else _audiobook_formats()
@@ -240,6 +311,7 @@ def strict_match(
         and not _listing_is_bundle(release, book)
         and _format_match(release, content_type, audio, ebook)
         and _seeders_ok(release, min_seeders)
+        and _language_ok(release, languages)
     )
 
 
@@ -483,6 +555,7 @@ def auto_download_request(
 
     audiobook_formats = _audiobook_formats()
     ebook_formats = _ebook_formats()
+    languages = _wanted_languages(coerce_int(request_row.get("user_id"), 0) or None)
     skipped_pack = False
 
     # Walk sources in priority order; take the first source with a strict match.
@@ -503,6 +576,7 @@ def auto_download_request(
                 min_seeders=min_seeders,
                 audiobook_formats=audiobook_formats,
                 ebook_formats=ebook_formats,
+                languages=languages,
             )
         ]
         chosen = None

@@ -91,6 +91,86 @@ class TestStrictMatch:
     def test_matching_release_passes(self):
         assert _strict(_release()) is True
 
+    # --- language: English only unless the requester's default languages say otherwise -------
+
+    def test_a_release_in_another_language_is_rejected(self):
+        assert _strict(_release(language="hi"), languages=["en"]) is False
+
+    def test_a_release_in_a_wanted_language_passes(self):
+        assert _strict(_release(language="en"), languages=["en"]) is True
+        assert _strict(_release(language="fr"), languages=["en", "fr"]) is True
+
+    def test_a_language_given_as_a_name_is_understood(self):
+        assert _strict(_release(language="Hindi"), languages=["en"]) is False
+        assert _strict(_release(language="English"), languages=["en"]) is True
+
+    def test_an_unreported_language_with_a_plain_title_passes(self):
+        assert _strict(_release(language=None), languages=["en"]) is True
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Dungeon Crawler Carl (Hindi Edition) - Matt Dinniman",
+            "Dungeon Crawler Carl [Spanish Version] - Matt Dinniman",
+            "Dungeon Crawler Carl (German Translation) - Matt Dinniman",
+            "Dungeon Crawler Carl (French audiobook) - Matt Dinniman",
+        ],
+    )
+    def test_a_title_that_names_another_language_is_rejected_when_none_is_reported(self, title):
+        assert _strict(_release(title=title, language=None), languages=["en"]) is False
+
+    def test_a_title_naming_a_wanted_language_is_kept(self):
+        title = "Dungeon Crawler Carl (English Edition) - Matt Dinniman"
+        assert _strict(_release(title=title, language=None), languages=["en"]) is True
+        french = "Dungeon Crawler Carl (French Edition) - Matt Dinniman"
+        assert _strict(_release(title=french, language=None), languages=["en", "fr"]) is True
+
+    def test_a_reported_language_beats_the_title(self):
+        title = "Dungeon Crawler Carl (Hindi Edition) - Matt Dinniman"
+        assert _strict(_release(title=title, language="en"), languages=["en"]) is True
+
+    def test_a_title_mostly_in_another_script_is_rejected_unless_that_script_is_wanted(self):
+        # Latin enough to match the book, but most of the letters are Cyrillic.
+        title = (
+            "Dungeon Crawler Carl - Matt Dinniman "
+            + "\u041f\u043e\u0434\u0437\u0435\u043c\u0435\u043b\u044c\u0435 " * 6
+        )
+        assert _strict(_release(title=title, language=None), languages=["en"]) is False
+        assert _strict(_release(title=title, language=None), languages=["ru"]) is True
+
+    def test_no_wanted_languages_means_every_language_is_fine(self):
+        assert _strict(_release(language="hi"), languages=None) is True
+        assert _strict(_release(language="hi")) is True  # the default, for callers that do not say
+
+    @pytest.mark.parametrize(
+        ("configured", "expected"),
+        [
+            (["en"], ["en"]),
+            ("english", ["en"]),
+            (["en", "fr"], ["en", "fr"]),
+            ("all", None),
+            (None, None),
+        ],
+    )
+    def test_the_wanted_languages_come_from_the_default_setting(
+        self, monkeypatch, configured, expected
+    ):
+        from shelfmark.core import search_plan
+
+        monkeypatch.setattr(search_plan.config, "get", lambda key, default=None, **kw: configured)
+
+        assert auto_download._wanted_languages(1) == expected
+
+    def test_a_settings_failure_does_not_switch_the_language_filter_off(self, monkeypatch):
+        from shelfmark.core import search_plan
+
+        def _boom(*_a, **_k):
+            raise OSError("settings unreadable")
+
+        monkeypatch.setattr(search_plan.config, "get", _boom)
+
+        assert auto_download._wanted_languages(1) == ["en"]
+
     def test_a_pack_named_in_the_listing_title_is_rejected_even_if_the_row_shows_one_book(self):
         # AudioBookBay lists a pack's files as rows titled after each book, but the listing
         # keeps the pack's own name in extra["title_raw"].
@@ -537,6 +617,34 @@ class TestAutoDownloadRequest:
         files = {sid: ["Book.m4b"] for sid in one}
         files.update({sid: [f"{n:02d}.mp3" for n in range(1, 30)] for sid in sets})
         self._file_inspector(monkeypatch, files)
+
+    def test_a_release_in_the_wrong_language_is_passed_over_for_the_next_best(
+        self, user_db, monkeypatch
+    ):
+        monkeypatch.setattr(auto_download, "_wanted_languages", lambda _uid: ["en"])
+        self._files(monkeypatch, one=["hindi", "english"], sets=[])
+        releases = [
+            _release(
+                source_id="hindi",
+                title="Dungeon Crawler Carl (Hindi Edition) - Matt Dinniman",
+                seeders=50,
+            ),
+            _release(source_id="english", title="Dungeon Crawler Carl - Matt Dinniman", seeders=5),
+        ]
+
+        _outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert queued == ["english"]
+
+    def test_when_every_release_is_in_the_wrong_language_nothing_is_queued(
+        self, user_db, monkeypatch
+    ):
+        monkeypatch.setattr(auto_download, "_wanted_languages", lambda _uid: ["en"])
+        releases = [_release(source_id="a", language="hi"), _release(source_id="b", language="es")]
+
+        outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert (outcome.status, queued) == ("no_match", [])
 
     def test_a_thin_m4b_loses_to_a_fuller_chapter_set(self, user_db, monkeypatch):
         self._files(monkeypatch, one=["thin"], sets=["full"])
