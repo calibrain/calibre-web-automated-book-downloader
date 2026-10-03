@@ -440,7 +440,9 @@ class TestAutoDownloadRequest:
         row = _pending_request(user_db, reader["id"])
         _stub_provider(monkeypatch, _book())
         monkeypatch.setattr(
-            auto_download, "search_source_releases", lambda *_a, **_k: (None, releases, None)
+            auto_download,
+            "search_book_releases",
+            lambda *_a, **_k: (releases, {"first": releases}, []),
         )
         queued = []
 
@@ -449,6 +451,250 @@ class TestAutoDownloadRequest:
             return True, None
 
         return self._run(user_db, row, admin, queue_release=_queue, sources=("first",)), queued
+
+    @staticmethod
+    def _file_inspector(monkeypatch, files_by_id, calls=None):
+        def _inspect(data):
+            if calls is not None:
+                calls.append(data["source_id"])
+            files = [{"path": p, "size": 1} for p in files_by_id[data["source_id"]]]
+            return {"inspected": True, "files": files, "plan": {"is_pack": False, "books": []}}
+
+        monkeypatch.setattr("shelfmark.core.release_inspect_routes.inspect_release", _inspect)
+
+    def test_a_single_m4b_file_beats_a_better_ranked_chapter_set(self, user_db, monkeypatch):
+        parts = [f"Part {n:02d} - Title.mp3" for n in range(1, 34)]
+        self._file_inspector(monkeypatch, {"mp3set": parts, "one": ["Book.m4b"]})
+        releases = [
+            _release(
+                source_id="mp3set",
+                title="Dungeon Crawler Carl - Matt Dinniman",
+                format=None,
+                content_type="audiobook",
+                seeders=50,
+            ),
+            _release(
+                source_id="one",
+                title="Dungeon Crawler Carl - Matt Dinniman",
+                format=None,
+                content_type="audiobook",
+                seeders=5,
+            ),
+        ]
+
+        outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert (outcome.status, queued) == ("queued", ["one"])
+
+    def test_with_no_single_file_release_the_best_ranked_is_queued(self, user_db, monkeypatch):
+        parts = ["01.mp3", "02.mp3"]
+        self._file_inspector(monkeypatch, {"a": parts, "b": parts})
+        releases = [
+            _release(
+                source_id="a",
+                title="Dungeon Crawler Carl - Matt Dinniman",
+                format=None,
+                content_type="audiobook",
+                seeders=50,
+            ),
+            _release(
+                source_id="b",
+                title="Dungeon Crawler Carl - Matt Dinniman",
+                format=None,
+                content_type="audiobook",
+                seeders=5,
+            ),
+        ]
+
+        outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert (outcome.status, queued) == ("queued", ["a"])
+
+    def test_a_tagged_m4b_is_not_followed_by_extra_inspections(self, user_db, monkeypatch):
+        calls: list[str] = []
+        self._file_inspector(monkeypatch, {"a": ["x.m4b"], "b": ["y.m4b"]}, calls)
+        releases = [_release(source_id="a", seeders=9), _release(source_id="b", seeders=1)]
+
+        _outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert (queued, calls) == (["a"], ["a"])
+
+    # --- a thin single file must not beat a fuller copy just because it is one m4b -------------
+
+    MB = 1_000_000
+
+    def _sized(self, source_id, mb, *, fmt=None, seeders=1):
+        return _release(
+            source_id=source_id,
+            title="Dungeon Crawler Carl - Matt Dinniman",
+            format=fmt,
+            content_type="audiobook",
+            seeders=seeders,
+            size_bytes=None if mb is None else mb * self.MB,
+        )
+
+    def _files(self, monkeypatch, one, sets):
+        files = {sid: ["Book.m4b"] for sid in one}
+        files.update({sid: [f"{n:02d}.mp3" for n in range(1, 30)] for sid in sets})
+        self._file_inspector(monkeypatch, files)
+
+    def test_a_thin_m4b_loses_to_a_fuller_chapter_set(self, user_db, monkeypatch):
+        self._files(monkeypatch, one=["thin"], sets=["full"])
+        releases = [self._sized("thin", 120, fmt="m4b"), self._sized("full", 480, fmt="mp3")]
+
+        _outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert queued == ["full"]
+
+    def test_a_single_m4b_of_similar_size_still_wins(self, user_db, monkeypatch):
+        self._files(monkeypatch, one=["one"], sets=["full"])
+        releases = [self._sized("one", 340, fmt="m4b"), self._sized("full", 480, fmt="mp3")]
+
+        _outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert queued == ["one"]
+
+    def test_an_unknown_size_is_not_treated_as_thin(self, user_db, monkeypatch):
+        self._files(monkeypatch, one=["one"], sets=["full", "other"])
+        releases = [
+            self._sized("one", None, fmt="m4b"),
+            self._sized("full", 480, fmt="mp3"),
+            self._sized("other", 450, fmt="mp3"),
+        ]
+
+        _outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert queued == ["one"]
+
+    def _min_size(self, monkeypatch, value):
+        orig = auto_download.app_config.get
+        monkeypatch.setattr(
+            auto_download.app_config,
+            "get",
+            lambda key, default=None, **kw: (
+                value if key == auto_download.MIN_SIZE_SETTING else orig(key, default, **kw)
+            ),
+        )
+
+    def test_the_default_is_two_thirds_of_the_largest_copy(self, user_db, monkeypatch):
+        assert auto_download.DEFAULT_MIN_SIZE_PERCENT == 67
+        self._files(monkeypatch, one=["one"], sets=["full"])
+        # 310/480 is 64.6%: under two thirds, so it loses; 330/480 is 68.8%, so it wins
+        _o, thin = self._pack_run(
+            user_db, monkeypatch, [self._sized("one", 310, fmt="m4b"), self._sized("full", 480)]
+        )
+        assert thin == ["full"]
+
+    def test_a_lower_setting_accepts_a_smaller_copy(self, user_db, monkeypatch):
+        self._min_size(monkeypatch, 50)
+        self._files(monkeypatch, one=["one"], sets=["full"])
+        releases = [self._sized("one", 310, fmt="m4b"), self._sized("full", 480, fmt="mp3")]
+
+        _outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert queued == ["one"]
+
+    def test_a_higher_setting_rejects_a_copy_that_the_default_accepts(self, user_db, monkeypatch):
+        self._min_size(monkeypatch, 75)
+        self._files(monkeypatch, one=["one"], sets=["full"])
+        releases = [self._sized("one", 340, fmt="m4b"), self._sized("full", 480, fmt="mp3")]
+
+        _outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert queued == ["full"]
+
+    def test_zero_turns_the_size_guard_off(self, user_db, monkeypatch):
+        self._min_size(monkeypatch, 0)
+        self._files(monkeypatch, one=["thin"], sets=["full"])
+        releases = [self._sized("thin", 50, fmt="m4b"), self._sized("full", 480, fmt="mp3")]
+
+        _outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert queued == ["thin"]
+
+    @pytest.mark.parametrize(
+        ("configured", "percent"),
+        [
+            (None, 67),
+            ("", 67),
+            ("soon", 67),
+            (float("nan"), 67),
+            (50, 50),
+            ("75", 75),
+            (0, 0),
+            (-5, 0),
+            (250, 100),
+        ],
+    )
+    def test_the_setting_is_read_and_kept_in_range(self, monkeypatch, configured, percent):
+        self._min_size(monkeypatch, configured)
+
+        assert auto_download._min_size_percent() == percent
+
+    def test_the_setting_is_offered_with_its_range(self):
+        from shelfmark.config import hardcover_sync_settings  # noqa: F401
+        from shelfmark.core.settings_registry import get_settings_field_map
+
+        field, _tab = get_settings_field_map()[auto_download.MIN_SIZE_SETTING]
+
+        assert (field.default, field.min_value, field.max_value) == (67, 0, 100)
+
+    def test_a_thin_m4b_is_still_queued_when_it_is_all_there_is(self, user_db, monkeypatch):
+        self._files(monkeypatch, one=["thin"], sets=[])
+        releases = [self._sized("thin", 120, fmt="m4b")]
+
+        _outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert queued == ["thin"]
+
+    def test_an_enormous_outlier_does_not_make_every_real_copy_look_thin(
+        self, user_db, monkeypatch
+    ):
+        self._files(monkeypatch, one=["one"], sets=["full", "huge"])
+        releases = [
+            self._sized("one", 400, fmt="m4b"),
+            self._sized("full", 480, fmt="mp3"),
+            self._sized("huge", 3000, fmt="mp3"),
+        ]
+
+        _outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert queued == ["one"]
+
+    def test_undersized_copies_are_moved_behind_the_rest_in_order(self):
+        rels = [self._sized("a", 100, fmt="m4b"), self._sized("b", 500), self._sized("c", 450)]
+
+        out = auto_download._demote_undersized(rels, "audiobook")
+
+        assert [r.source_id for r in out] == ["b", "c", "a"]
+
+    def test_ebooks_are_never_reordered_by_size(self):
+        rels = [self._sized("a", 1, fmt="epub"), self._sized("b", 500, fmt="pdf")]
+
+        assert auto_download._demote_undersized(rels, "ebook") == rels
+
+    def test_a_tagged_m4b_that_cannot_be_inspected_is_still_not_followed_by_more_checks(
+        self, user_db, monkeypatch
+    ):
+        calls: list[str] = []
+
+        def _inspect(data):
+            calls.append(data["source_id"])
+            return {"inspected": False, "plan": None}
+
+        monkeypatch.setattr("shelfmark.core.release_inspect_routes.inspect_release", _inspect)
+        releases = [self._sized("a", 300, fmt="m4b"), self._sized("b", 290, fmt="m4b")]
+
+        _outcome, queued = self._pack_run(user_db, monkeypatch, releases)
+
+        assert (queued, calls) == (["a"], ["a"])
+
+    def test_single_audio_file_detection(self):
+        f = auto_download._is_single_audio_file
+        assert f([{"path": "B/Book.m4b"}, {"path": "B/cover.jpg"}])
+        assert not f([{"path": "01.mp3"}])  # one mp3 is not a container
+        assert not f([{"path": "1.m4b"}, {"path": "2.m4b"}])
+        assert not f(None)
 
     def test_a_pack_is_skipped_for_the_next_best_single_book(self, user_db, monkeypatch):
         self._inspector(monkeypatch, packs={"pack"})

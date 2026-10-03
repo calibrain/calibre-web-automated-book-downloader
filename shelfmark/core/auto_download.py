@@ -15,7 +15,9 @@ Design goals:
 
 from __future__ import annotations
 
+import math
 import re
+import statistics
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +35,7 @@ from shelfmark.core.text_match import (
 from shelfmark.core.text_match import (
     tokens as _tokens,
 )
+from shelfmark.core.utils import AUDIOBOOK_FORMATS
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -248,15 +251,20 @@ def _download_count(release: Release) -> int:
     return coerce_int(raw, 0)
 
 
+def _audiobook_format(release: Release) -> str:
+    """The release's audiobook format; an unrecognised one is read from an "m4b" title tag."""
+    fmt = (release.format or "").strip().lower()
+    if fmt not in _FORMAT_RANK and "m4b" in (release.title or "").lower():
+        return "m4b"
+    return fmt
+
+
 def _release_sort_key(release: Release, content_type: str) -> tuple[int, int, int, int]:
     """Best format first, then the copy others chose (download count, then seeders), then size."""
-    fmt = (release.format or "").strip().lower()
     if content_type == "audiobook":
-        if fmt not in _FORMAT_RANK and "m4b" in (release.title or "").lower():
-            fmt = "m4b"
-        rank = _FORMAT_RANK.get(fmt, 0)
+        rank = _FORMAT_RANK.get(_audiobook_format(release), 0)
     else:
-        rank = _EBOOK_FORMAT_RANK.get(fmt, 0)
+        rank = _EBOOK_FORMAT_RANK.get((release.format or "").strip().lower(), 0)
     return (rank, _download_count(release), release.seeders or 0, release.size_bytes or 0)
 
 
@@ -265,17 +273,77 @@ def _release_sort_key(release: Release, content_type: str) -> tuple[int, int, in
 MAX_PACK_CHECKS = 3
 
 
-def _is_multi_book_pack(release_data: dict[str, Any]) -> bool:
-    """True when inspection says the release holds several books. Any failure counts as no."""
+_SINGLE_FILE_AUDIO = frozenset({"m4b", "m4a"})
+
+
+def _is_single_audio_file(files: object) -> bool:
+    """True when an inspected file list holds exactly one audio file and it is an m4b/m4a."""
+    if not isinstance(files, list):
+        return False
+    exts = [
+        str(f.get("path", "")).rsplit(".", 1)[-1].lower()
+        for f in files
+        if isinstance(f, dict) and "." in str(f.get("path", ""))
+    ]
+    audio = [ext for ext in exts if ext in AUDIOBOOK_FORMATS]
+    return len(audio) == 1 and audio[0] in _SINGLE_FILE_AUDIO
+
+
+def _inspect_candidate(release_data: dict[str, Any]) -> tuple[bool, bool]:
+    """Inspect a release: (holds several books, is one m4b/m4a file). Any failure is (False, False)."""
     try:
         from shelfmark.core.release_inspect_routes import inspect_release
 
         result = inspect_release(release_data)
-        plan = result.get("plan") if result.get("inspected") else None
-        return bool(plan and plan.get("is_pack"))
+        if not result.get("inspected"):
+            return False, False
+        plan = result.get("plan")
+        return bool(plan and plan.get("is_pack")), _is_single_audio_file(result.get("files"))
     except Exception as exc:  # noqa: BLE001 — inspection is advisory; never block a download
         logger.warning("auto-download: pack inspection failed, queueing anyway: %s", exc)
-        return False
+        return False, False
+
+
+# A copy far smaller than the others for the same book is a lower-bitrate copy. Format rank must
+# not lift it over a fuller one: a thin single m4b should lose to a good chapter set that can be
+# merged afterwards. Size is the only quality signal every source reports (no duration or bitrate).
+# The cut-off is a setting: the smallest acceptable copy, as a percentage of the largest.
+MIN_SIZE_SETTING = "AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT"
+DEFAULT_MIN_SIZE_PERCENT = 67
+# Sizes this far above the median (a pack, say) are ignored when picking the reference size.
+_SIZE_OUTLIER_FACTOR = 2.5
+
+
+def _min_size_percent() -> int:
+    """The configured cut-off, 0 (guard off) to 100; anything unusable falls back to the default."""
+    raw = app_config.get(MIN_SIZE_SETTING, DEFAULT_MIN_SIZE_PERCENT)
+    try:
+        percent = float(raw)  # pyright: ignore[reportArgumentType]
+    except TypeError, ValueError:
+        return DEFAULT_MIN_SIZE_PERCENT
+    if not math.isfinite(percent):
+        return DEFAULT_MIN_SIZE_PERCENT
+    return round(min(max(percent, 0), 100))
+
+
+def _undersized_copies(releases: list[Release], content_type: str) -> list[Release]:
+    """Audiobooks: copies under the configured share of the largest comparable copy's size."""
+    percent = _min_size_percent()
+    if content_type != "audiobook":
+        return []
+    sizes = [r.size_bytes for r in releases if r.size_bytes and r.size_bytes > 0]
+    if len(sizes) < 2:
+        return []
+    median = statistics.median(sizes)
+    reference = max(size for size in sizes if size <= _SIZE_OUTLIER_FACTOR * median)
+    floor = percent / 100 * reference
+    return [r for r in releases if r.size_bytes and 0 < r.size_bytes < floor]
+
+
+def _demote_undersized(ranked: list[Release], content_type: str) -> list[Release]:
+    """Move undersized copies behind the rest, keeping the order within each group."""
+    thin = _undersized_copies(ranked, content_type)
+    return [r for r in ranked if r not in thin] + thin
 
 
 def pick_best_release(releases: list[Release], content_type: str = "audiobook") -> Release | None:
@@ -440,16 +508,25 @@ def auto_download_request(
         chosen = None
         release_data: dict[str, Any] = {}
         ranked = sorted(candidates, key=lambda r: _release_sort_key(r, content_type), reverse=True)
+        thin = _undersized_copies(ranked, content_type)
+        ranked = _demote_undersized(ranked, content_type)
         for index, candidate in enumerate(ranked):
             if index >= MAX_PACK_CHECKS:
                 break  # the best few were all packs; don't queue an uninspected tail
             data = build_release_data(candidate, book, content_type)
-            if _is_multi_book_pack(data):
+            is_pack, single_file = _inspect_candidate(data)
+            if is_pack:
                 logger.info("auto-download: skipping multi-book pack %s", candidate.title)
                 skipped_pack = True
                 continue
-            chosen, release_data = candidate, data
-            break
+            if single_file and candidate not in thin:
+                # One m4b/m4a beats a set of chapter files: no merge step afterwards.
+                chosen, release_data = candidate, data
+                break
+            if chosen is None:
+                chosen, release_data = candidate, data  # best-ranked fallback
+            if content_type != "audiobook" or _audiobook_format(candidate) == "m4b":
+                break  # already as good as it gets; don't inspect the rest
         if chosen is None:
             continue
 
