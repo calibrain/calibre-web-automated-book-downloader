@@ -331,13 +331,34 @@ def _audiobook_format(release: Release) -> str:
     return fmt
 
 
-def _release_sort_key(release: Release, content_type: str) -> tuple[int, int, int, int]:
-    """Best format first, then the copy others chose (download count, then seeders), then size."""
+def _peer_rank(release: Release) -> tuple[int, int, int]:
+    """How well the peer holding a Soulseek release can serve it: a free upload slot, then a
+    short queue, then upload speed. Releases without those details (every other source) all
+    rank the same here, so their order is unchanged."""
+    extra = release.extra if isinstance(release.extra, dict) else {}
+    if "has_free_upload_slot" not in extra:
+        return (0, 0, 0)
+    return (
+        1 if extra.get("has_free_upload_slot") else 0,
+        -coerce_int(extra.get("queue_length"), 0),
+        coerce_int(extra.get("upload_speed"), 0),
+    )
+
+
+def _release_sort_key(release: Release, content_type: str) -> tuple[int, ...]:
+    """Best format first, then the copy others chose (download count, then seeders), then how
+    well the peer can serve it (Soulseek), then size."""
     if content_type == "audiobook":
         rank = _FORMAT_RANK.get(_audiobook_format(release), 0)
     else:
         rank = _EBOOK_FORMAT_RANK.get((release.format or "").strip().lower(), 0)
-    return (rank, _download_count(release), release.seeders or 0, release.size_bytes or 0)
+    return (
+        rank,
+        _download_count(release),
+        release.seeders or 0,
+        *_peer_rank(release),
+        release.size_bytes or 0,
+    )
 
 
 # The UI inspects a release and asks "single book or split?" before queueing. Auto-download

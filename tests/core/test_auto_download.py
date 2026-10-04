@@ -646,6 +646,56 @@ class TestAutoDownloadRequest:
 
         assert (outcome.status, queued) == ("no_match", [])
 
+    # --- Soulseek results have no seeders: the peer's slot, queue and speed rank them ---------
+
+    @staticmethod
+    def _peer(source_id, *, slot, queue=0, speed=0, size=100):
+        return _release(
+            source="slskd",
+            source_id=source_id,
+            seeders=None,
+            size_bytes=size * 1_000_000,
+            extra={"has_free_upload_slot": slot, "queue_length": queue, "upload_speed": speed},
+        )
+
+    def test_a_peer_with_a_free_slot_beats_a_bigger_copy_that_must_queue(self):
+        queued = self._peer("queued", slot=False, queue=3, size=900)
+        free = self._peer("free", slot=True, size=100)
+
+        assert auto_download.pick_best_release([queued, free]).source_id == "free"
+
+    def test_a_free_slot_alone_beats_a_bigger_copy_with_the_same_queue_and_speed(self):
+        taken = self._peer("taken", slot=False, queue=0, speed=100_000, size=900)
+        free = self._peer("free", slot=True, queue=0, speed=100_000, size=100)
+
+        assert auto_download.pick_best_release([taken, free]).source_id == "free"
+
+    def test_a_shorter_queue_beats_a_longer_one(self):
+        long_q = self._peer("long", slot=False, queue=40)
+        short_q = self._peer("short", slot=False, queue=2)
+
+        assert auto_download.pick_best_release([long_q, short_q]).source_id == "short"
+
+    def test_a_faster_peer_beats_a_slower_one_when_the_rest_ties(self):
+        slow = self._peer("slow", slot=True, speed=50_000)
+        fast = self._peer("fast", slot=True, speed=900_000)
+
+        assert auto_download.pick_best_release([slow, fast]).source_id == "fast"
+
+    def test_releases_without_peer_details_still_rank_by_size(self):
+        small = _release(source_id="small", size_bytes=100)
+        big = _release(source_id="big", size_bytes=900)
+
+        assert auto_download.pick_best_release([small, big]).source_id == "big"
+
+    def test_format_still_outranks_the_peer(self):
+        mp3 = self._peer("mp3", slot=True)
+        mp3.format = "mp3"
+        m4b = self._peer("m4b", slot=False, queue=9)
+        m4b.format = "m4b"
+
+        assert auto_download.pick_best_release([mp3, m4b]).source_id == "m4b"
+
     def test_a_thin_m4b_loses_to_a_fuller_chapter_set(self, user_db, monkeypatch):
         self._files(monkeypatch, one=["thin"], sets=["full"])
         releases = [self._sized("thin", 120, fmt="m4b"), self._sized("full", 480, fmt="mp3")]
