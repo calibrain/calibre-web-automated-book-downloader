@@ -31,6 +31,10 @@ logger = setup_logger(__name__)
 
 # "(Alex Cross Series #11)", "[Illustrated Edition]" and friends.
 _PARENTHETICAL = re.compile(r"[(\[][^)\]]*[)\]]")
+# "Label NN: Title", a series label and number in front of the work's own title. The
+# label often abbreviates the series ("HHG 5: Mostly Harmless" for The Hitchhiker's
+# Guide to the Galaxy), so its words are in neither the series nor the author name.
+_SERIES_LABEL = re.compile(r"^\s*(?P<label>[^:]{1,40}?)\s+\d+(?:\.\d+)?\s*:\s+\S")
 
 _DEFAULT_DB_PATH = "/calibre-library/metadata.db"
 _BUSY_TIMEOUT_SECONDS = 5
@@ -116,6 +120,10 @@ def _read_entries(conn: sqlite3.Connection) -> list[LibraryEntry]:
         # title set, which is what decides whether the shelf holds a different book.
         title_tok = set(tokens(_PARENTHETICAL.sub(" ", title)))
         context_tok = set(tokens(series.get(book_id)))
+        # Only for a book with a series: there a leading "Label NN:" is the series
+        # label, not words naming another work. Without one it is left to the matcher.
+        if book_id in series and (label := _SERIES_LABEL.match(title)):
+            context_tok |= set(tokens(label.group("label")))
         for name in authors.get(book_id, ()):
             context_tok |= set(tokens(name))
         tok = title_tok | context_tok

@@ -316,3 +316,79 @@ def test_fingerprint_follows_the_database_and_wal_mtime(
     os.utime(wal, (later, later))
 
     assert provider.fingerprint() == later
+
+
+def _library_with(path: Path, books: list[tuple[int, str, str, str | None]]) -> None:
+    """A library of (id, title, author, series) rows."""
+    conn = sqlite3.connect(path)
+    conn.executescript(_SCHEMA)
+    series_ids: dict[str, int] = {}
+    for book_id, title, author, series_name in books:
+        conn.execute(
+            "INSERT INTO books(id, title, uuid) VALUES (?, ?, ?)", (book_id, title, f"u{book_id}")
+        )
+        conn.execute("INSERT INTO authors(id, name) VALUES (?, ?)", (book_id, author))
+        conn.execute(
+            "INSERT INTO books_authors_link(book, author) VALUES (?, ?)", (book_id, book_id)
+        )
+        if series_name:
+            sid = series_ids.setdefault(series_name, len(series_ids) + 1)
+            conn.execute("INSERT OR IGNORE INTO series(id, name) VALUES (?, ?)", (sid, series_name))
+            conn.execute(
+                "INSERT INTO books_series_link(book, series) VALUES (?, ?)", (book_id, sid)
+            )
+    conn.commit()
+    conn.close()
+
+
+def _owned(entries: list[Any], title: str, author: str) -> str | None:
+    book = BookMetadata(provider="hardcover", provider_id="x", title=title, authors=[author])
+    return library_index.match_entries(book, entries)
+
+
+def test_an_abbreviated_series_label_in_the_title_does_not_hide_an_owned_book(
+    tmp_path: Path, calibre_library: Callable[..., Path]
+) -> None:
+    # The library names books "Label NN: Title". When the label abbreviates the series
+    # ("HHG" for The Hitchhiker's Guide to the Galaxy) its words are in neither the
+    # series nor the author, and the book read as not owned, so it was fetched again.
+    path = tmp_path / "metadata.db"
+    _library_with(
+        path,
+        [
+            (1, "HHG 5: Mostly Harmless", "Douglas Adams", "The Hitchhiker's Guide to the Galaxy"),
+            (2, "DCC 7: This Inevitable Ruin", "Matt Dinniman", "Dungeon Crawler Carl"),
+        ],
+    )
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Mostly Harmless", "Douglas Adams") == "owned"
+    assert _owned(entries, "This Inevitable Ruin", "Matt Dinniman") == "owned"
+
+
+def test_a_series_label_still_does_not_make_a_different_book_match(
+    tmp_path: Path, calibre_library: Callable[..., Path]
+) -> None:
+    path = tmp_path / "metadata.db"
+    _library_with(
+        path,
+        [(1, "HHG 5: Mostly Harmless", "Douglas Adams", "The Hitchhiker's Guide to the Galaxy")],
+    )
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Harmless", "Douglas Adams") is None
+    assert _owned(entries, "Mostly Harmless", "Someone Else") is None
+
+
+def test_a_title_prefix_without_a_series_is_left_alone(
+    tmp_path: Path, calibre_library: Callable[..., Path]
+) -> None:
+    # Only a book that has a series gets its leading "Label NN:" treated as the label.
+    path = tmp_path / "metadata.db"
+    _library_with(path, [(1, "Messiah 2: Dune", "Frank Herbert", None)])
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Dune", "Frank Herbert") is None
