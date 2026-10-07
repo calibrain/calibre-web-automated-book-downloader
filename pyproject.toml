@@ -19,7 +19,7 @@ dependencies = [
     "psutil",
     "emoji",
     "rarfile",
-    "qbittorrent-api>=2026.8.1",
+    "qbittorrent-api>=2026.10.0",
     "transmission-rpc",
     "authlib>=1.8.0,<1.9",
     "apprise>=1.13.1",
@@ -33,7 +33,7 @@ dependencies = [
 browser = [
     "pyvirtualdisplay",
     "pyautogui",
-    "seleniumbase==4.54.12",
+    "seleniumbase==4.55.0",
     "python-xlib",
 ]
 
@@ -44,7 +44,7 @@ dev = [
     "pytest",
     "pytest-cov",
     "pytest-xdist>=3.8.0",
-    "ruff==0.16.9",
+    "ruff==0.16.10",
     "vulture>=2.14",
 ]
 
