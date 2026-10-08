@@ -14,7 +14,7 @@ export type ActivityCardAction =
       record: RequestRecord;
     }
   | {
-      kind: 'request-reject' | 'request-cancel' | 'request-dismiss';
+      kind: 'request-reject' | 'request-reopen' | 'request-cancel' | 'request-dismiss';
       requestId: number;
     };
 
@@ -212,6 +212,13 @@ const buildActions = (item: ActivityItem, isAdmin: boolean): ActivityCardAction[
         return actions;
       }
       return [{ kind: 'request-cancel', requestId: item.requestId }];
+    }
+
+    if (item.visualStatus === 'rejected' && isAdmin) {
+      return [
+        { kind: 'request-reopen', requestId: item.requestId },
+        { kind: 'request-dismiss', requestId: item.requestId },
+      ];
     }
 
     if (

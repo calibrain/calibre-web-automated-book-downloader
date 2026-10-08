@@ -1308,6 +1308,76 @@ class TestRequestRoutes:
         assert updated["user_id"] == user["id"]
         assert updated["status"] == "rejected"
 
+    def test_admin_reopen_undoes_a_rejection(self, main_module, client):
+        user = _create_user(main_module, prefix="reader")
+        admin = _create_user(main_module, prefix="admin", role="admin")
+        policy = _policy(default_ebook="request_book")
+
+        _set_session(client, user_id=user["username"], db_user_id=user["id"], is_admin=False)
+        create_payload = {
+            "book_data": {
+                "title": "My Dog Thinks It's a Cat",
+                "author": "Some Author",
+                "content_type": "ebook",
+                "provider": "openlibrary",
+                "provider_id": "ol-reopen",
+            },
+            "context": {
+                "source": "direct_download",
+                "content_type": "ebook",
+                "request_level": "book",
+            },
+        }
+
+        with patch.object(main_module, "get_auth_mode", return_value="builtin"):
+            with patch.object(
+                main_module, "load_users_request_policy_settings", return_value=policy
+            ):
+                with patch(
+                    "shelfmark.core.request_routes.load_users_request_policy_settings",
+                    return_value=policy,
+                ):
+                    create_resp = client.post("/api/requests", json=create_payload)
+                    request_id = create_resp.json["id"]
+
+                    reopen_as_user_resp = client.post(f"/api/admin/requests/{request_id}/reopen")
+
+                    _set_session(
+                        client, user_id=admin["username"], db_user_id=admin["id"], is_admin=True
+                    )
+                    reopen_pending_resp = client.post(f"/api/admin/requests/{request_id}/reopen")
+                    client.post(
+                        f"/api/admin/requests/{request_id}/reject",
+                        json={"admin_note": "Sounds like a dumb book"},
+                    )
+                    with patch.object(main_module.ws_manager, "is_enabled", return_value=True):
+                        with patch.object(main_module.ws_manager.socketio, "emit") as mock_emit:
+                            reopen_resp = client.post(
+                                f"/api/admin/requests/{request_id}/reopen",
+                                json={"admin_note": "Therapy book, fair enough"},
+                            )
+                    reopen_again_resp = client.post(f"/api/admin/requests/{request_id}/reopen")
+
+        assert create_resp.status_code == 201
+        assert reopen_as_user_resp.status_code == 403
+        assert reopen_pending_resp.status_code == 409
+        assert reopen_pending_resp.json["code"] == "stale_transition"
+        assert reopen_resp.status_code == 200
+        assert reopen_resp.json["status"] == "pending"
+        assert reopen_resp.json["admin_note"] == "Therapy book, fair enough"
+        assert reopen_again_resp.status_code == 409
+        assert mock_emit.call_count == 2
+        expected_payload = {
+            "request_id": request_id,
+            "status": "pending",
+            "title": "My Dog Thinks It's a Cat",
+        }
+        _assert_emit_call(mock_emit, 0, "request_update", expected_payload, f"user_{user['id']}")
+        _assert_emit_call(mock_emit, 1, "request_update", expected_payload, "admins")
+        updated = main_module.user_db.get_request(request_id)
+        assert updated["status"] == "pending"
+        assert updated["reviewed_by"] is None
+
     def test_admin_reject_emits_update_to_user_and_admin_rooms(self, main_module, client):
         user = _create_user(main_module, prefix="reader")
         admin = _create_user(main_module, prefix="admin", role="admin")
