@@ -457,7 +457,7 @@ class TestAutoDownloadRequest:
         assert outcome.status == "no_match"
         assert user_db.get_request(row["id"])["status"] == "pending"
 
-    def test_book_already_in_library_is_skipped_before_searching(self, user_db, monkeypatch):
+    def test_book_already_in_library_is_closed_before_searching(self, user_db, monkeypatch):
         admin = user_db.create_user(username="admin", role="admin")
         reader = user_db.create_user(username="reader", role="user")
         row = _pending_request(user_db, reader["id"])
@@ -475,7 +475,30 @@ class TestAutoDownloadRequest:
         outcome = self._run(user_db, row, admin)
 
         assert outcome.status == "in_library"
-        assert user_db.get_request(row["id"])["status"] == "pending"
+        closed = user_db.get_request(row["id"])
+        assert closed["status"] == "fulfilled"
+        assert closed["delivery_state"] == "complete"
+        assert closed["admin_note"] == auto_download.IN_LIBRARY_NOTE
+        assert closed["reviewed_by"] == admin["id"]
+        assert closed["release_data"] is None
+
+    def test_owned_book_request_changed_mid_pass_is_left_alone(self, user_db, monkeypatch):
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        # An admin rejected it after the pass listed it as pending.
+        user_db.update_request(row["id"], status="rejected")
+        _stub_provider(monkeypatch, _book())
+        monkeypatch.setattr(auto_download, "app_config", FakeConfig(LIBRARY_CHECK_ENABLED=True))
+        monkeypatch.setattr("shelfmark.core.library_index.any_provider_enabled", lambda: True)
+        monkeypatch.setattr(
+            "shelfmark.core.library_index.is_in_library", lambda *_args, **_kwargs: True
+        )
+
+        outcome = self._run(user_db, row, admin)
+
+        assert outcome.status == "in_library"
+        assert user_db.get_request(row["id"])["status"] == "rejected"
 
     def test_a_library_that_cannot_be_read_stops_the_request_before_searching(
         self, user_db, monkeypatch

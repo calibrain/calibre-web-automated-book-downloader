@@ -59,6 +59,9 @@ if TYPE_CHECKING:
 
 logger = setup_logger(__name__)
 
+# Admin note on a pending request auto-download closed because the library already has it.
+IN_LIBRARY_NOTE = "Already in the library."
+
 # Fraction of significant book-title tokens that must appear in the release title.
 TITLE_MATCH_THRESHOLD = DEFAULT_TITLE_MATCH_THRESHOLD
 
@@ -1042,12 +1045,31 @@ def auto_download_request(
         )
         return AutoDownloadOutcome(request_id, "error", f"library check unavailable: {exc}")
     if in_library:
+        # Close it, or it sits in Needs Review and is looked up again every pass.
+        # Same end state as an admin approving it with no release.
+        try:
+            user_db.update_request(
+                request_id,
+                expected_current_status=RequestStatus.PENDING,
+                status=RequestStatus.FULFILLED,
+                delivery_state=QueueStatus.COMPLETE,
+                delivery_updated_at=datetime.now(UTC).isoformat(timespec="seconds"),
+                admin_note=IN_LIBRARY_NOTE,
+                reviewed_by=admin_user_id,
+                reviewed_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            )
+        except ValueError as exc:
+            # Changed under us (an admin acted on it mid-pass); leave it as it now is.
+            logger.info(
+                "auto-download: request %s already in library, not closed: %s", request_id, exc
+            )
+            return AutoDownloadOutcome(request_id, "in_library", "already in library")
         logger.info(
-            "auto-download: request %s (%s) already in library; skipping",
+            "auto-download: request %s (%s) already in library; closed",
             request_id,
             book.title,
         )
-        return AutoDownloadOutcome(request_id, "in_library", "already in library")
+        return AutoDownloadOutcome(request_id, "in_library", "already in library; closed")
 
     audiobook_formats = _audiobook_formats()
     ebook_formats = _ebook_formats()
