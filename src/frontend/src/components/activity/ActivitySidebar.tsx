@@ -801,7 +801,12 @@ export const ActivitySidebar = ({
             return (
               <div className="divide-y divide-[color-mix(in_srgb,var(--border-muted)_60%,transparent)]">
                 {visibleItems.map((item) => (
-                  <ActivityCard key={item.id} item={item} isAdmin={isAdmin} />
+                  <ActivityCard
+                    key={item.id}
+                    item={item}
+                    isAdmin={isAdmin}
+                    onRequestReopen={onRequestReopen}
+                  />
                 ))}
                 {historyHasMore && (
                   <div className="pt-3 text-center">
