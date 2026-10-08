@@ -688,6 +688,99 @@ class TestSABnzbdClientAddDownload:
         assert result == "SABnzbd_nzo_named"
         fetch.assert_called_once_with("https://geek.example/download.nzb?apikey=secret")
 
+    @pytest.mark.parametrize(
+        ("indexer_url", "nzb_url", "expected"),
+        [
+            ("https://indexer.example.com", "https://indexer.example.com/get.nzb", True),
+            ("https://indexer.example.com", "https://file.indexer.example.com/get.nzb", True),
+            ("https://indexer.example.com", "https://a.b.indexer.example.com/get.nzb", True),
+            ("https://indexer.example.com/api", "https://FILE.Indexer.Example.com/x", True),
+            # Siblings and the parent share the registrable domain.
+            ("https://api.example.com", "https://file.example.com/get.nzb", True),
+            ("https://indexer.example.com", "https://example.com/get.nzb", True),
+            ("https://api.indexer.co.uk", "https://dl.indexer.co.uk/get.nzb", True),
+            # Other registrable domains stay untrusted, including under shared suffixes.
+            ("https://indexer.example.com", "https://indexer.example.com.evil.test/x", False),
+            ("https://indexer.example.com", "https://example.net/get.nzb", False),
+            ("https://indexer.co.uk", "https://evil.co.uk/get.nzb", False),
+            ("https://mine.duckdns.org", "https://evil.duckdns.org/get.nzb", False),
+            ("http://prowlarr:9696", "http://other:9696/get.nzb", False),
+            # Scheme and port must still match.
+            ("https://indexer.example.com", "http://file.indexer.example.com/get.nzb", False),
+            ("https://indexer.example.com", "https://file.indexer.example.com:8443/x", False),
+            # IP literals never extend to "subdomains".
+            ("http://10.0.0.5:9696", "http://10.0.0.5:9696/get.nzb", True),
+            ("http://10.0.0.5:9696", "http://x.10.0.0.5:9696/get.nzb", False),
+        ],
+    )
+    def test_can_prefetch_nzb_url_same_domain(self, monkeypatch, indexer_url, nzb_url, expected):
+        """NZB downloads served from the configured indexer's domain are prefetched."""
+        config_values = {
+            "SABNZBD_URL": "http://localhost:8080",
+            "SABNZBD_API_KEY": "abc123",
+            "NEWZNAB_INDEXERS": [{"name": "Indexer", "url": indexer_url, "api_key": "k"}],
+        }
+        monkeypatch.setattr(
+            "shelfmark.download.clients.sabnzbd.config.get",
+            lambda key, default="": config_values.get(key, default),
+        )
+
+        from shelfmark.download.clients.sabnzbd import SABnzbdClient
+
+        assert SABnzbdClient()._can_prefetch_nzb_url(nzb_url) is expected
+
+
+class TestFetchNzbContentRedirects:
+    """_fetch_nzb_content must not leak the Prowlarr API key across hosts."""
+
+    @staticmethod
+    def _client(monkeypatch):
+        config_values = {
+            "SABNZBD_URL": "http://localhost:8080",
+            "SABNZBD_API_KEY": "abc123",
+            "PROWLARR_URL": "https://prowlarr.example",
+            "PROWLARR_API_KEY": "secret",
+        }
+        monkeypatch.setattr(
+            "shelfmark.download.clients.sabnzbd.config.get",
+            lambda key, default="": config_values.get(key, default),
+        )
+        from shelfmark.download.clients.sabnzbd import SABnzbdClient
+
+        with patch.object(SABnzbdClient, "__init__", lambda x: None):
+            client = SABnzbdClient()
+        return client
+
+    def test_strips_api_key_on_cross_host_redirect(self, monkeypatch):
+        """Prowlarr often 302s to the indexer's own download link."""
+        client = self._client(monkeypatch)
+        redirect = MagicMock(
+            status_code=302, headers={"Location": "https://indexer.example/get.nzb"}
+        )
+        final = MagicMock(status_code=200, content=b"nzbdata")
+        with patch(
+            "shelfmark.download.clients.sabnzbd.requests.get",
+            MagicMock(side_effect=[redirect, final]),
+        ) as mock_get:
+            assert client._fetch_nzb_content("https://prowlarr.example/download?id=1") == b"nzbdata"
+        assert mock_get.call_count == 2
+        assert mock_get.call_args_list[0].kwargs["headers"].get("X-Api-Key") == "secret"
+        assert "X-Api-Key" not in mock_get.call_args_list[1].kwargs["headers"]
+        assert mock_get.call_args_list[0].kwargs.get("allow_redirects") is False
+
+    def test_keeps_api_key_on_same_host_redirect(self, monkeypatch):
+        client = self._client(monkeypatch)
+        redirect = MagicMock(status_code=302, headers={"Location": "/download2?id=1"})
+        final = MagicMock(status_code=200, content=b"nzbdata")
+        with patch(
+            "shelfmark.download.clients.sabnzbd.requests.get",
+            MagicMock(side_effect=[redirect, final]),
+        ) as mock_get:
+            assert client._fetch_nzb_content("https://prowlarr.example/download?id=1") == b"nzbdata"
+        assert mock_get.call_count == 2
+        assert mock_get.call_args_list[1].args[0] == "https://prowlarr.example/download2?id=1"
+        assert mock_get.call_args_list[1].kwargs["headers"].get("X-Api-Key") == "secret"
+
 
 class TestSABnzbdClientRemove:
     """Tests for SABnzbdClient.remove()."""

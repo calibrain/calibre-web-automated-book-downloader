@@ -814,8 +814,8 @@ class TestRTorrentClientRemove:
             mock_rpc.d.stop.assert_called_once_with("ABC123DEF456")
             mock_rpc.d.erase.assert_called_once_with("ABC123DEF456")
 
-    def test_remove_with_files(self, monkeypatch):
-        """Test torrent removal with file deletion."""
+    def test_remove_with_files_is_unsupported(self, monkeypatch):
+        """Do not erase a torrent when rTorrent cannot delete its payload."""
         config_values = {
             "RTORRENT_URL": "http://localhost:8080/RPC2",
             "RTORRENT_USERNAME": "",
@@ -829,7 +829,6 @@ class TestRTorrentClientRemove:
         )
 
         mock_rpc = MagicMock()
-
         mock_xmlrpc = create_mock_xmlrpc_module()
         mock_xmlrpc.ServerProxy.return_value = mock_rpc
 
@@ -837,16 +836,13 @@ class TestRTorrentClientRemove:
             if "shelfmark.download.clients.rtorrent" in sys.modules:
                 del sys.modules["shelfmark.download.clients.rtorrent"]
 
-            from shelfmark.download.clients.rtorrent import (
-                RTorrentClient,
-            )
+            from shelfmark.download.clients.rtorrent import RTorrentClient
 
             client = RTorrentClient()
-            result = client.remove("abc123def456", delete_files=True)
-
-            assert result is True
-            mock_rpc.d.delete_tied.assert_called_once_with("ABC123DEF456")
-            mock_rpc.d.erase.assert_called_once_with("ABC123DEF456")
+            assert client.remove("abc123def456", delete_files=True) is False
+            mock_rpc.d.stop.assert_not_called()
+            mock_rpc.d.erase.assert_not_called()
+            mock_rpc.d.delete_tied.assert_not_called()
 
     def test_remove_failure(self, monkeypatch):
         """Test failed torrent removal."""

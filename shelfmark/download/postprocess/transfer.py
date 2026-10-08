@@ -71,6 +71,7 @@ def build_metadata_dict(task: DownloadTask) -> dict:
         "Year": task.year,
         "Series": task.series_name,
         "SeriesPosition": task.series_position,
+        "Narrator": task.narrator,
         "Language": normalize_language_code(task.language),
         "User": task.username,
     }

@@ -119,6 +119,12 @@ def _enrich_mam_releases(
             release.extra["narrator"] = details.narrator
         if details.series:
             release.extra["series"] = details.series
+        # Queueing falls back to extra.series_name/series_position for the
+        # {Series}/{SeriesPosition} placeholders when the metadata provider has none.
+        if details.series_name:
+            release.extra["series_name"] = details.series_name
+            if details.series_position is not None:
+                release.extra["series_position"] = details.series_position
         if details.bitrate and not release.extra.get("bitrate"):
             release.extra["bitrate"] = details.bitrate
             release.extra["bitrate_value"] = details.bitrate_kbps

@@ -110,3 +110,23 @@ def test_settings_test_connection_names_rejected_credential(monkeypatch, api_key
     )
 
     assert result == {"success": False, "message": f"qBittorrent rejected the {rejected}"}
+
+
+@pytest.mark.parametrize(
+    ("url", "forced"),
+    [("https://qbittorrent.example.com", True), ("http://localhost:8080", False)],
+)
+def test_settings_test_connection_keeps_an_explicit_https_scheme(monkeypatch, url, forced):
+    """The button connects the same way downloads do, so https:// can't drop to HTTP (#1417)."""
+    captured = {}
+    _run_test_connection(
+        monkeypatch,
+        {
+            "QBITTORRENT_URL": url,
+            "QBITTORRENT_USERNAME": "admin",
+            "QBITTORRENT_PASSWORD": "password",
+        },
+        fake_qbittorrentapi(captured=captured),
+    )
+
+    assert captured["FORCE_SCHEME_FROM_HOST"] is forced

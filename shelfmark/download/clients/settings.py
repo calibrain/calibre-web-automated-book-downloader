@@ -177,6 +177,8 @@ def _test_qbittorrent_connection(current_values: dict[str, Any] | None = None) -
             password=password,
             api_key=api_key or None,
             VERIFY_WEBUI_CERTIFICATE=get_ssl_verify(url),
+            # Same scheme rule as QBittorrentClient (#1417).
+            FORCE_SCHEME_FROM_HOST=url.lower().startswith("https://"),
         )
         client.auth_log_in()
         api_version = client.app.web_api_version
@@ -548,6 +550,23 @@ def _test_alldebrid_connection(current_values: dict[str, Any] | None = None) -> 
     return {"success": success, "message": message}
 
 
+def _test_debridlink_connection(current_values: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Test the Debrid-Link API connection using current form values."""
+    from shelfmark.core.config import config
+    from shelfmark.download.clients.debridlink import DebridLinkClient
+
+    current_values = current_values or {}
+    api_key = _resolve_string_setting(current_values, config.get, "DEBRIDLINK_API_KEY")
+
+    if not api_key:
+        return {"success": False, "message": "Debrid-Link API Key is required"}
+
+    client = DebridLinkClient()
+    client._api_key = api_key
+    success, message = client.test_connection()
+    return {"success": success, "message": message}
+
+
 def _test_realdebrid_connection(current_values: dict[str, Any] | None = None) -> dict[str, Any]:
     """Test the Real-Debrid API connection using current form values."""
     from shelfmark.core.config import config
@@ -608,6 +627,7 @@ def prowlarr_clients_settings() -> list[SettingsField]:
                 {"value": "", "label": "None"},
                 {"value": "alldebrid", "label": "AllDebrid"},
                 {"value": "blackhole", "label": "Blackhole"},
+                {"value": "debridlink", "label": "Debrid-Link"},
                 {"value": "qbittorrent", "label": "qBittorrent"},
                 {"value": "realdebrid", "label": "Real-Debrid"},
                 {"value": "torbox", "label": "TorBox"},
@@ -638,6 +658,21 @@ def prowlarr_clients_settings() -> list[SettingsField]:
             style="primary",
             callback=_test_alldebrid_connection,
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "alldebrid"},
+        ),
+        # --- Debrid-Link Settings ---
+        PasswordField(
+            key="DEBRIDLINK_API_KEY",
+            label="API Key",
+            description="Debrid-Link API Key from your Debrid-Link account settings",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "debridlink"},
+        ),
+        ActionButton(
+            key="test_debridlink",
+            label="Test Connection",
+            description="Verify your Debrid-Link configuration",
+            style="primary",
+            callback=_test_debridlink_connection,
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "debridlink"},
         ),
         # --- Real-Debrid Settings ---
         PasswordField(
@@ -895,10 +930,11 @@ def prowlarr_clients_settings() -> list[SettingsField]:
         SelectField(
             key="PROWLARR_TORRENT_ACTION",
             label="Torrent Completion Action",
-            description="Choose whether to keep, remove, or move the torrent to another category or label after import",
+            description="After a successful import, Remove keeps downloaded files in qBittorrent, Transmission, and Deluge; Remove & Delete Files also deletes them. rTorrent cannot delete download data, so this action leaves its torrent untouched. Blackhole does not support removal. Debrid clients delete temporary local files for either Remove action.",
             options=[
                 {"value": "keep", "label": "Keep"},
                 {"value": "remove", "label": "Remove"},
+                {"value": "remove_and_delete", "label": "Remove & Delete Files"},
                 {"value": "change_category", "label": "Change Category"},
             ],
             default="keep",

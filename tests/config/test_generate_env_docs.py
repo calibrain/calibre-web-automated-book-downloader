@@ -56,5 +56,5 @@ def test_generated_env_docs_include_custom_component_value_fields() -> None:
         "{Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, "
         "{User}, {OriginalName} "
         "(source filename without extension), {Series}, {SeriesPosition}, {Subtitle}, "
-        "{PrimaryTitle}, {PartNumber}. Use arbitrary prefix/suffix:"
+        "{PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix:"
     ) in docs

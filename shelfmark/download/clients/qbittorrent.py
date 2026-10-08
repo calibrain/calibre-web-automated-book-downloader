@@ -214,13 +214,17 @@ class QBittorrentClient(DownloadClient):
         self._api_key = config_text(config.get("QBITTORRENT_API_KEY", ""))
 
         # qbittorrent-api accepts either a full URL or host:port; prefer the normalized URL
-        # for consistency.
+        # for consistency. It ignores the URL's scheme and probes HTTP and HTTPS instead,
+        # which can settle on plain HTTP against a TLS port behind a reverse proxy (#1417),
+        # so an explicit https:// is kept. http:// is still probed: normalization adds it to
+        # a bare host:port, and the probe follows a proxy's redirect to HTTPS.
         self._client = Client(
             host=self._base_url,
             username=username,
             password=password,
             api_key=self._api_key or None,
             VERIFY_WEBUI_CERTIFICATE=get_ssl_verify(self._base_url),
+            FORCE_SCHEME_FROM_HOST=self._base_url.lower().startswith("https://"),
         )
         self._category = config_text(config.get("QBITTORRENT_CATEGORY", "books"))
         self._download_dir = config_text(config.get("QBITTORRENT_DOWNLOAD_DIR", ""))

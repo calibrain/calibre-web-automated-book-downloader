@@ -3,10 +3,12 @@
 Uses SABnzbd's REST API directly via requests (no external dependency).
 """
 
+import ipaddress
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
+from publicsuffixlist import PublicSuffixList
 
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
@@ -31,6 +33,8 @@ _SABNZBD_CLIENT_ERRORS = (
     ValueError,
 )
 _SabnzbdRequestParam = str | int | float | bool
+_PUBLIC_SUFFIXES = PublicSuffixList()
+_NZB_FETCH_MAX_REDIRECTS = 5
 
 
 def _url_origin(value: str) -> tuple[str, str, int] | None:
@@ -49,6 +53,36 @@ def _url_origin(value: str) -> tuple[str, str, int] | None:
         port = 443 if scheme == "https" else 80
 
     return scheme, hostname, port
+
+
+def _origin_is_trusted(
+    target: tuple[str, str, int],
+    trusted: tuple[str, str, int] | None,
+) -> bool:
+    """Match the trusted origin exactly, or any host in its registrable domain on the same scheme/port.
+
+    Indexers commonly serve NZB downloads from a different host in the same domain
+    as their API (e.g. dl.indexer.example for api.indexer.example). The Public Suffix
+    List keeps this from widening to shared suffixes such as co.uk or duckdns.org.
+    """
+    if trusted is None:
+        return False
+    if target == trusted:
+        return True
+
+    target_scheme, target_host, target_port = target
+    trusted_scheme, trusted_host, trusted_port = trusted
+    if (target_scheme, target_port) != (trusted_scheme, trusted_port):
+        return False
+
+    try:
+        ipaddress.ip_address(trusted_host)
+    except ValueError:
+        trusted_domain = _PUBLIC_SUFFIXES.privatesuffix(trusted_host)
+        return trusted_domain is not None and (
+            _PUBLIC_SUFFIXES.privatesuffix(target_host) == trusted_domain
+        )
+    return False
 
 
 def _parse_eta(eta_str: str) -> int | None:
@@ -233,10 +267,34 @@ class SABnzbdClient(DownloadClient):
 
     def _fetch_nzb_content(self, url: str) -> bytes:
         """Fetch NZB content, including Prowlarr auth headers when appropriate."""
-        headers = self._get_prowlarr_headers(url)
-        response = requests.get(url, timeout=30, headers=headers, verify=get_ssl_verify(url))
-        response.raise_for_status()
-        return response.content
+        # Follow redirects manually so the Prowlarr API key is re-evaluated
+        # per hop. requests forwards custom headers such as X-Api-Key to the
+        # redirect target even when it is a different host, so letting it
+        # follow a Prowlarr 302 to the indexer's own download link would leak
+        # the key to a third party. This mirrors the torrent fetch path.
+        current_url = url
+        redirects_remaining = _NZB_FETCH_MAX_REDIRECTS
+        while True:
+            headers = self._get_prowlarr_headers(current_url)
+            response = requests.get(
+                current_url,
+                timeout=30,
+                headers=headers,
+                verify=get_ssl_verify(current_url),
+                allow_redirects=False,
+            )
+            if response.status_code not in (301, 302, 303, 307, 308):
+                response.raise_for_status()
+                return response.content
+            location = response.headers.get("Location", "")
+            if not location:
+                response.raise_for_status()
+                return response.content
+            if redirects_remaining <= 0:
+                msg = f"Too many redirects fetching NZB from {urlparse(url).hostname or 'url'}"
+                raise requests.exceptions.TooManyRedirects(msg)
+            redirects_remaining -= 1
+            current_url = urljoin(current_url, location)
 
     def _can_prefetch_nzb_url(self, url: str) -> bool:
         target_origin = _url_origin(url)
@@ -245,7 +303,7 @@ class SABnzbdClient(DownloadClient):
 
         for key in ("PROWLARR_URL", "NEWZNAB_URL"):
             trusted_url = normalize_http_config_url(config.get(key, ""))
-            if trusted_url and _url_origin(trusted_url) == target_origin:
+            if trusted_url and _origin_is_trusted(target_origin, _url_origin(trusted_url)):
                 return True
 
         named_indexers = config.get("NEWZNAB_INDEXERS", [])
@@ -254,7 +312,7 @@ class SABnzbdClient(DownloadClient):
                 if not isinstance(row, dict):
                     continue
                 trusted_url = normalize_http_config_url(row.get("url"))
-                if trusted_url and _url_origin(trusted_url) == target_origin:
+                if trusted_url and _origin_is_trusted(target_origin, _url_origin(trusted_url)):
                     return True
 
         return False

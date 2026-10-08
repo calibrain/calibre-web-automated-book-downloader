@@ -48,3 +48,22 @@ src/frontend/.vite/
 templates/
 static/css/
 static/js/
+
+# Developer-only trees. `COPY . .` puts the whole context into /app, so anything
+# left here ships to production: the CodeGraph index alone was 38MB of the image.
+# NOTE: this file applies to EVERY stage, so `src/` cannot be listed — the
+# frontend-builder stage needs it. The final stage drops it after the copy.
+# Deliberately NOT listed: `data/` (languages.py:19 reads
+# data/book-languages.json at runtime) and `genDebug.sh` (the final stage
+# chmod +x's it, so excluding it fails the build).
+.codegraph/
+.ruff_cache/
+.claude/
+tests/
+docs/
+scripts/
+compose/
+downloaded_files/
+frontend-dist/
+SESSION_STATE.md
+Makefile

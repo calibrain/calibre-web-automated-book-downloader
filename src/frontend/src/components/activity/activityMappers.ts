@@ -188,3 +188,25 @@ export const requestToActivityItem = (
     requestRecord: record,
   };
 };
+
+/** The id of the download a fulfilled request item was delivered through, if listed. */
+export const linkedDownloadIdForRequest = (
+  item: ActivityItem,
+  latestDownloadIdByRequestId: Map<number, string>,
+): string | null => {
+  if (item.kind !== 'request' || item.visualStatus !== 'fulfilled') {
+    return null;
+  }
+
+  const sourceId = item.requestRecord?.release_data?.source_id;
+  if (typeof sourceId === 'string' && sourceId.trim()) {
+    return sourceId.trim();
+  }
+
+  // Non-admins don't receive the release's source_id (#1418), so their request is
+  // matched to the download queued for it instead.
+  if (typeof item.requestId !== 'number') {
+    return null;
+  }
+  return latestDownloadIdByRequestId.get(item.requestId) ?? null;
+};

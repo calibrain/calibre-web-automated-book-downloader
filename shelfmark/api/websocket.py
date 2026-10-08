@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 
 from flask_socketio import SocketIO, join_room, leave_room
 
+from shelfmark.core.viewer_redaction import viewer_download_id
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -167,7 +169,12 @@ class WebSocketManager:
             logger.exception("Failed to send status update for room %s", room)
 
     def broadcast_download_progress(
-        self, book_id: str, progress: float, status: str, user_id: int | None = None
+        self,
+        book_id: str,
+        progress: float,
+        status: str,
+        user_id: int | None = None,
+        request_id: int | None = None,
     ) -> None:
         """Broadcast download progress update for a specific book."""
         socketio = self._get_socketio()
@@ -178,12 +185,14 @@ class WebSocketManager:
             data = {"book_id": book_id, "progress": progress, "status": status}
             # Admins always see all progress
             socketio.emit("download_progress", data, to="admins")
-            # If task belongs to a specific user, send to their room too
+            # If task belongs to a specific user, send to their room too, under the id
+            # their status uses: an opaque one for a request-linked download (#1418).
             if user_id is not None:
                 room = f"user_{user_id}"
                 with self._rooms_lock:
                     if room in self._user_rooms:
-                        socketio.emit("download_progress", data, to=room)
+                        user_data = {**data, "book_id": viewer_download_id(book_id, request_id)}
+                        socketio.emit("download_progress", user_data, to=room)
             logger.debug("Broadcasted progress for book %s: %s%%", book_id, progress)
         except Exception:
             logger.exception("Error broadcasting download progress")

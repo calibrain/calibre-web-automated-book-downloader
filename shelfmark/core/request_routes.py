@@ -41,6 +41,7 @@ from shelfmark.core.requests_service import (
     fulfil_request,
     reject_request,
 )
+from shelfmark.core.viewer_redaction import redact_request_row
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -847,6 +848,9 @@ def register_request_routes(
             )
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
+        if not session.get("is_admin", False):
+            # A fulfilled request carries the release an admin picked (#1418).
+            rows = [redact_request_row(row) for row in rows]
         return jsonify(rows)
 
     @app.route("/api/requests/<int:request_id>", methods=["DELETE"])
@@ -901,6 +905,8 @@ def register_request_routes(
             room="admins",
         )
 
+        if not session.get("is_admin", False):
+            updated = redact_request_row(updated)
         return jsonify(updated)
 
     @app.route("/api/admin/requests", methods=["GET"])

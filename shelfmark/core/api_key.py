@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hmac
 
-from shelfmark.config.env import SHELFMARK_API_KEY
+from shelfmark.config.env import SHELFMARK_API_KEY, SHELFMARK_API_KEY_READONLY
 
 
 def extract_api_key_candidates(
@@ -37,3 +37,20 @@ def matches_api_key(candidate: str) -> bool:
     if not SHELFMARK_API_KEY or not candidate:
         return False
     return hmac.compare_digest(candidate.encode("utf-8"), SHELFMARK_API_KEY.encode("utf-8"))
+
+
+def key_scope(candidate: str) -> str | None:
+    """``"admin"``, ``"readonly"`` or None for a presented credential.
+
+    The read-only key (``SHELFMARK_API_KEY_READONLY``) is for dashboards: it reaches
+    ``/api/stats`` and nothing else. Admin wins if both are set to the same value.
+    """
+    if not candidate:
+        return None
+    if matches_api_key(candidate):
+        return "admin"
+    if SHELFMARK_API_KEY_READONLY and hmac.compare_digest(
+        candidate.encode("utf-8"), SHELFMARK_API_KEY_READONLY.encode("utf-8")
+    ):
+        return "readonly"
+    return None

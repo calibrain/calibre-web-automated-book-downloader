@@ -421,3 +421,132 @@ class TestIdentityAndRouting:
         assert response.status_code == 400
         assert response.get_json() == {"error": "source_id is required"}
         assert "Set-Cookie" not in response.headers
+
+
+class TestKeyScope:
+    def test_admin_key(self, monkeypatch):
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY", "adm")
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY_READONLY", "ro")
+        assert api_key.key_scope("adm") == "admin"
+
+    def test_read_only_key(self, monkeypatch):
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY", "adm")
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY_READONLY", "ro")
+        assert api_key.key_scope("ro") == "readonly"
+
+    def test_unknown_and_empty(self, monkeypatch):
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY", "adm")
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY_READONLY", "ro")
+        assert api_key.key_scope("nope") is None
+        assert api_key.key_scope("") is None
+
+    def test_unset_keys_never_match_an_empty_candidate(self, monkeypatch):
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY", "")
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY_READONLY", "")
+        assert api_key.key_scope("") is None
+        assert api_key.key_scope("x") is None
+
+    def test_same_value_in_both_is_admin(self, monkeypatch):
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY", "same")
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY_READONLY", "same")
+        assert api_key.key_scope("same") == "admin"
+
+    def test_read_only_key_alone(self, monkeypatch):
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY", "")
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY_READONLY", "ro")
+        assert api_key.key_scope("ro") == "readonly"
+
+
+class TestReadOnlyKeyRequests:
+    @pytest.fixture
+    def ro(self, wired, monkeypatch):
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY_READONLY", "ro-key")
+        return wired
+
+    def test_reads_stats(self, ro, user_db):
+        user_db.create_user(username="root", role="admin")
+        response = ro.app.test_client().get("/api/stats", headers=_bearer("ro-key"))
+        assert response.status_code == 200
+
+    def test_x_api_key_works_too(self, ro, user_db):
+        user_db.create_user(username="root", role="admin")
+        response = ro.app.test_client().get("/api/stats", headers=_x_api_key("ro-key"))
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize(
+        "path", ["/api/settings", "/api/downloads/active", "/api/users", "/api/requests"]
+    )
+    def test_cannot_read_anything_else(self, ro, user_db, path):
+        user_db.create_user(username="root", role="admin")
+        response = ro.app.test_client().get(path, headers=_bearer("ro-key"))
+        assert response.status_code == 403
+
+    @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
+    def test_cannot_write_even_to_stats(self, ro, user_db, method):
+        user_db.create_user(username="root", role="admin")
+        response = getattr(ro.app.test_client(), method)("/api/stats", headers=_bearer("ro-key"))
+        assert response.status_code == 403
+
+    def test_never_gets_an_admin_session(self, ro, user_db):
+        user_db.create_user(username="root", role="admin")
+        with ro.app.test_request_context("/api/stats", headers=_bearer("ro-key")):
+            assert ro.api_key_auth_middleware() is None
+            from flask import session
+
+            assert "is_admin" not in session
+            assert "user_id" not in session
+
+    def test_sets_no_cookie(self, ro, user_db):
+        user_db.create_user(username="root", role="admin")
+        response = ro.app.test_client().get("/api/stats", headers=_bearer("ro-key"))
+        assert "Set-Cookie" not in response.headers
+
+    def test_admin_key_still_reads_stats(self, ro, user_db):
+        user_db.create_user(username="root", role="admin")
+        response = ro.app.test_client().get("/api/stats", headers=_bearer("s3cret"))
+        assert response.status_code == 200
+
+    def test_admin_key_beside_a_read_only_key_keeps_admin_access(self, ro, user_db):
+        """A proxy's own Authorization value must not downgrade a correct admin X-Api-Key."""
+        user_db.create_user(username="root", role="admin")
+        headers = {**_bearer("ro-key"), **_x_api_key("s3cret")}
+        assert ro.app.test_client().get("/api/settings", headers=headers).status_code == 200
+
+    def test_no_key_is_refused(self, ro, user_db):
+        user_db.create_user(username="root", role="admin")
+        assert ro.app.test_client().get("/api/stats").status_code == 401
+
+    def test_wrong_key_is_refused(self, ro, user_db):
+        user_db.create_user(username="root", role="admin")
+        response = ro.app.test_client().get("/api/stats", headers=_bearer("guess"))
+        assert response.status_code == 401
+
+    def test_read_only_key_alone_enables_the_middleware(self, main_module, user_db, monkeypatch):
+        monkeypatch.setattr(main_module, "user_db", user_db)
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY", "")
+        monkeypatch.setattr(api_key, "SHELFMARK_API_KEY_READONLY", "ro-key")
+        with patch.object(main_module, "get_auth_mode", return_value="builtin"):
+            client = main_module.app.test_client()
+            assert client.get("/api/stats", headers=_bearer("ro-key")).status_code == 200
+            assert client.get("/api/settings", headers=_bearer("ro-key")).status_code == 403
+
+
+class TestStatsEndpoint:
+    def test_stats_payload_carries_counters(self, wired, user_db):
+        user_db.create_user(username="root", role="admin")
+        body = wired.app.test_client().get("/api/stats", headers=_bearer("s3cret")).get_json()
+
+        assert set(body) == {"generated_at", "added", "queue", "requests", "errors"}
+        assert body["added"]["total_7d"] == 0
+
+    def test_stats_is_closed_to_a_plain_non_admin_session(self, wired, user_db):
+        user = user_db.create_user(username="reader", role="user")
+        client = _cookie_client(wired.app, user, is_admin=False)
+
+        assert client.get("/api/stats").status_code == 403
+
+    def test_stats_is_open_to_an_admin_session(self, wired, user_db):
+        admin = user_db.create_user(username="root", role="admin")
+        client = _cookie_client(wired.app, admin, is_admin=True)
+
+        assert client.get("/api/stats").status_code == 200

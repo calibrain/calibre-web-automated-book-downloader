@@ -193,13 +193,45 @@ class TestTorBoxStatus:
         assert state.progress == 50.0
         thread.start.assert_called_once()
 
-    def test_finished_torrent_without_available_content_is_error(self, tmp_path):
+    def test_finished_torrent_waits_for_content_to_become_present(self, monkeypatch, tmp_path):
         client = TorBoxClient.__new__(TorBoxClient)
         state = _state(tmp_path)
+        start = MagicMock()
+        monkeypatch.setattr(client, "_maybe_start_download_thread", start)
+        torrent = {
+            "download_state": "completed",
+            "download_finished": True,
+            "download_present": False,
+            "progress": 1,
+            "files": [{"id": 1, "name": "Dune.epub"}],
+        }
 
-        status = client._handle_torrent_status(
-            {"download_finished": True, "download_present": False}, state
-        )
+        status = client._handle_torrent_status(torrent, state)
+
+        assert status.state == DownloadState.DOWNLOADING
+        assert status.progress == 50.0
+        assert state.phase == "waiting_torbox"
+        start.assert_not_called()
+
+        status = client._handle_torrent_status({**torrent, "download_present": True}, state)
+
+        assert status.state == DownloadState.DOWNLOADING
+        start.assert_called_once_with(state, torrent["files"])
+
+    def test_finished_torrent_without_available_content_errors_after_grace(
+        self, monkeypatch, tmp_path
+    ):
+        client = TorBoxClient.__new__(TorBoxClient)
+        state = _state(tmp_path)
+        now = [1000.0]
+        monkeypatch.setattr("shelfmark.download.clients.torbox.time.monotonic", lambda: now[0])
+        torrent = {"download_finished": True, "download_present": False}
+
+        assert client._handle_torrent_status(torrent, state).state == DownloadState.DOWNLOADING
+        now[0] += 119.0
+        assert client._handle_torrent_status(torrent, state).state == DownloadState.DOWNLOADING
+        now[0] += 1.0
+        status = client._handle_torrent_status(torrent, state)
 
         assert status.state == DownloadState.ERROR
         assert "unavailable" in status.message

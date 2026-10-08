@@ -1427,7 +1427,7 @@ def download_settings() -> list[SettingsField]:
             description=(
                 "Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, {OriginalName} "
                 "(source filename without extension), {Series}, {SeriesPosition}, {Subtitle}, "
-                "{PrimaryTitle}, {PartNumber}. Use arbitrary prefix/suffix: "
+                "{PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: "
                 "{Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. "
                 "Rename templates are filename-only (no '/' or '\\'); use Organize for folders. "
                 "Applies to single-file downloads."
@@ -1447,8 +1447,11 @@ def download_settings() -> list[SettingsField]:
             description=(
                 "Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, "
                 "{OriginalName} (source filename without extension), {Series}, {SeriesPosition}, "
-                "{Subtitle}, {PrimaryTitle}, {PartNumber}. Use arbitrary prefix/suffix: "
-                "{Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty."
+                "{Subtitle}, {PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: "
+                "{Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. "
+                "{Narrator} and a Series fallback come from MyAnonamouse results (needs a MAM "
+                "session ID); {{Narrator}} writes Audiobookshelf's '{Name}' style and is left "
+                "out entirely when there is no narrator."
             ),
             default="{Author}/{Title}/{Title}",
             placeholder="{Author}/{Series/}{Title}{ - Part }{PartNumber}",

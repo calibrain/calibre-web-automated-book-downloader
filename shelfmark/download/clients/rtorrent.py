@@ -61,8 +61,6 @@ class _RTorrentDownloadProtocol(Protocol):
 
     def multicall2(self, *args: object) -> list[list[Any]]: ...
 
-    def delete_tied(self, download_id: str) -> object: ...
-
     def erase(self, download_id: str) -> object: ...
 
     def stop(self, download_id: str) -> object: ...
@@ -333,31 +331,20 @@ class RTorrentClient(DownloadClient):
             return DownloadStatus.error(f"{error_type}: {e}")
 
     def remove(self, download_id: str, *, delete_files: bool = False) -> bool:
-        """Remove a torrent from rTorrent.
-
-        Args:
-            download_id: Torrent info_hash
-            delete_files: Whether to also delete files
-
-        Returns:
-            True if successful.
-
-        """
-        try:
-            # rtorrent is somehow case sensitive and requires uppercase hashes for look
-            torrent_hash = download_id.upper()
-            if delete_files:
-                self._rpc.d.delete_tied(torrent_hash)
-                self._rpc.d.erase(torrent_hash)
-            else:
-                self._rpc.d.stop(torrent_hash)
-                self._rpc.d.erase(torrent_hash)
-
-            logger.info(
-                "Removed torrent from rTorrent: %s%s",
+        """Remove a torrent; rTorrent RPC cannot delete downloaded payloads."""
+        if delete_files:
+            logger.warning(
+                "Cannot remove torrent %s with files: rTorrent RPC does not delete downloaded data",
                 download_id,
-                " (with files)" if delete_files else "",
             )
+            return False
+
+        try:
+            # rTorrent lookups are case sensitive and require uppercase hashes.
+            torrent_hash = download_id.upper()
+            self._rpc.d.stop(torrent_hash)
+            self._rpc.d.erase(torrent_hash)
+            logger.info("Removed torrent from rTorrent: %s", download_id)
         except _RTORRENT_CLIENT_ERRORS as e:
             error_type = type(e).__name__
             logger.exception("rTorrent remove failed (%s)", error_type)

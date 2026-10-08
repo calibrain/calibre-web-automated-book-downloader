@@ -28,7 +28,7 @@ RUN npm run build
 # than copied into the image. A COPY here would land ~24 MB in a `base` layer that
 # every published image inherits, and a later `rm` cannot take it back out again --
 # a RUN adds a layer, it does not rewrite the one underneath.
-FROM ghcr.io/astral-sh/uv:0.12.19@sha256:04d046b13e60d6bcec73cbc5e1cad25d680dea90c8573340950a0ac2d1aef424 AS uv
+FROM ghcr.io/astral-sh/uv:0.12.22@sha256:f513a91fc62fe7c17567eee97230dd198e43edb8a9fbecca843714a4358fe1bc AS uv
 
 # Use python-slim as the base image
 FROM python:3.14.7-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 AS base
@@ -57,11 +57,11 @@ ENV FLASK_PORT=8084
 # Configure locale, timezone, and perform initial cleanup in a single layer
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    # For building C-extensions (cffi, gevent, etc.)
-    gcc \
-    g++ \
-    libffi-dev \
-    python3-dev \
+    # No C toolchain: every compiled dependency (cffi, gevent, greenlet,
+    # zope-interface) ships a cp314 manylinux wheel for amd64 and arm64, and
+    # the sdist-only ones are pure Python. The toolchain was 290MB of the
+    # runtime image, and python3-dev pulled Debian's libpython3.13 into a 3.14
+    # image. If a dependency ever needs compiling, build it in a separate stage.
     # For locale
     locales tzdata \
     # For healthcheck
@@ -209,6 +209,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python --reinstall python-xlib==0.33 && \
     /app/.venv/bin/python -c "import Xlib.X; assert hasattr(Xlib.X, 'FamilyServerInterpreted'), 'Xlib.X.FamilyServerInterpreted missing after fix'; print('Xlib namespace OK:', Xlib.__version__)"
 
+# The venv's own pip goes too. uv seeded a copy into /app/.venv and nothing
+# installs at runtime. setuptools deliberately STAYS: several deps still import
+# pkg_resources on the hot path.
+RUN rm -rf /app/.venv/bin/pip /app/.venv/bin/pip3 /app/.venv/bin/pip3.* \
+           /app/.venv/lib/python*/site-packages/pip \
+           /app/.venv/lib/python*/site-packages/pip-*.dist-info
+
 # Keep SeleniumBase's bundled driver cache writable for the fixed non-root user.
 RUN SELENIUMBASE_DRIVERS_DIR=$(/app/.venv/bin/python -c "import pathlib, seleniumbase; print(pathlib.Path(seleniumbase.__file__).resolve().parent / 'drivers')") && \
     chown -R 1000:1000 "${SELENIUMBASE_DRIVERS_DIR}" && \
@@ -223,6 +230,11 @@ RUN chmod -R o+rx /usr/bin/chromium
 COPY . .
 
 COPY --from=frontend-builder /frontend/dist /app/frontend-dist
+
+# The frontend SOURCE cannot be excluded via .dockerignore — that file applies
+# to every stage and frontend-builder needs src/. Only the built dist (copied
+# above) is served at runtime, so drop the source here.
+RUN rm -rf /app/src
 
 # Image-owned runtime paths for the fixed non-root user. Root/PUID mode still
 # re-homes ownership at startup when needed.
@@ -261,6 +273,11 @@ ENV USING_EXTERNAL_BYPASSER=true
 COPY . .
 
 COPY --from=frontend-builder /frontend/dist /app/frontend-dist
+
+# The frontend SOURCE cannot be excluded via .dockerignore — that file applies
+# to every stage and frontend-builder needs src/. Only the built dist (copied
+# above) is served at runtime, so drop the source here.
+RUN rm -rf /app/src
 
 # Image-owned runtime paths for the fixed non-root user. Root/PUID mode still
 # re-homes ownership at startup when needed.

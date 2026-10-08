@@ -8,6 +8,7 @@ import re
 import time
 from binascii import Error as BinasciiError
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from threading import Lock
 from urllib.parse import ParseResult, parse_qs, urljoin, urlparse, urlunparse
 
@@ -588,3 +589,37 @@ def extract_hash_from_magnet(magnet_url: str) -> str | None:
                 return btmh_hash
 
     return None
+
+
+def safe_relative_path(name: str, target_dir: Path, service: str) -> Path:
+    """Validate a service-supplied file name before anything is written below ``target_dir``.
+
+    Debrid services pass torrent file names straight through, and a torrent can name a
+    file ``../../etc/cron.d/x``. Absolute paths, drive letters and ``..`` segments are
+    refused, and the resolved destination must stay inside ``target_dir``.
+    """
+    if not name:
+        msg = f"{service} returned a file without a name"
+        raise RuntimeError(msg)
+
+    relative_path = PurePosixPath(name.replace("\\", "/"))
+    windows_path = PureWindowsPath(name)
+    if (
+        relative_path.is_absolute()
+        or windows_path.is_absolute()
+        or windows_path.drive
+        or ".." in relative_path.parts
+    ):
+        msg = f"{service} returned an unsafe file path: {name}"
+        raise RuntimeError(msg)
+    if relative_path == PurePosixPath("."):
+        msg = f"{service} returned a file without a usable name"
+        raise RuntimeError(msg)
+
+    destination = (target_dir / Path(*relative_path.parts)).resolve()
+    try:
+        destination.relative_to(target_dir.resolve())
+    except ValueError:
+        msg = f"{service} returned an unsafe file path: {name}"
+        raise RuntimeError(msg) from None
+    return Path(*relative_path.parts)

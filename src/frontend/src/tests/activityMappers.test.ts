@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   downloadToActivityItem,
+  linkedDownloadIdForRequest,
   requestToActivityItem,
 } from '../components/activity/activityMappers';
 import type { Book, RequestRecord } from '../types/index';
@@ -189,5 +190,34 @@ describe('activityMappers.requestToActivityItem', () => {
   it('does not append username to meta line for user viewer role', () => {
     const item = requestToActivityItem(makeRequest(), 'user');
     expect(item.metaLine).toBe('EPUB · 2 MB · Prowlarr');
+  });
+});
+
+const fulfilled = (releaseData: Record<string, unknown> | null) =>
+  requestToActivityItem(
+    makeRequest({ status: 'fulfilled', request_level: 'book', release_data: releaseData }),
+    'user',
+  );
+
+describe('activityMappers.linkedDownloadIdForRequest', () => {
+  it("links through the release's source_id when the viewer has it", () => {
+    const item = fulfilled({ source_id: '21:https://tracker.example/t/1', format: 'epub' });
+
+    expect(linkedDownloadIdForRequest(item, new Map([[42, 'dl_other']]))).toBe(
+      '21:https://tracker.example/t/1',
+    );
+  });
+
+  it('falls back to the download queued for the request when source_id is withheld', () => {
+    const item = fulfilled({ format: 'epub', size: '2 MB' });
+
+    expect(linkedDownloadIdForRequest(item, new Map([[42, 'dl_abc']]))).toBe('dl_abc');
+    expect(linkedDownloadIdForRequest(item, new Map())).toBeNull();
+  });
+
+  it('does not link a request that has not been fulfilled', () => {
+    const item = requestToActivityItem(makeRequest({ status: 'pending' }), 'user');
+
+    expect(linkedDownloadIdForRequest(item, new Map([[42, 'dl_abc']]))).toBeNull();
   });
 });

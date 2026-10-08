@@ -15,6 +15,7 @@ from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.request_helpers import normalize_optional_text
 from shelfmark.core.utils import is_audiobook
+from shelfmark.download.activity import release_activity_grace, request_activity_grace
 from shelfmark.download.clients import (
     DownloadClient,
     DownloadState,
@@ -50,6 +51,20 @@ def _is_sabnzbd_like_client(candidate: DownloadClient) -> TypeGuard[_SabnzbdLike
 
 # How often to poll the download client for status (seconds)
 POLL_INTERVAL = 2
+# A torrent the client has queued is waiting for a free slot, not stalled. Its status never
+# changes while it waits, so the orchestrator's stall timer would cancel it after
+# STALL_TIMEOUT. Ask for a grace instead (the orchestrator caps one grace at 16 minutes),
+# renew it while the torrent is still queued, and stop at a hard ceiling so a queue that
+# never moves still ends.
+QUEUE_GRACE_SECONDS = 900.0
+QUEUE_GRACE_RENEW_SECONDS = 600.0
+QUEUE_MAX_WAIT_SECONDS = 7200.0
+# Torrents are jerky: a swarm with one seed can sit still for several minutes and then carry
+# on. The orchestrator's default window (STALL_TIMEOUT) is five minutes of no change. A torrent
+# that has already moved gets this longer window, restarted every time its progress goes up,
+# so a dead one still ends 15 minutes after its last movement. One that never moved (a magnet
+# that cannot fetch metadata) keeps the short window and is cleaned up quickly.
+MOVING_STALL_SECONDS = 900.0
 WINDOWS_DRIVE_PREFIX_LENGTH = 2
 SECONDS_PER_MINUTE = 60
 SECONDS_PER_HOUR = 3600
@@ -285,9 +300,19 @@ class ExternalClientHandler(DownloadHandler, ABC):
 
         elif protocol == "torrent":
             torrent_action = config.get("PROWLARR_TORRENT_ACTION", "keep")
-            if torrent_action == "remove":
+            if torrent_action in ("remove", "remove_and_delete"):
+                # Import succeeded; the client handles its own download data.
                 try:
-                    client.remove(download_id, delete_files=False)
+                    removed = client.remove(
+                        download_id,
+                        delete_files=torrent_action == "remove_and_delete",
+                    )
+                    if not removed:
+                        logger.warning(
+                            "Failed to remove torrent %s from %s",
+                            download_id,
+                            getattr(client, "name", "client"),
+                        )
                 except _CLIENT_CLEANUP_ERRORS as e:
                     logger.warning(
                         "Failed to remove torrent %s from %s: %s",
@@ -451,6 +476,8 @@ class ExternalClientHandler(DownloadHandler, ABC):
         download_id: str,
         protocol: str,
         status_callback: Callable[[str, str | None], None],
+        *,
+        remove_if_unstarted: bool = False,
     ) -> None:
         if protocol == "usenet":
             logger.info("Download cancelled, removing from %s: %s", client.name, download_id)
@@ -464,6 +491,12 @@ class ExternalClientHandler(DownloadHandler, ABC):
                     client.name,
                     e,
                 )
+        elif remove_if_unstarted and self._remove_unstarted_torrent(client, download_id):
+            logger.info(
+                "Download cancelled before it started, removed from %s: %s",
+                client.name,
+                download_id,
+            )
         else:
             logger.info(
                 "Download cancelled for protocol=%s; leaving in %s: %s",
@@ -472,6 +505,24 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 download_id,
             )
         status_callback("cancelled", "Cancelled")
+
+    def _remove_unstarted_torrent(self, client: DownloadClient, download_id: str) -> bool:
+        """Remove a torrent that downloaded nothing; True if it was removed.
+
+        Torrents are normally left in the client after a cancel so an already-downloaded one
+        can keep seeding. One at 0% has nothing to seed and nothing to resume, and leaving it
+        queued only holds a download slot and piles up dead entries.
+        """
+        try:
+            status = client.get_status(download_id)
+            if status.progress > 0:  # it has data, so it may be seeding or resumable
+                return False
+            return bool(client.remove(download_id, delete_files=True))
+        except _CLIENT_CLEANUP_ERRORS as e:
+            logger.warning(
+                "Could not remove unstarted torrent %s from %s: %s", download_id, client.name, e
+            )
+            return False
 
     def _resolve_download_path_once(
         self,
@@ -908,6 +959,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 cancel_flag=cancel_flag,
                 progress_callback=progress_callback,
                 status_callback=status_callback,
+                added_by_shelfmark=existing is None,
             )
 
         except Exception as e:
@@ -924,9 +976,19 @@ class ExternalClientHandler(DownloadHandler, ABC):
         cancel_flag: Event,
         progress_callback: Callable[[float], None],
         status_callback: Callable[[str, str | None], None],
+        *,
+        added_by_shelfmark: bool = False,
     ) -> str | None:
-        """Poll the download client for progress and handle completion."""
+        """Poll the download client for progress and handle completion.
+
+        ``added_by_shelfmark`` is False when the task joined a torrent the client already had;
+        such a torrent is never removed on cancel.
+        """
         poll_interval = self._poll_interval()
+        queued_since: float | None = None
+        grace_requested_at = 0.0
+        last_progress = 0.0
+        start_window_given = False
         # Track consecutive "not found" errors - torrents may take time to appear in client
         not_found_count = 0
         max_not_found_retries = 15  # 15 retries * poll interval ~= 30s grace period
@@ -1012,6 +1074,31 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 # Reset not-found counter on successful status check
                 not_found_count = 0
 
+                if status.state == DownloadState.QUEUED:
+                    now = time.monotonic()
+                    if queued_since is None:
+                        queued_since = now
+                    if (
+                        now - queued_since < QUEUE_MAX_WAIT_SECONDS
+                        and now - grace_requested_at >= QUEUE_GRACE_RENEW_SECONDS
+                    ):
+                        request_activity_grace(status_callback, QUEUE_GRACE_SECONDS)
+                        grace_requested_at = now
+                elif queued_since is not None:
+                    release_activity_grace(status_callback)
+                    queued_since = None
+                    grace_requested_at = 0.0
+
+                if status.progress > last_progress:
+                    request_activity_grace(status_callback, MOVING_STALL_SECONDS)
+                    start_window_given = True
+                elif not start_window_given and status.state != DownloadState.QUEUED:
+                    # Metadata and the first peer can take longer than the orchestrator's
+                    # stall timeout, so a torrent gets one full window to get going.
+                    request_activity_grace(status_callback, MOVING_STALL_SECONDS)
+                    start_window_given = True
+                last_progress = status.progress
+
                 # Build status message - use client message if provided, else build progress
                 msg = status.message or self._build_progress_message(status)
                 if status.state == DownloadState.PROCESSING:
@@ -1026,7 +1113,13 @@ class ExternalClientHandler(DownloadHandler, ABC):
 
             # Handle cancellation
             if cancel_flag.is_set():
-                self._handle_cancelled_download(client, download_id, protocol, status_callback)
+                self._handle_cancelled_download(
+                    client,
+                    download_id,
+                    protocol,
+                    status_callback,
+                    remove_if_unstarted=added_by_shelfmark,
+                )
                 return None
 
             # Handle completed file (wait briefly for files to appear)
@@ -1038,7 +1131,13 @@ class ExternalClientHandler(DownloadHandler, ABC):
             )
             if not source_path_obj:
                 if cancel_flag.is_set():
-                    self._handle_cancelled_download(client, download_id, protocol, status_callback)
+                    self._handle_cancelled_download(
+                        client,
+                        download_id,
+                        protocol,
+                        status_callback,
+                        remove_if_unstarted=added_by_shelfmark,
+                    )
                     return None
                 status_callback(
                     "error",

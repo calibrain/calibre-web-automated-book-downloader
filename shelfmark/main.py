@@ -86,6 +86,13 @@ from shelfmark.core.requests_service import (
 )
 from shelfmark.core.user_db import UserDB
 from shelfmark.core.utils import AUDIOBOOK_FORMATS, normalize_base_path
+from shelfmark.core.viewer_redaction import (
+    configure_public_id_key,
+    is_public_download_id,
+    match_public_download_id,
+    redact_status,
+    viewer_download_id,
+)
 from shelfmark.download import orchestrator as backend
 from shelfmark.download import warmup
 from shelfmark.release_sources import (
@@ -157,7 +164,14 @@ socketio = SocketIO(app, **socketio_init_kwargs)
 
 # Initialize WebSocket manager
 ws_manager.init_app(app, socketio)
-ws_manager.set_queue_status_fn(backend.queue_status)
+
+
+def _user_room_queue_status(user_id: int | None = None) -> dict[str, dict[str, Any]]:
+    """Queue status for a non-admin user room, with release details hidden (#1418)."""
+    return redact_status(backend.queue_status(user_id=user_id))
+
+
+ws_manager.set_queue_status_fn(_user_room_queue_status)
 logger.info("Flask-SocketIO initialized with async_mode='%s'", async_mode)
 logger.info("Socket.IO CORS allowed origins: %s", socketio_cors_allowed_origins)
 
@@ -229,6 +243,23 @@ def _warn_if_local_admin_missing() -> None:
 
 
 _warn_if_local_admin_missing()
+
+# Nothing is downloading yet, so anything the last process left "active" or "queued" was
+# interrupted. Close those rows out and put the recently interrupted requests back in the
+# queue, before the coordinator starts. Assumes one worker process (entrypoint.sh).
+if user_db is not None and download_history_service is not None:
+    try:
+        from shelfmark.core.startup_reconcile import reconcile_interrupted_downloads
+
+        _reconciled = reconcile_interrupted_downloads(user_db, download_history_service)
+        if _reconciled["marked"] or _reconciled["reopened"]:
+            logger.info(
+                "Startup: closed out %d interrupted download(s), reopened %d request(s)",
+                _reconciled["marked"],
+                _reconciled["reopened"],
+            )
+    except (ImportError, OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
+        logger.warning("Could not reconcile interrupted downloads at startup: %s", exc)
 
 # Start download coordinator
 backend.start()
@@ -673,6 +704,7 @@ app.config.update(
     SESSION_COOKIE_NAME=SESSION_COOKIE_NAME,
     PERMANENT_SESSION_LIFETIME=604800,  # 7 days in seconds
 )
+configure_public_id_key(app.config["SECRET_KEY"])
 
 logger.info(
     "Session cookie secure setting: %s (from env: %s)",
@@ -696,6 +728,7 @@ def _proxy_default_is_admin(db: UserDB) -> bool:
 
 _API_KEY_EXEMPT_PREFIXES = ("/api/auth/",)
 _API_KEY_EXEMPT_PATHS = frozenset({"/api/health"})
+_READ_ONLY_KEY_PATHS = frozenset({"/api/stats"})
 
 
 @app.before_request
@@ -714,7 +747,7 @@ def api_key_auth_middleware() -> Response | tuple[Response, int] | None:
         return None
     if request.path in _API_KEY_EXEMPT_PATHS or request.path.startswith(_API_KEY_EXEMPT_PREFIXES):
         return None
-    if not api_key_module.SHELFMARK_API_KEY:
+    if not api_key_module.SHELFMARK_API_KEY and not api_key_module.SHELFMARK_API_KEY_READONLY:
         return None
 
     candidates = api_key_module.extract_api_key_candidates(
@@ -723,7 +756,9 @@ def api_key_auth_middleware() -> Response | tuple[Response, int] | None:
     if not candidates:
         return None
 
-    if not any(api_key_module.matches_api_key(candidate) for candidate in candidates):
+    scopes = {api_key_module.key_scope(candidate) for candidate in candidates}
+    scope = "admin" if "admin" in scopes else "readonly" if "readonly" in scopes else None
+    if scope is None:
         return None
     if get_auth_mode() == "none":
         return None
@@ -731,6 +766,14 @@ def api_key_auth_middleware() -> Response | tuple[Response, int] | None:
     # Mark the request as keyed before the lookup so the after-request cookie
     # reset also covers the error path below.
     g.api_key_auth = True
+
+    if scope == "readonly":
+        # A read-only key is a dashboard credential: one GET endpoint, no session.
+        g.api_key_scope = "readonly"
+        if request.method != "GET" or request.path not in _READ_ONLY_KEY_PATHS:
+            return jsonify({"error": "This API key is read-only"}), 403
+        return None
+    g.api_key_scope = "admin"
 
     try:
         admin = user_db.get_first_admin() if user_db is not None else None
@@ -1321,6 +1364,28 @@ def api_config() -> Response | tuple[Response, int]:
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/stats", methods=["GET"])
+def api_stats() -> Response | tuple[Response, int]:
+    """Counters for dashboards. Reachable with the read-only API key, an admin key or an admin session."""
+    from shelfmark.core import stats
+
+    scope = g.get("api_key_scope")
+    if get_auth_mode() != "none" and scope is None:
+        if "user_id" not in session:
+            return jsonify({"error": "Unauthorized"}), 401
+        if not session.get("is_admin", False):
+            return jsonify({"error": "Admin access required"}), 403
+
+    if user_db is None:
+        return jsonify({"error": "User database unavailable"}), 503
+    try:
+        payload = stats.collect(user_db.db_path)
+    except sqlite3.Error:
+        logger.exception("stats: could not read the database")
+        return jsonify({"error": "Internal Server Error"}), 500
+    return jsonify(payload)
+
+
 @app.route("/api/health", methods=["GET"])
 def api_health() -> Response | tuple[Response, int]:
     """Health check endpoint for container orchestration.
@@ -1648,6 +1713,34 @@ def _queue_task_visible_to_actor(
     )
 
 
+def _resolve_viewer_download_id(book_id: str) -> str:
+    """Map a non-admin's opaque download id back to the task it names (#1418).
+
+    Only the caller's own request-linked downloads are searched, so an id that
+    doesn't resolve comes back unchanged and fails the route's usual lookup.
+    """
+    if not is_public_download_id(book_id):
+        return book_id
+    is_admin, db_user_id, _ = _resolve_status_scope()
+    if is_admin or db_user_id is None:
+        return book_id
+    candidates = [
+        task_id
+        for tasks in backend.book_queue.get_status(user_id=db_user_id).values()
+        for task_id, task in tasks.items()
+        if getattr(task, "request_id", None) is not None
+    ]
+    if download_history_service is not None:
+        candidates.extend(download_history_service.list_request_task_ids(user_id=db_user_id))
+    return match_public_download_id(book_id, candidates) or book_id
+
+
+def _viewer_queue_task_id(task_id: str) -> str:
+    """Return the id a non-admin sees for a live queue task."""
+    task = backend.book_queue.get_task(task_id)
+    return viewer_download_id(task_id, getattr(task, "request_id", None))
+
+
 backend.book_queue.set_queue_hook(_record_download_queued)
 backend.book_queue.set_terminal_status_hook(_record_download_terminal_snapshot)
 
@@ -1701,7 +1794,7 @@ def api_status() -> Response | tuple[Response, int]:
                 user_id=user_id,
             )
             _emit_request_update_events(updated_requests)
-        return jsonify(status)
+        return jsonify(status if is_admin else redact_status(status))
     except _OPERATIONAL_ERRORS as e:
         logger.error_trace(f"Status error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -1722,6 +1815,7 @@ def api_local_download() -> Response | tuple[Response, int]:
     book_id = request.args.get("id", "")
     if not book_id:
         return jsonify({"error": "No book ID provided"}), 400
+    book_id = _resolve_viewer_download_id(book_id)
 
     try:
         # The path, not the bytes: send_file streams it off disk, where reading it
@@ -1845,6 +1939,8 @@ def api_cancel_download(book_id: str) -> Response | tuple[Response, int]:
         flask.Response: JSON status indicating success or failure.
 
     """
+    viewer_book_id = book_id
+    book_id = _resolve_viewer_download_id(book_id)
     try:
         task = backend.book_queue.get_task(book_id)
         if task is None:
@@ -1873,7 +1969,7 @@ def api_cancel_download(book_id: str) -> Response | tuple[Response, int]:
 
         success = backend.cancel_download(book_id)
         if success:
-            return jsonify({"status": "cancelled", "book_id": book_id})
+            return jsonify({"status": "cancelled", "book_id": viewer_book_id})
         return jsonify({"error": "Failed to cancel download or book not found"}), 404
     except _OPERATIONAL_ERRORS as e:
         logger.error_trace(f"Cancel download error: {e}")
@@ -1884,6 +1980,8 @@ def api_cancel_download(book_id: str) -> Response | tuple[Response, int]:
 @login_required
 def api_retry_download(book_id: str) -> Response | tuple[Response, int]:
     """Retry a failed download."""
+    viewer_book_id = book_id
+    book_id = _resolve_viewer_download_id(book_id)
     try:
         task = backend.book_queue.get_task(book_id)
         history_row = None
@@ -1948,7 +2046,7 @@ def api_retry_download(book_id: str) -> Response | tuple[Response, int]:
             )
 
         if success:
-            return jsonify({"status": "queued", "book_id": book_id})
+            return jsonify({"status": "queued", "book_id": viewer_book_id})
 
         if error == "Download not found":
             return jsonify({"error": error}), 404
@@ -1985,6 +2083,8 @@ def api_set_priority(book_id: str) -> Response | tuple[Response, int]:
         if identity_error is not None:
             return identity_error, 403
 
+        viewer_book_id = book_id
+        book_id = _resolve_viewer_download_id(book_id)
         task = backend.book_queue.get_task(book_id)
         if task is None:
             return jsonify({"error": "Failed to update priority or book not found"}), 404
@@ -1999,7 +2099,7 @@ def api_set_priority(book_id: str) -> Response | tuple[Response, int]:
         success = backend.set_book_priority(book_id, priority)
 
         if success:
-            return jsonify({"status": "updated", "book_id": book_id, "priority": priority})
+            return jsonify({"status": "updated", "book_id": viewer_book_id, "priority": priority})
         return jsonify({"error": "Failed to update priority or book not found"}), 404
     except ValueError:
         return jsonify({"error": "Invalid priority value"}), 400
@@ -2039,6 +2139,10 @@ def api_reorder_queue() -> Response | tuple[Response, int]:
             return identity_error, 403
 
         if not is_admin:
+            book_priorities = {
+                _resolve_viewer_download_id(str(book_id)): priority
+                for book_id, priority in book_priorities.items()
+            }
             owned_book_priorities = {}
             for book_id in book_priorities:
                 task = backend.book_queue.get_task(str(book_id))
@@ -2077,7 +2181,7 @@ def api_queue_order() -> Response | tuple[Response, int]:
             return identity_error, 403
         if not is_admin:
             queue_order = [
-                item
+                {**item, "id": _viewer_queue_task_id(str(item.get("id", "")))}
                 for item in queue_order
                 if _queue_task_visible_to_actor(
                     str(item.get("id", "")),
@@ -2108,7 +2212,7 @@ def api_active_downloads() -> Response | tuple[Response, int]:
             return identity_error, 403
         if not is_admin:
             active_downloads = [
-                task_id
+                _viewer_queue_task_id(task_id)
                 for task_id in active_downloads
                 if _queue_task_visible_to_actor(
                     task_id,
@@ -3520,7 +3624,7 @@ def handle_connect() -> None:
 
         user_id = None if is_admin else db_user_id
         status = backend.queue_status(user_id=user_id)
-        emit("status_update", status)
+        emit("status_update", status if is_admin else redact_status(status))
     except _OPERATIONAL_ERRORS:
         logger.exception("Error sending initial status")
 
@@ -3557,7 +3661,7 @@ def handle_status_request() -> None:
 
         user_id = None if is_admin else db_user_id
         status = backend.queue_status(user_id=user_id)
-        emit("status_update", status)
+        emit("status_update", status if is_admin else redact_status(status))
     except _OPERATIONAL_ERRORS:
         logger.exception("Error handling status request")
         emit("error", {"message": "Failed to get status"})

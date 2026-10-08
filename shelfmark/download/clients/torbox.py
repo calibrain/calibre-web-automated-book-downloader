@@ -5,9 +5,9 @@ from __future__ import annotations
 import math
 import shutil
 import threading
+import time
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, ClassVar, NoReturn
+from typing import TYPE_CHECKING, Any, ClassVar, NoReturn
 from urllib.parse import urlparse
 
 import requests
@@ -26,9 +26,13 @@ from shelfmark.download.clients.torrent_utils import (
     DebridMagnet,
     DebridUpload,
     resolve_debrid_upload,
+    safe_relative_path,
 )
 from shelfmark.download.http import download_url
 from shelfmark.download.network import get_ssl_verify
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = setup_logger(__name__)
 
@@ -36,6 +40,8 @@ _API_BASE = "https://api.torbox.app/v1/api"
 _API_TIMEOUT = 30
 _STATUS_TIMEOUT = 15
 _WORKER_JOIN_TIMEOUT = 5.0
+# TorBox can report a torrent finished shortly before its files are present.
+_UNAVAILABLE_GRACE_SECONDS = 120.0
 
 _BOOK_EXTENSIONS = (
     ".aac",
@@ -81,6 +87,7 @@ class _DownloadState:
     phase: str = "waiting_torbox"
     error_message: str | None = None
     progress: float = 0.0
+    unavailable_since: float | None = None
     download_thread: threading.Thread | None = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -397,10 +404,11 @@ class TorBoxClient(DownloadClient):
         finished = torrent.get("download_finished") is True
         present = torrent.get("download_present") is True
         if finished and not present:
-            message = "TorBox finished processing but the download is unavailable"
-            self._set_error(state, message)
-            return DownloadStatus.error(message)
-        if finished and present:
+            if self._unavailable_grace_expired(state):
+                message = "TorBox finished processing but the download is unavailable"
+                self._set_error(state, message)
+                return DownloadStatus.error(message)
+        elif finished and present:
             files = torrent.get("files")
             if not isinstance(files, list):
                 message = "TorBox returned no file list for a completed torrent"
@@ -428,6 +436,20 @@ class TorBoxClient(DownloadClient):
             download_speed=speed,
             eta=eta,
         )
+
+    @staticmethod
+    def _unavailable_grace_expired(state: _DownloadState) -> bool:
+        """Return True once finished TorBox files have stayed absent past the grace period."""
+        now = time.monotonic()
+        with state.lock:
+            if state.unavailable_since is None:
+                state.unavailable_since = now
+                logger.info(
+                    "TorBox finished torrent %s but its files are not present yet; waiting",
+                    state.torrent_id,
+                    extra={"torrent_id": state.torrent_id},
+                )
+            return now - state.unavailable_since >= _UNAVAILABLE_GRACE_SECONDS
 
     @staticmethod
     def _normalize_remote_progress(value: object) -> float:
@@ -586,29 +608,7 @@ class TorBoxClient(DownloadClient):
     @classmethod
     def _safe_relative_path(cls, file_info: dict[str, Any], target_dir: Path) -> Path:
         """Validate external file metadata before writing below ``target_dir``."""
-        name = cls._file_name(file_info)
-        if not name:
-            _raise_runtime_error("TorBox returned a file without a name")
-
-        normalized = name.replace("\\", "/")
-        relative_path = PurePosixPath(normalized)
-        windows_path = PureWindowsPath(name)
-        if (
-            relative_path.is_absolute()
-            or windows_path.is_absolute()
-            or windows_path.drive
-            or ".." in relative_path.parts
-        ):
-            _raise_runtime_error(f"TorBox returned an unsafe file path: {name}")
-        if relative_path == PurePosixPath("."):
-            _raise_runtime_error("TorBox returned a file without a usable name")
-
-        destination = (target_dir / Path(*relative_path.parts)).resolve()
-        try:
-            destination.relative_to(target_dir.resolve())
-        except ValueError:
-            _raise_runtime_error(f"TorBox returned an unsafe file path: {name}")
-        return Path(*relative_path.parts)
+        return safe_relative_path(cls._file_name(file_info), target_dir, "TorBox")
 
     @staticmethod
     def _set_error(state: _DownloadState, message: str) -> None:

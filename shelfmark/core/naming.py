@@ -22,6 +22,7 @@ KNOWN_TOKENS = [
     "firstauthor",
     "partnumber",
     "language",
+    "narrator",
     "subtitle",
     "author",
     "series",
@@ -246,12 +247,23 @@ def parse_naming_template(
                     parts.append(match.group(0))
 
             cursor = match.end()
+            if rendered == "":
+                # "{{Narrator}}" (Audiobookshelf's "Title {Narrator}" folder style) matches as
+                # "{" + "{Narrator}"; with no value, drop the closing braces it opened too.
+                for _ in range(content.count("{")):
+                    if template[cursor : cursor + 1] != "}":
+                        break
+                    cursor += 1
 
         parts.append(template[cursor:])
         result = "".join(parts)
 
     # Clean up any double slashes that might result from empty tokens
     result = re.sub(r"/+", "/", result)
+
+    # A token left empty at the end or start of a folder name leaves stray spaces there
+    result = re.sub(r"[ \t]+/", "/", result)
+    result = re.sub(r"/[ \t]+", "/", result)
 
     # Remove leading/trailing slashes
     result = result.strip("/")

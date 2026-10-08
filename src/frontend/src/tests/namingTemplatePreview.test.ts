@@ -9,6 +9,24 @@ import {
 } from '../utils/namingTemplatePreview';
 
 describe('namingTemplatePreview', () => {
+  it('renders Audiobookshelf-style {{Narrator}} and drops it cleanly when empty', () => {
+    const template = '{Author}/{Title} {{Narrator}}/{Title}';
+    const metadata = { Author: 'Christopher Ruocchio', Title: 'Empire of Silence' };
+
+    expect(
+      renderNamingTemplate(
+        template,
+        { ...metadata, Narrator: 'Samuel Roukin' },
+        {
+          allowPathSeparators: true,
+        },
+      ).value,
+    ).toBe('Christopher Ruocchio/Empire of Silence {Samuel Roukin}/Empire of Silence');
+    expect(renderNamingTemplate(template, metadata, { allowPathSeparators: true }).value).toBe(
+      'Christopher Ruocchio/Empire of Silence/Empire of Silence',
+    );
+  });
+
   it('groups primary title with universal variables', () => {
     expect(NAMING_TEMPLATE_TOKENS.find((token) => token.token === 'PrimaryTitle')?.group).toBe(
       'Universal',

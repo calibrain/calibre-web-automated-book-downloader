@@ -378,6 +378,7 @@ ClientType = TypeVar("ClientType", bound=DownloadClient)
 _BUILTIN_CLIENT_MODULES = (
     "shelfmark.download.clients.alldebrid",
     "shelfmark.download.clients.blackhole",
+    "shelfmark.download.clients.debridlink",
     "shelfmark.download.clients.deluge",
     "shelfmark.download.clients.nzbget",
     "shelfmark.download.clients.qbittorrent",

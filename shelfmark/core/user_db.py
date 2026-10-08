@@ -188,6 +188,11 @@ class UserDB:
         self._db_path = db_path
         self._lock = threading.Lock()
 
+    @property
+    def db_path(self) -> str:
+        """Filesystem path of the SQLite database."""
+        return self._db_path
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row

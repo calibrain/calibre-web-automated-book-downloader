@@ -120,6 +120,7 @@ class DownloadTask:
     series_name: str | None = None
     series_position: float | None = None  # Float for novellas (e.g., 1.5)
     subtitle: str | None = None  # Book subtitle for naming templates
+    narrator: str | None = None  # Release narrator for the {Narrator} template variable
     language: str | None = None  # Release language code for the {Language} template variable
 
     # Hardlinking support

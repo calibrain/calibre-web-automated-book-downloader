@@ -203,6 +203,42 @@ class TestQBittorrentClientTestConnection:
             assert "401" in message or "failed" in message.lower()
 
 
+class TestQBittorrentClientScheme:
+    """qbittorrent-api probes for a scheme unless told to keep the configured one (#1417)."""
+
+    @pytest.mark.parametrize(
+        ("url", "forced"),
+        [
+            ("https://qbittorrent.example.com", True),
+            ("HTTPS://qbittorrent.example.com:443", True),
+            ("http://localhost:8080", False),
+            ("localhost:8080", False),
+        ],
+    )
+    def test_only_an_explicit_https_scheme_is_kept(self, monkeypatch, url, forced):
+        """https:// must not fall back to plain HTTP; http:// and bare hosts keep the probe."""
+        config_values = {
+            "QBITTORRENT_URL": url,
+            "QBITTORRENT_USERNAME": "admin",
+            "QBITTORRENT_PASSWORD": "password",
+        }
+        monkeypatch.setattr(
+            "shelfmark.download.clients.qbittorrent.config.get",
+            lambda key, default="": config_values.get(key, default),
+        )
+        mock_client_class = MagicMock(return_value=MagicMock())
+
+        with patch.dict("sys.modules", {"qbittorrentapi": MagicMock(Client=mock_client_class)}):
+            import importlib
+
+            import shelfmark.download.clients.qbittorrent as qb_module
+
+            importlib.reload(qb_module)
+            qb_module.QBittorrentClient()
+
+        assert mock_client_class.call_args.kwargs["FORCE_SCHEME_FROM_HOST"] is forced
+
+
 class TestQBittorrentClientApiKeyAuth:
     """Tests for API key authentication (qBittorrent 5.2.0+)."""
 

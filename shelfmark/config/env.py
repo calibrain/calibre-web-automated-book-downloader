@@ -169,6 +169,8 @@ DISABLE_LOCAL_AUTH = string_to_bool(os.getenv("DISABLE_LOCAL_AUTH", "false"))
 # Optional static API key. When set, requests carrying it as a Bearer token
 # (or X-Api-Key) are authenticated as an admin for that request only.
 SHELFMARK_API_KEY = os.getenv("SHELFMARK_API_KEY", "").strip()
+# Optional second key that can only read /api/stats (dashboards). Never an admin.
+SHELFMARK_API_KEY_READONLY = os.getenv("SHELFMARK_API_KEY_READONLY", "").strip()
 OIDC_AUTO_REDIRECT = string_to_bool(os.getenv("OIDC_AUTO_REDIRECT", "false"))
 
 

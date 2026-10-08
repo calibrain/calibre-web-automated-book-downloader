@@ -86,6 +86,15 @@ export const NAMING_TEMPLATE_TOKENS: NamingTemplateToken[] = [
     group: 'Universal',
   },
   {
+    token: 'Narrator',
+    label: 'Narrator',
+    description:
+      'Release narrator (MyAnonamouse via Prowlarr, needs a MAM session ID). {{Narrator}} gives "{Name}"',
+    value: 'Simon Vance',
+    group: 'Universal',
+    audiobookOnly: true,
+  },
+  {
     token: 'Subtitle',
     label: 'Subtitle',
     description: 'Subtitle from metadata',
@@ -116,6 +125,7 @@ const KNOWN_TOKENS = [
   'firstauthor',
   'partnumber',
   'language',
+  'narrator',
   'subtitle',
   'author',
   'series',
@@ -245,11 +255,20 @@ export const renderNamingTemplate = (
       }
 
       cursor = match.index + match[0].length;
+      if (rendered === '') {
+        // Mirrors naming.py: "{{Narrator}}" drops the closing braces it opened when empty.
+        const opened = (content.match(/\{/g) ?? []).length;
+        for (let i = 0; i < opened && template[cursor] === '}'; i += 1) {
+          cursor += 1;
+        }
+      }
     });
     result += template.slice(cursor);
   }
 
   result = result.replace(/\/+/g, '/');
+  result = result.replace(/[ \t]+\//g, '/');
+  result = result.replace(/\/[ \t]+/g, '/');
   result = result.replace(/^\/+|\/+$/g, '');
   result = result.replace(/^[\s\-_.]+/g, '');
   result = result.replace(/[\s\-_.]+$/g, '');

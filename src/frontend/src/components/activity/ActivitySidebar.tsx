@@ -7,7 +7,7 @@ import type { RequestRecord, StatusData } from '../../types';
 import { Dropdown } from '../Dropdown';
 import { ActivityCard } from './ActivityCard';
 import type { DownloadStatusKey } from './activityMappers';
-import { downloadToActivityItem } from './activityMappers';
+import { downloadToActivityItem, linkedDownloadIdForRequest } from './activityMappers';
 import type { ActivityItem } from './activityTypes';
 
 interface ActivitySidebarProps {
@@ -144,25 +144,6 @@ const getActivityCategory = (item: ActivityItem): ActivityCategoryKey => {
     return 'failed';
   }
   return 'in_progress';
-};
-
-const getLinkedDownloadIdFromRequestItem = (item: ActivityItem): string | null => {
-  if (item.kind !== 'request' || item.visualStatus !== 'fulfilled') {
-    return null;
-  }
-
-  const releaseData = item.requestRecord?.release_data;
-  if (!releaseData || typeof releaseData !== 'object') {
-    return null;
-  }
-
-  const sourceId = releaseData.source_id;
-  if (typeof sourceId !== 'string') {
-    return null;
-  }
-
-  const trimmed = sourceId.trim();
-  return trimmed ? trimmed : null;
 };
 
 const mergeRequestWithDownload = (
@@ -320,9 +301,17 @@ export const ActivitySidebar = ({
 
   const { mergedRequestItems, mergedDownloadItems } = useMemo(() => {
     const downloadsById = new Map<string, ActivityItem>();
+    // downloadItems is newest first, so a retried request keeps its latest download.
+    const latestDownloadIdByRequestId = new Map<number, string>();
     downloadItems.forEach((item) => {
       if (item.downloadBookId) {
         downloadsById.set(item.downloadBookId, item);
+        if (
+          typeof item.requestId === 'number' &&
+          !latestDownloadIdByRequestId.has(item.requestId)
+        ) {
+          latestDownloadIdByRequestId.set(item.requestId, item.downloadBookId);
+        }
       }
     });
 
@@ -345,7 +334,7 @@ export const ActivitySidebar = ({
     });
 
     const nextRequestItems = visibleRequestItems.map((requestItem) => {
-      const linkedDownloadId = getLinkedDownloadIdFromRequestItem(requestItem);
+      const linkedDownloadId = linkedDownloadIdForRequest(requestItem, latestDownloadIdByRequestId);
       if (!linkedDownloadId) {
         return requestItem;
       }

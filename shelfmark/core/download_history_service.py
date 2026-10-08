@@ -407,6 +407,50 @@ class DownloadHistoryService:
         finally:
             conn.close()
 
+    def list_active(self) -> list[dict[str, Any]]:
+        """Return every row still marked active, oldest first."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM download_history WHERE final_status = 'active' ORDER BY id"
+            ).fetchall()
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                normalized = self._normalize_row_dict(dict(row))
+                if normalized is not None:
+                    result.append(normalized)
+            return result
+        finally:
+            conn.close()
+
+    def list_request_ids(self) -> set[int]:
+        """Return the id of every request that has at least one download row."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT request_id FROM download_history WHERE request_id IS NOT NULL"
+            ).fetchall()
+            return {int(row["request_id"]) for row in rows}
+        finally:
+            conn.close()
+
+    def list_request_task_ids(self, *, user_id: int) -> list[str]:
+        """Return the task ids of every request-linked download owned by ``user_id``.
+
+        A non-admin addresses these downloads by an opaque id, so routes resolve it
+        against this set, which also confines the lookup to the user's own downloads.
+        """
+        normalized_user_id = normalize_optional_positive_int(user_id, "user_id")
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT task_id FROM download_history WHERE user_id = ? AND request_id IS NOT NULL",
+                (normalized_user_id,),
+            ).fetchall()
+            return [str(row["task_id"]) for row in rows]
+        finally:
+            conn.close()
+
     def list_recent(
         self,
         *,

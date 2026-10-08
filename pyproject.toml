@@ -26,13 +26,14 @@ dependencies = [
     # HTTP/2 client for RFC 8484 DoH: quad9 rejects HTTP/1.1 outright (505), which
     # requests cannot speak. See shelfmark/download/doh_wireformat.py.
     "httpx[http2]>=0.28.1",
+    "publicsuffixlist>=1.0.2.20260925",
 ]
 
 [project.optional-dependencies]
 browser = [
     "pyvirtualdisplay",
     "pyautogui",
-    "seleniumbase==4.54.10",
+    "seleniumbase==4.54.12",
     "python-xlib",
 ]
 
@@ -43,7 +44,7 @@ dev = [
     "pytest",
     "pytest-cov",
     "pytest-xdist>=3.8.0",
-    "ruff==0.16.8",
+    "ruff==0.16.9",
     "vulture>=2.14",
 ]
 

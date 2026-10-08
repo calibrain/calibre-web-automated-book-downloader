@@ -31,6 +31,15 @@ from shelfmark.core.request_helpers import (
     populate_request_usernames,
 )
 from shelfmark.core.request_validation import RequestStatus
+from shelfmark.core.viewer_redaction import (
+    is_public_download_id,
+    match_public_download_id,
+    public_download_id,
+    redact_download_payload,
+    redact_request_row,
+    redact_status,
+    viewer_download_id,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -501,6 +510,77 @@ def _request_history_entry(
     }
 
 
+def _request_linked_task_ids(
+    actor: _ActorContext,
+    *,
+    queue_status: Callable[..., dict[str, dict[str, Any]]],
+    download_history_service: DownloadHistoryService,
+) -> list[str]:
+    """Task ids of the actor's request-linked downloads, which they see by opaque id."""
+    if actor.db_user_id is None:
+        return []
+    live_task_ids = [
+        task_id
+        for bucket in queue_status(user_id=actor.owner_scope).values()
+        if isinstance(bucket, dict)
+        for task_id, payload in bucket.items()
+        if isinstance(payload, dict) and payload.get("request_id") is not None
+    ]
+    return [
+        *live_task_ids,
+        *download_history_service.list_request_task_ids(user_id=actor.db_user_id),
+    ]
+
+
+def _viewer_dismissed_entries(
+    entries: list[dict[str, str]],
+    *,
+    request_ids_by_task: dict[str, object],
+) -> list[dict[str, str]]:
+    """Rewrite a non-admin's dismissed download keys to the ids their snapshot uses.
+
+    Downloads outside the recent rows and the live queue never reach the snapshot,
+    so their entries are dropped rather than looked up one by one.
+    """
+    viewer_entries: list[dict[str, str]] = []
+    for entry in entries:
+        if entry["item_type"] != "download":
+            viewer_entries.append(entry)
+            continue
+        task_id = _parse_item_key(entry["item_key"], "download")
+        if task_id is None or task_id not in request_ids_by_task:
+            continue
+        viewer_id = viewer_download_id(task_id, request_ids_by_task[task_id])
+        viewer_entries.append({"item_type": "download", "item_key": f"download:{viewer_id}"})
+    return viewer_entries
+
+
+def _redact_history_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """Return a history entry with the same redactions as the non-admin snapshot."""
+    redacted = dict(entry)
+    snapshot = entry.get("snapshot")
+    source_id = entry.get("source_id")
+    if entry.get("item_type") == "download":
+        if isinstance(source_id, str) and source_id:
+            viewer_id = viewer_download_id(source_id, entry.get("request_id"))
+            item_key = f"download:{viewer_id}"
+            redacted.update(id=item_key, item_key=item_key, source_id=viewer_id)
+        if isinstance(snapshot, dict) and isinstance(snapshot.get("download"), dict):
+            redacted["snapshot"] = {
+                **snapshot,
+                "download": redact_download_payload(snapshot["download"], task_id=source_id),
+            }
+        return redacted
+
+    # A request's source_id names the download it was fulfilled with, which the
+    # requester sees by its opaque id.
+    if isinstance(source_id, str) and source_id:
+        redacted["source_id"] = public_download_id(source_id)
+    if isinstance(snapshot, dict) and isinstance(snapshot.get("request"), dict):
+        redacted["snapshot"] = {**snapshot, "request": redact_request_row(snapshot["request"])}
+    return redacted
+
+
 def register_activity_routes(
     app: Flask,
     user_db: UserDB,
@@ -577,6 +657,25 @@ def register_activity_routes(
                 continue
             visible_request_rows.append(row)
 
+        if not actor.is_admin:
+            # Redacted only now: the delivery-state sync above matches on real task ids.
+            request_ids_by_task: dict[str, object] = {
+                task_id: payload.get("request_id")
+                for bucket in live_queue.values()
+                if isinstance(bucket, dict)
+                for task_id, payload in bucket.items()
+                if isinstance(payload, dict)
+            }
+            request_ids_by_task.update(
+                (str(row.get("task_id") or "").strip(), row.get("request_id")) for row in db_rows
+            )
+            dismissed_entries = _viewer_dismissed_entries(
+                dismissed_entries,
+                request_ids_by_task=request_ids_by_task,
+            )
+            status = redact_status(status)
+            visible_request_rows = [redact_request_row(row) for row in visible_request_rows]
+
         return jsonify(
             {
                 "status": status,
@@ -620,6 +719,21 @@ def register_activity_routes(
                     viewer_scope=actor.viewer_scope,
                     item_type="download",
                     item_key=item_key,
+                )
+
+            # The id as this viewer knows it, which is what the response echoes.
+            viewer_task_id = task_id
+            if not actor.is_admin and is_public_download_id(task_id):
+                task_id = (
+                    match_public_download_id(
+                        task_id,
+                        _request_linked_task_ids(
+                            actor,
+                            queue_status=queue_status,
+                            download_history_service=download_history_service,
+                        ),
+                    )
+                    or task_id
                 )
 
             existing = download_history_service.get_by_task_id(task_id)
@@ -671,7 +785,7 @@ def register_activity_routes(
             )
             dismissal_item = {
                 "item_type": "download",
-                "item_key": f"download:{task_id}",
+                "item_key": f"download:{viewer_task_id}",
             }
 
         elif item_type == "request":
@@ -796,6 +910,7 @@ def register_activity_routes(
         dismissal_items: list[dict[str, str]] = []
         missing_item_keys: list[str] = []
         live_queue_index: dict[str, tuple[str, dict[str, Any]]] | None = None
+        request_linked_task_ids: list[str] | None = None
 
         for item in items:
             if not isinstance(item, dict):
@@ -824,9 +939,18 @@ def register_activity_routes(
                         item_key=item_key,
                         item_count=len(items),
                     )
+                viewer_task_id = task_id
+                if not actor.is_admin and is_public_download_id(task_id):
+                    if request_linked_task_ids is None:
+                        request_linked_task_ids = _request_linked_task_ids(
+                            actor,
+                            queue_status=queue_status,
+                            download_history_service=download_history_service,
+                        )
+                    task_id = match_public_download_id(task_id, request_linked_task_ids) or task_id
                 existing = download_history_service.get_by_task_id(task_id)
                 if existing is None:
-                    missing_item_keys.append(f"download:{task_id}")
+                    missing_item_keys.append(f"download:{viewer_task_id}")
                     continue
                 if live_queue_index is None:
                     live_queue_index = _build_queue_index(queue_status(user_id=actor.owner_scope))
@@ -1060,6 +1184,8 @@ def register_activity_routes(
             msg = f"Unknown activity history item_type: {item_type}"
             raise RuntimeError(msg)
 
+        if not actor.is_admin:
+            payload = [_redact_history_entry(entry) for entry in payload]
         return jsonify(payload)
 
     @app.route("/api/activity/history", methods=["DELETE"])

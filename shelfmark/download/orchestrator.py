@@ -108,6 +108,15 @@ def _resolve_email_destination(
     return None, None
 
 
+def _same_series(release_series: object, chosen_series: object) -> bool:
+    """Whether a release's own series (if it names one) is the series being used."""
+    if not isinstance(release_series, str) or not release_series.strip():
+        return True
+    if not isinstance(chosen_series, str):
+        return False
+    return release_series.strip().casefold() == chosen_series.strip().casefold()
+
+
 def _parse_release_search_mode(value: object) -> SearchMode:
     if isinstance(value, SearchMode):
         return value
@@ -263,8 +272,13 @@ def queue_release(
 
         # Get series info for library naming templates
         series_name = release_data.get("series_name") or extra.get("series_name")
-        series_position = release_data.get("series_position") or extra.get("series_position")
+        series_position = release_data.get("series_position")
+        if not series_position and _same_series(extra.get("series_name"), series_name):
+            # A release-level series (e.g. MyAnonamouse's) may number a different
+            # series than the metadata provider named; only borrow a matching one.
+            series_position = extra.get("series_position")
         subtitle = release_data.get("subtitle") or extra.get("subtitle")
+        narrator = release_data.get("narrator") or extra.get("narrator")
         language = release_data.get("language") or extra.get("language")
         multi_book = bool(release_data.get("multi_book") or extra.get("multi_book"))
         book_plan = _normalize_book_plan(release_data.get("book_plan") or extra.get("book_plan"))
@@ -303,6 +317,7 @@ def queue_release(
             series_name=series_name,
             series_position=series_position,
             subtitle=subtitle,
+            narrator=narrator if isinstance(narrator, str) and narrator.strip() else None,
             language=language,
             multi_book=multi_book or book_plan is not None,
             book_plan=book_plan,
@@ -505,6 +520,7 @@ def serialize_task_for_retry(task: DownloadTask) -> dict[str, Any]:
         "series_name": getattr(task, "series_name", None),
         "series_position": getattr(task, "series_position", None),
         "subtitle": getattr(task, "subtitle", None),
+        "narrator": getattr(task, "narrator", None),
         "language": getattr(task, "language", None),
         "search_mode": search_mode,
         "multi_book": bool(getattr(task, "multi_book", False)),
@@ -566,6 +582,7 @@ def _restore_task_from_retry_payload(payload: object) -> DownloadTask | None:
         series_name=normalize_optional_text(payload.get("series_name")),
         series_position=_optional_number(payload.get("series_position")),
         subtitle=normalize_optional_text(payload.get("subtitle")),
+        narrator=normalize_optional_text(payload.get("narrator")),
         language=normalize_optional_text(payload.get("language")),
         search_mode=search_mode,
         multi_book=bool(payload.get("multi_book", False)),
@@ -889,9 +906,12 @@ def update_download_progress(book_id: str, progress: float) -> None:
 
         if should_broadcast:
             task = book_queue.get_task(book_id)
-            task_user_id = task.user_id if task else None
             ws_manager.broadcast_download_progress(
-                book_id, progress, "downloading", user_id=task_user_id
+                book_id,
+                progress,
+                "downloading",
+                user_id=task.user_id if task else None,
+                request_id=task.request_id if task else None,
             )
 
 
@@ -1094,11 +1114,13 @@ def _cancel_stalled_task(task_id: str) -> None:
     the progress lock across that blocks the hub and every other download worker.
     """
     logger.warning("Download stalled for %s, cancelling", task_id)
-    book_queue.cancel_download(task_id)
+    # The message goes first: the terminal hook copies it into the history row, and a cancel
+    # that records the last poll's message ("Queued") hides that the timer ended the download.
     book_queue.update_status_message(
         task_id,
         f"Download stalled (no activity for {STALL_TIMEOUT}s)",
     )
+    book_queue.cancel_download(task_id)
 
 
 def concurrent_download_loop() -> None:

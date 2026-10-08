@@ -90,7 +90,10 @@ class MamTorrentDetails:
     """The fields Prowlarr drops from a MyAnonamouse search result."""
 
     narrator: str | None = None
-    series: str | None = None
+    series: str | None = None  # Display text: "Name #1, Other Series #2"
+    # First series only, for the {Series}/{SeriesPosition} naming placeholders.
+    series_name: str | None = None
+    series_position: float | None = None
     bitrate: str | None = None
     bitrate_kbps: int | None = None
 
@@ -208,9 +211,9 @@ def _parse_names(raw: object) -> str | None:
     return ", ".join(dict.fromkeys(names)) or None
 
 
-def _parse_series(raw: object) -> str | None:
-    """Format series_info ({"id": ["Name", "1"]}) as "Name #1"."""
-    entries: list[str] = []
+def _series_entries(raw: object) -> list[tuple[str, str]]:
+    """Return (name, number) pairs from series_info ({"id": ["Name", "1"]})."""
+    entries: list[tuple[str, str]] = []
     for value in _decode_info(raw).values():
         name: str = ""
         number: str = ""
@@ -220,10 +223,23 @@ def _parse_series(raw: object) -> str | None:
                 number = str(value[1]).strip()
         elif isinstance(value, str):
             name = value.strip()
-        if not name:
-            continue
-        entries.append(f"{name} #{number}" if number else name)
+        if name:
+            entries.append((name, number))
+    return entries
+
+
+def _parse_series(raw: object) -> str | None:
+    """Format series_info as "Name #1", joining several series with commas."""
+    entries = [f"{name} #{number}" if number else name for name, number in _series_entries(raw)]
     return ", ".join(dict.fromkeys(entries)) or None
+
+
+def _parse_series_position(number: str) -> float | None:
+    """Read a MAM series number ("1", "2.5") as a float; ranges like "1-3" are None."""
+    try:
+        return float(number)
+    except ValueError:
+        return None
 
 
 def _parse_bitrate(tags: object) -> tuple[str | None, int | None]:
@@ -239,9 +255,13 @@ def _parse_bitrate(tags: object) -> tuple[str | None, int | None]:
 def parse_torrent_details(item: dict[str, Any]) -> MamTorrentDetails:
     """Pull narrator, series and bitrate out of one MAM search result."""
     bitrate, bitrate_kbps = _parse_bitrate(item.get("tags"))
+    series_entries = _series_entries(item.get("series_info"))
+    first_name, first_number = series_entries[0] if series_entries else (None, "")
     return MamTorrentDetails(
         narrator=_parse_names(item.get("narrator_info")),
         series=_parse_series(item.get("series_info")),
+        series_name=first_name,
+        series_position=_parse_series_position(first_number) if first_number else None,
         bitrate=bitrate,
         bitrate_kbps=bitrate_kbps,
     )
