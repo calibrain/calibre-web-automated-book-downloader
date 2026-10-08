@@ -834,6 +834,8 @@ function App() {
         }
 
         prevSearchModeRef.current = cfg.search_mode;
+        // The browser tab follows the configured search page title.
+        document.title = cfg.search_page_title?.trim() || 'Shelfmark';
         setConfig({
           ...cfg,
           metadata_default_sort: resolvedMetadataDefaultSort,
