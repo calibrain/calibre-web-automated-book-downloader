@@ -29,8 +29,8 @@ if TYPE_CHECKING:
 
 logger = setup_logger(__name__)
 
-# "(Alex Cross Series #11)", "[Illustrated Edition]" and friends.
-_PARENTHETICAL = re.compile(r"[(\[][^)\]]*[)\]]")
+# "(Alex Cross Series #11)", "(Book 2)": a bracketed segment with a number in it.
+_NUMBERED_PARENTHETICAL = re.compile(r"[(\[][^)\]]*\d[^)\]]*[)\]]")
 # "Label NN: Title", a series label and number in front of the work's own title. The
 # label often abbreviates the series ("HHG 5: Mostly Harmless" for The Hitchhiker's
 # Guide to the Galaxy), so its words are in neither the series nor the author name.
@@ -114,11 +114,15 @@ def _read_entries(conn: sqlite3.Connection) -> list[LibraryEntry]:
 
     entries: list[LibraryEntry] = []
     for book_id, title in titles.items():
-        # A trailing parenthetical is series or edition metadata by convention rather
+        # A numbered parenthetical is series or volume metadata by convention rather
         # than part of the work name, and Calibre users often put it there instead of
         # in the series field. It stays in the recall set below and is dropped from the
         # title set, which is what decides whether the shelf holds a different book.
-        title_tok = set(tokens(_PARENTHETICAL.sub(" ", title)))
+        # An unnumbered one describes the edition, so its words stay in the title set:
+        # the matcher ignores printing words there ("Illustrated Edition", "Unabridged")
+        # but reads anything else ("Full Cast Edition", "Dramatized Adaptation") as a
+        # different recording of the work, which is not the one being asked for.
+        title_tok = set(tokens(_NUMBERED_PARENTHETICAL.sub(" ", title)))
         context_tok = set(tokens(series.get(book_id)))
         # Only for a book with a series: there a leading "Label NN:" is the series
         # label, not words naming another work. Without one it is left to the matcher.

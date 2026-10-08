@@ -5,13 +5,16 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from shelfmark.core import library_index
 from shelfmark.core.library_providers import calibre
 from shelfmark.metadata_providers import BookMetadata
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _SCHEMA = """
 CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT NOT NULL, uuid TEXT);
@@ -71,6 +74,19 @@ def _configure(monkeypatch: pytest.MonkeyPatch, path: Path, *, enabled: bool = T
         lambda key, default=None, user_id=None: values.get(key, default),
     )
     monkeypatch.setattr(library_index, "_cache", {})
+
+
+@pytest.fixture
+def calibre_library(monkeypatch: pytest.MonkeyPatch) -> Callable[..., Path]:
+    """Point the provider at a library, building it first unless ``create=False``."""
+
+    def make(*, path: Path, create: bool = True, enabled: bool = True) -> Path:
+        if create:
+            _make_library(path)
+        _configure(monkeypatch, path, enabled=enabled)
+        return path
+
+    return make
 
 
 def _infos(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -392,3 +408,50 @@ def test_a_title_prefix_without_a_series_is_left_alone(
     entries = calibre.CalibreLibrary().fetch_entries()
 
     assert _owned(entries, "Dune", "Frank Herbert") is None
+
+
+@pytest.mark.parametrize(
+    "shelf_title",
+    [
+        "Dungeon Crawler Carl (Full Cast Edition)",
+        "Dungeon Crawler Carl (Dramatized Adaptation)",
+        "Dungeon Crawler Carl [GraphicAudio]",
+    ],
+)
+def test_an_edition_marker_in_the_title_is_a_different_edition(
+    tmp_path: Path, calibre_library: Callable[..., Path], shelf_title: str
+) -> None:
+    # A bracketed marker with no number in it describes the edition. Owning a full-cast
+    # or dramatized recording is not owning the book it adapts, so the request must
+    # not be closed as already in the library.
+    path = tmp_path / "metadata.db"
+    _library_with(path, [(1, shelf_title, "Matt Dinniman", None)])
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Dungeon Crawler Carl", "Matt Dinniman") is None
+    # The same edition, asked for by its own name, is on the shelf.
+    assert _owned(entries, shelf_title, "Matt Dinniman") == "owned"
+
+
+@pytest.mark.parametrize(
+    ("shelf_title", "series"),
+    [
+        ("Kiss the Girls (Alex Cross Series #11)", None),
+        ("Kiss the Girls (Alex Cross, Book 2)", None),
+        ("Alex Cross 02: Kiss the Girls", "Alex Cross"),
+        ("Kiss the Girls (Illustrated Edition)", None),
+        ("Kiss the Girls (Unabridged)", None),
+    ],
+)
+def test_series_metadata_and_printing_words_in_the_title_do_not_hide_the_book(
+    tmp_path: Path, calibre_library: Callable[..., Path], shelf_title: str, series: str | None
+) -> None:
+    # A numbered parenthetical is the series by Calibre convention, often in place of
+    # the series field, and a printing word changes nothing about which work it is.
+    path = tmp_path / "metadata.db"
+    _library_with(path, [(1, shelf_title, "James Patterson", series)])
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Kiss the Girls", "James Patterson") == "owned"
