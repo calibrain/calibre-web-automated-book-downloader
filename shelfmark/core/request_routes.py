@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from typing import TYPE_CHECKING, Any
 
 from flask import Flask, Response, jsonify, request, session
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
 
     from flask.typing import ResponseReturnValue
 
+    from shelfmark.core.activity_view_state_service import ActivityViewStateService
     from shelfmark.core.user_db import UserDB
 
 logger = setup_logger(__name__)
@@ -563,6 +565,7 @@ def register_request_routes(
     resolve_auth_mode: Callable[[], str],
     queue_release: Callable[..., tuple[bool, str | None]],
     ws_manager: object | None = None,
+    activity_view_state_service: ActivityViewStateService | None = None,
 ) -> None:
     """Register request policy and request lifecycle routes."""
 
@@ -1102,6 +1105,21 @@ def register_request_routes(
             )
         except RequestServiceError as exc:
             return _error_response(str(exc), exc.status_code, code=exc.code)
+
+        # A rejected request has often been cleared from the activity list. Undo that too,
+        # or the reopened request stays hidden, the same as the failed-download reopen does.
+        if activity_view_state_service is not None:
+            try:
+                activity_view_state_service.clear_item_for_all_viewers(
+                    item_type="request",
+                    item_key=f"request:{updated['id']}",
+                )
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                logger.warning(
+                    "Could not restore reopened request #%s to the activity list: %s",
+                    updated["id"],
+                    exc,
+                )
 
         event_payload = {
             "request_id": updated["id"],

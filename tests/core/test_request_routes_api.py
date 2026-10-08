@@ -1350,6 +1350,11 @@ class TestRequestRoutes:
                         f"/api/admin/requests/{request_id}/reject",
                         json={"admin_note": "Sounds like a dumb book"},
                     )
+                    main_module.activity_view_state_service.dismiss(
+                        viewer_scope="admin:shared",
+                        item_type="request",
+                        item_key=f"request:{request_id}",
+                    )
                     with patch.object(main_module.ws_manager, "is_enabled", return_value=True):
                         with patch.object(main_module.ws_manager.socketio, "emit") as mock_emit:
                             reopen_resp = client.post(
@@ -1377,6 +1382,13 @@ class TestRequestRoutes:
         updated = main_module.user_db.get_request(request_id)
         assert updated["status"] == "pending"
         assert updated["reviewed_by"] is None
+        hidden_keys = {
+            row["item_key"]
+            for row in main_module.activity_view_state_service.list_hidden(
+                viewer_scope="admin:shared"
+            )
+        }
+        assert f"request:{request_id}" not in hidden_keys
 
     def test_admin_reject_emits_update_to_user_and_admin_rooms(self, main_module, client):
         user = _create_user(main_module, prefix="reader")

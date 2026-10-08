@@ -589,6 +589,7 @@ if user_db is not None:
             resolve_auth_mode=_resolve_auth_mode_for_routes,
             queue_release=_queue_release_for_routes,
             ws_manager=ws_manager,
+            activity_view_state_service=activity_view_state_service,
         )
         if download_history_service is not None and activity_view_state_service is not None:
             register_activity_routes(
