@@ -60,7 +60,8 @@ if TYPE_CHECKING:
 logger = setup_logger(__name__)
 
 # Admin note on a pending request auto-download closed because the library already has it.
-IN_LIBRARY_NOTE = "Already in the library."
+# "[auto]" marks an admin action no person took; the note is all a request records about why.
+IN_LIBRARY_NOTE = "[auto] Already in the library."
 
 # Fraction of significant book-title tokens that must appear in the release title.
 TITLE_MATCH_THRESHOLD = DEFAULT_TITLE_MATCH_THRESHOLD
