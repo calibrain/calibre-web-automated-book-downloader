@@ -690,6 +690,33 @@ def _unwrap_hit_document(hit: Any) -> dict[str, Any] | None:
     return item if isinstance(item, dict) else None
 
 
+def _matched_alternative_title(hit: Any, item: dict[str, Any]) -> str | None:
+    """Return the alternative title a search hit matched on, unless its title matched too.
+
+    Hardcover keeps one book per work, titled after the original, and lists its
+    translations' titles in `alternative_titles`. A search for "Der Weg der Könige"
+    matches only that alternative title of "The Way of Kings, Part 1"; the hit's
+    `highlights` name the field and the matching entries, best first.
+    """
+    if not isinstance(hit, dict):
+        return None
+    highlights = hit.get("highlights")
+    if not isinstance(highlights, list):
+        return None
+    fields = {h.get("field"): h for h in highlights if isinstance(h, dict)}
+    if "title" in fields:
+        return None
+    indices = (fields.get("alternative_titles") or {}).get("indices") or []
+    alternative_titles = item.get("alternative_titles")
+    if not indices or not isinstance(alternative_titles, list):
+        return None
+    index = indices[0]
+    if not isinstance(index, int) or not 0 <= index < len(alternative_titles):
+        return None
+    matched = alternative_titles[index]
+    return matched if isinstance(matched, str) and matched.strip() else None
+
+
 def _search_tokens(value: str) -> list[str]:
     """Tokenize search text for lightweight prefix matching."""
     return re.findall(r"[a-z0-9']+", value.casefold())
@@ -2473,7 +2500,9 @@ class HardcoverProvider(MetadataProvider):
                     release_year = item.get("release_year")
                     if release_year is not None and release_year > current_year:
                         continue
-                book = self._parse_search_result(item)
+                book = self._parse_search_result(
+                    item, matched_title=_matched_alternative_title(hit, item)
+                )
                 if book:
                     books.append(book)
 
@@ -2760,8 +2789,15 @@ class HardcoverProvider(MetadataProvider):
         _sort_fallback_until = time.monotonic() + SORT_FALLBACK_TTL
         return retry
 
-    def _parse_search_result(self, item: dict) -> BookMetadata | None:
-        """Parse a search result item into BookMetadata."""
+    def _parse_search_result(
+        self, item: dict, matched_title: str | None = None
+    ) -> BookMetadata | None:
+        """Parse a search result item into BookMetadata.
+
+        ``matched_title`` is the alternative (usually translated) title the search
+        matched; when given, it replaces the work's original title, so a search for a
+        translation by name stays in that translation's language.
+        """
         try:
             book_id = item.get("id") or item.get("document", {}).get("id")
             title = item.get("title") or item.get("document", {}).get("title")
@@ -2822,13 +2858,18 @@ class HardcoverProvider(MetadataProvider):
 
             # Extract subtitle if available in search results
             subtitle = item.get("subtitle")
+            search_title = _compute_search_title(title, subtitle)
+
+            if matched_title and matched_title != title:
+                # The subtitle belongs to the original title, not to the translation.
+                title, subtitle, search_title = matched_title, None, matched_title
 
             return BookMetadata(
                 provider="hardcover",
                 provider_id=str(book_id),
                 title=title,
                 subtitle=subtitle,
-                search_title=_compute_search_title(title, subtitle),
+                search_title=search_title,
                 search_author=search_author,
                 provider_display_name="Hardcover",
                 authors=authors,
