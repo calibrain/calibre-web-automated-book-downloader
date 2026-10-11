@@ -38,8 +38,9 @@ def get_unavailable_reason(
         return "Direct Download is disabled. Enable the source in Settings."
     if not enabled_providers(providers):
         return (
-            "Direct Download is not configured. Enable and configure at least one "
-            "download provider in Settings."
+            "Direct Download is not configured. Add at least one Anna's Archive mirror URL in "
+            "Settings. Z-Library, LibGen, and Welib mirrors only download results found through "
+            "Anna's Archive."
         )
     return None
 
