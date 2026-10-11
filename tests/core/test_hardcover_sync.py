@@ -1,6 +1,7 @@
 """Tests for syncing Hardcover status shelves into pending requests."""
 
 import sqlite3
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -44,18 +45,55 @@ def _book(provider_id, title, author="Matt Dinniman", **overrides):
     return BookMetadata(**fields)
 
 
-def _insert_history(db_path, *, title, author, final_status="complete", content_type=None):
+def _insert_history(
+    db_path,
+    *,
+    title,
+    author,
+    final_status="complete",
+    content_type=None,
+    request_id=None,
+    terminal_at=None,
+):
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
             "INSERT INTO download_history "
-            "(task_id, source, title, author, final_status, content_type) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (f"task-{title}-{final_status}", "prowlarr", title, author, final_status, content_type),
+            "(task_id, source, title, author, final_status, content_type, request_id, "
+            "terminal_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))",
+            (
+                f"task-{title}-{final_status}-{request_id}",
+                "prowlarr",
+                title,
+                author,
+                final_status,
+                content_type,
+                request_id,
+                terminal_at,
+            ),
         )
         conn.commit()
     finally:
         conn.close()
+
+
+def _request(user_db, user_id, provider_id, content_type="audiobook", title="Some Book"):
+    """A request for a Hardcover book, the shape the sync and the UI both create."""
+    row = user_db.create_request(
+        user_id=user_id,
+        content_type=content_type,
+        request_level="book",
+        policy_mode="request_book",
+        book_data={
+            "title": title,
+            "author": "Matt Dinniman",
+            "provider": "hardcover",
+            "provider_id": provider_id,
+            "content_type": content_type,
+        },
+    )
+    return int(row["id"])
 
 
 @pytest.fixture
@@ -163,18 +201,37 @@ def test_existing_request_keys_pair_provider_id_with_content_type(user_db):
     }
 
 
-def test_already_downloaded_matches_history_case_insensitively(user_db, db_path):
+def test_already_downloaded_is_keyed_on_the_request_book_not_the_release_title(user_db, db_path):
+    user = user_db.create_user(username="reader", role="user")
+    request_id = _request(user_db, user["id"], "42", title="Dungeon Crawler Carl")
+    # The history row carries the release name, which never equals the book's title.
+    _insert_history(
+        db_path,
+        title="Dungeon Crawler Carl - Matt Dinniman [M4B]",
+        author="Matt Dinniman",
+        request_id=request_id,
+    )
+
+    assert hardcover_sync._already_downloaded(db_path, "hardcover", "42", "audiobook")
+    assert not hardcover_sync._already_downloaded(db_path, "hardcover", "43", "audiobook")
+    assert not hardcover_sync._already_downloaded(db_path, "openlibrary", "42", "audiobook")
+    assert not hardcover_sync._already_downloaded(None, "hardcover", "42", "audiobook")
+
+
+def test_a_download_with_no_request_does_not_count(user_db, db_path):
+    user = user_db.create_user(username="reader", role="user")
+    _request(user_db, user["id"], "42", title="Dungeon Crawler Carl")
     _insert_history(db_path, title="Dungeon Crawler Carl", author="Matt Dinniman")
 
-    assert hardcover_sync._already_downloaded(
-        db_path, "dungeon crawler CARL", "MATT dinniman", "audiobook"
-    )
-    assert not hardcover_sync._already_downloaded(
-        db_path, "Dungeon Crawler Carl", "Someone", "audiobook"
-    )
-    assert not hardcover_sync._already_downloaded(
-        None, "Dungeon Crawler Carl", "Matt Dinniman", "audiobook"
-    )
+    assert not hardcover_sync._already_downloaded(db_path, "hardcover", "42", "audiobook")
+
+
+def test_a_provider_id_stored_as_a_number_still_matches(user_db, db_path):
+    user = user_db.create_user(username="reader", role="user")
+    request_id = _request(user_db, user["id"], 42)
+    _insert_history(db_path, title="Some Book", author="Matt Dinniman", request_id=request_id)
+
+    assert hardcover_sync._already_downloaded(db_path, "hardcover", "42", "audiobook")
 
 
 @pytest.mark.parametrize(
@@ -182,22 +239,66 @@ def test_already_downloaded_matches_history_case_insensitively(user_db, db_path)
     [("complete", True), ("active", True), ("error", False), ("cancelled", False)],
 )
 def test_only_a_finished_or_running_download_counts(user_db, db_path, final_status, counts):
+    user = user_db.create_user(username="reader", role="user")
+    request_id = _request(user_db, user["id"], "42", content_type="ebook")
     _insert_history(
-        db_path, title="Dungeon Crawler Carl", author="Matt Dinniman", final_status=final_status
+        db_path,
+        title="Dungeon Crawler Carl",
+        author="Matt Dinniman",
+        final_status=final_status,
+        request_id=request_id,
     )
 
+    assert hardcover_sync._already_downloaded(db_path, "hardcover", "42", "ebook") is counts
+
+
+@pytest.mark.parametrize(
+    ("terminal_at", "counts"),
+    [
+        ("2026-10-11T10:00:00+00:00", True),
+        ("2026-10-11 10:00:00", True),
+        ("2026-10-10T11:00:00+00:00", False),
+        ("2026-10-10 11:00:00", False),
+        ("not a time", False),
+    ],
+)
+def test_an_active_row_older_than_a_day_is_a_lost_download(user_db, db_path, terminal_at, counts):
+    user = user_db.create_user(username="reader", role="user")
+    request_id = _request(user_db, user["id"], "42")
+    _insert_history(
+        db_path,
+        title="Some Book",
+        author="Matt Dinniman",
+        final_status="active",
+        request_id=request_id,
+        terminal_at=terminal_at,
+    )
+    now = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
+
     assert (
-        hardcover_sync._already_downloaded(
-            db_path, "Dungeon Crawler Carl", "Matt Dinniman", "ebook"
-        )
+        hardcover_sync._already_downloaded(db_path, "hardcover", "42", "audiobook", now=now)
         is counts
     )
+
+
+def test_a_finished_download_counts_however_old_it_is(user_db, db_path):
+    user = user_db.create_user(username="reader", role="user")
+    request_id = _request(user_db, user["id"], "42")
+    _insert_history(
+        db_path,
+        title="Some Book",
+        author="Matt Dinniman",
+        request_id=request_id,
+        terminal_at="2025-01-01T00:00:00+00:00",
+    )
+
+    assert hardcover_sync._already_downloaded(db_path, "hardcover", "42", "audiobook")
 
 
 def test_already_downloaded_fails_open_without_history_table(tmp_path):
     missing = str(tmp_path / "empty.db")
 
-    assert hardcover_sync._already_downloaded(missing, "Anything", "Anyone", "ebook") is False
+    assert hardcover_sync._already_downloaded(missing, "hardcover", "1", "ebook") is False
 
 
 class TestSyncWishlist:
@@ -283,8 +384,17 @@ class TestSyncWishlist:
                 "provider_id": "10",
             },
         )
-        _insert_history(db_path, title="Already Downloaded", author="Matt Dinniman")
-        _configure(monkeypatch, HARDCOVER_SYNC_STATUSES="1")
+        # Another user's request for book 11 was fulfilled; this user's sync cannot see
+        # the request, so the history is what skips it.
+        other = user_db.create_user(username="other", role="user")
+        _insert_history(
+            db_path,
+            title="Already Downloaded - Matt Dinniman [M4B]",
+            author="Matt Dinniman",
+            request_id=_request(user_db, other["id"], "11", title="Already Downloaded"),
+        )
+        _configure(monkeypatch, HARDCOVER_SYNC_STATUSES="1", LIBRARY_CHECK_ENABLED=True)
+        monkeypatch.setattr("shelfmark.core.library_index.any_provider_enabled", lambda: True)
         monkeypatch.setattr(
             "shelfmark.core.library_index.is_in_library",
             lambda book, *_args, **_kwargs: book.title == "Already Owned",
@@ -307,7 +417,9 @@ class TestSyncWishlist:
         summary = hardcover_sync.sync_wishlist(user_db, db_path=db_path, user_id=user["id"])
 
         assert summary == {"added": 1, "skipped": 3, "in_library": 1, "errors": 0}
-        titles = sorted(row["book_data"]["title"] for row in user_db.list_requests())
+        titles = sorted(
+            row["book_data"]["title"] for row in user_db.list_requests(user_id=user["id"])
+        )
         assert titles == ["Already Requested", "Brand New"]
 
     def test_a_library_that_cannot_be_read_stops_the_sync_before_anything_is_requested(
@@ -390,16 +502,19 @@ def test_configured_content_types(monkeypatch, raw, expected):
 
 
 def test_already_downloaded_is_per_content_type(user_db, db_path):
+    user = user_db.create_user(username="reader", role="user")
+    request_id = _request(user_db, user["id"], "42", content_type="ebook")
+    # The source's own content label, as Anna's Archive writes it; the request's type decides.
     _insert_history(
-        db_path, title="Dungeon Crawler Carl", author="Matt Dinniman", content_type="ebook"
+        db_path,
+        title="Dungeon Crawler Carl",
+        author="Matt Dinniman",
+        content_type="\U0001f4d5 book (fiction)",
+        request_id=request_id,
     )
 
-    assert hardcover_sync._already_downloaded(
-        db_path, "Dungeon Crawler Carl", "Matt Dinniman", "ebook"
-    )
-    assert not hardcover_sync._already_downloaded(
-        db_path, "Dungeon Crawler Carl", "Matt Dinniman", "audiobook"
-    )
+    assert hardcover_sync._already_downloaded(db_path, "hardcover", "42", "ebook")
+    assert not hardcover_sync._already_downloaded(db_path, "hardcover", "42", "audiobook")
 
 
 class TestSyncBothFormats:

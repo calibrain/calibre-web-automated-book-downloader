@@ -13,8 +13,8 @@ On a schedule, Shelfmark reads the selected Hardcover shelf (by default **Want t
 A book is skipped when:
 
 - a request with the same Hardcover book id already exists, in any status
-- a download with the same title and author is already in the download history
-- the library check (below) says it is already in your library
+- a request for the same Hardcover book and format, by any user, has a download in the history that finished or is still running (an unfinished download older than a day no longer counts as running)
+- the library check (below) says you already own it
 - a pending request with the same title, author, and content type already exists
 
 ### Automatic downloads
