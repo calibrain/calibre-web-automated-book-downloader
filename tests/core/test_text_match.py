@@ -22,6 +22,45 @@ def test_tokens_empty_input(value):
     assert text_match.tokens(value) == []
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("The Children of Húrin", ["the", "children", "of", "hurin"]),
+        # The same title already decomposed (u + combining acute), as a scraped page has it.
+        ("The Children of Húrin", ["the", "children", "of", "hurin"]),
+        ("The Fall of Númenor", ["the", "fall", "of", "numenor"]),
+        ("Beren and Lúthien", ["beren", "and", "luthien"]),
+        ("Jo Nesbø", ["jo", "nesbo"]),
+        ("Straße", ["strasse"]),
+        ("Æsop's Fables", ["aesop", "s", "fables"]),
+        ("Gabriel García Márquez", ["gabriel", "garcia", "marquez"]),
+    ],
+)
+def test_tokens_fold_diacritics(text, expected):
+    assert text_match.tokens(text) == expected
+
+
+def test_fold_leaves_plain_ascii_alone():
+    assert text_match.fold("Dungeon Crawler Carl: Book 1!") == "dungeon crawler carl: book 1!"
+
+
+@pytest.mark.parametrize(
+    ("title", "haystack"),
+    [
+        ("The Fall of Númenor", "The Fall of Numenor - J.R.R. Tolkien, Brian Sibley (editor)"),
+        ("The Children of Hurin", "The Children of Húrin - J. R. R. Tolkien"),
+        ("The Children of Húrin", "The Children of Hurin - J.R.R. Tolkien"),
+    ],
+)
+def test_title_tokens_match_does_not_care_about_accents(title, haystack):
+    assert text_match.title_tokens_match(title, set(text_match.tokens(haystack))) is True
+
+
+def test_author_surname_folds_accents():
+    assert text_match.author_surname("Jo Nesbø") == "nesbo"
+    assert text_match.author_surname("Márquez, Gabriel García") == "marquez"
+
+
 def test_significant_tokens_drops_stopwords_and_single_characters():
     assert text_match.significant_tokens("The Way of Kings, Part A 2") == ["way", "kings", "part"]
 

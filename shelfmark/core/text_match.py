@@ -7,6 +7,7 @@ library matches titles, authors and ISBNs the same way.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 DEFAULT_TITLE_MATCH_THRESHOLD = 0.85
 
@@ -30,11 +31,40 @@ STOPWORDS = frozenset(
 )
 
 
+# Letters NFKD leaves whole, folded by hand so "Nesbø" and "Straße" compare as "nesbo" and
+# "strasse", which is how a release name or a shelf usually spells them.
+_LETTER_FOLD = str.maketrans(
+    {
+        "ß": "ss",
+        "æ": "ae",
+        "œ": "oe",
+        "ø": "o",
+        "ł": "l",
+        "đ": "d",
+        "ð": "d",
+        "þ": "th",
+        "ı": "i",
+    }
+)
+
+
+def fold(text: str) -> str:
+    """Lowercase text with its diacritics dropped, so "Húrin" and "Hurin" read the same.
+
+    Decomposes (NFKD) and discards the combining marks, which also covers a title that
+    arrives already decomposed ("Húrin"). A metadata provider and a release name
+    rarely agree on accents; without this, "The Children of Húrin" split into "hu" and
+    "rin" and scored half a match against its own audiobook.
+    """
+    decomposed = unicodedata.normalize("NFKD", text.lower())
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).translate(_LETTER_FOLD)
+
+
 def tokens(text: str | None) -> list[str]:
-    """Lowercase alphanumeric tokens from arbitrary text."""
+    """Lowercase alphanumeric tokens from arbitrary text, diacritics folded away."""
     if not text:
         return []
-    return [tok for tok in re.split(r"[^a-z0-9]+", text.lower()) if tok]
+    return [tok for tok in re.split(r"[^a-z0-9]+", fold(text)) if tok]
 
 
 def significant_tokens(text: str | None) -> list[str]:

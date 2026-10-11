@@ -1327,3 +1327,81 @@ def test_every_processable_audiobook_format_outranks_an_unknown_one():
 
     assert auto_download.pick_best_release([unknown, flac]) is flac
     assert auto_download.pick_best_release([flac, m4b]) is m4b
+
+
+def _abb(title, author=None, *, fmt="mp3", keywords=None):
+    """A release the way the AudiobookBay source builds one: the title split off the
+    author, the listing title kept raw, no seeder count."""
+    raw = f"{title} - {author}" if author else title
+    extra = {"author": author, "title_raw": raw}
+    if keywords is not None:
+        extra["keywords"] = keywords
+    return _release(
+        source="audiobookbay",
+        source_id=raw,
+        title=title,
+        format=fmt,
+        seeders=None,
+        indexer="AudiobookBay",
+        content_type="audiobook",
+        extra=extra,
+    )
+
+
+def _tolkien(title, **overrides):
+    fields = {"title": title, "authors": ["J.R.R. Tolkien"], "search_author": "Tolkien"}
+    fields.update(overrides)
+    return _book(**fields)
+
+
+class TestAccentedTitles:
+    """A provider's accents and a release's need not agree: Húrin is Hurin."""
+
+    @pytest.mark.parametrize(
+        ("wanted", "release_title", "author"),
+        [
+            ("The Children of Hurin", "The Children of Húrin", "J. R. R. Tolkien"),
+            ("The Children of Hurin", "The Children of Húrin", "J. R. R. Tolkien"),
+            ("The Children of Húrin", "The Children of Hurin", "J.R.R. Tolkien"),
+            ("The Fall of Númenor", "The Fall of Numenor", "J.R.R. Tolkien, Brian Sibley (editor)"),
+            ("Beren and Lúthien", "Beren and Luthien", "J.R.R. Tolkien"),
+        ],
+    )
+    def test_the_same_title_with_or_without_accents_matches(self, wanted, release_title, author):
+        book = _tolkien(wanted)
+
+        assert auto_download.strict_match(
+            _abb(release_title, author), book, audiobook_formats=AUDIOBOOK_FORMATS
+        )
+
+    def test_the_provider_search_title_is_folded_too(self):
+        book = _tolkien(
+            "The Fall of Númenor: and Other Tales from the Second Age of Middle-earth",
+            subtitle="and Other Tales from the Second Age of Middle-earth",
+            search_title="The Fall of Númenor",
+        )
+        release = _abb("The Fall of Numenor", "J.R.R. Tolkien, Brian Sibley (editor)", fmt="m4b")
+
+        assert auto_download.strict_match(release, book, audiobook_formats=AUDIOBOOK_FORMATS)
+
+    @pytest.mark.parametrize(
+        ("wanted", "release_title", "author"),
+        [
+            ("The Children of Húrin", "The Fall of Numenor", "J.R.R. Tolkien"),
+            ("The Fall of Númenor", "The Fall of Gondolin", "J.R.R. Tolkien"),
+            ("The Children of Húrin", "Beren and Luthien", "J.R.R. Tolkien"),
+            ("The Children of Húrin", "The Children of Húrin: Summary & Analysis", "Tolkien"),
+            (
+                "The Children of Húrin",
+                "Lord of the Rings (Complete Tolkien works)",
+                "J.R.R Tolkien",
+            ),
+            ("The Children of Húrin", "The Children of Húrin", "Alan Lee"),
+        ],
+    )
+    def test_another_title_edition_or_author_is_still_rejected(self, wanted, release_title, author):
+        book = _tolkien(wanted)
+
+        assert not auto_download.strict_match(
+            _abb(release_title, author), book, audiobook_formats=AUDIOBOOK_FORMATS
+        )
