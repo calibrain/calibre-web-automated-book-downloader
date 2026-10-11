@@ -805,6 +805,94 @@ def test_sync_delivery_states_preserves_retryable_error_state(user_db):
 # ---------------------------------------------------------------------------
 
 
+def _fulfilled_with_release(user_db, user_id, source_id):
+    return user_db.create_request(
+        user_id=user_id,
+        source_hint="slskd",
+        content_type="audiobook",
+        request_level="release",
+        policy_mode="request_release",
+        book_data=_book_data("audiobook"),
+        release_data={"source": "slskd", "source_id": source_id, "title": "The Sworn Sword"},
+        status="fulfilled",
+        delivery_state="queued",
+    )
+
+
+def test_sync_delivery_states_an_earlier_failure_does_not_undo_a_later_delivery(user_db):
+    user = user_db.create_user(username="alice")
+    request = _fulfilled_with_release(user_db, user["id"], "second-try")
+
+    updated = sync_delivery_states_from_queue_status(
+        user_db,
+        queue_status={
+            "complete": {
+                "second-try": {"id": "second-try", "request_id": request["id"]},
+            },
+            "error": {
+                "first-try": {
+                    "id": "first-try",
+                    "request_id": request["id"],
+                    "retry_available": False,
+                    "status_message": "Peer transfer failed: Rejected",
+                },
+            },
+        },
+        user_id=user["id"],
+    )
+
+    refreshed = user_db.get_request(request["id"])
+    assert refreshed["status"] == "fulfilled"
+    assert refreshed["delivery_state"] == "complete"
+    assert [row["id"] for row in updated] == [request["id"]]
+
+
+def test_sync_delivery_states_a_running_retry_outranks_an_earlier_failure(user_db):
+    user = user_db.create_user(username="alice")
+    request = _fulfilled_with_release(user_db, user["id"], "retry")
+
+    sync_delivery_states_from_queue_status(
+        user_db,
+        queue_status={
+            "downloading": {"retry": {"id": "retry", "request_id": request["id"]}},
+            "error": {
+                "first-try": {
+                    "id": "first-try",
+                    "request_id": request["id"],
+                    "retry_available": False,
+                },
+            },
+        },
+        user_id=user["id"],
+    )
+
+    refreshed = user_db.get_request(request["id"])
+    assert refreshed["status"] == "fulfilled"
+    assert refreshed["delivery_state"] == "downloading"
+
+
+def test_sync_delivery_states_a_failure_alone_still_reopens(user_db):
+    user = user_db.create_user(username="alice")
+    request = _fulfilled_with_release(user_db, user["id"], "only-try")
+
+    sync_delivery_states_from_queue_status(
+        user_db,
+        queue_status={
+            "error": {
+                "only-try": {
+                    "id": "only-try",
+                    "request_id": request["id"],
+                    "retry_available": False,
+                    "status_message": "Download failed",
+                },
+            },
+        },
+        user_id=user["id"],
+    )
+
+    assert user_db.get_request(request["id"])["status"] == "pending"
+
+
 def test_create_request_rejects_non_dict_book_data(user_db):
     user = user_db.create_user(username="alice")
     with pytest.raises(RequestServiceError, match="book_data must be an object"):

@@ -184,6 +184,19 @@ def _prepare_request_create(
     }
 
 
+# Which of a request's tasks decides its delivery state: an active attempt, else a
+# completed one, else a failed or cancelled one.
+_DELIVERY_PRECEDENCE: dict[str, int] = {
+    QueueStatus.QUEUED: 3,
+    QueueStatus.RESOLVING: 3,
+    QueueStatus.LOCATING: 3,
+    QueueStatus.DOWNLOADING: 3,
+    QueueStatus.COMPLETE: 2,
+    QueueStatus.ERROR: 1,
+    QueueStatus.CANCELLED: 1,
+}
+
+
 def sync_delivery_states_from_queue_status(
     user_db: UserDB,
     *,
@@ -221,6 +234,14 @@ def sync_delivery_states_from_queue_status(
             if request_id is None:
                 request_id = unique_request_ids_by_source.get(str(source_id).strip())
             if request_id is None:
+                continue
+            # A request retried after a failure has more than one task. The attempt that
+            # decides its state is one still running, else any that completed: an older
+            # failure must not undo a later delivery (and reopen the request).
+            current = request_delivery_states.get(request_id)
+            if current is not None and _DELIVERY_PRECEDENCE.get(
+                current, 0
+            ) > _DELIVERY_PRECEDENCE.get(status_key, 0):
                 continue
             request_delivery_states[request_id] = status_key
             if isinstance(task_payload, dict):
