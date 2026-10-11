@@ -40,6 +40,15 @@ Among matching releases from the winning source, format ranks first (`m4b` over 
 A download that fails, or is interrupted (a restart while it was queued, say), does not stay that way forever. Once the request has sat there for **Retry failed downloads after (days)** (7 by default), it goes back to pending and the next pass searches again. Each pass reopens at most five, oldest first, so a backlog is spread out instead of hitting your sources at once. An interrupted download may pick the same release again, since a torrent already in your client is joined instead of added twice. A download that itself failed, or that Shelfmark's stall timer cancelled, has its release remembered and skipped next time, and the request is given up on after three failed retries. Requests you or an admin cancelled are never retried, and neither are rejected ones: both are decisions. Set the value to 0 to turn retries off.
 
 A request that no source has a match for is not searched every cycle for ever. After three passes in a row with no match it is searched once a day, then every two days, and no further apart than **Longest wait between searches for an unmatched request (days)** (3 by default, 0 searches every unmatched request every cycle). A match, a search that failed (which says nothing about the book) or **Sync now** starts it over.
+### Audiobooks no store sells
+
+Some requested books were never recorded, so no source will ever match them and the request waits in Needs Review for good. With **Decline audiobooks no store sells** on, an audiobook request that has gone **Look the book up after (unmatched passes)** consecutive passes (3 by default) without a strict match is looked up on Audible's US and UK stores, through the metadata search of the Audiobookshelf server set up for the library check (its URL and token are needed; the library check itself can stay off).
+
+- **On neither store:** the request is rejected with the admin note `[auto] No audiobook found on Audible (US/UK) after <N> searches, <date>.` It can be reopened like any other rejected request, and then counts its passes from zero.
+- **On a store:** the request stays pending and its failure reason reads `Exists on Audible (<ASIN>), not on our sources yet`. The store is asked again a week later, not every pass.
+- **Lookup failed:** nothing changes and the next pass asks again. A failed lookup never declines a request. Audiobookshelf answers a failed Audible search with an empty list, which looks like "no such book", so before declining Shelfmark also looks up a book both stores are known to sell (*The Hobbit*). If that comes back missing too, the answer is treated as a failure.
+
+A store result counts as the book when its title matches the request's once both are normalised (accents, punctuation, "Part II"/"Part Two"/"Part 2", a subtitle after `:` or `, or`, bracketed notes like "(Unabridged)" and a leading series label are all ignored, and a title that begins the other with at least two words also counts) and the request author's surname is in its author field. The matching leans towards "found": a wrong "found" only leaves the request pending. The pass counter is reset when a source matches the book and when the request is rejected. Store lookups come out of the request's search time; when too little is left, the lookup waits for the next pass. Ebook requests are not checked.
 
 ### Library check
 
@@ -63,6 +72,8 @@ The check **fails closed** here: if an enabled library cannot be read and has no
 | `AUTO_DOWNLOAD_MIN_SEEDERS` | Minimum seeders (torrents) | 1 | Torrent releases below this are ignored |
 | `AUTO_DOWNLOAD_RETRY_DAYS` | Retry failed downloads after (days) | 7 | A failed or interrupted download goes back to pending after this long. 0 turns retries off |
 | `AUTO_DOWNLOAD_BACKOFF_MAX_DAYS` | Longest wait between searches for an unmatched request (days) | 3 | 0 searches every unmatched request every cycle |
+| `AUTO_DOWNLOAD_EXISTENCE_CHECK_ENABLED` | Decline audiobooks no store sells | Off | See [Audiobooks no store sells](#audiobooks-no-store-sells). Needs the Audiobookshelf URL and token |
+| `AUTO_DOWNLOAD_EXISTENCE_CHECK_AFTER_PASSES` | Look the book up after (unmatched passes) | 3 | Consecutive passes without a strict match before the stores are asked |
 
 One action button sits at the bottom of the tab:
 
