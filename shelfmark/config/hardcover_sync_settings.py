@@ -201,12 +201,12 @@ def hardcover_sync_settings() -> list[SettingsField]:
         ),
         CheckboxField(
             key="AUTO_DOWNLOAD_EXISTENCE_CHECK_ENABLED",
-            label="Decline audiobooks no store sells",
+            label="Mark audiobooks no store sells",
             description=(
                 "An audiobook request that stays unmatched is looked up on Audible (US and "
-                "UK) through your Audiobookshelf server. Not listed on either: the request is "
-                "declined with an [auto] note, and can be reopened. Listed: it stays pending "
-                "and says so, with the ASIN, and is checked again after a week. A lookup that "
+                "UK) through your Audiobookshelf server. Either way it stays pending and its "
+                "reason says what the store answered (with the ASIN when listed), for you to "
+                "decline or keep; it is checked again after a week. A lookup that "
                 "fails decides nothing. Needs the Audiobookshelf URL and token below."
             ),
             default=False,

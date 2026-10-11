@@ -271,7 +271,7 @@ class TestAfterRequest:
         assert _state(user_db, request) is None
         assert store.calls == []
 
-    def test_not_listed_is_rejected_after_the_set_passes(self, user_db, admin, store, settings):
+    def test_not_listed_is_marked_not_declined(self, user_db, admin, store, settings):
         request = _request(user_db, admin, "Young Zaphod Plays It Safe", "Douglas Adams")
 
         assert _pass(user_db, admin, request) == "counted"
@@ -280,12 +280,14 @@ class TestAfterRequest:
         assert _pass(user_db, admin, request) == "not_listed"
 
         row = user_db.get_request(int(request["id"]))
-        assert row["status"] == "rejected"
-        assert row["admin_note"] == (
-            "[auto] No audiobook found on Audible (US/UK) after 3 searches, 2026-10-11."
+        assert row["status"] == "pending"
+        assert row["last_failure_reason"] == (
+            "Not found on Audible (US/UK) after 3 searches, 2026-10-11"
         )
-        assert row["reviewed_by"] == admin["id"]
-        assert _state(user_db, request) is None
+        assert row["reviewed_by"] is None
+        assert _state(user_db, request)["result"] == "not_found"
+        # Not asked again inside the week.
+        assert _pass(user_db, admin, request) == "waiting"
 
     def test_listed_stays_pending_and_says_why(self, user_db, admin, store, settings):
         settings.values["AUTO_DOWNLOAD_EXISTENCE_CHECK_AFTER_PASSES"] = 1
@@ -399,7 +401,7 @@ class TestAfterRequest:
         assert stored[existence_check.BOOK_DATA_KEY]["no_match_passes"] == 1
 
 
-def test_the_pass_runs_the_check_and_counts_rejections(user_db, admin, store, monkeypatch):
+def test_the_pass_runs_the_check_and_counts_not_listed(user_db, admin, store, monkeypatch):
     monkeypatch.setattr(
         auto_download,
         "app_config",
@@ -427,4 +429,4 @@ def test_the_pass_runs_the_check_and_counts_rejections(user_db, admin, store, mo
 
     assert summary["no_match"] == 1
     assert summary["not_listed"] == 1
-    assert user_db.get_request(int(request["id"]))["status"] == "rejected"
+    assert user_db.get_request(int(request["id"]))["status"] == "pending"

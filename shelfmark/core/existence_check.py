@@ -1,4 +1,4 @@
-"""Decline audiobook requests for books that no store sells as an audiobook.
+"""Mark audiobook requests for books that no store sells as an audiobook.
 
 A pending audiobook request that no source ever matches sits in Needs Review for good,
 and an admin ends up looking it up by hand to learn that there is no recording to find.
@@ -7,10 +7,11 @@ auto-download passes without a strict match, Audible's US and UK catalogues are 
 through the Audiobookshelf server Shelfmark already talks to, whether the book exists as
 an audiobook at all.
 
-- Not listed on either store: the request is rejected through the normal admin path with
-  an ``[auto]`` note, so an admin can reopen it from the UI if the store was wrong.
+- Not listed on either store: the request stays pending and its failure reason says so,
+  for an admin to decline or keep. Audible search misses real books (collection-only
+  novellas, retitled releases), so the check never declines on its own.
 - Listed: the request stays pending and its failure reason says so, with the ASIN, so
-  the admin sees why it waits. The store is not asked again for a week.
+  the admin sees why it waits. Either way the store is not asked again for a week.
 - The store or the server failed, or the request's search budget was spent: nothing is
   decided. An error is not "no audiobook". Audiobookshelf answers a failed Audible search
   with an empty list rather than an error, so before a "not listed" counts, a book both
@@ -71,7 +72,7 @@ CANARY = ("The Hobbit", "J.R.R. Tolkien")
 # Outcomes of a pass that mean the request found its book, so the count starts over.
 _MATCHED = frozenset({"queued", "in_library"})
 
-NOT_LISTED_NOTE = "[auto] No audiobook found on Audible (US/UK) after {passes} searches, {date}."
+NOT_LISTED_REASON = "Not found on Audible (US/UK) after {passes} searches, {date}"
 LISTED_REASON = "Exists on Audible ({asin}), not on our sources yet"
 
 
@@ -170,7 +171,7 @@ def _with_state(book_data: dict[str, Any], state: dict[str, Any] | None) -> dict
 
 def _checked_recently(state: dict[str, Any], now: datetime) -> bool:
     """True when the store said "found" less than ``RECHECK_DAYS`` ago."""
-    if state.get("result") != "found":
+    if state.get("result") not in ("found", "not_found"):
         return False
     try:
         checked_at = datetime.fromisoformat(str(state.get("checked_at") or ""))
@@ -196,7 +197,7 @@ def after_request(
     Called by the auto-download pass after each request with that request's outcome.
     Returns what happened: ``counted`` (not yet time), ``waiting`` (the store listed it
     recently), ``listed`` (the store lists it; the request stays pending and says so),
-    ``not_listed`` (rejected), ``unknown`` (lookup failed, nothing changed) or None when
+    ``not_listed`` (not on either store; stays pending and says so), ``unknown`` (lookup failed, nothing changed) or None when
     the request was not an audiobook no-match, or the check is off.
     """
     if content_type != "audiobook" or not enabled():
@@ -265,19 +266,21 @@ def after_request(
         )
         return "listed"
 
-    from shelfmark.core.requests_service import RequestServiceError, reject_request
-
-    note = NOT_LISTED_NOTE.format(passes=passes, date=moment.date().isoformat())
-    try:
-        # reject_request drops the count, so a reopened request starts from nothing.
-        reject_request(user_db, request_id=request_id, admin_user_id=admin_user_id, admin_note=note)
-    except RequestServiceError as exc:
-        # Changed under us (an admin acted on it mid-pass); leave it as it now is.
-        logger.info("existence check: request %s (%s) not rejected: %s", request_id, title, exc)
-        return "unknown"
+    # Not on either store. Audible search misses too much to decline on that alone (books
+    # sold only in a collection, retitled releases, fan recordings), so the request stays
+    # pending for an admin to decide, with the reason saying what the store answered.
+    state.update(result="not_found", checked_at=moment.isoformat(timespec="seconds"))
+    user_db.update_request(
+        request_id,
+        expected_current_status=RequestStatus.PENDING,
+        book_data=_with_state(book_data, state),
+        last_failure_reason=NOT_LISTED_REASON.format(
+            passes=passes, date=moment.date().isoformat()
+        ),
+    )
     logger.info(
-        "existence check: request %s (%s) rejected, no audiobook on Audible US or UK after "
-        "%d searches",
+        "existence check: request %s (%s) not on Audible US or UK after %d searches; "
+        "left pending for review",
         request_id,
         title,
         passes,
