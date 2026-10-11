@@ -29,6 +29,8 @@ from shelfmark.core.request_helpers import coerce_int
 from shelfmark.core.request_policy import normalize_content_type
 from shelfmark.core.text_match import (
     DEFAULT_TITLE_MATCH_THRESHOLD,
+    PACKAGING_MARKERS,
+    STOPWORDS,
     author_surname,
     extra_work_tokens,
     is_bundle_title,
@@ -157,13 +159,108 @@ def _format_match(
     return has_ebook_signal and not _audiobook_signal(release, audiobook_formats)
 
 
+# Words that mark something made from the work rather than the work itself: a study
+# aid, a cut-down recording, a dramatisation. "Dune: Summary & Analysis" keeps them out
+# of the segment that holds the title, so they disqualify wherever they sit in the name.
+# The library's edition words answer a different question: an abridged recording on the
+# shelf still counts as the book owned, but it is not the book to download.
+_DERIVATIVE_MARKERS = frozenset(
+    {
+        "summary",
+        "summaries",
+        "analysis",
+        "workbook",
+        "sparknotes",
+        "cliffsnotes",
+        "abridged",
+        "dramatized",
+        "dramatised",
+        "dramatization",
+        "dramatisation",
+        "adaptation",
+    }
+)
+_DERIVATIVE_PHRASES = re.compile(r"\bstudy\s+guide\b|\bgraphic\s+novel\b", re.IGNORECASE)
+# "Unabridged" and "Un-Abridged" describe a full recording of the work. Dropped before the
+# markers are read so the hyphenated form does not split into "abridged".
+_UNABRIDGED = re.compile(r"\bun-?\s?abridged\b", re.IGNORECASE)
+# A slash between two names that each hold the title is a 2-in-1: "Dune / Dune Messiah".
+_SLASH_SPLIT = re.compile(r"\s*/\s*")
+
+
+def _names_derivative(book: BookMetadata, release_title: str | None) -> bool:
+    """True when the release name marks a derivative of the work, in any segment.
+
+    Words the requested title carries itself are not held against the release.
+    """
+    title = book.search_title or book.title or ""
+    text = _UNABRIDGED.sub(" ", release_title or "")
+    if (set(_tokens(text)) & _DERIVATIVE_MARKERS) - set(_tokens(title)):
+        return True
+    return bool(_DERIVATIVE_PHRASES.search(text)) and not _DERIVATIVE_PHRASES.search(title)
+
+
+def _is_series_label(seg_tokens: list[str], title_tokens: set[str], series: set[str]) -> bool:
+    """True when a segment is the series name rather than the title: "Alex Cross 25".
+
+    Such a segment holds a one-word title ("Cross") only because the series repeats it,
+    so it must not vouch for the release. A segment that is the title itself ("Dune" in
+    the Dune series) is not a label.
+    """
+    words = {
+        tok
+        for tok in seg_tokens
+        if tok.isalpha() and tok not in STOPWORDS and tok not in PACKAGING_MARKERS
+    }
+    return bool(words) and words <= series and not words <= title_tokens
+
+
+def _carries_sequel_number(seg_tokens: list[str], title: str, context: set[str]) -> bool:
+    """True when a bare number follows the title: "Mistborn 2", "Dune Chronicles Book 2".
+
+    Series, author and packaging words between the title and the number are skipped.
+    1 is the first book under its series name, and anything of three digits or more is
+    a year or a bitrate, so neither names a sequel.
+    """
+    title_toks = set(_tokens(title))
+    last = max((i for i, tok in enumerate(seg_tokens) if tok in title_toks), default=None)
+    if last is None:
+        return False
+    for tok in seg_tokens[last + 1 :]:
+        if tok in context or tok in PACKAGING_MARKERS or tok in STOPWORDS:
+            continue
+        return tok.isdigit() and len(tok) <= 2 and int(tok) >= 2 and tok not in title_toks
+    return False
+
+
+def _segments_name_other_work(text: str, title: str, context: set[str], series: set[str]) -> bool:
+    """Apply the other-work rule to the parts of a release name that hold the title."""
+    title_tokens = set(_tokens(title))
+    segments = [seg for seg in _RELEASE_SEGMENT_SPLIT.split(text) if seg.strip()]
+    holding = [
+        seg
+        for seg in segments
+        if title_tokens_match(title, set(_tokens(seg)), TITLE_MATCH_THRESHOLD)
+        and not _is_series_label(_tokens(seg), title_tokens, series)
+    ]
+    # A title the separators split apart ("Star Wars: Thrawn") is judged whole.
+    return all(
+        bool(extra_work_tokens(set(_tokens(seg)), title, context))
+        or _carries_sequel_number(_tokens(seg), title, context)
+        for seg in holding or [text]
+    )
+
+
 def _names_other_work(book: BookMetadata, release_title: str | None) -> bool:
     """True when the release names a different work that contains the requested title.
 
     "Dune" is a subset of "Dune Messiah", so the token match alone accepts a sequel.
     The library check rejects a shelf title that adds a word the search did not ask
     for; release names also carry narrators and uploader tags, so the same rule is
-    applied only to the parts of the name that hold the title.
+    applied only to the parts of the name that hold the title. A segment that is just
+    the series name does not count as holding it, and a bare number after the title
+    names a sequel. Two slash-separated names that both hold the title are two books
+    when either of them names another work.
     """
     title = book.search_title or book.title
     context = set(
@@ -178,17 +275,19 @@ def _names_other_work(book: BookMetadata, release_title: str | None) -> bool:
             )
         )
     )
-    segments = [seg for seg in _RELEASE_SEGMENT_SPLIT.split(release_title or "") if seg.strip()]
-    holding = [
-        seg
-        for seg in segments
-        if title_tokens_match(title, set(_tokens(seg)), TITLE_MATCH_THRESHOLD)
+    series = set(_tokens(book.series_name))
+    text = release_title or ""
+    parts = [part for part in _SLASH_SPLIT.split(text) if part.strip()]
+    holding_parts = [
+        part
+        for part in parts
+        if title_tokens_match(title, set(_tokens(part)), TITLE_MATCH_THRESHOLD)
     ]
-    # A title the separators split apart ("Star Wars: Thrawn") is judged whole.
-    return all(
-        extra_work_tokens(set(_tokens(seg)), title, context)
-        for seg in holding or [release_title or ""]
-    )
+    if len(holding_parts) > 1 and any(
+        _segments_name_other_work(part, title, context, series) for part in holding_parts
+    ):
+        return True
+    return _segments_name_other_work(text, title, context, series)
 
 
 def _seeders_ok(release: Release, min_seeders: int) -> bool:
@@ -298,6 +397,7 @@ def strict_match(
         _title_match(book, release.title or "")
         and _author_match(book, release)
         and not _names_other_work(book, release.title)
+        and not _names_derivative(book, release.title)
         and not is_bundle_title(release.title, book.search_title or book.title)
         and not _listing_is_bundle(release, book)
         and _format_match(release, content_type, audio, ebook)

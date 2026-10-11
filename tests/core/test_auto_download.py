@@ -1145,6 +1145,181 @@ class TestOtherWorkGuard:
         assert auto_download.strict_match(release, book, audiobook_formats=AUDIOBOOK_FORMATS)
 
 
+def _matches(book, release_title):
+    release = _release(title=release_title)
+    return auto_download.strict_match(release, book, audiobook_formats=AUDIOBOOK_FORMATS)
+
+
+class TestDerivativeGuard:
+    """Study aids, cut-down recordings and dramatisations are not the book, wherever named."""
+
+    @pytest.mark.parametrize(
+        "release_title",
+        [
+            "Dune: Summary & Analysis - Frank Herbert [m4b]",
+            "Dune: Summary of the Novel by Frank Herbert [m4b]",
+            "Dune (Abridged) - Frank Herbert [m4b]",
+            "Dune - Abridged Edition - Frank Herbert [m4b]",
+            "Dune [Dramatized Adaptation] - Frank Herbert [m4b]",
+            "Dune - Full Cast Dramatization - Frank Herbert [m4b]",
+            "Dune (BBC Radio Adaptation) - Frank Herbert [m4b]",
+            "Dune: A Study Guide - Frank Herbert [m4b]",
+            "Dune (Workbook) - Frank Herbert [m4b]",
+            "Dune (Graphic Novel) - Frank Herbert [m4b]",
+        ],
+    )
+    def test_a_derivative_named_in_any_segment_is_rejected(self, release_title):
+        book = _book(title="Dune", authors=["Frank Herbert"])
+
+        assert not _matches(book, release_title)
+
+    @pytest.mark.parametrize(
+        "release_title",
+        [
+            "Dune (Unabridged) - Frank Herbert [m4b]",
+            "Dune (Un-Abridged) - Frank Herbert [m4b]",
+            "Dune - Complete and Unabridged - Frank Herbert [m4b]",
+            "Dune - Frank Herbert - Unabridged Audiobook [m4b]",
+        ],
+    )
+    def test_an_unabridged_recording_still_matches(self, release_title):
+        book = _book(title="Dune", authors=["Frank Herbert"])
+
+        assert _matches(book, release_title)
+
+    def test_a_marker_the_requested_title_carries_is_not_held_against_the_release(self):
+        summary = _book(title="The Summary", authors=["Some Author"])
+        graphic = _book(title="Dune: The Graphic Novel, Book 1", authors=["Frank Herbert"])
+
+        assert _matches(summary, "The Summary - Some Author [m4b]")
+        assert not auto_download._names_derivative(
+            graphic, "Dune: The Graphic Novel, Book 1 - Frank Herbert"
+        )
+
+
+class TestTwoInOneGuard:
+    @pytest.mark.parametrize(
+        "release_title",
+        [
+            "Dune / Dune Messiah - Frank Herbert [m4b]",
+            "Dune Messiah / Dune - Frank Herbert [m4b]",
+            "Dune / Dune Messiah / Children of Dune - Frank Herbert [m4b]",
+        ],
+    )
+    def test_two_slash_separated_works_are_rejected(self, release_title):
+        book = _book(title="Dune", authors=["Frank Herbert"], series_name="Dune")
+
+        assert not _matches(book, release_title)
+
+    @pytest.mark.parametrize(
+        "release_title",
+        [
+            "Dune / Frank Herbert / Scott Brick [m4b]",
+            "Dune / Dune (Unabridged) - Frank Herbert [m4b]",
+            "Dune - Frank Herbert [m4b/64kbps]",
+        ],
+    )
+    def test_a_slash_that_separates_anything_else_is_fine(self, release_title):
+        book = _book(title="Dune", authors=["Frank Herbert"], series_name="Dune")
+
+        assert _matches(book, release_title)
+
+
+class TestSeriesLabelGuard:
+    """A segment that is just the series name does not vouch for a one-word title."""
+
+    @pytest.mark.parametrize(
+        "release_title",
+        [
+            "Alex Cross - Cross Justice - James Patterson [m4b]",
+            "Alex Cross: Cross Justice - James Patterson [m4b]",
+            "Alex Cross 25 - Cross Kill - James Patterson [m4b]",
+            "Alex Cross Series #11 - Cross Justice - James Patterson [m4b]",
+            "Double Cross - James Patterson [m4b]",
+        ],
+    )
+    def test_another_book_in_the_series_is_rejected(self, release_title):
+        book = _book(title="Cross", authors=["James Patterson"], series_name="Alex Cross")
+
+        assert not _matches(book, release_title)
+
+    @pytest.mark.parametrize(
+        "release_title",
+        [
+            "Cross - James Patterson [m4b]",
+            "Alex Cross - Cross - James Patterson [m4b]",
+            "Alex Cross 12: Cross - James Patterson [m4b]",
+            "Cross (Alex Cross #12) - James Patterson [m4b]",
+            "Cross - Alex Cross 12 - James Patterson [m4b]",
+            "Alex Cross Series #12 - Cross - James Patterson [m4b]",
+        ],
+    )
+    def test_the_book_itself_under_its_series_label_still_matches(self, release_title):
+        book = _book(title="Cross", authors=["James Patterson"], series_name="Alex Cross")
+
+        assert _matches(book, release_title)
+
+    @pytest.mark.parametrize(
+        "release_title",
+        [
+            "Star Wars Thrawn - Timothy Zahn [m4b]",
+            "Star.Wars.Thrawn.Timothy.Zahn.m4b",
+            "Thrawn - Timothy Zahn (Star Wars: Thrawn) [m4b]",
+        ],
+    )
+    def test_a_franchise_label_written_into_the_title_still_matches(self, release_title):
+        book = _book(title="Thrawn", authors=["Timothy Zahn"], series_name="Star Wars: Thrawn")
+
+        assert _matches(book, release_title)
+
+    def test_a_later_book_under_the_franchise_label_is_rejected(self):
+        book = _book(title="Thrawn", authors=["Timothy Zahn"], series_name="Star Wars: Thrawn")
+
+        assert not _matches(book, "Star Wars: Thrawn Ascendancy - Timothy Zahn [m4b]")
+
+
+class TestSequelNumberGuard:
+    @pytest.mark.parametrize(
+        ("wanted", "series", "release_title"),
+        [
+            ("Mistborn", "Mistborn", "Mistborn 2 - Brandon Sanderson [m4b]"),
+            ("Mistborn", "Mistborn", "Mistborn Book 2 - Brandon Sanderson [m4b]"),
+            ("Mistborn", "Mistborn", "Mistborn 2: The Well of Ascension - Brandon Sanderson"),
+            ("Dune", "Dune Chronicles", "Dune Chronicles Book 2 - Frank Herbert [m4b]"),
+            ("Dune", "Dune", "Dune.2.Frank.Herbert.m4b"),
+        ],
+    )
+    def test_a_bare_number_after_the_title_names_a_sequel(self, wanted, series, release_title):
+        author = "Brandon Sanderson" if wanted == "Mistborn" else "Frank Herbert"
+        book = _book(title=wanted, authors=[author], series_name=series)
+
+        assert not _matches(book, release_title)
+
+    @pytest.mark.parametrize(
+        ("wanted", "series", "release_title"),
+        [
+            ("Mistborn", "Mistborn", "Mistborn 1 - The Final Empire - Brandon Sanderson [m4b]"),
+            ("Dune", "Dune", "Dune 1 - Frank Herbert [m4b]"),
+            ("Dune", "Dune", "Dune.2021.Frank.Herbert.m4b"),
+            ("Dune", "Dune Chronicles", "Dune (Dune Chronicles, Book 1) - Frank Herbert [m4b]"),
+            ("Dune", "Dune Chronicles", "Dune Chronicles Book 1 - Frank Herbert [m4b]"),
+            ("Dune", "Dune", "Dune - Frank Herbert - Dune Chronicles Book 1 [m4b]"),
+            ("Dune", "Dune", "Dune (40th Anniversary Edition) - Frank Herbert [m4b]"),
+            ("Dune", "Dune", "Dune (2 of 6) - Frank Herbert [m4b]"),
+        ],
+    )
+    def test_a_first_volume_year_or_index_is_not_a_sequel(self, wanted, series, release_title):
+        author = "Brandon Sanderson" if wanted == "Mistborn" else "Frank Herbert"
+        book = _book(title=wanted, authors=[author], series_name=series)
+
+        assert _matches(book, release_title)
+
+    def test_a_number_the_title_carries_is_not_a_sequel(self):
+        book = _book(title="Catch-22", authors=["Joseph Heller"])
+
+        assert _matches(book, "Catch-22 - Joseph Heller [m4b]")
+
+
 def test_every_processable_audiobook_format_outranks_an_unknown_one():
     flac = _release(format="flac", title="Dungeon Crawler Carl - Matt Dinniman [FLAC]")
     unknown = _release(format="xyz", title="Dungeon Crawler Carl - Matt Dinniman", seeders=99)
