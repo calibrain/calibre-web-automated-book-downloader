@@ -2160,6 +2160,281 @@ class TestAuthorLookup:
         assert outcome.status == "no_match"
 
 
+class TestQueryVariants:
+    """Simpler titles searched when the request's own title finds no strict match."""
+
+    @pytest.mark.parametrize(
+        ("fields", "expected"),
+        [
+            (
+                {
+                    "title": "Find Your Why: A Practical Guide to Discovering Purpose",
+                    "subtitle": "A Practical Guide to Discovering Purpose",
+                    "authors": ["Simon Sinek"],
+                },
+                [("without subtitle", "Find Your Why")],
+            ),
+            (
+                {
+                    "title": "Children of Dune - Deluxe Edition",
+                    "authors": ["Frank Herbert"],
+                    "series_name": "Dune Chronicles",
+                },
+                [("without subtitle", "Children of Dune")],
+            ),
+            (
+                {"title": "The Hobbit, or There and Back Again", "authors": ["J.R.R. Tolkien"]},
+                [("without alternate title", "The Hobbit")],
+            ),
+            (
+                {"title": "The Book of Lost Tales, Part II", "authors": ["J.R.R. Tolkien"]},
+                [("numerals as digits", "The Book of Lost Tales, Part 2")],
+            ),
+            (
+                {
+                    "title": "The Book of Lost Tales, Part Two: Tales of the Elder Days",
+                    "authors": ["J.R.R. Tolkien"],
+                    "series_name": "The History of Middle-earth",
+                },
+                [
+                    ("without subtitle", "The Book of Lost Tales, Part Two"),
+                    (
+                        "numerals as digits",
+                        "The Book of Lost Tales, Part 2: Tales of the Elder Days",
+                    ),
+                ],
+            ),
+            # The prefix is the series or the author: it names no single book.
+            (
+                {
+                    "title": "Star Wars: Thrawn",
+                    "authors": ["Timothy Zahn"],
+                    "series_name": "Star Wars: Thrawn",
+                },
+                [],
+            ),
+            (
+                {
+                    "title": "Alex Cross: Kiss the Girls",
+                    "authors": ["James Patterson"],
+                    "series_name": "Alex Cross",
+                },
+                [],
+            ),
+            (
+                {
+                    "title": "Tolkien: A Biography",
+                    "subtitle": "A Biography",
+                    "authors": ["J.R.R. Tolkien"],
+                },
+                [],
+            ),
+            (
+                {
+                    "title": "Star Wars: Thrawn",
+                    "subtitle": "Thrawn",
+                    "authors": ["Timothy Zahn"],
+                    "series_name": "Thrawn",
+                },
+                [],
+            ),
+            # Nothing says the part after the colon is a subtitle rather than the title.
+            ({"title": "Star Wars: Thrawn", "authors": ["Timothy Zahn"]}, []),
+            (
+                {"title": "Star Wars: Thrawn", "subtitle": "A Novel", "authors": ["Timothy Zahn"]},
+                [],
+            ),
+            # Nothing simpler to try.
+            ({"title": "Dune", "authors": ["Frank Herbert"]}, []),
+            # A hyphen inside a word is not a separator.
+            (
+                {
+                    "title": "Spider-Man - Forever Young",
+                    "subtitle": "Forever Young",
+                    "authors": ["Stefan Petrucha"],
+                },
+                [("without subtitle", "Spider-Man")],
+            ),
+            # The search title is what was searched; it is the starting point.
+            (
+                {
+                    "title": "An Appetite for Wonder: The Making of a Scientist",
+                    "search_title": "An Appetite for Wonder",
+                    "authors": ["Richard Dawkins"],
+                },
+                [],
+            ),
+        ],
+    )
+    def test_variants(self, fields, expected):
+        assert auto_download.query_variants(_book(**fields)) == expected
+
+    def test_at_most_three(self):
+        book = _book(
+            title="The Mummy, or Ramses the Damned: Part Two of Three",
+            series_name="Ramses the Damned",
+        )
+        assert len(auto_download.query_variants(book)) <= auto_download.MAX_QUERY_VARIANTS == 3
+
+
+class TestQueryLadder:
+    """When the request's own query finds no strict match, simpler queries are tried in
+    order, each judged by the same strict match, stopping at the first that matches."""
+
+    FIND_YOUR_WHY = "Find Your Why: A Practical Guide to Discovering Purpose for You and Your Team"
+
+    @pytest.fixture(autouse=True)
+    def _library_check_off(self, monkeypatch):
+        monkeypatch.setattr(auto_download, "app_config", FakeConfig(LIBRARY_CHECK_ENABLED=False))
+        monkeypatch.setattr(
+            "shelfmark.core.library_index.is_in_library", lambda *_args, **_kwargs: False
+        )
+        monkeypatch.setattr(auto_download, "_inspect_candidate", lambda _data: (False, False))
+
+    def _find_your_why(self):
+        return _book(
+            title=self.FIND_YOUR_WHY,
+            subtitle=self.FIND_YOUR_WHY.split(": ", 1)[1],
+            authors=["Simon Sinek"],
+        )
+
+    def _run(self, user_db, monkeypatch, book, results_by_title, sources=("first",)):
+        """Run one request; ``results_by_title`` maps a searched title to release titles."""
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        _stub_provider(monkeypatch, book)
+        searched = []
+
+        def _search(source_name, searched_book, **_kwargs):
+            title = searched_book.search_title or searched_book.title
+            searched.append((source_name, title))
+            releases = [
+                _release(source=source_name, source_id=f"{title}|{name}", title=name)
+                for name in results_by_title.get(title, [])
+            ]
+            return None, releases, None
+
+        monkeypatch.setattr(auto_download, "search_source_releases", _search)
+        outcome = auto_download.auto_download_request(
+            user_db,
+            row,
+            sources=list(sources),
+            content_type="audiobook",
+            min_seeders=1,
+            queue_release=lambda *_args, **_kwargs: (True, None),
+            admin_user_id=admin["id"],
+        )
+        return outcome, searched
+
+    def test_a_simpler_query_finds_the_book(self, user_db, monkeypatch):
+        book = self._find_your_why()
+
+        outcome, searched = self._run(
+            user_db,
+            monkeypatch,
+            book,
+            {"Find Your Why": ["Find Your Why - Simon Sinek [m4b]"]},
+            sources=("first", "second"),
+        )
+
+        assert outcome.status == "queued"
+        assert outcome.detail == "Find Your Why - Simon Sinek [m4b]"
+        assert searched == [
+            ("first", self.FIND_YOUR_WHY),
+            ("second", self.FIND_YOUR_WHY),
+            ("first", "Find Your Why"),
+        ]
+
+    def test_the_own_query_wins_without_trying_variants(self, user_db, monkeypatch):
+        book = _book(title="The Book of Lost Tales, Part II", authors=["J.R.R. Tolkien"])
+
+        outcome, searched = self._run(
+            user_db,
+            monkeypatch,
+            book,
+            {
+                "The Book of Lost Tales, Part II": [
+                    "The Book of Lost Tales, Part Two - Tolkien [mp3]"
+                ]
+            },
+        )
+
+        assert outcome.status == "queued"
+        assert searched == [("first", "The Book of Lost Tales, Part II")]
+
+    def test_the_ladder_stops_at_the_first_variant_that_matches(self, user_db, monkeypatch):
+        book = _book(
+            title="The Book of Lost Tales, Part II: Tales of the Elder Days",
+            authors=["J.R.R. Tolkien"],
+            series_name="The History of Middle-earth",
+        )
+        found = ["The Book of Lost Tales, Part Two - J.R.R. Tolkien [mp3]"]
+
+        outcome, searched = self._run(
+            user_db,
+            monkeypatch,
+            book,
+            {
+                "The Book of Lost Tales, Part II": found,
+                "The Book of Lost Tales, Part 2: Tales of the Elder Days": found,
+            },
+        )
+
+        assert outcome.status == "queued"
+        assert [title for _source, title in searched] == [
+            "The Book of Lost Tales, Part II: Tales of the Elder Days",
+            "The Book of Lost Tales, Part II",
+        ]
+
+    @pytest.mark.parametrize(
+        "release_title",
+        [
+            "Find Your Why Workbook - Simon Sinek [m4b]",  # derivative
+            "Find Your Why (Abridged) - Simon Sinek [m4b]",  # another edition
+            "Find Your Why 2 - Simon Sinek [m4b]",  # sequel number
+            "Find Your Why Again - Simon Sinek [m4b]",  # another work
+            "Simon Sinek Collection: Start With Why, Find Your Why [m4b]",  # pack
+            "Find Your Why - Someone Else [m4b]",  # wrong author
+        ],
+    )
+    def test_a_simpler_query_does_not_relax_the_match(self, user_db, monkeypatch, release_title):
+        book = self._find_your_why()
+
+        outcome, searched = self._run(
+            user_db, monkeypatch, book, {"Find Your Why": [release_title]}
+        )
+
+        assert outcome.status == "no_match"
+        assert ("first", "Find Your Why") in searched
+
+    def test_a_series_prefix_is_never_searched_on_its_own(self, user_db, monkeypatch):
+        book = _book(
+            title="Star Wars: Thrawn", authors=["Timothy Zahn"], series_name="Star Wars: Thrawn"
+        )
+
+        outcome, searched = self._run(
+            user_db, monkeypatch, book, {"Star Wars": ["Star Wars - Timothy Zahn [m4b]"]}
+        )
+
+        assert outcome.status == "no_match"
+        assert searched == [("first", "Star Wars: Thrawn")]
+
+    def test_at_most_three_extra_walks(self, user_db, monkeypatch):
+        book = _book(
+            title="The Mummy, or Ramses the Damned: Part Two of Three",
+            authors=["Anne Rice"],
+            series_name="Ramses the Damned",
+        )
+
+        outcome, searched = self._run(user_db, monkeypatch, book, {}, sources=("first", "second"))
+
+        assert outcome.status == "no_match"
+        variants = {title for _source, title in searched} - {book.title}
+        assert 1 <= len(variants) <= 3
+        assert len(searched) == 2 * (1 + len(variants))
+
+
 class TestRetryAfterCooldown:
     """A synced download that never arrived goes back to pending after a cooldown.
 

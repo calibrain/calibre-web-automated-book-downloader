@@ -20,7 +20,7 @@ import re
 import sqlite3
 import statistics
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -39,6 +39,9 @@ from shelfmark.core.text_match import (
     author_surname,
     extra_work_tokens,
     is_bundle_title,
+    normalize_numerals,
+    significant_tokens,
+    strip_alternate_title,
     title_tokens_match,
 )
 from shelfmark.core.text_match import (
@@ -1007,6 +1010,67 @@ def _acted_on_since_listed(user_db: UserDB, request_id: int) -> bool:
     return status in closed or (status == RequestStatus.PENDING and delivery not in {"none", ""})
 
 
+# Simpler queries tried, in order, when a request's own query finds no strict match.
+MAX_QUERY_VARIANTS = 3
+# "Find Your Why: A Practical Guide..." and "Dune - Deluxe Edition" both name the book
+# before the separator.
+_SUBTITLE_SPLIT = re.compile(r"^(?P<main>.+?)(?:\s*:\s+|\s+-\s+)\S")
+
+
+def _without_subtitle(title: str, book: BookMetadata) -> str:
+    """The title before a ':' or ' - ' subtitle; the title itself when that would not do.
+
+    A prefix that is only series or author words ("Star Wars: Thrawn", "Alex Cross:
+    Kiss the Girls") names a whole series rather than this book, so it is not taken;
+    nor is one followed by only series words (the "Thrawn" series' "Star Wars:
+    Thrawn"), where the prefix is a franchise.
+    Nor is it when the metadata cannot say so: without a series name, or a subtitle
+    the part after the separator holds, "Star Wars: Thrawn" would be searched and
+    matched as "Star Wars".
+    """
+    match = _SUBTITLE_SPLIT.match(title)
+    if not match:
+        return title
+    main = match.group("main").strip()
+    words = set(significant_tokens(main))
+    known = set(significant_tokens(" ".join([book.series_name or "", *(book.authors or [])])))
+    rest = set(significant_tokens(title[len(main) :]))
+    series = set(significant_tokens(book.series_name))
+    if not words or words <= known or (rest and rest <= series):
+        return title
+    subtitle = set(significant_tokens(book.subtitle))
+    confirmed = bool(subtitle) and subtitle <= rest
+    if not (book.series_name or confirmed):
+        return title
+    return main
+
+
+def query_variants(book: BookMetadata) -> list[tuple[str, str]]:
+    """Simpler titles to search when the book's own search title finds no strict match.
+
+    Returns ``(label, title)`` pairs, at most ``MAX_QUERY_VARIANTS``, each different
+    from the title already searched and from the ones before it: the title without a
+    subtitle, without an alternate title (", or There and Back Again"), and with its
+    numbers written as digits. Each is searched and matched as the book's search title,
+    so every strict-match rule still applies to it.
+    """
+    searched = book.search_title or book.title or ""
+    candidates = [
+        ("without subtitle", _without_subtitle(searched, book)),
+        ("without alternate title", strip_alternate_title(searched)),
+        ("numerals as digits", normalize_numerals(searched)),
+    ]
+    seen = {" ".join(searched.lower().split())}
+    variants: list[tuple[str, str]] = []
+    for label, title in candidates:
+        key = " ".join(title.lower().split())
+        if not key or key in seen or not significant_tokens(title):
+            continue
+        seen.add(key)
+        variants.append((label, title.strip()))
+    return variants[:MAX_QUERY_VARIANTS]
+
+
 def auto_download_request(
     user_db: UserDB,
     request_row: dict[str, Any],
@@ -1103,74 +1167,107 @@ def auto_download_request(
     failed_releases = _failed_release_keys(book_data)
     source_errors: list[str] = []
 
-    # Walk sources in priority order; take the first source with a strict match.
-    for source_name in sources:
-        # The requester's id lets the search plan apply their default languages.
-        _source, releases, search_error = search_source_releases(
-            source_name,
-            book,
-            expand_search=True,
-            content_type=content_type,
-            user_id=coerce_int(request_row.get("user_id"), 0) or None,
-        )
-        if search_error:
-            source_errors.append(f"{source_name}: {search_error}")
-        match_kwargs: dict[str, Any] = {
-            "content_type": content_type,
-            "min_seeders": min_seeders,
-            "audiobook_formats": audiobook_formats,
-            "ebook_formats": ebook_formats,
-            "languages": languages,
-        }
-        releases = [r for r in releases if (r.source, r.source_id) not in failed_releases]
-        if not any(strict_match(release, book, **match_kwargs) for release in releases):
-            _fill_missing_authors(releases, book, match_kwargs)
-        candidates = [
-            release for release in releases if strict_match(release, book, **match_kwargs)
-        ]
-        chosen = None
-        release_data: dict[str, Any] = {}
-        ranked = sorted(candidates, key=lambda r: _release_sort_key(r, content_type), reverse=True)
-        thin = _undersized_copies(ranked, content_type)
-        ranked = _demote_undersized(ranked, content_type)
-        for index, candidate in enumerate(ranked):
-            if index >= MAX_PACK_CHECKS:
-                break  # the best few were all packs; don't queue an uninspected tail
-            data = build_release_data(candidate, book, content_type)
-            is_pack, single_file = _inspect_candidate(data)
-            if is_pack:
-                logger.info("auto-download: skipping multi-book pack %s", candidate.title)
-                skipped_pack = True
-                continue
-            if single_file and candidate not in thin:
-                # One m4b/m4a beats a set of chapter files: no merge step afterwards.
-                chosen, release_data = candidate, data
-                break
-            if chosen is None:
-                chosen, release_data = candidate, data  # best-ranked fallback
-            if content_type != "audiobook" or _audiobook_format(candidate) == "m4b":
-                break  # already as good as it gets; don't inspect the rest
-        if chosen is None:
-            continue
-
-        try:
-            fulfil_request(
-                user_db,
-                request_id=request_id,
-                admin_user_id=admin_user_id,
-                queue_release=queue_release,
-                release_data=release_data,
+    def _walk(searched_book: BookMetadata) -> AutoDownloadOutcome | None:
+        """Search the sources in priority order; the first with a strict match wins."""
+        nonlocal skipped_pack
+        for source_name in sources:
+            # The requester's id lets the search plan apply their default languages.
+            _source, releases, search_error = search_source_releases(
+                source_name,
+                searched_book,
+                expand_search=True,
+                content_type=content_type,
+                user_id=coerce_int(request_row.get("user_id"), 0) or None,
             )
-        except RequestServiceError as exc:
-            logger.warning("auto-download: fulfil failed for request %s: %s", request_id, exc)
-            return AutoDownloadOutcome(request_id, "error", str(exc), source=source_name)
+            if search_error:
+                source_errors.append(f"{source_name}: {search_error}")
+            match_kwargs: dict[str, Any] = {
+                "content_type": content_type,
+                "min_seeders": min_seeders,
+                "audiobook_formats": audiobook_formats,
+                "ebook_formats": ebook_formats,
+                "languages": languages,
+            }
+            releases = [r for r in releases if (r.source, r.source_id) not in failed_releases]
+            if not any(
+                strict_match(release, searched_book, **match_kwargs) for release in releases
+            ):
+                _fill_missing_authors(releases, searched_book, match_kwargs)
+            candidates = [
+                release
+                for release in releases
+                if strict_match(release, searched_book, **match_kwargs)
+            ]
+            chosen = None
+            release_data: dict[str, Any] = {}
+            ranked = sorted(
+                candidates, key=lambda r: _release_sort_key(r, content_type), reverse=True
+            )
+            thin = _undersized_copies(ranked, content_type)
+            ranked = _demote_undersized(ranked, content_type)
+            for index, candidate in enumerate(ranked):
+                if index >= MAX_PACK_CHECKS:
+                    break  # the best few were all packs; don't queue an uninspected tail
+                data = build_release_data(candidate, searched_book, content_type)
+                is_pack, single_file = _inspect_candidate(data)
+                if is_pack:
+                    logger.info("auto-download: skipping multi-book pack %s", candidate.title)
+                    skipped_pack = True
+                    continue
+                if single_file and candidate not in thin:
+                    # One m4b/m4a beats a set of chapter files: no merge step afterwards.
+                    chosen, release_data = candidate, data
+                    break
+                if chosen is None:
+                    chosen, release_data = candidate, data  # best-ranked fallback
+                if content_type != "audiobook" or _audiobook_format(candidate) == "m4b":
+                    break  # already as good as it gets; don't inspect the rest
+            if chosen is None:
+                continue
+
+            try:
+                fulfil_request(
+                    user_db,
+                    request_id=request_id,
+                    admin_user_id=admin_user_id,
+                    queue_release=queue_release,
+                    release_data=release_data,
+                )
+            except RequestServiceError as exc:
+                logger.warning("auto-download: fulfil failed for request %s: %s", request_id, exc)
+                return AutoDownloadOutcome(request_id, "error", str(exc), source=source_name)
+            logger.info(
+                "auto-download: queued request %s from %s (%s)",
+                request_id,
+                source_name,
+                chosen.title,
+            )
+            return AutoDownloadOutcome(request_id, "queued", chosen.title, source=source_name)
+        return None
+
+    outcome = _walk(book)
+    if outcome is not None:
+        return outcome
+    # Nothing matched the request's own query. Try a few simpler ones, stopping at the
+    # first that yields a strict match; the match rules are the same for each.
+    for label, title in query_variants(book):
         logger.info(
-            "auto-download: queued request %s from %s (%s)",
+            "auto-download: request %s (%s): no strict match, trying %s: %r",
             request_id,
-            source_name,
-            chosen.title,
+            book.title,
+            label,
+            title,
         )
-        return AutoDownloadOutcome(request_id, "queued", chosen.title, source=source_name)
+        outcome = _walk(replace(book, search_title=title))
+        if outcome is not None:
+            if outcome.status == "queued":
+                logger.info(
+                    "auto-download: request %s matched on the query %s: %r",
+                    request_id,
+                    label,
+                    title,
+                )
+            return outcome
 
     if source_errors:
         # A source that failed has not said the book is missing.
