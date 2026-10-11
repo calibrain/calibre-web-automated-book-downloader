@@ -60,6 +60,66 @@ def fold(text: str) -> str:
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).translate(_LETTER_FOLD)
 
 
+# Small numbers the way titles write them. "Part II", "Part Two" and "Part 2" name the
+# same part, and a shelf, a provider and a release rarely agree on which to use.
+_ROMAN = [
+    "i",
+    "ii",
+    "iii",
+    "iv",
+    "v",
+    "vi",
+    "vii",
+    "viii",
+    "ix",
+    "x",
+    "xi",
+    "xii",
+    "xiii",
+    "xiv",
+    "xv",
+    "xvi",
+    "xvii",
+    "xviii",
+    "xix",
+    "xx",
+]
+_NUMBER_WORDS = [
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
+]
+NUMERALS: dict[str, str] = {
+    **{roman: str(n) for n, roman in enumerate(_ROMAN, 1)},
+    **{word: str(n) for n, word in enumerate(_NUMBER_WORDS, 1)},
+}
+
+
+def canonical_numeral(tok: str) -> str:
+    """The digit form of a small number written as a word, a roman numeral or with a
+    leading zero ("two", "ii", "02" all give "2"); any other token unchanged."""
+    if tok.isdigit():
+        return str(int(tok)) if len(tok) <= 2 else tok
+    return NUMERALS.get(tok, tok)
+
+
 def tokens(text: str | None) -> list[str]:
     """Lowercase alphanumeric tokens from arbitrary text, diacritics folded away."""
     if not text:
@@ -67,18 +127,78 @@ def tokens(text: str | None) -> list[str]:
     return [tok for tok in re.split(r"[^a-z0-9]+", fold(text)) if tok]
 
 
+def numeral_tokens(text: str | None) -> list[str]:
+    """``tokens`` with small numbers in their digit form, for comparing titles.
+
+    Kept apart from ``tokens`` because a shelf title's "Book Three" is a word that
+    names another work to the library matcher, where "Book 3" is a volume number it
+    deliberately lets pass (see ``extra_work_tokens``).
+    """
+    return [canonical_numeral(tok) for tok in tokens(text)]
+
+
 def significant_tokens(text: str | None) -> list[str]:
-    """Tokens with stopwords and 1-char noise removed."""
-    return [tok for tok in tokens(text) if len(tok) >= 2 and tok not in STOPWORDS]
+    """Title words for comparison: stopwords and single letters removed, small numbers
+    in their digit form.
+
+    Numbers always count, however short: "Part 2" is not "Part 1".
+    """
+    return [
+        tok
+        for tok in numeral_tokens(text)
+        if tok not in STOPWORDS and (len(tok) >= 2 or tok.isdigit())
+    ]
 
 
 def author_surname(author: str | None) -> str | None:
-    """Return the most distinctive author token (the surname), or None."""
+    """Return the most distinctive author token (the surname), or None.
+
+    A generational suffix is skipped: "Henry Louis Gates III" is Gates.
+    """
     value = author or ""
     if "," in value:  # "Last, First" -> keep the "Last" portion
         value = value.split(",")[0]
-    toks = significant_tokens(value)
-    return toks[-1] if toks else None
+    toks = [tok for tok in tokens(value) if len(tok) >= 2 and tok not in STOPWORDS]
+    words = [tok for tok in toks if not canonical_numeral(tok).isdigit()]
+    return (words or toks)[-1] if toks else None
+
+
+# Number words and roman numerals of two letters or more, as whole words. The single
+# letters (I, V, X) are left out here: in a query they are words far more often than
+# numbers ("What I Loved", "Malcolm X").
+_NUMERAL_WORD = re.compile(
+    r"\b(" + "|".join(sorted((k for k in NUMERALS if len(k) > 1), key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def normalize_numerals(text: str) -> str:
+    """Text with its small numbers written as digits: "Part II" and "Part Two" become
+    "Part 2". For queries; the token comparison already treats the forms alike."""
+    return _NUMERAL_WORD.sub(lambda match: NUMERALS[match.group(1).lower()], text or "")
+
+
+# ", Part II", ": Volume 3", " Vol. IV" at the end of a title. "Book" is deliberately not
+# a part word: "The Jungle Book 2" is a title, not a title and a part.
+_PART_SUFFIX = re.compile(
+    r"^(?P<main>.+?)\s*[,:;]?\s+(?:part|pt\.?|volume|vol\.?)\s+(?:\d{1,2}|[ivx]{1,5}|[a-z]+)\.?\s*$",
+    re.IGNORECASE,
+)
+
+
+def strip_part_suffix(title: str) -> str:
+    """ "The Book of Lost Tales, Part II" without its ", Part II"; anything else unchanged.
+
+    Only when what follows the part word is a small number in some form; "Part" followed
+    by a name ("Part of Your World") is left alone.
+    """
+    match = _PART_SUFFIX.match(title or "")
+    if not match:
+        return title
+    number = numeral_tokens(title[match.end("main") :])
+    if not number or not number[-1].isdigit() or not significant_tokens(match.group("main")):
+        return title
+    return match.group("main")
 
 
 # "The Hobbit, or There and Back Again", "Moby-Dick; or, The Whale": a main title, a
@@ -109,7 +229,9 @@ def title_tokens_match(
     title_toks = significant_tokens(title)
     if not title_toks:
         return False
-    present = sum(1 for tok in title_toks if tok in haystack_tokens)
+    # Either side may write a number as a word, a roman numeral or digits.
+    haystack = {canonical_numeral(tok) for tok in haystack_tokens}
+    present = sum(1 for tok in title_toks if tok in haystack)
     return (present / len(title_toks)) >= threshold
 
 
@@ -209,14 +331,18 @@ def extra_work_tokens(
     """Significant words the shelf title adds that suggest a different work.
 
     Packaging words are ignored, since "Illustrated Edition" and "Books 1-6" describe
-    the same work differently wrapped, while "Messiah" or "Chapter Two" name another
+    the same work differently wrapped, while "Messiah" or "Chapter Two" name another.
     Only alphabetic words of three or more characters count, so volume numbers and
-    structural words do not make a shelf entry look like a different book.
+    structural words do not make a shelf entry look like a different book. A number
+    word the searched title carries in any form is its own: "Part Two" on the shelf
+    adds nothing to a search for "Part II".
 
     ``context_tokens`` are the entry's series and author words, which shelf titles
     often repeat ("Alex Cross 25: Cross Kill") without meaning another book.
     """
-    search_toks = set(tokens(search_title)) | (context_tokens or set())
+    search_toks = {
+        canonical_numeral(tok) for tok in set(tokens(search_title)) | (context_tokens or set())
+    }
     return {
         tok
         for tok in shelf_title_tokens
@@ -228,7 +354,7 @@ def extra_work_tokens(
         and len(tok) >= 3
         and tok not in STOPWORDS
         and tok not in PACKAGING_MARKERS
-        and tok not in search_toks
+        and canonical_numeral(tok) not in search_toks
     }
 
 

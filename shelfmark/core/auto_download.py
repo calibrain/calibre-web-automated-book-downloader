@@ -37,7 +37,7 @@ from shelfmark.core.text_match import (
     title_tokens_match,
 )
 from shelfmark.core.text_match import (
-    tokens as _tokens,
+    numeral_tokens as _tokens,
 )
 from shelfmark.core.utils import AUDIOBOOK_FORMATS
 from shelfmark.download.postprocess.policy import (
@@ -225,16 +225,34 @@ def _carries_sequel_number(seg_tokens: list[str], title: str, context: set[str])
 
     Series, author and packaging words between the title and the number are skipped.
     1 is the first book under its series name, and anything of three digits or more is
-    a year or a bitrate, so neither names a sequel.
+    a year or a bitrate, so neither names a sequel. A title that carries a number of its
+    own ("Part II", "Ready Player Two") is another matter: any other number in that
+    place, 1 included, names another volume. Numbers written as words or roman numerals
+    arrive here already in digit form.
     """
-    title_toks = set(_tokens(title))
-    last = max((i for i, tok in enumerate(seg_tokens) if tok in title_toks), default=None)
+    title_seq = _tokens(title)
+    title_toks = set(title_seq)
+    title_numbered = any(tok.isdigit() and len(tok) <= 2 for tok in title_toks)
+    # The title ends where its own last word does: in "The Two Towers 2" the trailing 2
+    # follows "towers" and is not the title's "two" over again.
+    anchored = [i for i, tok in enumerate(seg_tokens) if title_seq and tok == title_seq[-1]]
+    last = max(
+        anchored or (i for i, tok in enumerate(seg_tokens) if tok in title_toks), default=None
+    )
     if last is None:
         return False
     for tok in seg_tokens[last + 1 :]:
-        if tok in context or tok in PACKAGING_MARKERS or tok in STOPWORDS:
+        # The book's own title is part of the context, so its number would be skipped
+        # as context; past the title's end that number is another volume's.
+        repeated = bool(anchored) and tok in title_toks
+        if (tok in context and not repeated) or tok in PACKAGING_MARKERS or tok in STOPWORDS:
             continue
-        return tok.isdigit() and len(tok) <= 2 and int(tok) >= 2 and tok not in title_toks
+        return (
+            tok.isdigit()
+            and len(tok) <= 2
+            and (int(tok) >= 2 or title_numbered)
+            and (bool(anchored) or tok not in title_toks)
+        )
     return False
 
 

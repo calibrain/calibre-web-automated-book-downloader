@@ -607,6 +607,91 @@ class TestAudiobookBaySource:
         assert first_call["exact_phrase"] is True
         assert second_call["exact_phrase"] is False
 
+    @staticmethod
+    def _row(title: str, slug: str) -> dict[str, str]:
+        return {"title": title, "link": f"https://audiobookbay.lu/abss/{slug}/", "format": "MP3"}
+
+    @staticmethod
+    def _lost_tales_search():
+        book = BookMetadata(
+            provider="test",
+            provider_id="341",
+            title="The Book of Lost Tales, Part II",
+            authors=["J.R.R. Tolkien"],
+        )
+        plan = ReleaseSearchPlan(
+            languages=["en"],
+            isbn_candidates=[],
+            author="Tolkien",
+            title_variants=[
+                ReleaseSearchVariant(title="The Book of Lost Tales, Part II", author="Tolkien")
+            ],
+            grouped_title_variants=[],
+        )
+        return book, plan
+
+    @patch("shelfmark.release_sources.audiobookbay.source.scraper.search_audiobookbay")
+    def test_search_drops_a_trailing_part_when_only_packs_come_back(self, mock_search):
+        """ "Part II" brings back only packs whose descriptions list the book; the volume's
+        own post ("Part Two") comes back once the part is dropped from the query."""
+        packs = [
+            self._row("Lord of the Rings (Complete Tolkien works) - J.R.R Tolkien", "lotr"),
+            self._row("Entire Audiobooks Collection - Various", "all"),
+        ]
+        volumes = [
+            self._row("The Book of Lost Tales, Part Two - J.R.R. Tolkien", "lt2"),
+            self._row("The Book of Lost Tales, Part One - J.R.R. Tolkien", "lt1"),
+            packs[0],
+        ]
+        mock_search.side_effect = [packs, packs, volumes]
+
+        book, plan = self._lost_tales_search()
+        results = AudiobookBaySource().search(book, plan, content_type="audiobook")
+
+        queries = [call.kwargs["query"] for call in mock_search.call_args_list]
+        assert queries == [
+            "the book of lost tales, part ii tolkien",
+            "the book of lost tales, part ii",
+            "the book of lost tales tolkien",
+        ]
+        titles = [release.title for release in results]
+        # Part One comes back too; the strict matcher is what tells the parts apart.
+        assert "The Book of Lost Tales, Part Two" in titles
+        assert "The Book of Lost Tales, Part One" in titles
+        # A row returned by more than one query is kept once.
+        assert len({release.source_id for release in results}) == len(results)
+
+    @patch("shelfmark.release_sources.audiobookbay.source.scraper.search_audiobookbay")
+    def test_search_stops_at_the_first_query_whose_rows_hold_the_title(self, mock_search):
+        mock_search.return_value = [
+            self._row("The Book of Lost Tales, Part 2 - J.R.R. Tolkien", "lt2"),
+        ]
+
+        book, plan = self._lost_tales_search()
+        results = AudiobookBaySource().search(book, plan, content_type="audiobook")
+
+        assert mock_search.call_count == 1
+        assert [release.title for release in results] == ["The Book of Lost Tales, Part 2"]
+
+    @patch("shelfmark.release_sources.audiobookbay.source.scraper.search_audiobookbay")
+    def test_search_adds_no_part_query_for_a_title_without_one(self, mock_search):
+        mock_search.return_value = []
+
+        book = BookMetadata(
+            provider="test", provider_id="1", title="The Jungle Book 2", authors=["Someone"]
+        )
+        plan = ReleaseSearchPlan(
+            languages=["en"],
+            isbn_candidates=[],
+            author="Someone",
+            title_variants=[ReleaseSearchVariant(title="The Jungle Book 2", author="Someone")],
+            grouped_title_variants=[],
+        )
+        AudiobookBaySource().search(book, plan, content_type="audiobook")
+
+        queries = [call.kwargs["query"] for call in mock_search.call_args_list]
+        assert queries == ["the jungle book 2 someone", "the jungle book 2"]
+
     def test_get_column_config(self):
         """Test column configuration."""
         source = AudiobookBaySource()

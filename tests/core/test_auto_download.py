@@ -1496,3 +1496,95 @@ class TestAlternateTitles:
         assert not auto_download.strict_match(
             _abb(release_title, author), book, audiobook_formats=AUDIOBOOK_FORMATS
         )
+
+
+class TestNumberedVolumes:
+    """ "Part II", "Part Two" and "Part 2" are one volume; "Part One" is another."""
+
+    LOST_TALES = {
+        "title": "The Book of Lost Tales, Part II",
+        "subtitle": "Part II",
+        "series_name": "The History of Middle-Earth",
+    }
+
+    @pytest.mark.parametrize(
+        "release_title",
+        [
+            "The Book of Lost Tales, Part Two",
+            "The Book of Lost Tales, Part 2",
+            "The Book of Lost Tales, Part II",
+            "The Book of Lost Tales Part 02",
+        ],
+    )
+    def test_the_volume_matches_however_its_number_is_written(self, release_title):
+        book = _tolkien(**self.LOST_TALES)
+
+        assert auto_download.strict_match(
+            _abb(release_title, "J.R.R. Tolkien"), book, audiobook_formats=AUDIOBOOK_FORMATS
+        )
+
+    @pytest.mark.parametrize(
+        ("release_title", "author"),
+        [
+            ("The Book of Lost Tales, Part One", "J.R.R. Tolkien"),
+            ("The Book of Lost Tales, Part 1", "J.R.R. Tolkien"),
+            ("The Book of Lost Tales, Part I", "J.R.R. Tolkien"),
+            ("The Book of Lost Tales 1", "J.R.R. Tolkien"),
+            # Which part? Not this one's to guess.
+            ("The Book of Lost Tales", "J.R.R. Tolkien"),
+            ("The Book of Lost Tales, Parts 1-2", "J.R.R. Tolkien"),
+            ("The Book of Lost Tales, Part Two (Abridged)", "J.R.R. Tolkien"),
+            ("The Book of Lost Tales, Part Two", "Christopher Lee"),
+            ("Lord of the Rings (Complete Tolkien works)", "J.R.R Tolkien"),
+        ],
+    )
+    def test_the_other_part_the_bare_title_and_packs_are_rejected(self, release_title, author):
+        book = _tolkien(**self.LOST_TALES)
+
+        assert not auto_download.strict_match(
+            _abb(release_title, author), book, audiobook_formats=AUDIOBOOK_FORMATS
+        )
+
+    @pytest.mark.parametrize(
+        ("wanted", "author", "release_title"),
+        [
+            ("Ready Player One", "Ernest Cline", "Ready Player Two - Ernest Cline [m4b]"),
+            ("Ready Player Two", "Ernest Cline", "Ready Player One - Ernest Cline [m4b]"),
+            ("Ready Player Two", "Ernest Cline", "Ready Player 1 - Ernest Cline [m4b]"),
+            ("Mistborn", "Brandon Sanderson", "Mistborn II - Brandon Sanderson [m4b]"),
+            ("Mistborn", "Brandon Sanderson", "Mistborn Two - Brandon Sanderson [m4b]"),
+            ("Dune", "Frank Herbert", "Dune Book Two - Frank Herbert [m4b]"),
+            # The title's own number does not hide a sequel number after it.
+            ("The Two Towers", "J.R.R. Tolkien", "The Two Towers 2 - J.R.R. Tolkien [m4b]"),
+        ],
+    )
+    def test_a_sequel_numbered_in_words_or_roman_numerals_is_rejected(
+        self, wanted, author, release_title
+    ):
+        book = _book(title=wanted, authors=[author])
+
+        assert not _matches(book, release_title)
+
+    @pytest.mark.parametrize(
+        ("wanted", "author", "release_title"),
+        [
+            ("Ready Player One", "Ernest Cline", "Ready Player One - Ernest Cline [m4b]"),
+            ("Ready Player One", "Ernest Cline", "Ready Player 1 - Ernest Cline [m4b]"),
+            ("Station Eleven", "Emily St. John Mandel", "Station 11 - Emily St. John Mandel"),
+            ("Henry V", "William Shakespeare", "Henry V - William Shakespeare [m4b]"),
+            ("Dune", "Frank Herbert", "Dune I - Frank Herbert [m4b]"),
+            ("The Two Towers", "J.R.R. Tolkien", "The Two Towers - J.R.R. Tolkien [m4b]"),
+            # "I" the pronoun reads as a numeral on both sides alike.
+            ("What I Loved", "Siri Hustvedt", "What I Loved - Siri Hustvedt [m4b]"),
+            ("I, Robot", "Isaac Asimov", "I, Robot - Isaac Asimov [m4b]"),
+            (
+                "The Seven Habits of Highly Effective People",
+                "Stephen R. Covey",
+                "The 7 Habits of Highly Effective People - Stephen R. Covey [m4b]",
+            ),
+        ],
+    )
+    def test_the_book_itself_matches_in_any_numeral_form(self, wanted, author, release_title):
+        book = _book(title=wanted, authors=[author])
+
+        assert _matches(book, release_title)
