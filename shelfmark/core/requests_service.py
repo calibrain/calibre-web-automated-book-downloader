@@ -502,6 +502,17 @@ def reject_request(
 
     normalized_admin_note = _normalize_admin_note(admin_note)
 
+    extra: dict[str, Any] = {}
+    book_data = request_row.get("book_data")
+    if isinstance(book_data, dict):
+        from shelfmark.core.existence_check import without_state
+
+        # The audiobook existence check's pass count ends with the review, so a request
+        # that is reopened later counts its passes afresh.
+        cleared = without_state(book_data)
+        if cleared is not None:
+            extra["book_data"] = cleared
+
     try:
         return user_db.update_request(
             request_id,
@@ -510,6 +521,7 @@ def reject_request(
             admin_note=normalized_admin_note,
             reviewed_by=admin_user_id,
             reviewed_at=_now_timestamp(),
+            **extra,
         )
     except TypeError as exc:
         raise RequestServiceError(str(exc), status_code=400) from exc

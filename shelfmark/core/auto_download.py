@@ -19,6 +19,7 @@ import math
 import re
 import sqlite3
 import statistics
+import time
 import unicodedata
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -1370,6 +1371,7 @@ def auto_download_pending(
             summary["skipped"] += 1
             continue
 
+        started = time.monotonic()
         try:
             outcome = auto_download_request(
                 user_db,
@@ -1387,7 +1389,51 @@ def auto_download_pending(
             summary["error"] += 1
             continue
         summary[outcome.status] = summary.get(outcome.status, 0) + 1
+        _existence_check(
+            user_db,
+            row,
+            outcome,
+            admin_user_id=admin_user_id,
+            content_type=content_type,
+            # What is left of this request's search budget; the store lookups spend it.
+            budget_seconds=max(
+                0.0, search_deadline.budget_seconds() - (time.monotonic() - started)
+            ),
+            summary=summary,
+        )
         _record_search_outcome(user_db, int(row["id"]), outcome.status, datetime.now(UTC))
 
     logger.info("auto-download pass complete: %s", summary)
     return summary
+
+
+def _existence_check(
+    user_db: UserDB,
+    row: dict[str, Any],
+    outcome: AutoDownloadOutcome,
+    *,
+    admin_user_id: int,
+    content_type: str,
+    budget_seconds: float,
+    summary: dict[str, int],
+) -> None:
+    """Hand a request's outcome to the audiobook existence check (see ``existence_check``).
+
+    Its failure must not take the pass with it, so it is logged and the pass moves on.
+    """
+    from shelfmark.core import existence_check
+
+    try:
+        verdict = existence_check.after_request(
+            user_db,
+            row,
+            outcome,
+            admin_user_id=admin_user_id,
+            content_type=content_type,
+            budget_seconds=budget_seconds,
+        )
+    except Exception:
+        logger.exception("auto-download: existence check for request %s failed", row.get("id"))
+        return
+    if verdict == "not_listed":
+        summary["not_listed"] = summary.get("not_listed", 0) + 1

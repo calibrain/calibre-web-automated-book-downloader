@@ -1,0 +1,39 @@
+[
+  {
+    "title": "The Mummy or Ramses the Damned",
+    "subtitle": "A Novel",
+    "author": "Anne Rice",
+    "narrator": "Michael York",
+    "publisher": "Random House Audio",
+    "publishedYear": "2000",
+    "description": "He was Ramses the Damned in ancient Egypt, but awoke in opulent Edwardian London as Dr. Ramsey, expert in Egyptology. He...",
+    "cover": "https://m.media-amazon.com/images/I/9194bYyVy9L.jpg",
+    "asin": "B002UUKMQA",
+    "isbn": "9780375418259",
+    "genres": [
+      "Literature & Fiction",
+      "Science Fiction & Fantasy"
+    ],
+    "tags": [
+      "Genre Fiction",
+      "Psychological",
+      "Sagas",
+      "Horror",
+      "Fantasy",
+      "Paranormal & Urban",
+      "Paranormal"
+    ],
+    "series": [
+      {
+        "series": "Ramses the Damned (abridged)",
+        "sequence": "1"
+      }
+    ],
+    "language": "English",
+    "duration": 177,
+    "region": "us",
+    "rating": "3.9",
+    "abridged": true,
+    "descriptionPlain": "He was Ramses the Damned in ancient Egypt, but awoke in opulent Edwardian London as Dr. Ramsey, expert in Egyptology. He..."
+  }
+]

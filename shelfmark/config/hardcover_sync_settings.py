@@ -199,6 +199,30 @@ def hardcover_sync_settings() -> list[SettingsField]:
             min_value=0,
             max_value=365,
         ),
+        CheckboxField(
+            key="AUTO_DOWNLOAD_EXISTENCE_CHECK_ENABLED",
+            label="Decline audiobooks no store sells",
+            description=(
+                "An audiobook request that stays unmatched is looked up on Audible (US and "
+                "UK) through your Audiobookshelf server. Not listed on either: the request is "
+                "declined with an [auto] note, and can be reopened. Listed: it stays pending "
+                "and says so, with the ASIN, and is checked again after a week. A lookup that "
+                "fails decides nothing. Needs the Audiobookshelf URL and token below."
+            ),
+            default=False,
+        ),
+        NumberField(
+            key="AUTO_DOWNLOAD_EXISTENCE_CHECK_AFTER_PASSES",
+            label="Look the book up after (unmatched passes)",
+            description=(
+                "How many consecutive passes with no strict match a request goes through "
+                "before the store is asked. A pass that matched, or a reopen, starts the "
+                "count over."
+            ),
+            default=3,
+            min_value=1,
+            max_value=100,
+        ),
         NumberField(
             key="AUTO_DOWNLOAD_BACKOFF_MAX_DAYS",
             label="Longest wait between searches for an unmatched request (days)",
