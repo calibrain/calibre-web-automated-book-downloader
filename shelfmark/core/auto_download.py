@@ -22,6 +22,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from shelfmark.core import search_deadline
 from shelfmark.core.config import config as app_config
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.release_search import search_source_releases
@@ -418,11 +419,32 @@ def strict_match(
     languages: list[str] | None = None,
 ) -> bool:
     """Return True only if the release confidently matches the requested book and format."""
+    return _author_match(book, release) and _matches_besides_author(
+        release,
+        book,
+        content_type=content_type,
+        min_seeders=min_seeders,
+        audiobook_formats=audiobook_formats,
+        ebook_formats=ebook_formats,
+        languages=languages,
+    )
+
+
+def _matches_besides_author(
+    release: Release,
+    book: BookMetadata,
+    *,
+    content_type: str = "audiobook",
+    min_seeders: int = 1,
+    audiobook_formats: set[str] | None = None,
+    ebook_formats: set[str] | None = None,
+    languages: list[str] | None = None,
+) -> bool:
+    """Every strict-match rule but the author one."""
     audio = audiobook_formats if audiobook_formats is not None else _audiobook_formats()
     ebook = ebook_formats if ebook_formats is not None else _ebook_formats()
     return (
         _title_match(book, release.title or "")
-        and _author_match(book, release)
         and not _names_other_work(book, release.title)
         and not _names_derivative(book, release.title)
         and not is_bundle_title(release.title, book.search_title or book.title)
@@ -431,6 +453,52 @@ def strict_match(
         and _seeders_ok(release, min_seeders)
         and _language_ok(release, languages)
     )
+
+
+# Detail pages read per request to find the author of releases whose listing names none.
+MAX_AUTHOR_LOOKUPS = 3
+
+
+def _release_author(release: Release) -> str | None:
+    author = release.extra.get("author") if isinstance(release.extra, dict) else None
+    return author if isinstance(author, str) and author.strip() else None
+
+
+def _fill_missing_authors(
+    releases: list[Release], book: BookMetadata, match_kwargs: dict[str, Any]
+) -> None:
+    """Look up the author of the few releases that fail the strict match only for want of one.
+
+    An AudiobookBay listing title without " - Author" ("The Mummy or Ramses the Damned")
+    names nobody, so the author rule could never pass it. Its detail page usually credits
+    the author; the source's handler reads it for at most ``MAX_AUTHOR_LOOKUPS`` such
+    releases, inside the request's search budget. What it finds goes on the release's
+    author field and the ordinary strict match then judges it. Nothing is relaxed: a page
+    that credits nobody, or someone else, leaves the release rejected.
+    """
+    from shelfmark.release_sources import get_handler
+
+    if not _author_surname_tokens(book):
+        return
+    looked = 0
+    for release in releases:
+        if looked >= MAX_AUTHOR_LOOKUPS or search_deadline.expired():
+            return
+        if _release_author(release) is not None or _author_match(book, release):
+            continue
+        if not _matches_besides_author(release, book, **match_kwargs):
+            continue
+        looked += 1
+        try:
+            authors = get_handler(release.source).list_authors(
+                {"source": release.source, "download_url": release.download_url}
+            )
+        except Exception as exc:  # noqa: BLE001 - a lookup failure only leaves it unmatched
+            logger.warning("auto-download: author lookup failed for %s: %s", release.title, exc)
+            continue
+        if authors:
+            release.extra["author"] = ", ".join(authors)
+            logger.info("auto-download: %s credits %s", release.title, release.extra["author"])
 
 
 def _download_count(release: Release) -> int:
@@ -707,18 +775,17 @@ def auto_download_request(
             content_type=content_type,
             user_id=coerce_int(request_row.get("user_id"), 0) or None,
         )
+        match_kwargs: dict[str, Any] = {
+            "content_type": content_type,
+            "min_seeders": min_seeders,
+            "audiobook_formats": audiobook_formats,
+            "ebook_formats": ebook_formats,
+            "languages": languages,
+        }
+        if not any(strict_match(release, book, **match_kwargs) for release in releases):
+            _fill_missing_authors(releases, book, match_kwargs)
         candidates = [
-            release
-            for release in releases
-            if strict_match(
-                release,
-                book,
-                content_type=content_type,
-                min_seeders=min_seeders,
-                audiobook_formats=audiobook_formats,
-                ebook_formats=ebook_formats,
-                languages=languages,
-            )
+            release for release in releases if strict_match(release, book, **match_kwargs)
         ]
         chosen = None
         release_data: dict[str, Any] = {}

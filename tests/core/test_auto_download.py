@@ -1588,3 +1588,155 @@ class TestNumberedVolumes:
         book = _book(title=wanted, authors=[author])
 
         assert _matches(book, release_title)
+
+
+class TestAuthorLookup:
+    """An AudiobookBay listing title without " - Author" names nobody; the detail page
+    is asked, for a few releases that fail on the author alone, and the strict match
+    then judges what it says."""
+
+    MUMMY = {"title": "The Mummy, or Ramses the Damned", "authors": ["Anne Rice"]}
+    TRIAL = {
+        "title": "Alex Cross's Trial",
+        "authors": ["Richard DiLallo", "James Patterson"],
+        "series_name": "Alex Cross",
+    }
+
+    @pytest.fixture(autouse=True)
+    def _no_inspection(self, monkeypatch):
+        monkeypatch.setattr(auto_download, "_inspect_candidate", lambda _data: (False, False))
+
+    @staticmethod
+    def _handler(monkeypatch, authors_by_url):
+        asked = []
+
+        class _Handler:
+            def list_authors(self, release_data):
+                asked.append(release_data["download_url"])
+                return authors_by_url.get(release_data["download_url"])
+
+        monkeypatch.setattr("shelfmark.release_sources.get_handler", lambda _source: _Handler())
+        return asked
+
+    @staticmethod
+    def _authorless(title, slug=None):
+        slug = slug or title
+        return _release(
+            source="audiobookbay",
+            source_id=slug,
+            title=title,
+            format="mp3",
+            seeders=None,
+            indexer="AudiobookBay",
+            content_type="audiobook",
+            download_url=f"https://audiobookbay.lu/abss/{slug}/",
+            extra={"author": None, "title_raw": title},
+        )
+
+    def _try(self, user_db, book, releases, monkeypatch):
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        _stub_provider(monkeypatch, book)
+        monkeypatch.setattr(
+            auto_download, "search_source_releases", lambda *_a, **_k: (None, releases, None)
+        )
+        return auto_download.auto_download_request(
+            user_db,
+            row,
+            sources=["audiobookbay"],
+            content_type="audiobook",
+            min_seeders=1,
+            queue_release=lambda *_a, **_k: (True, None),
+            admin_user_id=admin["id"],
+        )
+
+    @pytest.mark.parametrize(
+        ("book_fields", "title", "credited"),
+        [
+            (MUMMY, "The Mummy or Ramses the Damned", ["Anne Rice"]),
+            (TRIAL, "Alex Cross\u2019s TRIAL", ["James Patterson", "Richard DiLallo"]),
+        ],
+    )
+    def test_the_detail_page_author_lets_the_release_match(
+        self, user_db, monkeypatch, book_fields, title, credited
+    ):
+        release = self._authorless(title, "one")
+        asked = self._handler(monkeypatch, {release.download_url: credited})
+
+        outcome = self._try(user_db, _book(**book_fields), [release], monkeypatch)
+
+        assert asked == [release.download_url]
+        assert isinstance(outcome, auto_download.AutoDownloadOutcome)
+        assert outcome.status == "queued"
+
+    @pytest.mark.parametrize("credited", [["Stephen King"], None, []])
+    def test_another_author_or_no_credit_still_rejects(self, user_db, monkeypatch, credited):
+        release = self._authorless("The Mummy or Ramses the Damned", "one")
+        self._handler(monkeypatch, {release.download_url: credited})
+
+        outcome = self._try(user_db, _book(**self.MUMMY), [release], monkeypatch)
+
+        assert outcome.status == "no_match"
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Anne Rice Collection",  # pack
+            "The Mummy (Abridged)",  # derivative
+            "The Mummy 2",  # sequel number
+            "The Mummy Returns",  # another work
+            "Interview with the Vampire",  # another title
+        ],
+    )
+    def test_releases_failing_any_other_rule_are_not_looked_up(self, user_db, monkeypatch, title):
+        release = self._authorless(title, "one")
+        asked = self._handler(monkeypatch, {release.download_url: ["Anne Rice"]})
+        book = _book(title="The Mummy", authors=["Anne Rice"])
+
+        outcome = self._try(user_db, book, [release], monkeypatch)
+
+        assert asked == []
+        assert outcome.status == "no_match"
+
+    def test_at_most_three_pages_are_read(self, user_db, monkeypatch):
+        releases = [self._authorless("The Mummy", f"copy-{n}") for n in range(5)]
+        asked = self._handler(monkeypatch, {})
+
+        outcome = self._try(
+            user_db, _book(title="The Mummy", authors=["Anne Rice"]), releases, monkeypatch
+        )
+
+        assert len(asked) == auto_download.MAX_AUTHOR_LOOKUPS == 3
+        assert outcome.status == "no_match"
+
+    def test_no_lookup_when_a_release_already_matches(self, user_db, monkeypatch):
+        named = self._authorless("The Mummy", "named")
+        named.extra["author"] = "Anne Rice"
+        asked = self._handler(monkeypatch, {})
+
+        outcome = self._try(
+            user_db,
+            _book(title="The Mummy", authors=["Anne Rice"]),
+            [self._authorless("The Mummy", "unnamed"), named],
+            monkeypatch,
+        )
+
+        assert asked == []
+        assert outcome.status == "queued"
+
+    def test_a_failing_lookup_leaves_the_release_unmatched(self, user_db, monkeypatch):
+        class _Broken:
+            def list_authors(self, _data):
+                raise OSError("timed out")
+
+        monkeypatch.setattr("shelfmark.release_sources.get_handler", lambda _source: _Broken())
+
+        outcome = self._try(
+            user_db,
+            _book(**self.MUMMY),
+            [self._authorless("The Mummy or Ramses the Damned")],
+            monkeypatch,
+        )
+
+        assert outcome.status == "no_match"

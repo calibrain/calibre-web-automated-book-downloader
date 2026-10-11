@@ -477,6 +477,14 @@ class DownloadHandler(ABC):
         """
         return None
 
+    def list_authors(self, release_data: dict[str, Any]) -> list[str] | None:
+        """Return the release's authors from a source page beyond its search result.
+
+        For sources whose search results can leave the author out. Return None when the
+        source has nothing more to say than the result did.
+        """
+        return None
+
     @abstractmethod
     def cancel(self, task_id: str) -> bool:
         """Cancel an in-progress download."""
