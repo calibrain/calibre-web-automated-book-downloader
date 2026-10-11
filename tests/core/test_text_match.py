@@ -61,6 +61,28 @@ def test_author_surname_folds_accents():
     assert text_match.author_surname("Márquez, Gabriel García") == "marquez"
 
 
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("The Hobbit, or There and Back Again", "The Hobbit"),
+        ("The Mummy, or Ramses the Damned", "The Mummy"),
+        ("Moby-Dick; or, The Whale", "Moby-Dick"),
+        ("Frankenstein; or, The Modern Prometheus", "Frankenstein"),
+        ("Twelfth Night, Or What You Will", "Twelfth Night"),
+        # No alternate title: "or" inside the title, or nothing before the comma.
+        ("Dead or Alive", "Dead or Alive"),
+        ("Deal or No Deal", "Deal or No Deal"),
+        # Nothing worth searching before the separator.
+        ("A, or The Whale", "A, or The Whale"),
+        (", or The Whale", ", or The Whale"),
+        ("The Hobbit", "The Hobbit"),
+        ("", ""),
+    ],
+)
+def test_strip_alternate_title(title, expected):
+    assert text_match.strip_alternate_title(title) == expected
+
+
 def test_significant_tokens_drops_stopwords_and_single_characters():
     assert text_match.significant_tokens("The Way of Kings, Part A 2") == ["way", "kings", "part"]
 

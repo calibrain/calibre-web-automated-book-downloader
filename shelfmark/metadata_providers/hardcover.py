@@ -27,6 +27,7 @@ from shelfmark.core.settings_registry import (
     SettingsField,
     register_settings,
 )
+from shelfmark.core.text_match import strip_alternate_title
 from shelfmark.download.network import get_ssl_verify
 from shelfmark.metadata_providers import (
     BookMetadata,
@@ -1003,13 +1004,15 @@ def _compute_search_title(
 
     Additional heuristics:
     - Drop trailing parenthetical qualifiers ("(Unabridged)").
+    - Drop an alternate title ("The Hobbit, or There and Back Again" is searched and
+      matched as "The Hobbit"; the full title stays on the book for display).
     """
     if not title:
         return None
 
     original_title = " ".join(title.split()).strip()
 
-    normalized_title = _strip_parenthetical_suffix(original_title)
+    normalized_title = strip_alternate_title(_strip_parenthetical_suffix(original_title))
 
     normalized_subtitle = " ".join(subtitle.split()).strip() if subtitle else ""
     normalized_subtitle = (

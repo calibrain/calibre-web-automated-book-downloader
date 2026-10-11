@@ -1405,3 +1405,94 @@ class TestAccentedTitles:
         assert not auto_download.strict_match(
             _abb(release_title, author), book, audiobook_formats=AUDIOBOOK_FORMATS
         )
+
+
+class TestAlternateTitles:
+    """ "The Hobbit, or There and Back Again" is matched as "The Hobbit", the way the
+    provider now searches it, and a release spelling out the whole pair is the same book."""
+
+    HOBBIT = {
+        "title": "The Hobbit, or There and Back Again",
+        "search_title": "The Hobbit",
+        "series_name": "Middle Earth",
+    }
+    MUMMY = {
+        "title": "The Mummy, or Ramses the Damned",
+        "search_title": "The Mummy",
+        "authors": ["Anne Rice"],
+        "series_name": "Ramses the Damned",
+        "subtitle": "The Passion of Cleopatra",
+    }
+
+    @pytest.mark.parametrize(
+        ("release_title", "author"),
+        [
+            ("The Hobbit", "J.R.R. Tolkien"),
+            ("The Hobbit", "J. R. R. Tolkien"),
+            ("The Hobbit (Andy Serkis)", "J. R. R. Tolkien"),
+            ("The Hobbit, or There and Back Again", "J.R.R. Tolkien"),
+            ("The Hobbit: There and Back Again (Unabridged)", "J.R.R. Tolkien"),
+        ],
+    )
+    def test_the_hobbit_with_or_without_its_alternate_title_matches(self, release_title, author):
+        book = _tolkien(**self.HOBBIT)
+
+        assert auto_download.strict_match(
+            _abb(release_title, author), book, audiobook_formats=AUDIOBOOK_FORMATS
+        )
+
+    @pytest.mark.parametrize(
+        ("release_title", "author"),
+        [
+            ("The Hobbit: 1979 Mind’s Eye Radio Drama", "J.R.R. Tolkien"),
+            ("The Hobbit: The BBC TV Soundtrack of the Jackanory Multi-Voice Reading", "Tolkien"),
+            (
+                "The Hobbit + Lord of the Rings Trilogy (Theatrical Experience), Chapterized",
+                "Tolkien",
+            ),
+            ("The Hobbit + The Lord of the Rings Trilogy, Chapterized [128 kbps]", "Tolkien"),
+            ("The Hobbit (Graphic Novel)", "J.R.R. Tolkien"),
+            ("The Hobbit (Abridged)", "J.R.R. Tolkien"),
+            ("The Hobbit", "Peter Jackson"),
+            ("The Hobbit: An Unexpected Journey", "Jude Fisher"),
+        ],
+    )
+    def test_dramatisations_packs_and_other_hobbits_are_still_rejected(self, release_title, author):
+        book = _tolkien(**self.HOBBIT)
+
+        assert not auto_download.strict_match(
+            _abb(release_title, author), book, audiobook_formats=AUDIOBOOK_FORMATS
+        )
+
+    def test_the_mummy_matches_the_bare_main_title_once_the_author_is_known(self):
+        book = _book(**self.MUMMY)
+
+        assert auto_download.strict_match(
+            _abb("The Mummy or Ramses the Damned", "Anne Rice"),
+            book,
+            audiobook_formats=AUDIOBOOK_FORMATS,
+        )
+        assert auto_download.strict_match(
+            _abb("The Mummy", "Anne Rice"), book, audiobook_formats=AUDIOBOOK_FORMATS
+        )
+
+    @pytest.mark.parametrize(
+        ("release_title", "author"),
+        [
+            # Without an author the listing is not trusted, main title or not.
+            ("The Mummy or Ramses the Damned", None),
+            # Another author's Mummy.
+            ("The Mummy", "Max Allan Collins"),
+            ("The Mummy: Tomb of the Dragon Emperor", "Max Allan Collins"),
+            # The sequel, whose title the provider repeats as this book's subtitle.
+            ("Ramses the Damned: The Passion of Cleopatra", "Anne Rice"),
+            ("The Mummy, or Ramses the Damned (Abridged)", "Anne Rice"),
+            ("Anne Rice Collection", "Anne Rice"),
+        ],
+    )
+    def test_other_mummies_and_the_sequel_are_still_rejected(self, release_title, author):
+        book = _book(**self.MUMMY)
+
+        assert not auto_download.strict_match(
+            _abb(release_title, author), book, audiobook_formats=AUDIOBOOK_FORMATS
+        )

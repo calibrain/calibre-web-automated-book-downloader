@@ -52,9 +52,9 @@ def fold(text: str) -> str:
     """Lowercase text with its diacritics dropped, so "Húrin" and "Hurin" read the same.
 
     Decomposes (NFKD) and discards the combining marks, which also covers a title that
-    arrives already decomposed ("Húrin"). A metadata provider and a release name
-    rarely agree on accents; without this, "The Children of Húrin" split into "hu" and
-    "rin" and scored half a match against its own audiobook.
+    arrives already decomposed (a "u" followed by a combining acute). A metadata
+    provider and a release name rarely agree on accents; without this, "The Children of
+    Húrin" split into "hu" and "rin" and scored half a match against its own audiobook.
     """
     decomposed = unicodedata.normalize("NFKD", text.lower())
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).translate(_LETTER_FOLD)
@@ -79,6 +79,25 @@ def author_surname(author: str | None) -> str | None:
         value = value.split(",")[0]
     toks = significant_tokens(value)
     return toks[-1] if toks else None
+
+
+# "The Hobbit, or There and Back Again", "Moby-Dick; or, The Whale": a main title, a
+# comma or semicolon, "or", and the alternate title. "Dead or Alive" has no separator
+# before the "or" and is left alone.
+_ALTERNATE_TITLE = re.compile(r"^(?P<main>.+?)\s*[,;]\s*or\b[,:]?\s+(?P<alt>\S.*)$", re.IGNORECASE)
+
+
+def strip_alternate_title(title: str) -> str:
+    """The main title of a "Title, or Alternate Title" pair; anything else unchanged.
+
+    Releases and shelves carry the main title alone far more often than the pair, so
+    the alternate title only costs recall when searching and matching. The full title
+    stays on the book as display data.
+    """
+    match = _ALTERNATE_TITLE.match(title or "")
+    if not match or not significant_tokens(match.group("main")):
+        return title
+    return match.group("main")
 
 
 def title_tokens_match(

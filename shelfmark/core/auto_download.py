@@ -178,6 +178,11 @@ _DERIVATIVE_MARKERS = frozenset(
         "dramatization",
         "dramatisation",
         "adaptation",
+        # A radio play or a broadcast's soundtrack is a dramatisation that does not say so:
+        # "The Hobbit: 1979 Mind's Eye Radio Drama", "The Hobbit: The BBC TV Soundtrack".
+        "drama",
+        "radio",
+        "soundtrack",
     }
 )
 _DERIVATIVE_PHRASES = re.compile(r"\bstudy\s+guide\b|\bgraphic\s+novel\b", re.IGNORECASE)
@@ -263,6 +268,9 @@ def _names_other_work(book: BookMetadata, release_title: str | None) -> bool:
     when either of them names another work.
     """
     title = book.search_title or book.title
+    # The book's own full title is context too: a search title shortened from it (the
+    # subtitle dropped, or ", or There and Back Again" cut off) must not read a release
+    # that spells the whole thing out as another work.
     context = set(
         _tokens(
             " ".join(
@@ -271,6 +279,7 @@ def _names_other_work(book: BookMetadata, release_title: str | None) -> bool:
                     book.search_author or "",
                     book.series_name or "",
                     book.subtitle or "",
+                    book.title or "",
                 ]
             )
         )

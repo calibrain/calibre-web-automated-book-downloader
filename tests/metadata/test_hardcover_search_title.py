@@ -112,5 +112,30 @@ class TestHardcoverComputeSearchTitle:
         assert _compute_search_title("The Martian (Unabridged)", None) == "The Martian"
         assert _compute_search_title("The Martian", None) is None
 
+    @pytest.mark.parametrize(
+        ("title", "subtitle", "series", "expected"),
+        [
+            # Hardcover's subtitle here is unrelated marketing text; the alternate title
+            # is what kept AudiobookBay from returning the book at all.
+            (
+                "The Hobbit, or There and Back Again",
+                "Heartache, Heritage, and Happiness",
+                "Middle Earth",
+                "The Hobbit",
+            ),
+            # The subtitle is the sequel's title; it must not become the search title.
+            (
+                "The Mummy, or Ramses the Damned",
+                "The Passion of Cleopatra",
+                "Ramses the Damned",
+                "The Mummy",
+            ),
+            ("Moby-Dick; or, The Whale", None, None, "Moby-Dick"),
+            ("Dead or Alive", None, None, None),
+        ],
+    )
+    def test_strips_an_alternate_title(self, title, subtitle, series, expected):
+        assert _compute_search_title(title, subtitle, series_name=series) == expected
+
     def test_returns_none_when_no_useful_simplification(self):
         assert _compute_search_title("Dune", None) is None
