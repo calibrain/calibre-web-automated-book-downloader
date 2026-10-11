@@ -976,6 +976,9 @@ def _simplify_author_for_search(author: str) -> str | None:
     return candidate
 
 
+_TITLE_COLON_SPLIT = re.compile(r"^(.+?)\s*:\s*(.+)$")
+
+
 def _compute_search_title(
     title: str,
     subtitle: str | None,
@@ -985,15 +988,21 @@ def _compute_search_title(
     """Compute a provider-specific, *looser* title for indexer searching.
 
     Goal: produce a string that maximizes recall in downstream sources (Prowlarr,
-    IRC bots, etc.). Being too detailed is counterproductive.
+    IRC bots, AudiobookBay), which AND their search terms, so being too detailed is
+    counterproductive. Auto-download also matches releases against this title, so it
+    must still name this book and no other.
 
-    Hardcover often stores titles in a "Series: Book Title" format and places the
-    standalone book title in `subtitle`. When this appears to be the case, prefer
-    the subtitle (unless it looks like a series position or other noise).
+    Hardcover stores "Title: Subtitle" with the subtitle repeated in `subtitle`, and a
+    series volume as "Series: Book Title" with the book's title in `subtitle`. The two
+    look the same; only the series name tells them apart. When the prefix is the series
+    name the suffix is the book's title; otherwise the prefix is the title and the
+    subtitle is description ("An Appetite for Wonder: The Making of a Scientist" is
+    searched as "An Appetite for Wonder"). A subtitle is never taken on its own:
+    "Vittorio, the Vampire" with subtitle "The Vampire" used to search for "The
+    Vampire", which found every vampire novel but this one.
 
     Additional heuristics:
-    - If Hardcover prefixes the series in the title, remove it.
-    - Drop trailing parenthetical qualifiers.
+    - Drop trailing parenthetical qualifiers ("(Unabridged)").
     """
     if not title:
         return None
@@ -1010,57 +1019,22 @@ def _compute_search_title(
     if normalized_subtitle and normalized_subtitle.lower() == normalized_title.lower():
         normalized_subtitle = ""
 
-    # If subtitle is noise, strip it from the title and use just the prefix.
-    if normalized_subtitle and _is_probably_series_position(normalized_subtitle):
-        match = re.match(r"^(.+?)\s*:\s*(.+)$", normalized_title)
-        if match:
-            suffix = _strip_parenthetical_suffix(match.group(2).strip())
-            if (
-                normalized_subtitle.lower() == suffix.lower()
-                or normalized_subtitle.lower() in suffix.lower()
-            ):
+    series_normalized = " ".join(series_name.split()).strip() if series_name else ""
+
+    match = _TITLE_COLON_SPLIT.match(normalized_title)
+    if match:
+        prefix = match.group(1).strip()
+        suffix = _strip_parenthetical_suffix(match.group(2).strip())
+        prefix_is_series = bool(series_normalized) and prefix.lower() == series_normalized.lower()
+        subtitle_is_suffix = bool(normalized_subtitle) and (
+            normalized_subtitle.lower() == suffix.lower()
+            or normalized_subtitle.lower() in suffix.lower()
+        )
+        if prefix_is_series or subtitle_is_suffix:
+            # "Series: Book 1" names nothing to search for on either side of the colon.
+            if _is_probably_series_position(suffix):
                 return None
-
-    # Prefer subtitle when it looks like the real title.
-    if normalized_subtitle and not _is_probably_series_position(normalized_subtitle):
-        match = re.match(r"^(.+?)\s*:\s*(.+)$", normalized_title)
-        if match:
-            prefix = match.group(1).strip()
-            suffix = _strip_parenthetical_suffix(match.group(2).strip())
-
-            prefix_words = len(prefix.split()) if prefix else 0
-            subtitle_words = len(normalized_subtitle.split())
-
-            series_normalized = " ".join(series_name.split()).strip() if series_name else ""
-            if series_normalized and prefix.lower() == series_normalized.lower():
-                return normalized_subtitle
-
-            # If the subtitle is much longer than the prefix, treat it as a descriptive subtitle.
-            if prefix and subtitle_words >= (prefix_words + 4):
-                return prefix
-
-            # Otherwise assume "Series: Book Title" and prefer the subtitle.
-            if (
-                normalized_subtitle.lower() == suffix.lower()
-                or normalized_subtitle.lower() in suffix.lower()
-            ):
-                return normalized_subtitle
-
-        # Fallback: if title contains the subtitle, this is likely "Series: Subtitle".
-        if normalized_subtitle.lower() in normalized_title.lower():
-            return normalized_subtitle
-
-    # If we know the series name (from full book fetch), strip it.
-    if series_name:
-        series_normalized = " ".join(series_name.split()).strip()
-        if series_normalized:
-            # Common Hardcover format: "Series: Book Title".
-            prefix = f"{series_normalized}:"
-            if normalized_title.lower().startswith(prefix.lower()):
-                candidate = normalized_title[len(prefix) :].strip()
-                candidate = _strip_parenthetical_suffix(candidate)
-                if candidate and candidate.lower() != normalized_title.lower():
-                    return candidate
+            return suffix if prefix_is_series else prefix
 
     # Last resort: return a cleaned version of the title if we removed noise.
     if normalized_title and normalized_title.lower() != original_title.lower():
