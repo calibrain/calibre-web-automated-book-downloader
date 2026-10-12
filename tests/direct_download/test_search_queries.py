@@ -1,3 +1,7 @@
+from urllib.parse import parse_qs, urlparse
+
+import pytest
+
 from shelfmark.core.config import config
 from shelfmark.core.models import SearchFilters
 from shelfmark.core.search_plan import build_release_search_plan
@@ -5,6 +9,7 @@ from shelfmark.metadata_providers import BookMetadata
 from shelfmark.release_sources import BrowseRecord
 from shelfmark.release_sources.direct_download import DirectDownloadSource
 from shelfmark.release_sources.direct_download import annas_archive as aa
+from shelfmark.release_sources.direct_download.common import get_supported_formats
 
 
 def _browse_record(record_id: str, title: str) -> BrowseRecord:
@@ -184,6 +189,81 @@ class TestDirectDownloadSearchQueries:
             ("mistborn custom query", ["en"], ["epub"]),
             ("mistborn custom query", None, ["epub"]),
         ]
+
+
+def _record_search_pages(monkeypatch, body: str) -> list[str]:
+    urls: list[str] = []
+
+    def _fake_html_get_page(url: str, selector, **_kwargs):
+        del selector
+        urls.append(url)
+        return body
+
+    monkeypatch.setattr(aa.network, "get_aa_base_url", lambda: "https://mirror.example")
+    monkeypatch.setattr(aa.network, "AAMirrorSelector", lambda: object())
+    monkeypatch.setattr(
+        aa.network, "get_available_aa_urls", lambda: ["https://a.example", "https://b.example"]
+    )
+    monkeypatch.setattr(aa, "_enrich_search_results_with_downloads", lambda _books: None)
+    monkeypatch.setattr(aa.downloader, "html_get_page", _fake_html_get_page)
+    return urls
+
+
+def _decoded_search_query(url: str) -> str:
+    return parse_qs(urlparse(url).query)["q"][0]
+
+
+def test_isbn_search_requests_the_bare_isbn(monkeypatch):
+    urls = _record_search_pages(monkeypatch, "No files found.")
+
+    aa.search_books("9788845269837", SearchFilters(isbn=["9788845269837"]))
+
+    url = urls[0]
+    assert _decoded_search_query(url) == "9788845269837"
+    assert "display=table" in url
+    assert f"&ext={'&ext='.join(get_supported_formats())}" in url
+    assert "isbn13" not in url
+    assert "isbn10" not in url
+    assert "||" not in url
+    assert "%7C" not in url
+
+
+def test_isbn_search_includes_a_distinct_free_text_query(monkeypatch):
+    urls = _record_search_pages(monkeypatch, "No files found.")
+
+    aa.search_books("Dune", SearchFilters(isbn=["9780441172719"]))
+
+    query = _decoded_search_query(urls[0])
+    assert query == "9780441172719 Dune"
+    assert "isbn13" not in query
+    assert "isbn10" not in query
+    assert "||" not in query
+
+
+def test_search_without_isbn_keeps_the_free_text_query(monkeypatch):
+    urls = _record_search_pages(monkeypatch, "No files found.")
+
+    aa.search_books("Dune Messiah", SearchFilters())
+
+    assert _decoded_search_query(urls[0]) == "Dune Messiah"
+    assert "q=Dune%20Messiah" in urls[0]
+
+
+def test_duplicate_isbn_filters_are_sent_once(monkeypatch):
+    urls = _record_search_pages(monkeypatch, "No files found.")
+
+    aa.search_books("Dune", SearchFilters(isbn=["9780441172719", "9780441172719"]))
+
+    assert _decoded_search_query(urls[0]) == "9780441172719 Dune"
+
+
+def test_empty_isbn_search_page_is_terminal(monkeypatch):
+    urls = _record_search_pages(monkeypatch, "")
+
+    with pytest.raises(aa.SearchUnavailableError):
+        aa.search_books("9788845269837", SearchFilters(isbn=["9788845269837"]))
+
+    assert len(urls) == 1
 
 
 # --- Distant-path language detection tests ---
