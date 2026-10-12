@@ -10,6 +10,7 @@ from shelfmark.core.download_history_service import DownloadHistoryService
 from shelfmark.core.user_db import UserDB
 from shelfmark.metadata_providers import BookMetadata
 from shelfmark.release_sources import Release, ReleaseProtocol
+from tests.core.fakes import FakeConfig
 
 AUDIOBOOK_FORMATS = {"m4b", "mp3"}
 
@@ -1138,6 +1139,248 @@ def test_pending_pass_follows_each_request_content_type(user_db, monkeypatch):
     assert seen == [("ebook", ["src"])]
     assert summary["no_match"] == 1
     assert summary["skipped"] == 1  # the audiobook request had no usable sources
+
+
+class TestNoMatchBackoff:
+    """A request that keeps finding nothing is searched less often."""
+
+    NOW = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
+
+    @staticmethod
+    def _book_data(passes, hours_ago, now=NOW):
+        return {
+            auto_download.BACKOFF_KEY: {
+                "no_match_passes": passes,
+                "last_searched_at": (now - timedelta(hours=hours_ago)).isoformat(),
+            }
+        }
+
+    @pytest.mark.parametrize(
+        ("passes", "hours_ago", "due"),
+        [
+            (0, 0, True),
+            (2, 0, True),  # the first passes run at full rate
+            (3, 6, False),  # then once a day
+            (3, 23.5, True),  # a cycle a little early is on time
+            (3, 24, True),
+            (4, 30, False),  # then every two days
+            (4, 48, True),
+            (5, 60, False),  # then at most the setting (3 days)
+            (5, 72, True),
+            (50, 60, False),
+            (50, 72, True),
+        ],
+    )
+    def test_the_wait_grows_with_the_passes_and_stops_at_the_setting(self, passes, hours_ago, due):
+        book_data = self._book_data(passes, hours_ago)
+
+        assert auto_download._search_is_due(book_data, self.NOW, 3) is due
+
+    def test_a_smaller_setting_caps_the_wait(self):
+        book_data = self._book_data(5, 30)
+
+        assert auto_download._search_is_due(book_data, self.NOW, 1) is True
+        assert auto_download._search_is_due(book_data, self.NOW, 3) is False
+
+    def test_zero_turns_the_backoff_off(self):
+        assert auto_download._search_is_due(self._book_data(50, 0), self.NOW, 0) is True
+
+    @pytest.mark.parametrize(
+        "book_data",
+        [
+            {},
+            {auto_download.BACKOFF_KEY: "garbage"},
+            {auto_download.BACKOFF_KEY: {"no_match_passes": 9}},
+            {auto_download.BACKOFF_KEY: {"no_match_passes": 9, "last_searched_at": "not a date"}},
+            {auto_download.BACKOFF_KEY: {"no_match_passes": "many", "last_searched_at": None}},
+        ],
+    )
+    def test_anything_doubtful_is_searched(self, book_data):
+        assert auto_download._search_is_due(book_data, self.NOW, 3) is True
+
+    def _pass(self, user_db, monkeypatch, *, ignore_backoff=False, outcome="no_match"):
+        user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        monkeypatch.setattr(auto_download, "app_config", FakeConfig(AUTO_DOWNLOAD_ENABLED=True))
+        monkeypatch.setattr(auto_download, "_configured_source_priority", lambda _t: ["src"])
+        searched = []
+
+        def _fake_request(_db, request_row, **_kwargs):
+            searched.append(int(request_row["id"]))
+            return auto_download.AutoDownloadOutcome(int(request_row["id"]), outcome)
+
+        monkeypatch.setattr(auto_download, "auto_download_request", _fake_request)
+        return row, searched
+
+    def _run_pass(self, user_db, **kwargs):
+        return auto_download.auto_download_pending(
+            user_db, queue_release=lambda *_a, **_k: (True, None), **kwargs
+        )
+
+    def _stored(self, user_db, row):
+        return user_db.get_request(row["id"])["book_data"].get(auto_download.BACKOFF_KEY)
+
+    def test_each_no_match_pass_is_counted_and_dated(self, user_db, monkeypatch):
+        row, searched = self._pass(user_db, monkeypatch)
+
+        self._run_pass(user_db)
+        self._run_pass(user_db)
+
+        stored = self._stored(user_db, row)
+        assert searched == [int(row["id"])] * 2
+        assert stored["no_match_passes"] == 2
+        assert datetime.fromisoformat(stored["last_searched_at"]).tzinfo is not None
+
+    def test_a_request_inside_its_wait_is_skipped_not_searched(self, user_db, monkeypatch):
+        row, searched = self._pass(user_db, monkeypatch)
+        book_data = {**row["book_data"], **self._book_data(3, 1, datetime.now(UTC))}
+        user_db.update_request(row["id"], book_data=book_data)
+
+        summary = self._run_pass(user_db)
+
+        assert searched == []
+        assert summary["skipped"] == 1
+
+    def test_sync_now_searches_a_request_inside_its_wait(self, user_db, monkeypatch):
+        row, searched = self._pass(user_db, monkeypatch)
+        book_data = {**row["book_data"], **self._book_data(3, 1, datetime.now(UTC))}
+        user_db.update_request(row["id"], book_data=book_data)
+
+        self._run_pass(user_db, ignore_backoff=True)
+
+        assert searched == [int(row["id"])]
+
+    def test_the_setting_at_zero_searches_every_pass(self, user_db, monkeypatch):
+        row, searched = self._pass(user_db, monkeypatch)
+        monkeypatch.setattr(
+            auto_download,
+            "app_config",
+            FakeConfig(AUTO_DOWNLOAD_ENABLED=True, AUTO_DOWNLOAD_BACKOFF_MAX_DAYS=0),
+        )
+        book_data = {**row["book_data"], **self._book_data(9, 1, datetime.now(UTC))}
+        user_db.update_request(row["id"], book_data=book_data)
+
+        self._run_pass(user_db)
+
+        assert searched == [int(row["id"])]
+
+    @pytest.mark.parametrize("outcome", ["queued", "in_library"])
+    def test_a_match_starts_the_count_over(self, user_db, monkeypatch, outcome):
+        row, _searched = self._pass(user_db, monkeypatch, outcome=outcome)
+        book_data = {**row["book_data"], **self._book_data(5, 99, datetime.now(UTC))}
+        user_db.update_request(row["id"], book_data=book_data)
+
+        self._run_pass(user_db)
+
+        assert self._stored(user_db, row) is None
+
+    @pytest.mark.parametrize("outcome", ["error", "skipped"])
+    def test_a_failed_search_does_not_count_against_the_request(
+        self, user_db, monkeypatch, outcome
+    ):
+        row, _searched = self._pass(user_db, monkeypatch, outcome=outcome)
+
+        self._run_pass(user_db)
+
+        assert self._stored(user_db, row) is None
+
+    def test_the_other_book_data_survives_the_bookkeeping(self, user_db, monkeypatch):
+        row, _searched = self._pass(user_db, monkeypatch)
+        book_data = {**row["book_data"], "failed_releases": [{"source": "x", "source_id": "1"}]}
+        user_db.update_request(row["id"], book_data=book_data)
+
+        self._run_pass(user_db)
+
+        stored = user_db.get_request(row["id"])["book_data"]
+        assert stored["failed_releases"] == [{"source": "x", "source_id": "1"}]
+        assert stored["title"] == "Dungeon Crawler Carl"
+        assert stored[auto_download.BACKOFF_KEY]["no_match_passes"] == 1
+
+    def test_a_bookkeeping_failure_never_takes_the_pass_with_it(self, user_db, monkeypatch):
+        row, searched = self._pass(user_db, monkeypatch)
+        real = user_db.update_request
+
+        def _fail_for_book_data(request_id, **kwargs):
+            if "book_data" in kwargs:
+                raise RuntimeError("database is locked")
+            return real(request_id, **kwargs)
+
+        monkeypatch.setattr(user_db, "update_request", _fail_for_book_data)
+
+        summary = self._run_pass(user_db)
+
+        assert searched == [int(row["id"])]
+        assert summary["no_match"] == 1
+
+
+def test_one_metadata_provider_serves_a_whole_pass(user_db, monkeypatch):
+    admin = user_db.create_user(username="admin", role="admin")
+    reader = user_db.create_user(username="reader", role="user")
+    rows = [_pending_request(user_db, reader["id"], provider_id=str(n)) for n in (1, 2, 3)]
+    built = []
+
+    class _Provider:
+        def get_book(self, _book_id):
+            return None  # "book not found": the request ends before any search
+
+    def _get_provider(_name, **_kwargs):
+        built.append(1)
+        return _Provider()
+
+    monkeypatch.setattr(
+        "shelfmark.metadata_providers.is_provider_registered", lambda name: name == "hardcover"
+    )
+    monkeypatch.setattr("shelfmark.metadata_providers.get_provider_kwargs", lambda _n: {})
+    monkeypatch.setattr("shelfmark.metadata_providers.get_provider", _get_provider)
+    providers: dict = {}
+
+    for row in rows:
+        auto_download.auto_download_request(
+            user_db,
+            row,
+            sources=["src"],
+            content_type="audiobook",
+            min_seeders=1,
+            queue_release=lambda *_a, **_k: (True, None),
+            admin_user_id=admin["id"],
+            providers=providers,
+        )
+
+    assert len(built) == 1
+
+
+def test_without_a_shared_dict_each_request_still_builds_its_own_provider(user_db, monkeypatch):
+    admin = user_db.create_user(username="admin", role="admin")
+    reader = user_db.create_user(username="reader", role="user")
+    rows = [_pending_request(user_db, reader["id"], provider_id=str(n)) for n in (1, 2)]
+    built = []
+
+    class _Provider:
+        def get_book(self, _book_id):
+            return None
+
+    monkeypatch.setattr(
+        "shelfmark.metadata_providers.is_provider_registered", lambda name: name == "hardcover"
+    )
+    monkeypatch.setattr("shelfmark.metadata_providers.get_provider_kwargs", lambda _n: {})
+    monkeypatch.setattr(
+        "shelfmark.metadata_providers.get_provider",
+        lambda _n, **_k: built.append(1) or _Provider(),
+    )
+
+    for row in rows:
+        auto_download.auto_download_request(
+            user_db,
+            row,
+            sources=["src"],
+            content_type="audiobook",
+            min_seeders=1,
+            queue_release=lambda *_a, **_k: (True, None),
+            admin_user_id=admin["id"],
+        )
+
+    assert len(built) == 2
 
 
 class TestPackGuard:

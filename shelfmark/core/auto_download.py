@@ -674,6 +674,77 @@ def build_release_data(release: Release, book: BookMetadata, content_type: str) 
     return {key: value for key, value in payload.items() if value is not None}
 
 
+# A request that keeps finding nothing is searched less often, so the same unmatched books do not
+# cost every source a search every cycle. The first FULL_RATE_PASSES no-match passes run at full
+# rate (a release often turns up within a day, and the existence check counts these passes), then
+# one pass a day, then one every two, up to the setting (default 3 days). A match, a manual
+# "Sync now" or the setting at 0 searches at full rate again. Anything doubtful searches.
+BACKOFF_SETTING = "AUTO_DOWNLOAD_BACKOFF_MAX_DAYS"
+DEFAULT_BACKOFF_MAX_DAYS = 3
+FULL_RATE_PASSES = 3
+BACKOFF_KEY = "search_backoff"  # in book_data, beside ``failed_releases``
+# A cycle starts a little earlier or later than the one before, so a request searched late in one
+# pass would just miss "a day later" in the next; this much early is on time.
+_BACKOFF_SLACK = timedelta(hours=1)
+
+
+def _backoff_state(book_data: object) -> dict[str, Any]:
+    raw = book_data.get(BACKOFF_KEY) if isinstance(book_data, dict) else None
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _search_is_due(book_data: object, now: datetime, max_days: int) -> bool:
+    """False only while a repeatedly unmatched request is inside its wait."""
+    if max_days <= 0:
+        return True
+    state = _backoff_state(book_data)
+    passes = coerce_int(state.get("no_match_passes"), 0)
+    if passes < FULL_RATE_PASSES:
+        return True
+    try:
+        last = datetime.fromisoformat(str(state.get("last_searched_at") or ""))
+    except ValueError:
+        return True
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=UTC)
+    wait = timedelta(days=min(max_days, passes - FULL_RATE_PASSES + 1))
+    return now - last >= wait - _BACKOFF_SLACK
+
+
+def _record_search_outcome(
+    user_db: UserDB, request_id: int, outcome_status: str, now: datetime
+) -> None:
+    """Count a no-match pass for the backoff, or start over after a match.
+
+    Best effort: the pass must not fail because this bookkeeping did, and a request whose
+    count was not written is simply searched again next time.
+    """
+    try:
+        current = user_db.get_request(request_id)
+        if current is None:
+            return
+        book_data = current.get("book_data")
+        if not isinstance(book_data, dict):
+            return
+        state: dict[str, Any] | None
+        if outcome_status == "no_match" and current.get("status") == RequestStatus.PENDING:
+            passes = coerce_int(_backoff_state(book_data).get("no_match_passes"), 0) + 1
+            state = {
+                "no_match_passes": passes,
+                "last_searched_at": now.isoformat(timespec="seconds"),
+            }
+        elif outcome_status in {"queued", "in_library"} and _backoff_state(book_data):
+            state = None
+        else:
+            return
+        rest = {key: value for key, value in book_data.items() if key != BACKOFF_KEY}
+        if state:
+            rest[BACKOFF_KEY] = state
+        user_db.update_request(request_id, book_data=rest)
+    except Exception:  # noqa: BLE001 - bookkeeping must never take the pass with it
+        logger.debug("auto-download: could not record the search for request %s", request_id)
+
+
 RETRY_DAYS_SETTING = "AUTO_DOWNLOAD_RETRY_DAYS"
 DEFAULT_RETRY_DAYS = 7
 
@@ -921,8 +992,13 @@ def auto_download_request(
     min_seeders: int,
     queue_release: Callable[..., tuple[bool, str | None]],
     admin_user_id: int,
+    providers: dict[str, Any] | None = None,
 ) -> AutoDownloadOutcome:
-    """Search, strict-match, and queue a single pending request."""
+    """Search, strict-match, and queue a single pending request.
+
+    ``providers`` lets a pass share one metadata provider (and its HTTP connection) across its
+    requests instead of building one per request.
+    """
     from shelfmark.core.requests_service import RequestServiceError, fulfil_request
     from shelfmark.metadata_providers import (
         get_provider,
@@ -941,7 +1017,11 @@ def auto_download_request(
         return AutoDownloadOutcome(request_id, "skipped", "no usable provider/id")
 
     try:
-        prov = get_provider(provider_name, **get_provider_kwargs(provider_name))
+        prov = providers.get(provider_name) if providers is not None else None
+        if prov is None:
+            prov = get_provider(provider_name, **get_provider_kwargs(provider_name))
+            if providers is not None:
+                providers[provider_name] = prov
         book = prov.get_book(str(provider_id))
     except Exception as exc:  # noqa: BLE001 - provider/network errors shouldn't kill the loop
         logger.warning("auto-download: metadata lookup failed for request %s: %s", request_id, exc)
@@ -1066,8 +1146,12 @@ def auto_download_pending(
     provider_filter: str | None = "hardcover",
     admin_user_id: int | None = None,
     db_path: str | None = None,
+    ignore_backoff: bool = False,
 ) -> dict[str, int]:
     """Run the auto-download pass over all eligible pending requests.
+
+    ``ignore_backoff`` (a manual "Sync now") searches every request, however many passes in a
+    row found nothing for it.
 
     Each request is handled for its own content type (ebook or audiobook): its source
     priority list, format guard and library check all follow the request. Returns a summary
@@ -1104,6 +1188,12 @@ def auto_download_pending(
 
     pending = user_db.list_requests(status="pending")
     summary = dict(zeros)
+    providers: dict[str, Any] = {}
+    backoff_days = (
+        0
+        if ignore_backoff
+        else coerce_int(app_config.get(BACKOFF_SETTING, DEFAULT_BACKOFF_MAX_DAYS), 0)
+    )
 
     for row in pending:
         book_data = row.get("book_data") or {}
@@ -1130,6 +1220,13 @@ def auto_download_pending(
             summary["skipped"] += 1
             continue
 
+        if not _search_is_due(book_data, datetime.now(UTC), backoff_days):
+            logger.debug(
+                "auto-download: request %s is waiting out its no-match backoff", row.get("id")
+            )
+            summary["skipped"] += 1
+            continue
+
         try:
             outcome = auto_download_request(
                 user_db,
@@ -1139,6 +1236,7 @@ def auto_download_pending(
                 min_seeders=min_seeders,
                 queue_release=queue_release,
                 admin_user_id=admin_user_id,
+                providers=providers,
             )
         except Exception:
             # One bad request must not take the rest of the pass with it.
@@ -1146,6 +1244,7 @@ def auto_download_pending(
             summary["error"] += 1
             continue
         summary[outcome.status] = summary.get(outcome.status, 0) + 1
+        _record_search_outcome(user_db, int(row["id"]), outcome.status, datetime.now(UTC))
 
     logger.info("auto-download pass complete: %s", summary)
     return summary

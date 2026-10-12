@@ -200,6 +200,19 @@ def hardcover_sync_settings() -> list[SettingsField]:
             max_value=365,
         ),
         NumberField(
+            key="AUTO_DOWNLOAD_BACKOFF_MAX_DAYS",
+            label="Longest wait between searches for an unmatched request (days)",
+            description=(
+                "A request that no source has a match for is searched every cycle at first. "
+                "After three passes in a row with no match it is searched once a day, then "
+                "every two days, and at most this often apart. A match, or Sync now, starts it "
+                "over. 0 searches every unmatched request every cycle."
+            ),
+            default=3,
+            min_value=0,
+            max_value=30,
+        ),
+        NumberField(
             key="AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT",
             label="Smallest acceptable audiobook copy (%)",
             description=(

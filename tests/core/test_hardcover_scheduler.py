@@ -103,7 +103,14 @@ class TestRunOnce:
         assert result == {"status": "ok", "sync": None, "auto_download": {"queued": 1}}
         assert calls["sync"] == []
         assert calls["auto"] == [
-            (user_db, {"queue_release": queue_release, "db_path": "/data/users.db"})
+            (
+                user_db,
+                {
+                    "queue_release": queue_release,
+                    "db_path": "/data/users.db",
+                    "ignore_backoff": False,
+                },
+            )
         ]
 
     def test_forced_run_syncs_regardless_of_toggle(self, calls):
@@ -114,6 +121,8 @@ class TestRunOnce:
 
         assert result == {"status": "ok", "sync": {"added": 1}, "auto_download": {"queued": 1}}
         assert calls["sync"] == [(user_db, {"db_path": "/data/users.db"})]
+        # Sync now searches every request, whatever the no-match backoff says.
+        assert calls["auto"][0][1]["ignore_backoff"] is True
 
     def test_scheduled_run_syncs_when_enabled(self, monkeypatch, calls):
         _configure(monkeypatch, HARDCOVER_SYNC_ENABLED=True)
