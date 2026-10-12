@@ -58,6 +58,11 @@ logger = setup_logger(__name__)
 # Fraction of significant book-title tokens that must appear in the release title.
 TITLE_MATCH_THRESHOLD = DEFAULT_TITLE_MATCH_THRESHOLD
 
+# An archive says nothing about what is inside it. Nothing unattended should unpack one for an
+# audiobook request: a Soulseek peer's "(html).rar" (a Calibre ebook export) was queued for an
+# audiobook because its release carried the requested content type. Pick it by hand if you want it.
+ARCHIVE_FORMATS = frozenset({"rar", "zip", "7z", "tar", "gz", "tgz", "bz2", "xz"})
+
 EBOOK_FORMAT_MARKERS = (
     "epub",
     "mobi",
@@ -148,6 +153,8 @@ def _format_match(
     """Require a format signal for the requested content type and reject the other kind."""
     fmt = (release.format or "").strip().lower()
     if content_type == "audiobook":
+        if fmt in ARCHIVE_FORMATS:
+            return False
         # Reject things that are clearly an ebook and nothing else.
         return _audiobook_signal(release, audiobook_formats) and fmt not in EBOOK_FORMAT_MARKERS
 

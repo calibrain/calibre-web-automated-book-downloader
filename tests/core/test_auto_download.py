@@ -964,6 +964,30 @@ class TestContentTypeAwareMatching:
         assert auto_download.strict_match(release, _book(), content_type="audiobook")
         assert not auto_download.strict_match(release, _book(), content_type="ebook")
 
+    @pytest.mark.parametrize("fmt", ["rar", "zip", "7z", "tar", "gz"])
+    def test_an_archive_is_never_an_audiobook_match(self, fmt):
+        # A release that carries the requested content type is not enough: what is inside an
+        # archive is unknown, and a Calibre ebook export once got through this way.
+        release = _release(
+            format=fmt,
+            content_type="audiobook",
+            title="Dungeon Crawler Carl - Matt Dinniman (html)",
+        )
+
+        assert not auto_download.strict_match(release, _book(), content_type="audiobook")
+
+    def test_an_archive_is_not_an_ebook_match_either(self):
+        release = _release(format="rar", title="Dungeon Crawler Carl - Matt Dinniman (html)")
+
+        assert not auto_download.strict_match(release, _book(), content_type="ebook")
+
+    def test_a_folder_of_audio_files_is_still_an_audiobook_match(self):
+        release = _release(
+            format="mp3", content_type="audiobook", title="Dungeon Crawler Carl - Matt Dinniman"
+        )
+
+        assert auto_download.strict_match(release, _book(), content_type="audiobook")
+
     def test_ebook_signal_in_title_counts_without_a_format(self):
         release = _release(format=None, title="Dungeon Crawler Carl - Matt Dinniman.epub")
 
