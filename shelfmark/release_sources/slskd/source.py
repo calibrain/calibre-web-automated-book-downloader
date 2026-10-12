@@ -495,7 +495,10 @@ class SlskdSource(ReleaseSource):
         response_limit = _config_int(
             "SLSKD_RESPONSE_LIMIT", DEFAULT_RESPONSE_LIMIT, minimum=10, maximum=1000
         )
-        deadline = time.monotonic() + SLSKD_SEARCH_TIMEOUT_SECONDS
+        # Searches now run to slskd's own end rather than being cut at the wait, so the
+        # budget must let every planned query start even after slow ones.
+        budget = max(SLSKD_SEARCH_TIMEOUT_SECONDS, len(queries) * (wait_seconds + 30.0))
+        deadline = time.monotonic() + budget
 
         releases: list[Release] = []
         answered: list[list[dict[str, Any]]] = []
@@ -512,7 +515,6 @@ class SlskdSource(ReleaseSource):
                     query,
                     wait_seconds=wait_seconds,
                     response_limit=response_limit,
-                    stop_after=deadline,
                 )
             except Exception:
                 logger.exception("slskd search failed for '%s'", query)

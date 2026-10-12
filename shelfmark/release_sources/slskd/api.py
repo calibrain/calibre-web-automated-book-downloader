@@ -47,6 +47,14 @@ def transfer_is_complete(state: str | None) -> bool:
     return str(state or "").startswith(TRANSFER_STATE_COMPLETED_PREFIX)
 
 
+# A search ends on slskd's own clock; this is how far past the wait one may run before we
+# stop waiting for it (its responses keep resetting slskd's timer while peers answer).
+SEARCH_FINISH_MARGIN_SECONDS = 60.0
+# How long a search that reports itself complete may take to show ``endedAt``. slskd sets
+# it in the write that saves the responses; a slskd that never reports it is read after this.
+SEARCH_SAVE_WAIT_SECONDS = 10.0
+
+
 def transfer_succeeded(state: str | None) -> bool:
     """Whether a slskd transfer state string is the successful terminal state."""
     return str(state or "").strip() == TRANSFER_STATE_SUCCEEDED
@@ -223,14 +231,20 @@ class SlskdClient:
         wait_seconds: float,
         response_limit: int,
         poll_interval: float = 0.5,
-        stop_after: float | None = None,
     ) -> list[dict[str, Any]]:
-        """Run a search to completion and return its responses.
+        """Run a search to the end and return its responses.
 
-        slskd searches are asynchronous: they run for ``searchTimeout`` after the last
-        response or until ``responseLimit`` peers have answered. This blocks until the
-        search reports itself complete or ``wait_seconds`` (or ``stop_after``, a
-        ``time.monotonic()`` deadline) elapses, then collects whatever has arrived.
+        slskd searches are asynchronous: one ends ``searchTimeout`` after its last response,
+        or when ``responseLimit`` peers have answered, so a busy one can outlast
+        ``wait_seconds``. A started search is never cut short: it is not cancelled, and it
+        is not deleted until slskd has saved its responses.
+
+        Complete is not saved. slskd flags a search complete on its last state change and
+        saves the responses in a second write, which also sets ``endedAt``.
+        ``GET .../responses`` reads what was saved, so reading earlier returns nothing, and
+        deleting earlier makes that second write fail. So this waits for ``endedAt``. A
+        search still running ``SEARCH_FINISH_MARGIN_SECONDS`` past the wait is left alone
+        (slskd keeps its record) and this returns nothing.
         """
         if not search_text.strip():
             return []
@@ -241,24 +255,35 @@ class SlskdClient:
             response_limit=response_limit,
         )
 
-        deadline = time.monotonic() + wait_seconds + poll_interval
-        if stop_after is not None:
-            deadline = min(deadline, stop_after)
-
-        try:
-            while True:
-                state = self.get_search(search_id)
-                if state.get("isComplete") or transfer_is_complete(state.get("state")):
+        deadline = time.monotonic() + wait_seconds + SEARCH_FINISH_MARGIN_SECONDS
+        completed_at: float | None = None
+        responses: list[dict[str, Any]] | None = None
+        while True:
+            state = self.get_search(search_id)
+            now = time.monotonic()
+            if state.get("endedAt"):
+                responses = self.get_search_responses(search_id)  # saved: endedAt came with them
+                break
+            if state.get("isComplete") or transfer_is_complete(state.get("state")):
+                completed_at = completed_at if completed_at is not None else now
+                if now - completed_at >= SEARCH_SAVE_WAIT_SECONDS:
+                    # No endedAt: an older slskd. Take its word, unless it heard peers and
+                    # nothing is saved.
+                    responses = self.get_search_responses(search_id)
+                    if not responses and (state.get("responseCount") or 0) > 0:
+                        responses = None
                     break
-                if time.monotonic() >= deadline:
-                    logger.debug("slskd search '%s' still running at deadline", search_text)
-                    break
-                time.sleep(poll_interval)
+            elif now >= deadline:
+                break
+            time.sleep(poll_interval)
 
-            responses = self.get_search_responses(search_id)
-        finally:
-            self.delete_search(search_id)
+        if responses is None:
+            logger.warning(
+                "slskd search '%s' did not finish saving; leaving it for slskd", search_text
+            )
+            return []
 
+        self.delete_search(search_id)
         logger.debug("slskd search '%s': %d responses", search_text, len(responses))
         return responses
 

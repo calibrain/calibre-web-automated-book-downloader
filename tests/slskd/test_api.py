@@ -6,6 +6,8 @@ import pytest
 import requests
 
 from shelfmark.release_sources.slskd.api import (
+    SEARCH_FINISH_MARGIN_SECONDS,
+    SEARCH_SAVE_WAIT_SECONDS,
     SlskdAuthError,
     SlskdBatchUnsupportedError,
     SlskdClient,
@@ -216,44 +218,111 @@ class TestSearch:
         ):
             client.start_search("x", timeout_ms=1000, response_limit=10)
 
-    def test_search_polls_until_complete_then_deletes(self):
-        client = SlskdClient("http://slskd:5030", "key")
-        states = iter(
-            [
-                {"id": "abc", "isComplete": False, "state": "InProgress"},
-                {"id": "abc", "isComplete": True, "state": "Completed, TimedOut"},
-            ]
-        )
-        responses = [{"username": "peer", "files": []}]
-        with (
-            patch.object(client, "start_search", return_value="abc"),
-            patch.object(client, "get_search", side_effect=lambda _id: next(states)),
-            patch.object(client, "get_search_responses", return_value=responses) as get_resp,
-            patch.object(client, "delete_search") as delete,
-            patch("shelfmark.release_sources.slskd.api.time.sleep"),
-        ):
-            result = client.search("dune", wait_seconds=5, response_limit=10, poll_interval=0)
-        assert result == responses
-        get_resp.assert_called_once_with("abc")
-        delete.assert_called_once_with("abc")
+    @staticmethod
+    def _search(states, *, responses=None, wait_seconds=15, poll_interval=1.0):
+        """Run client.search over scripted slskd states on a fake clock.
 
-    def test_search_stops_at_deadline_and_still_collects(self):
+        Returns (result, calls, clock): ``calls`` lists the client calls in order, and each
+        sleep advances the clock, so a search "taking" minutes costs nothing.
+        """
         client = SlskdClient("http://slskd:5030", "key")
+        clock = [0.0]
+        calls: list[str] = []
+        seq = iter(states)
+        last = [None]
+
+        def _state(_id):
+            calls.append("state")
+            try:
+                last[0] = next(seq)
+            except StopIteration:
+                pass
+            return last[0]
+
+        def _responses(_id):
+            calls.append("responses")
+            return list(responses or [])
+
+        def _sleep(seconds):
+            clock[0] += seconds
+
         with (
             patch.object(client, "start_search", return_value="abc"),
-            patch.object(
-                client, "get_search", return_value={"isComplete": False, "state": "InProgress"}
+            patch.object(client, "get_search", side_effect=_state),
+            patch.object(client, "get_search_responses", side_effect=_responses),
+            patch.object(client, "delete_search", side_effect=lambda _id: calls.append("delete")),
+            patch("shelfmark.release_sources.slskd.api.time.sleep", side_effect=_sleep),
+            patch(
+                "shelfmark.release_sources.slskd.api.time.monotonic", side_effect=lambda: clock[0]
             ),
-            patch.object(client, "get_search_responses", return_value=[{"username": "p"}]),
-            patch.object(client, "delete_search") as delete,
-            patch("shelfmark.release_sources.slskd.api.time.sleep"),
-            patch("shelfmark.release_sources.slskd.api.time.monotonic", side_effect=[0, 0.1, 100]),
         ):
-            result = client.search("dune", wait_seconds=1, response_limit=10, poll_interval=0)
-        assert result == [{"username": "p"}]
-        delete.assert_called_once()
+            result = client.search(
+                "dune", wait_seconds=wait_seconds, response_limit=10, poll_interval=poll_interval
+            )
+        return result, calls, clock[0]
 
-    def test_search_deletes_even_when_polling_fails(self):
+    def test_search_waits_for_slskd_to_save_the_responses_then_deletes(self):
+        running = {"isComplete": False, "state": "InProgress"}
+        # Complete, but slskd has not written the responses yet: no endedAt.
+        complete = {"isComplete": True, "state": "Completed, TimedOut", "responseCount": 3}
+        saved = {**complete, "endedAt": "2026-10-12T05:00:00Z"}
+        responses = [{"username": "peer", "files": []}]
+
+        result, calls, _ = self._search([running, complete, complete, saved], responses=responses)
+
+        assert result == responses
+        # Nothing is read or deleted before endedAt appears, and the delete comes last.
+        assert calls == ["state"] * 4 + ["responses", "delete"]
+
+    def test_a_busy_search_that_outlasts_the_wait_is_not_cut_short(self):
+        running = {"isComplete": False, "state": "InProgress"}
+        saved = {"isComplete": True, "endedAt": "2026-10-12T05:00:00Z", "responseCount": 40}
+        responses = [{"username": "peer"}]
+
+        # Still running 40 s in, against a 15 s wait (peers keep resetting slskd's timer).
+        result, calls, elapsed = self._search([running] * 40 + [saved], responses=responses)
+
+        assert result == responses
+        assert elapsed > 15
+        assert calls[-2:] == ["responses", "delete"]
+
+    def test_a_search_that_never_finishes_is_left_running_not_deleted(self):
+        running = {"isComplete": False, "state": "InProgress"}
+
+        result, calls, elapsed = self._search([running])
+
+        assert result == []
+        assert "delete" not in calls
+        assert "responses" not in calls
+        assert elapsed >= 15 + SEARCH_FINISH_MARGIN_SECONDS  # it was given the whole margin
+
+    def test_a_search_with_no_responses_is_deleted_once_slskd_has_finished_it(self):
+        saved = {"isComplete": True, "endedAt": "2026-10-12T05:00:00Z", "responseCount": 0}
+
+        result, calls, _ = self._search([saved])
+
+        assert result == []
+        assert calls == ["state", "responses", "delete"]
+
+    def test_a_slskd_without_endedat_is_read_after_the_save_wait(self):
+        complete = {"isComplete": True, "state": "Completed, TimedOut", "responseCount": 2}
+        responses = [{"username": "peer"}]
+
+        result, calls, elapsed = self._search([complete], responses=responses)
+
+        assert result == responses
+        assert elapsed >= SEARCH_SAVE_WAIT_SECONDS
+        assert calls[-2:] == ["responses", "delete"]
+
+    def test_a_slskd_without_endedat_that_heard_peers_but_saved_nothing_is_left_alone(self):
+        complete = {"isComplete": True, "state": "Completed, TimedOut", "responseCount": 2}
+
+        result, calls, _ = self._search([complete], responses=[])
+
+        assert result == []
+        assert "delete" not in calls
+
+    def test_search_does_not_delete_when_polling_fails(self):
         client = SlskdClient("http://slskd:5030", "key")
         with (
             patch.object(client, "start_search", return_value="abc"),
@@ -262,7 +331,7 @@ class TestSearch:
             pytest.raises(requests.exceptions.Timeout),
         ):
             client.search("dune", wait_seconds=1, response_limit=10)
-        delete.assert_called_once_with("abc")
+        delete.assert_not_called()  # slskd may still be writing the search
 
     def test_empty_query_short_circuits(self):
         client = SlskdClient("http://slskd:5030", "key")
