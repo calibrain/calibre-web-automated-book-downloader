@@ -987,6 +987,26 @@ def _configured_source_priority(content_type: str) -> list[str]:
     return [src["name"] for src in available if src.get("enabled")]
 
 
+def _acted_on_since_listed(user_db: UserDB, request_id: int) -> bool:
+    """True only when the request is read back and is positively no longer waiting.
+
+    A pass lists its pending requests once and can run for minutes, so an admin may have
+    fulfilled, rejected or cancelled one since. Anything doubtful (the read fails, the row
+    is missing, an unexpected value) answers False, so the request is searched exactly as
+    it was before this check existed.
+    """
+    try:
+        current = user_db.get_request(request_id)
+    except Exception:  # noqa: BLE001 - a failed read must never stop a download
+        return False
+    if not isinstance(current, dict):
+        return False
+    status = str(current.get("status") or "").lower()
+    delivery = str(current.get("delivery_state") or "none").lower()
+    closed = {RequestStatus.FULFILLED, RequestStatus.REJECTED, RequestStatus.CANCELLED}
+    return status in closed or (status == RequestStatus.PENDING and delivery not in {"none", ""})
+
+
 def auto_download_request(
     user_db: UserDB,
     request_row: dict[str, Any],
@@ -1011,6 +1031,9 @@ def auto_download_request(
     )
 
     request_id = int(request_row["id"])
+    if _acted_on_since_listed(user_db, request_id):
+        logger.info("auto-download: request %s was handled since this pass listed it", request_id)
+        return AutoDownloadOutcome(request_id, "skipped", "no longer pending")
     book_data = request_row.get("book_data") or {}
     if not isinstance(book_data, dict):
         return AutoDownloadOutcome(request_id, "skipped", "no book_data")

@@ -486,8 +486,10 @@ class TestAutoDownloadRequest:
         admin = user_db.create_user(username="admin", role="admin")
         reader = user_db.create_user(username="reader", role="user")
         row = _pending_request(user_db, reader["id"])
-        # An admin rejected it after the pass listed it as pending.
+        # An admin rejected it after the pass listed it as pending. The up-front re-read is
+        # switched off so this reaches the guard that protects the narrow window after it.
         user_db.update_request(row["id"], status="rejected")
+        monkeypatch.setattr(auto_download, "_acted_on_since_listed", lambda *_args: False)
         _stub_provider(monkeypatch, _book())
         monkeypatch.setattr(auto_download, "app_config", FakeConfig(LIBRARY_CHECK_ENABLED=True))
         monkeypatch.setattr("shelfmark.core.library_index.any_provider_enabled", lambda: True)
@@ -499,6 +501,74 @@ class TestAutoDownloadRequest:
 
         assert outcome.status == "in_library"
         assert user_db.get_request(row["id"])["status"] == "rejected"
+
+    def _searched_request(self, user_db, monkeypatch, *, change=None, get_request=None):
+        """Run one request through a search that records whether it ran and what it queued."""
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        _stub_provider(monkeypatch, _book())
+        if change:
+            user_db.update_request(row["id"], **change)
+        if get_request:
+            monkeypatch.setattr(user_db, "get_request", get_request)
+        searches = []
+        chosen = _release(source="first")
+
+        def _search(*_args, **_kwargs):
+            searches.append(1)
+            return None, [chosen], None
+
+        monkeypatch.setattr(auto_download, "search_source_releases", _search)
+        outcome = self._run(user_db, row, admin)
+        return outcome, searches
+
+    def test_a_request_handled_by_hand_mid_pass_is_not_searched_again(self, user_db, monkeypatch):
+        # The pass listed it as pending, then an admin fulfilled it through the UI.
+        outcome, searches = self._searched_request(
+            user_db, monkeypatch, change={"status": "fulfilled", "delivery_state": "queued"}
+        )
+
+        assert outcome.status == "skipped"
+        assert searches == []
+
+    def test_a_request_rejected_mid_pass_is_not_searched_again(self, user_db, monkeypatch):
+        outcome, searches = self._searched_request(
+            user_db, monkeypatch, change={"status": "rejected"}
+        )
+
+        assert outcome.status == "skipped"
+        assert searches == []
+
+    def test_a_request_still_pending_is_searched_and_queued(self, user_db, monkeypatch):
+        outcome, searches = self._searched_request(user_db, monkeypatch)
+
+        assert outcome.status == "queued"
+        assert searches == [1]
+
+    def test_an_unreadable_request_is_still_searched(self, user_db, monkeypatch):
+        # A failed re-read must never stand between a request and its download.
+        real = user_db.get_request
+        calls = []
+
+        def _broken_once(request_id):
+            calls.append(request_id)
+            if len(calls) == 1:  # the up-front re-read; fulfilling reads it again later
+                raise RuntimeError("database is locked")
+            return real(request_id)
+
+        outcome, searches = self._searched_request(user_db, monkeypatch, get_request=_broken_once)
+
+        assert outcome.status == "queued"
+        assert searches == [1]
+
+    def test_a_missing_request_row_is_still_searched(self, user_db, monkeypatch):
+        outcome, searches = self._searched_request(
+            user_db, monkeypatch, get_request=lambda _request_id: None
+        )
+
+        assert searches == [1]
+        assert outcome.status in {"queued", "error"}  # fulfil may fail on a row that is gone
 
     def test_a_library_that_cannot_be_read_stops_the_request_before_searching(
         self, user_db, monkeypatch
