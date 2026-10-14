@@ -188,6 +188,46 @@ def _probe_completed_path(path: Path) -> tuple[bool, OSError | None]:
     return True, None
 
 
+def _completed_file_signature(path: Path, content_type: str | None) -> tuple[tuple[str, int, int], ...] | None:
+    """Return sizes and mtimes for supported files in a completed path."""
+    from shelfmark.download.postprocess.policy import (
+        get_supported_audiobook_formats,
+        get_supported_formats,
+    )
+
+    formats = (
+        get_supported_audiobook_formats()
+        if is_audiobook(content_type)
+        else get_supported_formats()
+    )
+    supported_suffixes = {f".{fmt.lstrip('.').lower()}" for fmt in formats}
+
+    try:
+        if path.is_file():
+            candidates = (path,)
+        elif path.is_dir():
+            candidates = path.rglob("*")
+        else:
+            return None
+
+        signature = []
+        for candidate in candidates:
+            if candidate.suffix.lower() not in supported_suffixes:
+                continue
+            try:
+                stat = candidate.stat()
+            except OSError:
+                continue
+            if not candidate.is_file() or stat.st_size <= 0:
+                continue
+            name = candidate.relative_to(path).as_posix() if path.is_dir() else candidate.name
+            signature.append((name, stat.st_size, stat.st_mtime_ns))
+    except OSError:
+        return None
+
+    return tuple(sorted(signature)) or None
+
+
 class ExternalClientHandler(DownloadHandler, ABC):
     """Shared lifecycle handler for sources that hand off to torrent/usenet clients."""
 
@@ -733,9 +773,11 @@ class ExternalClientHandler(DownloadHandler, ABC):
         *,
         cancel_flag: Event | None,
         status_callback: Callable[[str, str | None], None],
+        content_type: str | None = None,
     ) -> tuple[Path | None, str | None]:
-        """Wait briefly for completed files to appear on disk."""
+        """Wait for supported files to appear and stop changing on disk."""
         last_error: str | None = None
+        previous_signature: tuple[tuple[str, int, int], ...] | None = None
         retry_interval = self._completed_path_retry_interval()
         timeout_seconds = self._completed_path_timeout_seconds()
         if retry_interval <= 0 or timeout_seconds <= 0:
@@ -754,7 +796,32 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 log_details=log_details,
             )
             if result.path:
-                return result.path, None
+                if run_blocking_io(result.path.is_file):
+                    return result.path, None
+                signature = run_blocking_io(
+                    _completed_file_signature,
+                    result.path,
+                    content_type,
+                )
+                if signature is not None and signature == previous_signature:
+                    return result.path, None
+                previous_signature = signature
+                last_error = "Completed download has no stable supported files yet."
+                if attempt < max_attempts:
+                    status_callback("locating", "Waiting for completed files...")
+                    logger.debug(
+                        "Supported files are missing or still changing for %s (%s) (attempt %d/%d)",
+                        client.name,
+                        download_id,
+                        attempt,
+                        max_attempts,
+                    )
+                    if cancel_flag:
+                        if cancel_flag.wait(timeout=retry_interval):
+                            return None, last_error
+                    else:
+                        time.sleep(retry_interval)
+                continue
 
             last_error = result.error
 
@@ -855,6 +922,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
                         download_id=download_id,
                         cancel_flag=cancel_flag,
                         status_callback=status_callback,
+                        content_type=task.content_type,
                     )
                     if not source_path_obj:
                         if cancel_flag.is_set():
@@ -1128,6 +1196,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 download_id=download_id,
                 cancel_flag=cancel_flag,
                 status_callback=status_callback,
+                content_type=task.content_type,
             )
             if not source_path_obj:
                 if cancel_flag.is_set():
