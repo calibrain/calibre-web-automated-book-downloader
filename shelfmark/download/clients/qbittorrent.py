@@ -50,6 +50,24 @@ _METADATA_DOWNLOAD_STATES = {"forcedMetaDL", "metaDL"}
 _METADATA_WAIT_POLLS = 20
 _METADATA_WAIT_INTERVAL_SECONDS = 0.5
 _ONE_WEEK_IN_SECONDS = 604800
+# States that mean a torrent is still downloading or being finalised. Some
+# qBittorrent-compatible clients (e.g. rdt-client) report progress 1.0 while
+# still in one of these, before the files and content path are final, resulting in
+# a file not found error.
+_INCOMPLETE_STATES = frozenset(
+    {
+        "allocating",
+        "checkingDL",
+        "checkingResumeData",
+        "downloading",
+        "forcedDL",
+        "forcedMetaDL",
+        "metaDL",
+        "moving",
+        "queuedDL",
+        "stalledDL",
+    }
+)
 
 
 class _UnsafeQBittorrentPath:
@@ -622,9 +640,10 @@ class QBittorrentClient(DownloadClient):
             state, message = state_info.get(torrent_state, ("unknown", str(torrent_state)))
 
             torrent_progress = getattr(torrent, "progress", 0.0)
-            # Don't mark complete while files are being moved to final location
-            # (qBittorrent moves files from incomplete → complete folder)
-            complete = torrent_progress >= 1.0 and torrent_state != "moving"
+            # Don't mark complete while files are still downloading, being finalised,
+            # or being moved to their final location (qBittorrent moves files from
+            # incomplete to complete folder).
+            complete = torrent_progress >= 1.0 and torrent_state not in _INCOMPLETE_STATES
 
             # For active downloads without a special message, leave message as None
             # so the handler can build the progress message
