@@ -4,12 +4,14 @@ import re
 import threading
 import time
 from collections import deque
+from dataclasses import replace
 from http import HTTPStatus
-from typing import Any, ClassVar
+from typing import Any, ClassVar, NamedTuple
 
 import requests
 
 from shelfmark.core.cache import cacheable
+from shelfmark.core.config import config as app_config
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.settings_registry import (
     ActionButton,
@@ -30,6 +32,7 @@ from shelfmark.metadata_providers import (
     SortOrder,
     TextSearchField,
     register_provider,
+    wikidata,
 )
 
 logger = setup_logger(__name__)
@@ -45,6 +48,44 @@ ISBN_10_LENGTH = 10
 ISBN_13_LENGTH = 13
 # Merged duplicate works leave redirects behind; old links and Wikidata still point at them.
 MAX_WORK_REDIRECTS = 3
+# Translated works found through Wikidata for a query Open Library itself cannot answer.
+WIKIDATA_SEARCH_LIMIT = 3
+# Wikidata labels languages as "uk", "pt-br", "zh-hans"; release searches match ISO 639-1 codes.
+_PLAIN_LANGUAGE_CODE = re.compile(r"[a-z]{2}")
+
+
+class _LoadedWork(NamedTuple):
+    """A parsed work and the ids Wikidata may know it by."""
+
+    book: BookMetadata
+    work_ids: tuple[str, ...]  # current id first, then the merged ids it was reached through
+    author_ids: tuple[str, ...]
+
+
+def _wikidata_enabled() -> bool:
+    return bool(app_config.get("OPENLIBRARY_WIKIDATA_TITLES", False))
+
+
+def _attach_titles(book: BookMetadata, titles: dict[str, str]) -> BookMetadata:
+    """Keep ISO 639-1 keys and titles that differ from the book's own title."""
+    plain = {
+        lang: title
+        for lang, title in titles.items()
+        if _PLAIN_LANGUAGE_CODE.fullmatch(lang) and title != book.title
+    }
+    if not plain:
+        return book
+    return replace(book, titles_by_language={**plain, **book.titles_by_language})
+
+
+def _author_ids(work: dict) -> tuple[str, ...]:
+    """Open Library author ids of a work record ("/authors/OL118077A" -> "OL118077A")."""
+    ids: list[str] = []
+    for ref in work.get("authors") or []:
+        key = ((ref.get("author") or {}).get("key") or "") if isinstance(ref, dict) else ""
+        if key:
+            ids.append(str(key).rsplit("/", 1)[-1])
+    return tuple(ids)
 
 
 def _redirect_target(work: dict) -> str | None:
@@ -155,14 +196,20 @@ class OpenLibraryProvider(MetadataProvider):
 
         # Build cache key from options (include fields for cache differentiation)
         fields_key = ":".join(f"{k}={v}" for k, v in sorted(options.fields.items()))
-        cache_key = f"{options.query}:{options.search_type.value}:{options.sort.value}:{options.language}:{options.limit}:{options.page}:{fields_key}"
+        cache_key = f"{options.query}:{options.search_type.value}:{options.sort.value}:{options.language}:{options.limit}:{options.page}:{fields_key}:wikidata={_wikidata_enabled()}"
         return self._search_cached(cache_key, options)
 
     @cacheable(
         ttl_key="METADATA_CACHE_SEARCH_TTL", ttl_default=300, key_prefix="openlibrary:search"
     )
-    def _search_cached(self, cache_key: str, options: MetadataSearchOptions) -> list[BookMetadata]:
-        """Return cached Open Library search results."""
+    def _search_cached(
+        self, cache_key: str, options: MetadataSearchOptions, *, translated: bool = True
+    ) -> list[BookMetadata]:
+        """Return cached Open Library search results.
+
+        ``translated=False`` is for lookups made on behalf of the Wikidata fallback itself,
+        which must never fall back to Wikidata again.
+        """
         _rate_limiter.wait_if_needed()
 
         # Build query params
@@ -220,6 +267,14 @@ class OpenLibraryProvider(MetadataProvider):
 
             logger.info("Open Library search '%s' returned %s results", options.query, len(books))
 
+            if (
+                translated
+                and not books
+                and options.page == 1
+                and options.search_type != SearchType.AUTHOR
+            ):
+                books = self._search_translated_title(title_value or options.query, author_value)
+
         except requests.Timeout:
             logger.warning("Open Library search timed out")
             return []
@@ -248,12 +303,26 @@ class OpenLibraryProvider(MetadataProvider):
         response.raise_for_status()
         return response.json()
 
-    @cacheable(ttl_key="METADATA_CACHE_BOOK_TTL", ttl_default=600, key_prefix="openlibrary:book")
     def get_book(self, book_id: str) -> BookMetadata | None:
         """Get book details by Open Library work ID (e.g., 'OL12345W').
 
         A work that was merged into another is followed to its current id, which is the
-        ``provider_id`` of the result.
+        ``provider_id`` of the result. With ``OPENLIBRARY_WIKIDATA_TITLES`` on, the book
+        also carries its Wikidata titles in ``titles_by_language``.
+        """
+        loaded = self._load_work(book_id)
+        if loaded is None:
+            return None
+        if not _wikidata_enabled():
+            return loaded.book
+        return self._with_translated_titles(loaded)
+
+    @cacheable(ttl_key="METADATA_CACHE_BOOK_TTL", ttl_default=600, key_prefix="openlibrary:book")
+    def _load_work(self, book_id: str) -> _LoadedWork | None:
+        """Fetch and parse a work, following merged-work redirects.
+
+        Not the place for Wikidata: ``get_book`` adds titles after this cached step, so
+        neither a setting change nor a Wikidata outage is held in the cache.
         """
         # Normalize the book_id format
         if not book_id.startswith("OL"):
@@ -263,15 +332,20 @@ class OpenLibraryProvider(MetadataProvider):
 
         try:
             work = self._fetch_work(book_id)
+            reached_through: list[str] = []
             for _ in range(MAX_WORK_REDIRECTS):
                 target = _redirect_target(work)
                 if not target:
                     break
                 logger.debug("Open Library work %s redirects to %s", book_id, target)
+                reached_through.append(book_id)
                 book_id = target
                 work = self._fetch_work(book_id)
 
-            return self._parse_work(work, book_id)
+            book = self._parse_work(work, book_id)
+            if book is None:
+                return None
+            return _LoadedWork(book, (book_id, *reached_through), _author_ids(work))
 
         except requests.Timeout:
             logger.warning("Open Library get_book timed out")
@@ -319,8 +393,6 @@ class OpenLibraryProvider(MetadataProvider):
                     if book:
                         # Update with ISBN from edition if not present
                         # Use dataclasses.replace() to avoid mutating cached object
-                        from dataclasses import replace
-
                         updates = {}
                         if not book.isbn_10:
                             isbn_10_list = edition.get("isbn_10", [])
@@ -349,6 +421,95 @@ class OpenLibraryProvider(MetadataProvider):
         except TypeError, ValueError:
             logger.exception("Open Library ISBN search parsing error")
             return None
+
+    def _with_translated_titles(self, loaded: _LoadedWork) -> BookMetadata:
+        """Attach the work's Wikidata titles so release searches also try translated titles.
+
+        Open Library files a translation under the original work ("The Secret History"),
+        while release sources list the edition the reader wants ("Таємна історія"). The titles
+        feed ``titles_by_language``, which the release search plan already turns into
+        one query per configured language.
+        """
+        book = loaded.book
+        author = book.authors[0] if book.authors else ""
+        try:
+            titles = wikidata.localized_titles(
+                loaded.work_ids, book.title, author, loaded.author_ids
+            )
+        except wikidata.WikidataUnavailableError as e:
+            logger.debug("Wikidata titles skipped for %s: %s", book.provider_id, e)
+            return book
+        except KeyError, TypeError, ValueError, AttributeError:
+            logger.exception("Unexpected Wikidata answer for %s", book.provider_id)
+            return book
+        return _attach_titles(book, titles)
+
+    def _search_translated_title(self, text: str, author: str) -> list[BookMetadata]:
+        """Find works by a title typed in a non-Latin script, through their Wikidata labels.
+
+        Open Library has almost no translated titles, so «Таємна історія» or «Тартт Таємна
+        історія» returns nothing there. Runs only when the setting is on and the query has
+        non-Latin letters; author-only searches never get here.
+        """
+        if not _wikidata_enabled():
+            return []
+        query = " ".join(part for part in (text.strip(), author.strip()) if part)
+        if not text.strip() or not wikidata.has_non_latin_letters(query):
+            return []
+        try:
+            works = wikidata.find_works(query, WIKIDATA_SEARCH_LIMIT)
+        except wikidata.WikidataUnavailableError as e:
+            logger.debug("Wikidata search skipped for '%s': %s", query, e)
+            return []
+        except KeyError, TypeError, ValueError, AttributeError:
+            logger.exception("Unexpected Wikidata answer for '%s'", query)
+            return []
+        books: list[BookMetadata] = []
+        for work in works:
+            book = self._book_for_wikidata_work(work)
+            if book and all(b.provider_id != book.provider_id for b in books):
+                books.append(book)
+        if books:
+            logger.info(
+                "Open Library search '%s': %s works found through Wikidata", query, len(books)
+            )
+        return books
+
+    def _book_for_wikidata_work(self, work: wikidata.WikidataWork) -> BookMetadata | None:
+        """The Open Library work for a Wikidata work, with its translated titles attached.
+
+        Uses the work's P648 link, else an Open Library search by its Latin-script title
+        and the author's surname (many works, Ukrainian originals among them, have no Open
+        Library link on Wikidata although Open Library has them). Only the surname is sent:
+        Open Library spells "I͡Uriĭ Andrukhovych" where Wikidata has "Yurii Andrukhovych".
+        A hit must be by the same author in any script ("Іван Франко" is "Ivan Franko").
+        """
+        work_ids = work.ol_work_ids
+        if not work_ids and (found := self._find_work_id(work)):
+            work_ids = (found,)
+        for work_id in work_ids:
+            loaded = self._load_work(work_id)
+            if loaded:
+                return _attach_titles(loaded.book, work.titles)
+        return None
+
+    def _find_work_id(self, work: wikidata.WikidataWork) -> str | None:
+        """Search Open Library for a Wikidata work that has no P648 link."""
+        title = work.titles.get("en", "")
+        if not title or wikidata.has_non_latin_letters(title):
+            title = next(
+                (t for t in work.titles.values() if not wikidata.has_non_latin_letters(t)), ""
+            )
+        family = wikidata.family_name(work.author)
+        if not title or not family:
+            return None
+        for fields in ({"title": title, "author": family}, {"title": title}):
+            options = MetadataSearchOptions(query="", fields=fields, limit=5)
+            key = f"wikidata-work:{title}:{fields.get('author', '')}"
+            for candidate in self._search_cached(key, options, translated=False):
+                if work.is_by(candidate.authors):
+                    return candidate.provider_id
+        return None
 
     def _parse_search_doc(self, doc: dict) -> BookMetadata | None:
         """Parse a search document into BookMetadata."""
@@ -610,5 +771,17 @@ def openlibrary_settings() -> list[SettingsField]:
             description="Default sort order for Open Library search results.",
             options=_OPENLIBRARY_SORT_OPTIONS,
             default="relevance",
+        ),
+        CheckboxField(
+            key="OPENLIBRARY_WIKIDATA_TITLES",
+            label="Translated titles from Wikidata",
+            description=(
+                "Open Library lists translations under the original title. When enabled, "
+                "release searches also try the title in each of your book languages, taken "
+                "from Wikidata, and a search typed in a non-Latin script (Cyrillic, Greek, "
+                "...) that Open Library cannot answer is looked up there. Sends requests "
+                "to wikidata.org."
+            ),
+            default=False,
         ),
     ]
