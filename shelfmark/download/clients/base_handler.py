@@ -593,6 +593,21 @@ class ExternalClientHandler(DownloadHandler, ABC):
             )
         status_callback("cancelled", "Cancelled")
 
+    def _remove_dead_torrent(self, client: DownloadClient, download_id: str) -> bool:
+        """Remove a torrent Shelfmark added and has given up on for want of seeders, with its data.
+
+        Unlike a cancel, it is removed at any progress: with no seed it cannot finish, and
+        left in the client it would hold a slot and a partial copy for a release that is
+        remembered as failed.
+        """
+        try:
+            return bool(client.remove(download_id, delete_files=True))
+        except _CLIENT_CLEANUP_ERRORS as e:
+            logger.warning(
+                "Could not remove dead torrent %s from %s: %s", download_id, client.name, e
+            )
+            return False
+
     def _remove_unstarted_torrent(self, client: DownloadClient, download_id: str) -> bool:
         """Remove a torrent that downloaded nothing; True if it was removed.
 
@@ -1125,6 +1140,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
             else float(STALL_TIMEOUT_MIN_MINUTES * SECONDS_PER_MINUTE)
         )
         no_seeders_since: float | None = None
+        zero_seeds_since: float | None = None
         # Track consecutive "not found" errors - torrents may take time to appear in client
         not_found_count = 0
         max_not_found_retries = 15  # 15 retries * poll interval ~= 30s grace period
@@ -1232,36 +1248,53 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 no_seeders_wait = self._no_seeders_wait_seconds()
                 min_seeders = self._min_seeders()
                 seeds = self._seed_count(status)
-                if (
+                judged = (
                     no_seeders_wait > 0
+                    and min_seeders > 0
                     and status.state == DownloadState.DOWNLOADING
                     and seeds is not None
-                    and seeds < min_seeders
-                    and status.progress <= last_progress
-                ):
-                    now = time.monotonic()
+                )
+                # Two ways to be given up on, each with its own clock. Too few seeds and not
+                # moving; or no seed at all, moving or not: a torrent running on the pieces
+                # its peers happen to hold stops when they run out.
+                too_few_idle = judged and seeds < min_seeders and status.progress <= last_progress
+                no_seed_at_all = judged and seeds == 0
+                now = time.monotonic() if too_few_idle or no_seed_at_all else 0.0
+                if too_few_idle:
                     if no_seeders_since is None:
                         no_seeders_since = now
-                    no_seeders_left = no_seeders_wait - (now - no_seeders_since)
+                else:
+                    no_seeders_since = None
+                if no_seed_at_all:
+                    if zero_seeds_since is None:
+                        zero_seeds_since = now
+                else:
+                    zero_seeds_since = None
+                lefts = [
+                    no_seeders_wait - (now - since)
+                    for since in (no_seeders_since, zero_seeds_since)
+                    if since is not None
+                ]
+                if lefts:
+                    no_seeders_left = min(lefts)
                     if no_seeders_left <= 0:
+                        minutes = no_seeders_wait / SECONDS_PER_MINUTE
                         logger.warning(
-                            "Giving up on %s (%s): %s seeders found, %s needed, no progress for %.0f min",
+                            "Giving up on %s (%s): %s seeders found, %s needed, for %.0f min",
                             client.name,
                             download_id,
                             seeds,
                             min_seeders,
-                            no_seeders_wait / SECONDS_PER_MINUTE,
+                            minutes,
                         )
                         if added_by_shelfmark:
-                            self._remove_unstarted_torrent(client, download_id)
+                            self._remove_dead_torrent(client, download_id)
                         status_callback(
                             "error",
                             f"No seeders: {seeds} found, {min_seeders} needed, "
-                            f"nothing downloaded in {no_seeders_wait / SECONDS_PER_MINUTE:g} min",
+                            f"for {minutes:g} min ({status.progress:.0f}% downloaded)",
                         )
                         return None
-                else:
-                    no_seeders_since = None
 
                 if status.progress > last_progress:
                     if stall_window > STALL_TIMEOUT_MIN_MINUTES * SECONDS_PER_MINUTE:

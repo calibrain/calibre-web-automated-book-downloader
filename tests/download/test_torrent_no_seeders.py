@@ -86,7 +86,7 @@ def test_gives_up_when_nothing_moves_and_no_seeds_are_seen() -> None:
     events, client, result = _poll([_status()] * 4, [0.0, 100.0, 200.0, 301.0])
 
     assert result is None
-    assert events[-1] == ("error", "No seeders: 0 found, 1 needed, nothing downloaded in 5 min")
+    assert events[-1] == ("error", "No seeders: 0 found, 1 needed, for 5 min (0% downloaded)")
     client.remove.assert_called_once_with("hash", delete_files=True)
 
 
@@ -100,18 +100,25 @@ def test_the_card_counts_down_while_it_waits() -> None:
     ]
 
 
-def test_a_torrent_that_is_moving_is_kept_even_with_no_seeds_in_view() -> None:
+def test_a_torrent_with_no_seed_at_all_is_given_up_on_even_while_it_moves() -> None:
     statuses = [_status(1.0), _status(2.0), _status(3.0), _status(4.0)]
-    events, client, result = _poll(statuses, [0.0, 400.0, 800.0, 1200.0])
+    events, client, _result = _poll(statuses, [0.0, 400.0, 800.0, 1200.0])
+
+    assert events[-1] == ("error", "No seeders: 0 found, 1 needed, for 5 min (2% downloaded)")
+    client.remove.assert_called_once_with("hash", delete_files=True)
+
+
+def test_a_torrent_that_is_moving_is_kept_while_it_still_has_a_seed() -> None:
+    statuses = [_status(1.0, seeders=1), _status(2.0, seeders=1), _status(3.0, seeders=1)]
+    events, client, _result = _poll(statuses, [0.0, 400.0, 800.0], min_seeders=3)
 
     assert not any(s == "error" for s, _m in events)
     client.remove.assert_not_called()
-    assert result is None  # the scripted run ended by cancel, not by giving up
 
 
 def test_the_clock_restarts_when_progress_appears() -> None:
-    statuses = [_status(0.0), _status(0.0), _status(1.0), _status(1.0)]
-    events, _client, _result = _poll(statuses, [0.0, 200.0, 500.0, 600.0])
+    statuses = [_status(0.0, seeders=1), _status(0.0, seeders=1), _status(1.0, seeders=1)]
+    events, _client, _result = _poll(statuses, [0.0, 200.0, 500.0], min_seeders=3)
 
     assert not any(s == "error" for s, _m in events)
 
@@ -134,7 +141,7 @@ def test_a_higher_minimum_is_honoured() -> None:
     events, _client, _result = _poll([_status(seeders=1)] * 3, [0.0, 200.0, 400.0], min_seeders=3)
 
     assert events[-1][0] == "error"
-    assert events[-1][1] == "No seeders: 1 found, 3 needed, nothing downloaded in 5 min"
+    assert events[-1][1] == "No seeders: 1 found, 3 needed, for 5 min (0% downloaded)"
 
 
 def test_off_by_default_never_gives_up() -> None:
@@ -183,13 +190,13 @@ def test_a_clients_unknown_count_is_not_a_zero() -> None:
 
 
 def test_a_torrent_that_started_with_enough_seeds_keeps_going_as_they_leave() -> None:
-    # Met the minimum of 3 when it started, dropped to 1 and then to 0 while still moving.
+    # Met the minimum of 3 when it started, then dropped to 1 while still moving.
     statuses = [
         _status(10.0, seeders=3),
-        _status(30.0, seeders=1),
+        _status(30.0, seeders=2),
         _status(50.0, seeders=1),
-        _status(60.0, seeders=0),
-        _status(70.0, seeders=0),
+        _status(60.0, seeders=1),
+        _status(70.0, seeders=1),
     ]
     events, client, _result = _poll(
         statuses, [0.0, 600.0, 1200.0, 1800.0, 2400.0], min_seeders=3, added_by_shelfmark=False
@@ -197,6 +204,24 @@ def test_a_torrent_that_started_with_enough_seeds_keeps_going_as_they_leave() ->
 
     assert not any(s == "error" for s, _m in events)
     client.remove.assert_not_called()
+
+
+def test_the_last_seed_leaving_starts_the_clock_even_if_it_is_still_moving() -> None:
+    statuses = [
+        _status(10.0, seeders=3),
+        _status(50.0, seeders=0),
+        _status(60.0, seeders=0),
+        _status(70.0, seeders=0),
+    ]
+    events, _client, _result = _poll(statuses, [0.0, 150.0, 400.0], min_seeders=3)
+
+    assert events[-1] == ("error", "No seeders: 0 found, 3 needed, for 5 min (70% downloaded)")
+
+
+def test_no_seed_is_not_judged_when_the_minimum_is_zero() -> None:
+    events, _client, _result = _poll([_status()] * 3, [0.0, 600.0, 1200.0], min_seeders=0)
+
+    assert not any(s == "error" for s, _m in events)
 
 
 def test_it_gives_up_only_once_a_torrent_that_lost_its_seeds_stops_moving() -> None:
