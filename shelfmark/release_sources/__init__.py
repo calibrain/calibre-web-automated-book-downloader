@@ -485,6 +485,14 @@ class DownloadHandler(ABC):
         """
         return None
 
+    def seed_complaints(self, release_data: dict[str, Any]) -> int | None:
+        """How many comments on the release's page say nobody is seeding it.
+
+        For sources that report no seeder count of their own. None when the source has no
+        such signal or the page could not be read.
+        """
+        return None
+
     @abstractmethod
     def cancel(self, task_id: str) -> bool:
         """Cancel an in-progress download."""

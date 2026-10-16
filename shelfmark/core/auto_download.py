@@ -15,6 +15,7 @@ Design goals:
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import sqlite3
@@ -644,6 +645,92 @@ def _demote_undersized(ranked: list[Release], content_type: str) -> list[Release
     return [r for r in ranked if r not in thin] + thin
 
 
+# A Soulseek peer whose recent downloads all failed is tried after the others, not before.
+DEAD_PEER_DAYS = 3
+# AudiobookBay shows no seed counts, so its best few candidates have their comments read for
+# "0 seeders" and the like. A page costs a fetch (cached), so only this many are looked at.
+MAX_COMPLAINT_CHECKS = 5
+
+
+def recent_failed_peers(
+    db_path: str | None, *, now: datetime | None = None, days: int = DEAD_PEER_DAYS
+) -> frozenset[str]:
+    """Soulseek peers that failed a transfer in the last ``days`` and delivered nothing in it."""
+    if not db_path:
+        return frozenset()
+    since = ((now or datetime.now(UTC)) - timedelta(days=days)).isoformat(timespec="seconds")
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            rows = conn.execute(
+                "SELECT final_status, status_message, retry_payload FROM download_history "
+                "WHERE source = 'slskd' AND queued_at >= ?",
+                (since,),
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        logger.debug("auto-download: could not read recent Soulseek failures: %s", exc)
+        return frozenset()
+    failed: set[str] = set()
+    delivered: set[str] = set()
+    for final_status, message, payload in rows:
+        try:
+            context = (json.loads(payload) if payload else {}).get("retry_source_context") or {}
+        except ValueError, AttributeError:
+            continue
+        peer = str(context.get("username") or "").strip() if isinstance(context, dict) else ""
+        if not peer:
+            continue
+        if final_status == "complete":
+            delivered.add(peer)
+        elif final_status == "error" and str(message or "").lower().startswith(
+            "peer transfer failed"
+        ):
+            failed.add(peer)
+    return frozenset(failed - delivered)
+
+
+def _dead_source_reason(
+    release: Release, dead_peers: frozenset[str], complaint_checks: list[int]
+) -> str | None:
+    extra = release.extra if isinstance(release.extra, dict) else {}
+    if release.source == "slskd":
+        peer = str(extra.get("username") or "").strip()
+        return f"peer {peer} failed recently" if peer and peer in dead_peers else None
+    if release.source == "audiobookbay" and complaint_checks[0] < MAX_COMPLAINT_CHECKS:
+        if search_deadline.expired():
+            return None
+        complaint_checks[0] += 1
+        from shelfmark.release_sources import get_handler
+
+        try:
+            complaints = get_handler(release.source).seed_complaints(
+                {"source": release.source, "download_url": release.download_url}
+            )
+        except Exception as exc:  # noqa: BLE001 - a page that cannot be read just is not judged
+            logger.debug("auto-download: no seed check for %s: %s", release.title, exc)
+            return None
+        if complaints:
+            return f"{complaints} comment(s) say it has no seeders"
+    return None
+
+
+def _demote_dead_sources(ranked: list[Release], dead_peers: frozenset[str]) -> list[Release]:
+    """Move releases from sources known to be dead behind the rest, keeping order within each."""
+    live: list[Release] = []
+    dead: list[Release] = []
+    complaint_checks = [0]
+    for release in ranked:
+        reason = _dead_source_reason(release, dead_peers, complaint_checks)
+        if reason is None:
+            live.append(release)
+            continue
+        logger.info("auto-download: trying %s last, %s", release.title, reason)
+        dead.append(release)
+    return live + dead
+
+
 def pick_best_release(releases: list[Release], content_type: str = "audiobook") -> Release | None:
     if not releases:
         return None
@@ -877,8 +964,16 @@ def reopen_stale_failures(
     provider_filter: str | None = "hardcover",
     max_reopen: int = MAX_RETRIES_PER_PASS,
     now: datetime | None = None,
+    failure_cooldown: timedelta | None = None,
+    only_kinds: frozenset[str] | None = None,
+    reopened_ids: list[int] | None = None,
 ) -> int:
     """Return synced requests whose download never arrived to pending once the cooldown passes.
+
+    ``failure_cooldown`` shortens the wait for a download that itself failed or that the stall
+    timer ended (a dead release says nothing about when the book will turn up, so another
+    release can be tried soon); interrupted downloads keep the ``cooldown_days`` wait.
+    ``only_kinds`` limits which of those are reopened, and ``reopened_ids`` collects the ids.
 
     Nothing else retries them: the sync treats a request in any status as handled, and the
     auto-download pass only acts on pending ones. Reopening goes through
@@ -892,9 +987,13 @@ def reopen_stale_failures(
     and rejected ones are decisions and are never touched. Returns how many were reopened; ``cooldown_days`` of 0 or less turns retries off,
     and without readable history nothing is retried, since guessing would be worse.
     """
-    if cooldown_days <= 0:
+    if cooldown_days <= 0 and failure_cooldown is None:
         return 0
-    cutoff = (now or datetime.now(UTC)) - timedelta(days=cooldown_days)
+    moment = now or datetime.now(UTC)
+    cutoff = moment - timedelta(days=cooldown_days) if cooldown_days > 0 else None
+    failure_cutoff = moment - failure_cooldown if failure_cooldown is not None else None
+    # A row can only be reopened once it is past the shorter of the two waits.
+    earliest = max(c for c in (cutoff, failure_cutoff) if c is not None)
 
     stale: list[tuple[datetime, dict[str, Any], str]] = []
     for row in user_db.list_requests(status=RequestStatus.FULFILLED):
@@ -907,7 +1006,7 @@ def reopen_stale_failures(
         ):
             continue
         changed = _last_delivery_change(row)
-        if changed is None or changed > cutoff:
+        if changed is None or changed > earliest:
             continue
         stale.append((changed, row, state))
     if not stale or not db_path:
@@ -928,6 +1027,13 @@ def reopen_stale_failures(
         kind = _failure_kind(history.get(request_id))
         if kind is None or (state == _CANCELLED and kind != _STALLED):
             continue
+        if only_kinds is not None and kind not in only_kinds:
+            continue
+        threshold = (
+            failure_cutoff if kind in (_FAILED, _STALLED) and failure_cutoff is not None else cutoff
+        )
+        if threshold is None or _changed > threshold:
+            continue
         try:
             if kind in (_FAILED, _STALLED):
                 book_data = dict(row["book_data"])
@@ -941,13 +1047,20 @@ def reopen_stale_failures(
                 ) not in _failed_release_keys(book_data):
                     book_data["failed_releases"] = [*tried, key]
                     user_db.update_request(request_id, book_data=book_data)
-            reason = f"Retrying after a {cooldown_days}-day cooldown ({kind}; delivery was {state})"
+            wait = (
+                f"{int(failure_cooldown.total_seconds() // 60)}-minute"
+                if failure_cooldown is not None and threshold is failure_cutoff
+                else f"{cooldown_days}-day"
+            )
+            reason = f"Retrying after a {wait} cooldown ({kind}; delivery was {state})"
             result = user_db.reopen_failed_request(request_id, failure_reason=reason)
         except sqlite3.Error as exc:
             logger.warning("auto-download: could not reopen request %s: %s", request_id, exc)
             continue
         if result is not None:
             reopened += 1
+            if reopened_ids is not None:
+                reopened_ids.append(request_id)
     return reopened
 
 
@@ -1082,6 +1195,7 @@ def auto_download_request(
     queue_release: Callable[..., tuple[bool, str | None]],
     admin_user_id: int,
     providers: dict[str, Any] | None = None,
+    dead_peers: frozenset[str] = frozenset(),
 ) -> AutoDownloadOutcome:
     """Search, strict-match, and queue a single pending request.
 
@@ -1206,6 +1320,7 @@ def auto_download_request(
             )
             thin = _undersized_copies(ranked, content_type)
             ranked = _demote_undersized(ranked, content_type)
+            ranked = _demote_dead_sources(ranked, dead_peers)
             for index, candidate in enumerate(ranked):
                 if index >= MAX_PACK_CHECKS:
                     break  # the best few were all packs; don't queue an uninspected tail
@@ -1283,6 +1398,61 @@ def auto_download_request(
     return AutoDownloadOutcome(request_id, "no_match", "no strict match across sources")
 
 
+FAILURE_RETRY_MINUTES_SETTING = "AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES"
+
+
+def retry_failed_downloads(
+    user_db: UserDB,
+    *,
+    queue_release: Callable[..., tuple[bool, str | None]],
+    provider_filter: str | None = "hardcover",
+    admin_user_id: int | None = None,
+    db_path: str | None = None,
+) -> dict[str, int] | None:
+    """Pick another release for requests whose download just failed or stalled.
+
+    Runs between full passes. Only the requests it reopens are searched, so it costs nothing
+    when no download has failed. The release that failed is noted on the request first, and a
+    request is given up on after ``MAX_FAILURE_RETRIES`` attempts. None when switched off.
+    """
+    minutes = coerce_int(app_config.get(FAILURE_RETRY_MINUTES_SETTING, 0), 0)
+    if minutes <= 0 or not bool(app_config.get("AUTO_DOWNLOAD_ENABLED", False)):
+        return None
+    reopened_ids: list[int] = []
+    reopen_stale_failures(
+        user_db,
+        cooldown_days=0,
+        db_path=db_path,
+        provider_filter=provider_filter,
+        failure_cooldown=timedelta(minutes=minutes),
+        only_kinds=frozenset({_FAILED, _STALLED}),
+        reopened_ids=reopened_ids,
+    )
+    # A failed download the status poll already reopened is pending with no release; those
+    # are searched here as well, so they are not left for the next full pass.
+    pending_after_failure = {
+        int(row["id"])
+        for row in user_db.list_requests(status="pending")
+        if row.get("last_failure_reason")
+        and str(row.get("delivery_state") or "none").lower() in {"none", ""}
+        and isinstance(row.get("book_data"), dict)
+        and row["book_data"].get("failed_releases")
+        and len(row["book_data"]["failed_releases"]) < MAX_FAILURE_RETRIES
+    }
+    ids = frozenset(reopened_ids) | pending_after_failure
+    if not ids:
+        return None
+    logger.info("auto-download: trying another release for %d request(s)", len(ids))
+    return auto_download_pending(
+        user_db,
+        queue_release=queue_release,
+        provider_filter=provider_filter,
+        admin_user_id=admin_user_id,
+        db_path=db_path,
+        only_request_ids=ids,
+    )
+
+
 def auto_download_pending(
     user_db: UserDB,
     *,
@@ -1291,8 +1461,12 @@ def auto_download_pending(
     admin_user_id: int | None = None,
     db_path: str | None = None,
     ignore_backoff: bool = False,
+    only_request_ids: frozenset[int] | None = None,
 ) -> dict[str, int]:
     """Run the auto-download pass over all eligible pending requests.
+
+    ``only_request_ids`` limits the pass to those requests (the quick retry after a failed
+    download), and skips the 7-day reopen.
 
     ``ignore_backoff`` (a manual "Sync now") searches every request, however many passes in a
     row found nothing for it.
@@ -1317,8 +1491,12 @@ def auto_download_pending(
     retry_days = coerce_int(
         app_config.get(RETRY_DAYS_SETTING, DEFAULT_RETRY_DAYS), DEFAULT_RETRY_DAYS
     )
-    reopened = reopen_stale_failures(
-        user_db, cooldown_days=retry_days, db_path=db_path, provider_filter=provider_filter
+    reopened = (
+        0
+        if only_request_ids is not None
+        else reopen_stale_failures(
+            user_db, cooldown_days=retry_days, db_path=db_path, provider_filter=provider_filter
+        )
     )
     if reopened:
         logger.info(
@@ -1339,7 +1517,10 @@ def auto_download_pending(
         else coerce_int(app_config.get(BACKOFF_SETTING, DEFAULT_BACKOFF_MAX_DAYS), 0)
     )
 
+    dead_peers = recent_failed_peers(db_path)
     for row in pending:
+        if only_request_ids is not None and int(row["id"]) not in only_request_ids:
+            continue
         book_data = row.get("book_data") or {}
         if provider_filter and (
             not isinstance(book_data, dict) or book_data.get("provider") != provider_filter
@@ -1382,6 +1563,7 @@ def auto_download_pending(
                 queue_release=queue_release,
                 admin_user_id=admin_user_id,
                 providers=providers,
+                dead_peers=dead_peers,
             )
         except Exception:
             # One bad request must not take the rest of the pass with it.

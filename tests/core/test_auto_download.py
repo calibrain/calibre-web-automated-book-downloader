@@ -2636,6 +2636,164 @@ class TestRetryAfterCooldown:
         assert self._reopen(user_db) == 0
         assert user_db.get_request(row["id"])["status"] == "fulfilled"
 
+    def test_a_failed_download_can_be_retried_after_minutes_not_days(self, user_db):
+        user_id = self._user(user_db)["id"]
+        failed = self._request(
+            user_db, user_id, provider_id="1", history="error", days_ago=30 / 1440
+        )
+
+        ids: list[int] = []
+        count = self._reopen(
+            user_db,
+            cooldown_days=0,
+            failure_cooldown=timedelta(minutes=20),
+            only_kinds=frozenset({"failed", "stalled"}),
+            reopened_ids=ids,
+        )
+
+        assert count == 1
+        assert ids == [failed["id"]]
+        stored = user_db.get_request(failed["id"])
+        assert stored["status"] == "pending"
+        assert "20-minute cooldown" in stored["last_failure_reason"]
+        assert stored["book_data"]["failed_releases"] == [
+            {"source": "audiobookbay", "source_id": "rel-1"}
+        ]
+
+    def test_a_failure_newer_than_the_short_wait_is_left_alone(self, user_db):
+        row = self._request(
+            user_db, self._user(user_db)["id"], provider_id="1", history="error", days_ago=5 / 1440
+        )
+
+        assert self._reopen(user_db, cooldown_days=0, failure_cooldown=timedelta(minutes=20)) == 0
+        assert user_db.get_request(row["id"])["status"] == "fulfilled"
+
+    def test_a_stalled_download_also_gets_the_short_wait(self, user_db):
+        row = self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            state="cancelled",
+            history="cancelled",
+            history_message=self.STALL_MESSAGE,
+            days_ago=30 / 1440,
+        )
+
+        assert self._reopen(user_db, cooldown_days=0, failure_cooldown=timedelta(minutes=20)) == 1
+        assert user_db.get_request(row["id"])["status"] == "pending"
+
+    def test_an_interrupted_download_keeps_the_long_wait(self, user_db):
+        row = self._request(
+            user_db, self._user(user_db)["id"], provider_id="1", history="active", days_ago=1.0
+        )
+
+        assert self._reopen(user_db, cooldown_days=7, failure_cooldown=timedelta(minutes=20)) == 0
+        assert user_db.get_request(row["id"])["status"] == "fulfilled"
+
+    def test_the_short_retry_can_be_limited_to_failures(self, user_db):
+        row = self._request(
+            user_db, self._user(user_db)["id"], provider_id="1", history="active", days_ago=30
+        )
+
+        count = self._reopen(
+            user_db,
+            cooldown_days=7,
+            failure_cooldown=timedelta(minutes=20),
+            only_kinds=frozenset({"failed", "stalled"}),
+        )
+
+        assert count == 0
+        assert user_db.get_request(row["id"])["status"] == "fulfilled"
+
+    def _quick_retry(self, user_db, monkeypatch, **config):
+        monkeypatch.setattr(
+            auto_download,
+            "app_config",
+            FakeConfig(AUTO_DOWNLOAD_ENABLED=True, **config),
+        )
+        passes: list[frozenset[int]] = []
+
+        def fake_pending(_user_db, **kwargs):
+            passes.append(kwargs["only_request_ids"])
+            return {"queued": 1, "no_match": 0, "in_library": 0, "skipped": 0, "error": 0}
+
+        monkeypatch.setattr(auto_download, "auto_download_pending", fake_pending)
+        result = auto_download.retry_failed_downloads(
+            user_db,
+            queue_release=lambda *_a, **_k: (True, None),
+            db_path=user_db._db_path,
+        )
+        return result, passes
+
+    def test_the_quick_retry_is_off_unless_set(self, user_db, monkeypatch):
+        self._request(user_db, self._user(user_db)["id"], provider_id="1", history="error")
+
+        result, passes = self._quick_retry(user_db, monkeypatch)
+
+        assert result is None
+        assert passes == []
+
+    def test_the_quick_retry_searches_only_the_requests_it_reopened(self, user_db, monkeypatch):
+        user_id = self._user(user_db)["id"]
+        failed = self._request(user_db, user_id, provider_id="1", history="error")
+        self._request(user_db, user_id, provider_id="2", history="active")  # interrupted
+
+        result, passes = self._quick_retry(
+            user_db, monkeypatch, AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES=20
+        )
+
+        assert result is not None
+        assert passes == [frozenset({failed["id"]})]
+        assert user_db.get_request(failed["id"])["book_data"]["failed_releases"]
+
+    def test_the_quick_retry_does_nothing_when_nothing_failed(self, user_db, monkeypatch):
+        self._request(user_db, self._user(user_db)["id"], provider_id="1", history="active")
+
+        result, passes = self._quick_retry(
+            user_db, monkeypatch, AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES=20
+        )
+
+        assert result is None
+        assert passes == []
+
+    def test_a_request_the_status_poll_already_reopened_is_searched_too(self, user_db, monkeypatch):
+        user_id = self._user(user_db)["id"]
+        row = _pending_request(user_db, user_id, provider_id="9")
+        book_data = {**row["book_data"], "failed_releases": [{"source": "s", "source_id": "r"}]}
+        user_db.update_request(row["id"], book_data=book_data, last_failure_reason="No seeders")
+
+        result, passes = self._quick_retry(
+            user_db, monkeypatch, AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES=20
+        )
+
+        assert result is not None
+        assert passes == [frozenset({row["id"]})]
+
+    def test_the_pass_can_be_limited_to_some_requests(self, user_db, monkeypatch):
+        monkeypatch.setattr(auto_download, "app_config", FakeConfig(AUTO_DOWNLOAD_ENABLED=True))
+        user_id = self._user(user_db)["id"]
+        user_db.create_user(username="admin", role="admin")
+        a = _pending_request(user_db, user_id, provider_id="1")
+        b = _pending_request(user_db, user_id, provider_id="2")
+        handled: list[int] = []
+
+        def fake_request(_db, row, **_kwargs):
+            handled.append(row["id"])
+            return auto_download.AutoDownloadOutcome(row["id"], "no_match", "x", source=None)
+
+        monkeypatch.setattr(auto_download, "auto_download_request", fake_request)
+        monkeypatch.setattr(auto_download, "_configured_source_priority", lambda _c: ["first"])
+
+        auto_download.auto_download_pending(
+            user_db,
+            queue_release=lambda *_a, **_k: (True, None),
+            db_path=user_db._db_path,
+            only_request_ids=frozenset({b["id"]}),
+        )
+
+        assert handled == [b["id"]]
+        assert a["id"] not in handled
+
     def test_a_stall_cancelled_request_is_given_up_on_after_three_tries(self, user_db):
         tried = [{"source": "audiobookbay", "source_id": f"old-{n}"} for n in range(3)]
         row = self._request(
@@ -2868,3 +3026,136 @@ def test_one_request_that_blows_up_does_not_abort_the_pass(user_db, monkeypatch)
     assert sorted(seen) == sorted([int(first["id"]), int(second["id"])])
     assert summary["error"] == 1
     assert summary["queued"] == 1
+
+
+class TestDeadSources:
+    """A peer or post known to be dead is tried after the others, never excluded."""
+
+    NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
+
+    def _history(self, user_db, *rows):
+        service = DownloadHistoryService(user_db._db_path)
+        for n, (peer, status, message) in enumerate(rows):
+            task_id = f"slskd:{n}"
+            service.record_download(
+                task_id=task_id,
+                user_id=None,
+                username=None,
+                request_id=None,
+                source="slskd",
+                source_display_name=None,
+                title=f"File {n}",
+                author=None,
+                file_format=None,
+                size=None,
+                preview=None,
+                content_type="audiobook",
+                downloads=None,
+                origin="requested",
+                retry_payload={"retry_source_context": {"username": peer}},
+            )
+            service.finalize_download(task_id=task_id, final_status=status, status_message=message)
+
+    def _peers(self, user_db):
+        return auto_download.recent_failed_peers(user_db._db_path, now=datetime.now(UTC))
+
+    def test_a_peer_that_only_failed_is_dead(self, user_db):
+        self._history(user_db, ("flaky", "error", "Peer transfer failed: TimedOut"))
+
+        assert self._peers(user_db) == {"flaky"}
+
+    def test_a_peer_that_also_delivered_is_not(self, user_db):
+        self._history(
+            user_db,
+            ("mixed", "error", "Peer transfer failed: Errored"),
+            ("mixed", "complete", "Complete"),
+        )
+
+        assert self._peers(user_db) == frozenset()
+
+    def test_a_failure_that_was_not_the_peers_does_not_count(self, user_db):
+        self._history(user_db, ("fine", "error", "Failed to add to slskd: 500 Server Error"))
+
+        assert self._peers(user_db) == frozenset()
+
+    def test_old_failures_are_forgotten(self, user_db):
+        self._history(user_db, ("flaky", "error", "Peer transfer failed: TimedOut"))
+
+        later = datetime.now(UTC) + timedelta(days=auto_download.DEAD_PEER_DAYS + 1)
+        assert auto_download.recent_failed_peers(user_db._db_path, now=later) == frozenset()
+
+    def test_no_history_database_means_no_dead_peers(self):
+        assert auto_download.recent_failed_peers(None) == frozenset()
+
+    def _soulseek(self, peer, source_id):
+        return _release(source="slskd", source_id=source_id, extra={"username": peer}, seeders=None)
+
+    def test_releases_from_a_dead_peer_move_behind_the_rest(self):
+        ranked = [
+            self._soulseek("flaky", "a"),
+            self._soulseek("good", "b"),
+            self._soulseek("ok", "c"),
+        ]
+
+        result = auto_download._demote_dead_sources(ranked, frozenset({"flaky"}))
+
+        assert [r.source_id for r in result] == ["b", "c", "a"]
+
+    def test_the_only_release_is_still_offered_when_its_peer_is_dead(self):
+        ranked = [self._soulseek("flaky", "a")]
+
+        assert auto_download._demote_dead_sources(ranked, frozenset({"flaky"})) == ranked
+
+    def _abb(self, source_id):
+        return _release(
+            source="audiobookbay",
+            source_id=source_id,
+            download_url=f"https://audiobookbay.lu/abss/{source_id}/",
+            seeders=None,
+        )
+
+    def _complaints(self, monkeypatch, counts):
+        class _Handler:
+            def seed_complaints(self, release_data):
+                return counts[release_data["download_url"].rstrip("/").rsplit("/", 1)[-1]]
+
+        monkeypatch.setattr("shelfmark.release_sources.get_handler", lambda _name: _Handler())
+
+    def test_a_post_whose_comments_say_it_has_no_seeders_moves_behind_the_rest(self, monkeypatch):
+        self._complaints(monkeypatch, {"a": 3, "b": 0})
+
+        result = auto_download._demote_dead_sources([self._abb("a"), self._abb("b")], frozenset())
+
+        assert [r.source_id for r in result] == ["b", "a"]
+
+    def test_a_page_that_cannot_be_read_is_not_judged(self, monkeypatch):
+        self._complaints(monkeypatch, {"a": None, "b": 0})
+
+        result = auto_download._demote_dead_sources([self._abb("a"), self._abb("b")], frozenset())
+
+        assert [r.source_id for r in result] == ["a", "b"]
+
+    def test_only_the_best_few_posts_have_their_comments_read(self, monkeypatch):
+        looked: list[str] = []
+
+        class _Handler:
+            def seed_complaints(self, release_data):
+                looked.append(release_data["download_url"])
+                return 0
+
+        monkeypatch.setattr("shelfmark.release_sources.get_handler", lambda _name: _Handler())
+        ranked = [self._abb(str(n)) for n in range(auto_download.MAX_COMPLAINT_CHECKS + 3)]
+
+        auto_download._demote_dead_sources(ranked, frozenset())
+
+        assert len(looked) == auto_download.MAX_COMPLAINT_CHECKS
+
+    def test_other_sources_are_never_asked_for_comments(self, monkeypatch):
+        def explode(_name):
+            raise AssertionError("no handler lookup expected")
+
+        monkeypatch.setattr("shelfmark.release_sources.get_handler", explode)
+
+        ranked = [_release(source="prowlarr", source_id="x")]
+
+        assert auto_download._demote_dead_sources(ranked, frozenset()) == ranked

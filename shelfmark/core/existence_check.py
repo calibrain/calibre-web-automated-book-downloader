@@ -274,9 +274,7 @@ def after_request(
         request_id,
         expected_current_status=RequestStatus.PENDING,
         book_data=_with_state(book_data, state),
-        last_failure_reason=NOT_LISTED_REASON.format(
-            passes=passes, date=moment.date().isoformat()
-        ),
+        last_failure_reason=NOT_LISTED_REASON.format(passes=passes, date=moment.date().isoformat()),
     )
     logger.info(
         "existence check: request %s (%s) not on Audible US or UK after %d searches; "

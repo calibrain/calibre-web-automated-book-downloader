@@ -498,6 +498,26 @@ def extract_authors(detail_html: str) -> list[str]:
     return []
 
 
+# What a visitor writes under a post nobody is seeding: "0 seeders", "no seeds", "please seed",
+# "unseeded", "dead". Anything shorter or vaguer than these is ignored.
+_SEED_COMPLAINT_PATTERN = re.compile(
+    r"\b(?:0|no|zero)\s+seed(?:s|ers?)?\b"
+    r"|\bunseeded\b|\bnot\s+seeding\b|\bno\s+one\s+(?:is\s+)?seeding\b"
+    r"|\bplease\s+(?:re-?)?seed\b|\bseeders?\s+needed\b|\bneeds?\s+seed|\bdead\b",
+    re.IGNORECASE,
+)
+
+
+def extract_seed_complaints(detail_html: str) -> int:
+    """How many comments on a post say nobody is seeding it. A hint, not a seed count."""
+    soup = BeautifulSoup(detail_html, "html.parser")
+    return sum(
+        1
+        for body in soup.select('[itemprop="reviewBody"]')
+        if _SEED_COMPLAINT_PATTERN.search(body.get_text(" ", strip=True))
+    )
+
+
 def extract_magnet_link(details_url: str, hostname: str = "audiobookbay.lu") -> str | None:
     """Extract info hash and trackers from book detail page, then construct magnet link.
 

@@ -109,6 +109,58 @@ def trigger_async(*, force: bool = True) -> bool:
     return True
 
 
+def _quick_retry_interval_seconds() -> float:
+    """How often failed downloads are checked between cycles, 0 when switched off."""
+    try:
+        minutes = float(app_config.get("AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES", 0) or 0)
+    except TypeError, ValueError:
+        return 0.0
+    return max(minutes * 60.0, _MIN_INTERVAL_SECONDS) if minutes > 0 else 0.0
+
+
+def run_quick_retry() -> dict[str, int] | None:
+    """Pick another release for downloads that failed since the last look.
+
+    Skipped (None) while a cycle or a manual sync runs, and when no download failed.
+    """
+    if not _run_lock.acquire(blocking=False):
+        return None
+    try:
+        with _ctx_lock:
+            user_db = _ctx.get("user_db")
+            queue_release = _ctx.get("queue_release")
+            db_path = _ctx.get("db_path")
+        if user_db is None or queue_release is None:
+            return None
+        from shelfmark.core.auto_download import retry_failed_downloads
+
+        return retry_failed_downloads(user_db, queue_release=queue_release, db_path=db_path)
+    finally:
+        _run_lock.release()
+
+
+def _wait_for_next_cycle() -> None:
+    """Sleep until the next cycle, looking at failed downloads on the way when that is on."""
+    deadline = time.monotonic() + _interval_seconds()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        step = _quick_retry_interval_seconds()
+        if step <= 0:
+            time.sleep(remaining)
+            return
+        time.sleep(min(step, remaining))
+        if time.monotonic() >= deadline:
+            return
+        try:
+            result = run_quick_retry()
+            if result is not None:
+                logger.info("Hardcover scheduler: quick retry result %s", result)
+        except Exception:
+            logger.exception("Hardcover scheduler: quick retry failed")
+
+
 def _scheduler_loop() -> None:
     logger.info("Hardcover scheduler started")
     time.sleep(_WARMUP_SECONDS)
@@ -120,7 +172,7 @@ def _scheduler_loop() -> None:
                 logger.info("Hardcover scheduler: cycle result %s", result)
         except Exception:
             logger.exception("Hardcover scheduler: cycle failed")
-        time.sleep(_interval_seconds())
+        _wait_for_next_cycle()
 
 
 def start(

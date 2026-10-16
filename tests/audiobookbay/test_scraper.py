@@ -495,3 +495,32 @@ class TestExtractMagnetLink:
         assert magnet_link is not None
         # Info hash should be cleaned (no spaces, uppercase)
         assert "ABC123DEF456" in magnet_link
+
+
+def _post_with_comments(*comments: str) -> str:
+    bodies = "".join(
+        f'<li itemprop="review"><div itemprop="reviewBody"><p>{text}</p></div></li>'
+        for text in comments
+    )
+    return f"<html><body><p>Seed it please, this page text is not a comment</p><ul>{bodies}</ul></body></html>"
+
+
+def test_seed_complaints_counts_the_comments_that_say_nobody_is_seeding():
+    html = _post_with_comments(
+        "Please seed and thank you",
+        "I think you have a problem, as it has 0 seeders. Can somebody please seed or reup?",
+        "No seeds :(",
+        "Great narrator, thanks for the upload",
+    )
+
+    assert scraper.extract_seed_complaints(html) == 3
+
+
+def test_seed_complaints_ignores_page_text_outside_the_comments():
+    assert scraper.extract_seed_complaints(_post_with_comments("Loved it")) == 0
+
+
+def test_seed_complaints_reads_dead_and_unseeded():
+    html = _post_with_comments("link is dead", "all of these are unseeded", "worked for me")
+
+    assert scraper.extract_seed_complaints(html) == 2

@@ -199,6 +199,33 @@ def hardcover_sync_settings() -> list[SettingsField]:
             min_value=0,
             max_value=365,
         ),
+        NumberField(
+            key="AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES",
+            label="Try another release after a failed download (minutes)",
+            description=(
+                "A download that failed, or that was given up on (stalled, no seeders), goes "
+                "back to pending this many minutes later and another release is chosen, "
+                "without waiting for the retry days above or the next sync cycle. The release "
+                "that failed is not picked again, and a request is given up on after three "
+                "failed attempts. 0 turns this off."
+            ),
+            default=0,
+            min_value=0,
+            max_value=1440,
+        ),
+        NumberField(
+            key="AUTO_DOWNLOAD_BACKOFF_MAX_DAYS",
+            label="Longest wait between searches for an unmatched request (days)",
+            description=(
+                "A request that no source has a match for is searched every cycle at first. "
+                "After three passes in a row with no match it is searched once a day, then "
+                "every two days, and at most this often apart. A match, or Sync now, starts it "
+                "over. 0 searches every unmatched request every cycle."
+            ),
+            default=3,
+            min_value=0,
+            max_value=30,
+        ),
         CheckboxField(
             key="AUTO_DOWNLOAD_EXISTENCE_CHECK_ENABLED",
             label="Mark audiobooks no store sells",
@@ -222,19 +249,6 @@ def hardcover_sync_settings() -> list[SettingsField]:
             default=3,
             min_value=1,
             max_value=100,
-        ),
-        NumberField(
-            key="AUTO_DOWNLOAD_BACKOFF_MAX_DAYS",
-            label="Longest wait between searches for an unmatched request (days)",
-            description=(
-                "A request that no source has a match for is searched every cycle at first. "
-                "After three passes in a row with no match it is searched once a day, then "
-                "every two days, and at most this often apart. A match, or Sync now, starts it "
-                "over. 0 searches every unmatched request every cycle."
-            ),
-            default=3,
-            min_value=0,
-            max_value=30,
         ),
         NumberField(
             key="AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT",
