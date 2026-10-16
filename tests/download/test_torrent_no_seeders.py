@@ -180,3 +180,27 @@ def test_a_clients_unknown_count_is_not_a_zero() -> None:
     assert _non_negative_int(True) is None
     assert _non_negative_int(0) == 0
     assert _non_negative_int(7) == 7
+
+
+def test_a_torrent_that_started_with_enough_seeds_keeps_going_as_they_leave() -> None:
+    # Met the minimum of 3 when it started, dropped to 1 and then to 0 while still moving.
+    statuses = [
+        _status(10.0, seeders=3),
+        _status(30.0, seeders=1),
+        _status(50.0, seeders=1),
+        _status(60.0, seeders=0),
+        _status(70.0, seeders=0),
+    ]
+    events, client, _result = _poll(
+        statuses, [0.0, 600.0, 1200.0, 1800.0, 2400.0], min_seeders=3, added_by_shelfmark=False
+    )
+
+    assert not any(s == "error" for s, _m in events)
+    client.remove.assert_not_called()
+
+
+def test_it_gives_up_only_once_a_torrent_that_lost_its_seeds_stops_moving() -> None:
+    statuses = [_status(50.0, seeders=1), _status(50.0, seeders=0), _status(50.0, seeders=0)]
+    events, _client, _result = _poll(statuses, [0.0, 100.0, 400.0], min_seeders=3)
+
+    assert events[-1][0] == "error"
