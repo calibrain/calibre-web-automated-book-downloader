@@ -409,3 +409,16 @@ def test_a_source_has_room_only_below_its_limit():
     assert orchestrator._source_has_room(task, running={"slskd": 1}, limit=2) is True
     assert orchestrator._source_has_room(task, running={"slskd": 2}, limit=2) is False
     assert orchestrator._source_has_room(task, running={"audiobookbay": 5}, limit=2) is True
+
+
+def test_a_task_waiting_in_its_clients_queue_does_not_use_up_its_source(monkeypatch):
+    waiting = DownloadTask(task_id="waiting", source="audiobookbay", title="w", client_queued=True)
+    pool = _run_one_pass(
+        monkeypatch,
+        [waiting, _t("audiobookbay", "next"), _t("audiobookbay", "third")],
+        per_source=1,
+    )
+
+    # "waiting" is first and takes the one slot; being queued in qBittorrent it gives it back,
+    # so "next" starts; "next" is working, so "third" has to wait.
+    assert pool.started == ["waiting", "next"]

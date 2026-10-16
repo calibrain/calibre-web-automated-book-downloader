@@ -1183,6 +1183,14 @@ def _source_has_room(task: DownloadTask, *, running: dict[str | None, int], limi
     return running.get(task.source, 0) < limit
 
 
+def _working_source_of(task_id: str) -> str | None:
+    """The source a running task counts against, or None when it is only waiting in a client queue."""
+    task = book_queue.get_task(task_id)
+    if task is None or task.client_queued:
+        return None
+    return task.source
+
+
 def _source_of(task_id: str) -> str | None:
     task = book_queue.get_task(task_id)
     return task.source if task is not None else None
@@ -1267,8 +1275,9 @@ def concurrent_download_loop() -> None:
                     running_by_source: dict[str | None, int] = {}
                     if per_source:
                         for running_id, _flag in active_futures.values():
-                            key = _source_of(running_id)
-                            running_by_source[key] = running_by_source.get(key, 0) + 1
+                            key = _working_source_of(running_id)
+                            if key is not None:
+                                running_by_source[key] = running_by_source.get(key, 0) + 1
                     accept = (
                         partial(_source_has_room, running=running_by_source, limit=per_source)
                         if per_source
