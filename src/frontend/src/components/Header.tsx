@@ -729,6 +729,7 @@ export const Header = forwardRef<HeaderHandle, HeaderProps>(
                   activeQueryTarget={activeQueryTarget}
                   onQueryTargetChange={onQueryTargetChange}
                   activeQueryField={activeQueryField}
+                  optionsLayout="popover"
                 />
               </div>
             </div>
