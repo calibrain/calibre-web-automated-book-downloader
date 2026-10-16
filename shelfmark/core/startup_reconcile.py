@@ -33,6 +33,16 @@ INTERRUPTED_MESSAGE = "Interrupted"
 # The message a row gets when its request was delivered by another download.
 SUPERSEDED_MESSAGE = "Superseded by a completed download"
 
+# Delivery states of a download that is still working, as far as the request knows.
+_IN_FLIGHT_STATES = frozenset(
+    {
+        QueueStatus.QUEUED,
+        QueueStatus.RESOLVING,
+        QueueStatus.LOCATING,
+        QueueStatus.DOWNLOADING,
+    }
+)
+
 # The failure reason a reopened request is given.
 REOPEN_REASON = "Interrupted by a restart"
 
@@ -128,8 +138,9 @@ def reconcile_interrupted_downloads(
         )
         marked += 1
 
-    # A request can be "queued" with no history row at all, for instance when the row was
-    # never written. After a restart nothing is queued, so it is stranded the same way. A
+    # A request can be "queued" (or "downloading", when its row moved to another request) with
+    # no history row at all, for instance when the row was never written. After a restart
+    # nothing is in flight, so it is stranded the same way. A
     # request that has a row is not one of these: delivery_state is only synced while
     # something polls the queue, so a download that finished with nobody watching still says
     # "queued", and the activity API settles it from the row on its next read.
@@ -137,7 +148,7 @@ def reconcile_interrupted_downloads(
     for request in user_db.list_requests(status=RequestStatus.FULFILLED):
         if int(request["id"]) in requests_with_history:
             continue
-        if request.get("delivery_state") != QueueStatus.QUEUED:
+        if request.get("delivery_state") not in _IN_FLIGHT_STATES:
             continue
         if _is_recent(_request_stamp(request), now=now, window=reopen_window) and (
             user_db.reopen_failed_request(int(request["id"]), failure_reason=REOPEN_REASON)

@@ -299,3 +299,25 @@ def test_an_old_row_of_an_undelivered_request_is_still_left_alone(db):
 
     assert _run(user_db, history) == {"marked": 0, "reopened": 0}
     assert history.get_by_task_id("old")["final_status"] == "active"
+
+
+@pytest.mark.parametrize("state", ["queued", "resolving", "locating", "downloading"])
+def test_a_request_with_no_row_that_says_it_is_in_flight_is_reopened(db, state):
+    user_db, history, _path = db
+    user = user_db.create_user(username="reader", role="user")
+    request = _request(user_db, user["id"], state=state)
+
+    assert _run(user_db, history) == {"marked": 0, "reopened": 1}
+
+    assert user_db.get_request(request["id"])["status"] == "pending"
+
+
+@pytest.mark.parametrize("state", ["complete", "error", "cancelled", "none"])
+def test_a_request_with_no_row_in_any_other_state_is_left_alone(db, state):
+    user_db, history, _path = db
+    user = user_db.create_user(username="reader", role="user")
+    request = _request(user_db, user["id"], state=state)
+
+    assert _run(user_db, history) == {"marked": 0, "reopened": 0}
+
+    assert user_db.get_request(request["id"])["status"] == "fulfilled"
