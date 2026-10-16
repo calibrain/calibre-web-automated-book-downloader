@@ -542,6 +542,7 @@ Audiobooks only. AudiobookBay lists it for most releases. In Prowlarr results it
 | `AUTO_OPEN_DOWNLOADS_SIDEBAR` | Automatically open the downloads sidebar when a new download is queued. | boolean | `false` |
 | `DOWNLOAD_TO_BROWSER_CONTENT_TYPES` | Automatically download completed files to your browser for the selected content types. | string (comma-separated) | _empty list_ |
 | `MAX_CONCURRENT_DOWNLOADS` | Maximum number of simultaneous downloads. | number | `3` |
+| `MAX_CONCURRENT_DOWNLOADS_PER_SOURCE` | Simultaneous downloads allowed from each source (Soulseek, AudiobookBay, Direct Download and so on). A source at its limit does not hold the others back, so a Soulseek download waiting in a peer's queue cannot stop a torrent from starting. 0 uses the single limit above for all sources together. | number | `0` |
 | `STATUS_TIMEOUT` | How long to keep completed/failed downloads in the queue display. | number | `3600` |
 
 <details>
@@ -851,6 +852,17 @@ Maximum number of simultaneous downloads.
 - **Default:** `3`
 - **Requires restart:** Yes
 - **Constraints:** min: 1, max: 10
+
+#### `MAX_CONCURRENT_DOWNLOADS_PER_SOURCE`
+
+**Max Concurrent Downloads Per Source**
+
+Simultaneous downloads allowed from each source (Soulseek, AudiobookBay, Direct Download and so on). A source at its limit does not hold the others back, so a Soulseek download waiting in a peer's queue cannot stop a torrent from starting. 0 uses the single limit above for all sources together.
+
+- **Type:** number
+- **Default:** `0`
+- **Requires restart:** Yes
+- **Constraints:** min: 0, max: 10
 
 #### `STATUS_TIMEOUT`
 

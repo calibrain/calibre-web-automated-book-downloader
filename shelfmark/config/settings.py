@@ -1495,6 +1495,20 @@ def download_settings() -> list[SettingsField]:
             requires_restart=True,
         ),
         NumberField(
+            key="MAX_CONCURRENT_DOWNLOADS_PER_SOURCE",
+            label="Max Concurrent Downloads Per Source",
+            description=(
+                "Simultaneous downloads allowed from each source (Soulseek, AudiobookBay, "
+                "Direct Download and so on). A source at its limit does not hold the others "
+                "back, so a Soulseek download waiting in a peer's queue cannot stop a torrent "
+                "from starting. 0 uses the single limit above for all sources together."
+            ),
+            default=0,
+            min_value=0,
+            max_value=10,
+            requires_restart=True,
+        ),
+        NumberField(
             key="STATUS_TIMEOUT",
             label="Status Timeout (seconds)",
             description="How long to keep completed/failed downloads in the queue display.",
