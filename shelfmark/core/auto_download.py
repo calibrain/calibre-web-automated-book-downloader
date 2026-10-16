@@ -1017,6 +1017,15 @@ def _latest_history(db_path: str, request_ids: list[int]) -> dict[int, tuple[str
     return latest
 
 
+# What a download records when its client could not be reached. The release is not to blame.
+_CLIENT_UNREACHABLE = (
+    "failed to connect",
+    "cannot connect",
+    "connection refused",
+    "connection aborted",
+)
+
+
 def _failure_kind(latest: tuple[str, str | None] | None) -> str | None:
     """Why a request whose delivery never completed never arrived, from its latest history row.
 
@@ -1031,7 +1040,9 @@ def _failure_kind(latest: tuple[str, str | None] | None) -> str | None:
     if final_status == "active":
         return _INTERRUPTED
     if final_status == "error":
-        if (message or "").strip().lower() == _INTERRUPTED_MESSAGE:
+        lowered = (message or "").strip().lower()
+        if lowered == _INTERRUPTED_MESSAGE or any(m in lowered for m in _CLIENT_UNREACHABLE):
+            # Nothing was wrong with the release: the process stopped, or its client was down.
             return _INTERRUPTED
         return _FAILED
     if final_status == "cancelled" and (message or "").strip().lower().startswith(

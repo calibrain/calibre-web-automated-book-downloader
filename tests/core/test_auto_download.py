@@ -2569,6 +2569,29 @@ class TestRetryAfterCooldown:
         assert self._reopen(user_db) == 1
         assert user_db.get_request(row["id"])["book_data"]["failed_releases"] == seen
 
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "Failed to add to qbittorrent: Failed to connect to qBittorrent. This i",
+            "Cannot connect to qBittorrent at http://x",
+            "Connection refused",
+        ],
+    )
+    def test_a_download_whose_client_was_down_is_not_held_against_its_release(
+        self, user_db, message
+    ):
+        row = self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            history="error",
+            history_message=message,
+        )
+
+        assert self._reopen(user_db) == 1
+
+        assert "failed_releases" not in user_db.get_request(row["id"])["book_data"]
+
     def test_it_gives_up_after_three_retries(self, user_db):
         user_id = self._user(user_db)["id"]
         three = [{"source": "s", "source_id": f"r{n}"} for n in range(3)]
