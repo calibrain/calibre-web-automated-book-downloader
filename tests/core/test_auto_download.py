@@ -3073,8 +3073,19 @@ class TestDeadSources:
 
         assert self._peers(user_db) == frozenset()
 
+    def test_a_peer_that_never_answered_the_queue_request_is_dead(self, user_db):
+        self._history(
+            user_db, ("squickle", "error", "Failed to add to slskd: 500 Server Error (timed out)")
+        )
+
+        assert self._peers(user_db) == {"squickle"}
+
     def test_a_failure_that_was_not_the_peers_does_not_count(self, user_db):
-        self._history(user_db, ("fine", "error", "Failed to add to slskd: 500 Server Error"))
+        self._history(
+            user_db,
+            ("fine", "error", "slskd refused 1 file(s): already queued"),
+            ("other", "error", "Download failed: TypeError"),
+        )
 
         assert self._peers(user_db) == frozenset()
 

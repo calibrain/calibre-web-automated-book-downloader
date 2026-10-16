@@ -647,6 +647,10 @@ def _demote_undersized(ranked: list[Release], content_type: str) -> list[Release
 
 # A Soulseek peer whose recent downloads all failed is tried after the others, not before.
 DEAD_PEER_DAYS = 3
+# What a Soulseek task records when the peer is the problem: a transfer that errored or timed
+# out, or a peer that did not answer slskd's queue request (it answers 500, and the download is
+# tried twice before giving up).
+_PEER_FAILURE_MESSAGES = ("peer transfer failed", "failed to add to slskd")
 # AudiobookBay shows no seed counts, so its best few candidates have their comments read for
 # "0 seeders" and the like. A page costs a fetch (cached), so only this many are looked at.
 MAX_COMPLAINT_CHECKS = 5
@@ -685,7 +689,7 @@ def recent_failed_peers(
         if final_status == "complete":
             delivered.add(peer)
         elif final_status == "error" and str(message or "").lower().startswith(
-            "peer transfer failed"
+            _PEER_FAILURE_MESSAGES
         ):
             failed.add(peer)
     return frozenset(failed - delivered)
