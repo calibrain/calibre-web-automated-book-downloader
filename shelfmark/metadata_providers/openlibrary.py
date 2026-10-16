@@ -43,6 +43,16 @@ RATE_LIMIT_REQUESTS = 90
 RATE_LIMIT_WINDOW_SECONDS = 60
 ISBN_10_LENGTH = 10
 ISBN_13_LENGTH = 13
+# Merged duplicate works leave redirects behind; old links and Wikidata still point at them.
+MAX_WORK_REDIRECTS = 3
+
+
+def _redirect_target(work: dict) -> str | None:
+    """The work id a redirect record points to, or None for a real work."""
+    if (work.get("type") or {}).get("key") != "/type/redirect":
+        return None
+    location = str(work.get("location") or "")
+    return location.rsplit("/", 1)[-1] or None
 
 
 class RateLimiter:
@@ -227,11 +237,24 @@ class OpenLibraryProvider(MetadataProvider):
             return []
         return books
 
+    def _fetch_work(self, work_id: str) -> dict:
+        """Fetch a work record; it may be a redirect (see ``_redirect_target``)."""
+        _rate_limiter.wait_if_needed()
+        response = self.session.get(
+            f"{OPENLIBRARY_BASE_URL}/works/{work_id}.json",
+            timeout=15,
+            verify=get_ssl_verify(OPENLIBRARY_BASE_URL),
+        )
+        response.raise_for_status()
+        return response.json()
+
     @cacheable(ttl_key="METADATA_CACHE_BOOK_TTL", ttl_default=600, key_prefix="openlibrary:book")
     def get_book(self, book_id: str) -> BookMetadata | None:
-        """Get book details by Open Library work ID (e.g., 'OL12345W')."""
-        _rate_limiter.wait_if_needed()
+        """Get book details by Open Library work ID (e.g., 'OL12345W').
 
+        A work that was merged into another is followed to its current id, which is the
+        ``provider_id`` of the result.
+        """
         # Normalize the book_id format
         if not book_id.startswith("OL"):
             book_id = f"OL{book_id}"
@@ -239,13 +262,14 @@ class OpenLibraryProvider(MetadataProvider):
             book_id = f"{book_id}W"
 
         try:
-            response = self.session.get(
-                f"{OPENLIBRARY_BASE_URL}/works/{book_id}.json",
-                timeout=15,
-                verify=get_ssl_verify(OPENLIBRARY_BASE_URL),
-            )
-            response.raise_for_status()
-            work = response.json()
+            work = self._fetch_work(book_id)
+            for _ in range(MAX_WORK_REDIRECTS):
+                target = _redirect_target(work)
+                if not target:
+                    break
+                logger.debug("Open Library work %s redirects to %s", book_id, target)
+                book_id = target
+                work = self._fetch_work(book_id)
 
             return self._parse_work(work, book_id)
 
