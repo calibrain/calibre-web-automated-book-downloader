@@ -712,3 +712,6 @@ with suppress(ImportError):
 
 with suppress(ImportError):
     from shelfmark.metadata_providers import moly as moly
+
+with suppress(ImportError):
+    from shelfmark.metadata_providers import databazeknih as databazeknih
