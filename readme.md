@@ -95,6 +95,19 @@ volumes:
 - Aggregates releases from multiple configured sources
 - Full audiobook support
 
+### German-language Metadata (DNB)
+
+The Deutsche Nationalbibliothek is available as a keyless metadata provider.
+For a deployment-managed selection, set `DNB_ENABLED=true` and
+`METADATA_PROVIDER=dnb` in your container environment, then recreate the
+container. These environment values take precedence over saved settings and
+per-user overrides. Without these environment values, enable DNB in Settings
+under Metadata Providers and select it for book searches when you need
+German-language editions. Existing provider selections are not automatically
+changed. DNB supplies catalogue metadata, not cover images; see the
+[provider documentation](shelfmark/metadata_providers/README.md#deutsche-nationalbibliothek)
+for supported searches and limitations.
+
 ### Hardcover API Key
 
 Hardcover powers metadata search in Universal mode. Create a token at
