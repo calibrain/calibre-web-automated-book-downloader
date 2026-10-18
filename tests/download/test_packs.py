@@ -383,3 +383,24 @@ class TestMatchPlanToFiles:
         assert set(groups[0].files) == {b1_t1, b1_t2}
         assert groups[1].title == "Book 2"
         assert set(groups[1].files) == {b2_t1, b2_t2}
+
+
+class TestDropIgnoredFiles:
+    def test_drops_by_relative_path_and_keeps_others(self, tmp_path: Path):
+        from shelfmark.download.postprocess.packs import drop_ignored_files
+
+        files = [tmp_path / "A" / "a.m4b", tmp_path / "A" / "a.epub", tmp_path / "B" / "b.m4b"]
+        assert drop_ignored_files(files, ["A/a.epub"]) == [files[0], files[2]]
+
+    def test_basename_fallback_only_when_unique(self, tmp_path: Path):
+        from shelfmark.download.postprocess.packs import drop_ignored_files
+
+        files = [tmp_path / "A" / "01.mp3", tmp_path / "B" / "01.mp3", tmp_path / "B" / "x.mp3"]
+        assert drop_ignored_files(files, ["x.mp3"]) == files[:2]
+        assert drop_ignored_files(files, ["Z/01.mp3"]) == files
+
+    def test_no_ignored_is_a_noop(self, tmp_path: Path):
+        from shelfmark.download.postprocess.packs import drop_ignored_files
+
+        files = [tmp_path / "a.m4b"]
+        assert drop_ignored_files(files, None) is files

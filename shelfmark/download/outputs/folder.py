@@ -96,6 +96,7 @@ def process_folder_output(
     preserve_source_on_failure: bool = False,
 ) -> str | None:
     """Post-process download to the configured folder destination."""
+    from shelfmark.download.postprocess.packs import drop_ignored_files
     from shelfmark.download.postprocess.pipeline import (
         CustomScriptContext,
         CustomScriptTransferSummary,
@@ -262,7 +263,9 @@ def process_folder_output(
     )
 
     pack_groups = resolve_book_groups(
-        task, prepared.files, organization_mode=plan.organization_mode
+        task,
+        drop_ignored_files(prepared.files, task.ignored_files),
+        organization_mode=plan.organization_mode,
     )
     if pack_groups is not None:
         message = f"Complete ({len(pack_groups)} books, {len(final_paths)} files)"

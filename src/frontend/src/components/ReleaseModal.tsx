@@ -1282,7 +1282,7 @@ const ReleaseModalSession = ({
   );
 
   const handlePackConfirm = useCallback(
-    async (books: PackBook[] | null): Promise<void> => {
+    async (books: PackBook[] | null, ignoredFiles: string[] = []): Promise<void> => {
       if (!book || !packReview) {
         return;
       }
@@ -1292,7 +1292,7 @@ const ReleaseModalSession = ({
           book,
           packReview.release,
           contentType,
-          books ? { multiBook: true, bookPlan: toBookPlanPayload(books) } : {},
+          books ? { multiBook: true, bookPlan: toBookPlanPayload(books), ignoredFiles } : {},
         );
         handleClose();
       } finally {

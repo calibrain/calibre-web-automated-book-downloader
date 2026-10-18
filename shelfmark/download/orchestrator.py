@@ -282,6 +282,9 @@ def queue_release(
         language = release_data.get("language") or extra.get("language")
         multi_book = bool(release_data.get("multi_book") or extra.get("multi_book"))
         book_plan = _normalize_book_plan(release_data.get("book_plan") or extra.get("book_plan"))
+        ignored_files = _normalize_ignored_files(
+            release_data.get("ignored_files") or extra.get("ignored_files")
+        )
 
         books_output_mode = (
             str(config.get("BOOKS_OUTPUT_MODE", "folder", user_id=user_id) or "folder")
@@ -321,6 +324,7 @@ def queue_release(
             language=language,
             multi_book=multi_book or book_plan is not None,
             book_plan=book_plan,
+            ignored_files=ignored_files,
             search_mode=search_mode,
             output_mode=output_mode,
             output_args=output_args,
@@ -466,6 +470,14 @@ def can_retry_download_task(
     return _has_staged_retry_source(task)
 
 
+def _normalize_ignored_files(value: object) -> list[str] | None:
+    """Keep only non-empty string paths from a user-ignored file list."""
+    if not isinstance(value, list):
+        return None
+    files = [f for f in value if isinstance(f, str) and f.strip()]
+    return files or None
+
+
 def _normalize_book_plan(value: object) -> list[dict[str, Any]] | None:
     """Keep only well-formed pack books: a title plus a non-empty list of file paths."""
     if not isinstance(value, list):
@@ -525,6 +537,7 @@ def serialize_task_for_retry(task: DownloadTask) -> dict[str, Any]:
         "search_mode": search_mode,
         "multi_book": bool(getattr(task, "multi_book", False)),
         "book_plan": _normalize_book_plan(getattr(task, "book_plan", None)),
+        "ignored_files": _normalize_ignored_files(getattr(task, "ignored_files", None)),
         "output_mode": getattr(task, "output_mode", None),
         "output_args": dict(raw_output_args) if isinstance(raw_output_args, dict) else {},
         "user_id": getattr(task, "user_id", None),
@@ -587,6 +600,7 @@ def _restore_task_from_retry_payload(payload: object) -> DownloadTask | None:
         search_mode=search_mode,
         multi_book=bool(payload.get("multi_book", False)),
         book_plan=_normalize_book_plan(payload.get("book_plan")),
+        ignored_files=_normalize_ignored_files(payload.get("ignored_files")),
         output_mode=normalize_optional_text(payload.get("output_mode")),
         output_args=dict(output_args) if isinstance(output_args, dict) else {},
         user_id=normalize_positive_int(payload.get("user_id")),
