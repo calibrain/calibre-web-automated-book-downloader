@@ -268,7 +268,7 @@ def process_folder_output(
         organization_mode=plan.organization_mode,
     )
     if pack_groups is not None:
-        message = f"Complete ({len(pack_groups)} books, {len(final_paths)} files)"
+        message = f"Complete ({len(pack_groups)} {'book' if len(pack_groups) == 1 else 'books'}, {len(final_paths)} files)"
     elif len(final_paths) == 1:
         message = "Complete"
     else:

@@ -363,7 +363,10 @@ def resolve_book_groups(
         groups = group_files_into_books(
             book_files, series_name=task.series_name, author_name=task.author
         )
-    return groups if len(groups) > 1 else None
+    # An approved plan that lost books to the user's skips still carries the titles they
+    # reviewed, so a single remaining group keeps them instead of the searched title.
+    keeps_plan = bool(task.book_plan and task.ignored_files)
+    return groups if len(groups) > 1 or (keeps_plan and groups) else None
 
 
 def _transfer_book_groups(
