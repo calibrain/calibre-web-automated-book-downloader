@@ -1592,6 +1592,13 @@ def _get_slow_source_options() -> list[dict[str, str | bool | None]]:
             "isLocked": _get_reason("zlib") is not None,
             "disabledReason": _get_reason("zlib"),
         },
+        {
+            "id": "oceanofpdf",
+            "label": "OceanofPDF",
+            "description": "Searches and downloads on its own, so its position does not matter",
+            "isLocked": _get_reason("oceanofpdf") is not None,
+            "disabledReason": _get_reason("oceanofpdf"),
+        },
     ]
 
 
@@ -1604,6 +1611,7 @@ def _get_slow_source_defaults() -> list[dict[str, str | bool]]:
         {"id": "aa-slow-wait", "enabled": True},
         {"id": "welib", "enabled": _LEGACY_ALLOW_USE_WELIB},
         {"id": "zlib", "enabled": True},
+        {"id": "oceanofpdf", "enabled": True},
     ]
 
 

@@ -36,6 +36,7 @@ _DOWNLOAD_SOURCE_MIRROR_LABELS = {
     "libgen": "LibGen",
     "zlib": "Z-Library",
     "welib": "Welib",
+    "oceanofpdf": "OceanofPDF",
 }
 
 
@@ -224,6 +225,8 @@ def has_download_source_mirror_configuration(source_id: str) -> bool:
         return has_zlib_mirror_configuration()
     if source_id == "welib":
         return has_welib_mirror_configuration()
+    if source_id == "oceanofpdf":
+        return has_oceanofpdf_mirror_configuration()
     return False
 
 

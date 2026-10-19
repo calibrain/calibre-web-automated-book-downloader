@@ -22,6 +22,7 @@ from bs4 import BeautifulSoup, Tag
 
 from shelfmark.bypass.challenge import challenge_marker
 from shelfmark.core import search_deadline
+from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.models import SearchFilters
 from shelfmark.download import http as downloader
@@ -74,6 +75,23 @@ def _base_url() -> str | None:
     from shelfmark.core import mirrors
 
     return mirrors.get_oceanofpdf_base_url()
+
+
+def _is_switched_on() -> bool:
+    """Whether OceanofPDF's toggle in Download Sources -> Slow downloads is on.
+
+    A saved list with no OceanofPDF entry was saved before this provider existed. The
+    settings page shows a missing option as off, so it counts as off here too - otherwise
+    the page would show it off while searches still used it. With nothing saved at all,
+    the field's default applies, and that has it on.
+    """
+    entries = config.get("SOURCE_PRIORITY")
+    if not isinstance(entries, list):
+        return True
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("id") == PROVIDER_ID:
+            return bool(entry.get("enabled", True))
+    return False
 
 
 def _search_url(base_url: str, query: str) -> str:
@@ -268,7 +286,12 @@ class OceanofPDFProvider:
     display_name = "OceanofPDF"
 
     def is_enabled(self) -> bool:
-        return _base_url() is not None
+        # Every page is behind Cloudflare, so without the bypass a search can only fail.
+        return (
+            _base_url() is not None
+            and bool(config.get("USE_CF_BYPASS", True))
+            and _is_switched_on()
+        )
 
     def handles(self, url: str) -> bool:
         base_url = _base_url()

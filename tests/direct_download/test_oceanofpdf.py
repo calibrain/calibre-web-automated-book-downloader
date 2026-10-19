@@ -104,13 +104,24 @@ CHALLENGE_PAGE = (
 
 @pytest.fixture
 def configured(monkeypatch):
-    """Configure an OceanofPDF mirror and keep every request off the network."""
+    """Configure an OceanofPDF mirror and keep every request off the network.
+
+    Returns the settings the provider reads, so a test can flip the toggle or the bypass.
+    """
+    settings = {
+        "USE_CF_BYPASS": True,
+        "SOURCE_PRIORITY": [{"id": "zlib", "enabled": True}, {"id": "oceanofpdf", "enabled": True}],
+    }
+    monkeypatch.setattr(
+        op, "config", SimpleNamespace(get=lambda key, default=None: settings.get(key, default))
+    )
     monkeypatch.setattr(mirrors, "_get_config", lambda: {"OCEANOFPDF_MIRROR_URLS": [BASE]})
     monkeypatch.setattr(op.network, "AAMirrorSelector", lambda: SimpleNamespace(last_failure=None))
     monkeypatch.setattr(op.network, "get_proxies", lambda _url: {})
     monkeypatch.setattr(op.network, "get_ssl_verify", lambda _url: True)
     monkeypatch.setattr(op.downloader, "get_cf_cookies_for_domain", lambda _host: {})
     monkeypatch.setattr(op.downloader, "get_cf_user_agent_for_domain", lambda _host: None)
+    return settings
 
 
 def _plan(**overrides):
@@ -478,6 +489,65 @@ def test_provider_is_enabled_only_with_a_mirror(configured, monkeypatch):
 
     monkeypatch.setattr(mirrors, "_get_config", lambda: {})
     assert not provider.is_enabled()
+
+
+def test_toggle_off_disables_the_provider(configured):
+    configured["SOURCE_PRIORITY"] = [{"id": "oceanofpdf", "enabled": False}]
+
+    assert not op.OceanofPDFProvider().is_enabled()
+
+
+def test_saved_list_from_before_oceanofpdf_counts_as_off(configured):
+    # The settings page shows an option missing from the saved list as off; agree with it.
+    configured["SOURCE_PRIORITY"] = [{"id": "zlib", "enabled": True}]
+
+    assert not op.OceanofPDFProvider().is_enabled()
+
+
+def test_nothing_saved_falls_back_to_on(configured):
+    configured["SOURCE_PRIORITY"] = None
+
+    assert op.OceanofPDFProvider().is_enabled()
+
+
+def test_provider_is_off_without_the_cloudflare_bypass(configured):
+    configured["USE_CF_BYPASS"] = False
+
+    assert not op.OceanofPDFProvider().is_enabled()
+
+
+def test_toggle_is_offered_in_slow_sources_and_on_by_default(configured):
+    from shelfmark.config import settings as settings_module
+
+    options = {o["id"]: o for o in settings_module._get_slow_source_options()}
+    defaults = {d["id"]: d for d in settings_module._get_slow_source_defaults()}
+
+    assert options["oceanofpdf"]["label"] == "OceanofPDF"
+    assert options["oceanofpdf"]["isLocked"] is False
+    assert defaults["oceanofpdf"]["enabled"] is True
+
+
+def test_toggle_is_locked_until_a_mirror_is_added(configured, monkeypatch):
+    from shelfmark.config import settings as settings_module
+
+    monkeypatch.setattr(mirrors, "_get_config", lambda: {})
+    option = next(o for o in settings_module._get_slow_source_options() if o["id"] == "oceanofpdf")
+
+    assert option["isLocked"] is True
+    assert option["disabledReason"] == "Add at least one OceanofPDF mirror in Mirrors"
+
+
+def test_annas_archive_cascade_ignores_the_oceanofpdf_entry(monkeypatch):
+    from shelfmark.release_sources.direct_download import annas_archive as aa
+
+    priority = [{"id": "zlib", "enabled": True}, {"id": "oceanofpdf", "enabled": True}]
+    monkeypatch.setattr(
+        aa.config,
+        "get",
+        lambda key, default=None: priority if key == "SOURCE_PRIORITY" else default,
+    )
+
+    assert "oceanofpdf" not in [entry["id"] for entry in aa._get_source_priority()]
 
 
 def test_provider_handles_only_its_configured_host(configured):
