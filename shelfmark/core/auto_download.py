@@ -1071,6 +1071,89 @@ def _failed_release_keys(book_data: object) -> set[tuple[str, str]]:
     return keys
 
 
+# Delivery states that say a task is alive. Only the status poll moves a request off them, and a
+# finished task leaves the queue an hour after it ends, so with nobody watching they can stay
+# for good.
+_LIVE_DELIVERY_STATES = frozenset({QueueStatus.QUEUED.value, QueueStatus.DOWNLOADING.value})
+_SETTLED_STATUSES = frozenset(
+    {QueueStatus.COMPLETE.value, QueueStatus.ERROR.value, QueueStatus.CANCELLED.value}
+)
+
+
+def _parse_moment(value: object) -> datetime | None:
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def settle_delivery_states_from_history(user_db: UserDB, *, db_path: str | None) -> int:
+    """Record how a download ended for requests that still say queued or downloading.
+
+    The status poll does this while someone watches. Here the history decides: the newest row of
+    the request, if it ended after the request last changed, is the outcome, and the request is
+    dated from when it ended so the retry cooldown counts from then. A row still
+    "active", or one that ended before the request was fulfilled again, says nothing about the
+    current attempt and is left alone. Returns how many requests were updated.
+    """
+    if not db_path:
+        return 0
+    candidates = [
+        row
+        for row in user_db.list_requests(status=RequestStatus.FULFILLED)
+        if str(row.get("delivery_state") or "none").lower() in _LIVE_DELIVERY_STATES
+    ]
+    if not candidates:
+        return 0
+    ids = [int(row["id"]) for row in candidates]
+    latest: dict[int, tuple[str, object]] = {}
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start : start + 500]
+                marks = ",".join("?" * len(chunk))
+                for request_id, final_status, terminal_at in conn.execute(
+                    "SELECT request_id, final_status, terminal_at FROM download_history "  # noqa: S608 - placeholders only
+                    f"WHERE request_id IN ({marks}) ORDER BY id",
+                    chunk,
+                ):
+                    latest[int(request_id)] = (str(final_status), terminal_at)
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        logger.warning("auto-download: could not settle delivery states from history: %s", exc)
+        return 0
+    settled = 0
+    for row in candidates:
+        request_id = int(row["id"])
+        entry = latest.get(request_id)
+        if entry is None or entry[0] not in _SETTLED_STATUSES:
+            continue
+        ended = _parse_moment(entry[1])
+        changed = _last_delivery_change(row)
+        if ended is None or (changed is not None and ended <= changed):
+            continue
+        try:
+            user_db.update_request(
+                request_id,
+                delivery_state=entry[0],
+                delivery_updated_at=ended.isoformat(timespec="seconds"),
+            )
+        except sqlite3.Error as exc:
+            logger.warning("auto-download: could not settle request %s: %s", request_id, exc)
+            continue
+        logger.info(
+            "auto-download: request %s said %s but its download ended (%s); recorded",
+            request_id,
+            row.get("delivery_state"),
+            entry[0],
+        )
+        settled += 1
+    return settled
+
+
 def reopen_stale_failures(
     user_db: UserDB,
     *,
@@ -1104,6 +1187,7 @@ def reopen_stale_failures(
     """
     if cooldown_days <= 0 and failure_cooldown is None:
         return 0
+    settle_delivery_states_from_history(user_db, db_path=db_path)
     moment = now or datetime.now(UTC)
     cutoff = moment - timedelta(days=cooldown_days) if cooldown_days > 0 else None
     failure_cutoff = moment - failure_cooldown if failure_cooldown is not None else None
