@@ -102,6 +102,9 @@ export const PackReviewPanel = ({
         </div>
         {books.map((book, index) => {
           const skipped = book.files.every((file) => userIgnored.has(file));
+          const ignoredCount = book.files.filter((file) => userIgnored.has(file)).length;
+          const partiallyIgnored = !skipped && ignoredCount > 0;
+          const fileNoun = book.files.length === 1 ? 'file' : 'files';
           return (
             <div
               key={book.files[0] ?? index}
@@ -156,38 +159,44 @@ export const PackReviewPanel = ({
                   className="hover-surface rounded-md px-2 py-1 text-right text-sm text-zinc-500 transition-colors dark:text-zinc-400"
                   aria-expanded={expandedFiles === index}
                 >
-                  {book.files.length} {book.files.length === 1 ? 'file' : 'files'}
+                  {partiallyIgnored ? (
+                    <span
+                      className="text-amber-600 dark:text-amber-400"
+                      title={`${ignoredCount} of ${book.files.length} ${fileNoun} skipped`}
+                    >
+                      {book.files.length - ignoredCount} of {book.files.length} {fileNoun}
+                    </span>
+                  ) : (
+                    `${book.files.length} ${fileNoun}`
+                  )}
                 </button>
               </div>
-              <label className="mt-1 flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                <input
-                  type="checkbox"
+              <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                <ToggleSwitch
                   checked={skipped}
-                  onChange={(e) =>
-                    setUserIgnored(setBookIgnored(userIgnored, book, e.target.checked))
-                  }
+                  onChange={(checked) => setUserIgnored(setBookIgnored(userIgnored, book, checked))}
+                  color="emerald"
+                  ariaLabel={`Skip book ${index + 1}`}
                   disabled={isSubmitting}
-                  aria-label={`Skip book ${index + 1}`}
                 />
                 Skip this book
-              </label>
+              </div>
               {expandedFiles === index && (
                 <ul className="mt-2 max-h-40 overflow-y-auto rounded-md bg-(--bg-soft) px-3 py-2 font-mono text-xs break-all text-zinc-600 dark:text-zinc-300">
                   {book.files.map((file) => (
                     <li key={file}>
-                      <label className="flex items-start gap-2">
-                        <input
-                          type="checkbox"
+                      <div className="flex items-center gap-2 py-0.5">
+                        <ToggleSwitch
                           checked={!userIgnored.has(file)}
                           onChange={() => toggleFile(file)}
+                          color="emerald"
+                          ariaLabel={`Include ${file}`}
                           disabled={isSubmitting}
-                          aria-label={`Include ${file}`}
-                          className="mt-0.5"
                         />
                         <span className={userIgnored.has(file) ? 'line-through opacity-60' : ''}>
                           {file}
                         </span>
-                      </label>
+                      </div>
                     </li>
                   ))}
                 </ul>
