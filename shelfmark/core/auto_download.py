@@ -996,7 +996,11 @@ def _last_delivery_change(row: dict[str, Any]) -> datetime | None:
 
 
 def _latest_history(db_path: str, request_ids: list[int]) -> dict[int, tuple[str, str | None]]:
-    """The newest (status, message) in download_history per request id; none means absent."""
+    """The newest (status, message) in download_history per request id; none means absent.
+
+    Newest by when it was queued: a reused release keeps its old row id, so id order is not
+    chronological.
+    """
     latest: dict[int, tuple[str, str | None]] = {}
     if not request_ids:
         return latest
@@ -1007,7 +1011,7 @@ def _latest_history(db_path: str, request_ids: list[int]) -> dict[int, tuple[str
             marks = ",".join("?" * len(chunk))
             rows = conn.execute(
                 "SELECT request_id, final_status, status_message FROM download_history "  # noqa: S608 - placeholders only
-                f"WHERE request_id IN ({marks}) ORDER BY id",
+                f"WHERE request_id IN ({marks}) ORDER BY queued_at, id",
                 chunk,
             )
             for request_id, final_status, status_message in rows:
@@ -1116,7 +1120,7 @@ def settle_delivery_states_from_history(user_db: UserDB, *, db_path: str | None)
                 marks = ",".join("?" * len(chunk))
                 for request_id, final_status, terminal_at in conn.execute(
                     "SELECT request_id, final_status, terminal_at FROM download_history "  # noqa: S608 - placeholders only
-                    f"WHERE request_id IN ({marks}) ORDER BY id",
+                    f"WHERE request_id IN ({marks}) ORDER BY queued_at, id",
                     chunk,
                 ):
                     latest[int(request_id)] = (str(final_status), terminal_at)

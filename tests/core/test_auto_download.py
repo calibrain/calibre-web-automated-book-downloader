@@ -3538,3 +3538,39 @@ class TestSettleDeliveryStatesFromHistory:
 
         assert reopened == 1
         assert user_db.get_request(rid)["status"] == "pending"
+
+
+class TestHistoryOrder:
+    """A reused release keeps its old row id, so the newest attempt is not the highest id."""
+
+    def test_the_settle_follows_queue_time_not_row_id(self, user_db):
+        suite = TestSettleDeliveryStatesFromHistory()
+        rid = suite._fulfilled(
+            user_db, state="downloading", delivery_updated_at="2026-10-16T20:56:38+00:00"
+        )
+        # The older attempt is recorded second, as when a reused release row is written again.
+        suite._record(
+            user_db,
+            rid,
+            "cancelled",
+            "Download stalled (no activity for 300s)",
+            ended="2026-10-18T19:49:23+00:00",
+        )
+        suite._record(
+            user_db, rid, "error", "Peer transfer failed", ended="2026-10-12T04:16:12+00:00"
+        )
+        with sqlite3.connect(user_db._db_path) as conn:
+            conn.execute(
+                "UPDATE download_history SET queued_at = ? WHERE final_status = 'cancelled'",
+                ("2026-10-16T20:55:43+00:00",),
+            )
+            conn.execute(
+                "UPDATE download_history SET queued_at = ? WHERE final_status = 'error'",
+                ("2026-10-12T03:36:39+00:00",),
+            )
+
+        assert (
+            auto_download.settle_delivery_states_from_history(user_db, db_path=user_db._db_path)
+            == 1
+        )
+        assert suite._state(user_db, rid) == "cancelled"
