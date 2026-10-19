@@ -35,6 +35,13 @@ _RAW_HTML_MARKERS = (
     "/.well-known/ddos-guard/",
 )
 
+# Cloudflare's bot-detection beacon. Its script injects an iframe loading this path into
+# every page a Cloudflare site serves, so a browser-rendered page - what FlareSolverr and
+# the internal bypasser hand back - carries it after a *successful* solve. Real challenge
+# pages load from /cdn-cgi/challenge-platform/h/... and keep their other markers, so
+# discarding this one path before the scan does not hide them.
+_CLOUDFLARE_BEACON_PATH = "/cdn-cgi/challenge-platform/scripts/jsd/"
+
 # An interstitial is a few KB of markup. Past that it is a real page that happens to
 # mention a marker - a protected site links its own DDoS-Guard endpoints on every page.
 MAX_CHALLENGE_HTML_CHARS = 64 * 1024
@@ -49,7 +56,7 @@ def challenge_marker(html: str) -> str | None:
     """
     if not html or len(html) > MAX_CHALLENGE_HTML_CHARS:
         return None
-    lowered = html.lower()
+    lowered = html.lower().replace(_CLOUDFLARE_BEACON_PATH, "")
     for marker in (
         *_RAW_HTML_MARKERS,
         *DDOS_GUARD_INDICATORS,
