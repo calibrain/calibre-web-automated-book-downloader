@@ -198,6 +198,22 @@ def has_welib_mirror_configuration() -> bool:
     return bool(get_welib_mirrors())
 
 
+def get_oceanofpdf_mirrors() -> list[str]:
+    """Get user-configured OceanofPDF mirrors, in the order they were entered."""
+    return _normalize_configured_urls(_get_config().get("OCEANOFPDF_MIRROR_URLS", None))
+
+
+def get_oceanofpdf_base_url() -> str | None:
+    """Get the OceanofPDF mirror in use. Only the first configured one is used."""
+    mirrors = get_oceanofpdf_mirrors()
+    return mirrors[0] if mirrors else None
+
+
+def has_oceanofpdf_mirror_configuration() -> bool:
+    """Return True when at least one OceanofPDF mirror URL is configured."""
+    return bool(get_oceanofpdf_mirrors())
+
+
 def has_download_source_mirror_configuration(source_id: str) -> bool:
     """Return True when the requested direct-download source has mirror config."""
     if source_id in {"aa-fast", "aa-slow", "aa-slow-nowait", "aa-slow-wait"}:

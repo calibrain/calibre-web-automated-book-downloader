@@ -1833,6 +1833,7 @@ def _on_save_mirrors(values: dict[str, Any]) -> dict[str, Any]:
         "LIBGEN_MIRROR_URLS",
         "ZLIB_MIRROR_URLS",
         "WELIB_MIRROR_URLS",
+        "OCEANOFPDF_MIRROR_URLS",
     }
 
     for key in mirror_list_keys:
@@ -1917,6 +1918,17 @@ def mirror_settings() -> list[SettingsField]:
             label="Welib",
             description="Only the first mirror in the list is used.",
             placeholder="https://your-welib-mirror.example",
+        ),
+        # === OCEANOFPDF ===
+        TagListField(
+            key="OCEANOFPDF_MIRROR_URLS",
+            label="OceanofPDF",
+            description=(
+                "Searches and downloads directly, without Anna's Archive. Only the first "
+                "mirror in the list is used. The site is behind Cloudflare, so the bypass "
+                "must be enabled."
+            ),
+            placeholder="https://oceanofpdf.com",
         ),
     ]
 
