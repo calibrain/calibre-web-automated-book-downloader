@@ -377,6 +377,34 @@ def test_download_posts_the_form_and_saves_the_file(configured, monkeypatch, tmp
     assert downloads == [{"link": FILE_URL, "size": "952 KB", "referer": FETCH_URL}]
 
 
+def test_download_form_post_never_offers_brotli(configured, monkeypatch, tmp_path):
+    # requests cannot decode Brotli without the optional package, and Cloudflare answers
+    # in Brotli whenever it is offered - the interstitial came back unreadable.
+    posts, _downloads = _wire_download(
+        monkeypatch, post_responses=[_FakeResponse(INTERSTITIAL_PAGE)], payload=b"PK" * 10_000
+    )
+
+    op.OceanofPDFProvider().download(_record(), tmp_path / "d.epub", None, Event(), None)
+
+    assert "br" not in posts[0]["headers"].get("Accept-Encoding", "")
+
+
+def test_page_without_a_file_link_is_described_in_the_log(configured, monkeypatch, tmp_path):
+    page = _FakeResponse("<html><title>Fetching Resource</title><p>Please donate</p></html>")
+    page.headers = {"Content-Type": "text/html", "Content-Encoding": "br"}
+    _wire_download(monkeypatch, post_responses=[page], payload=b"")
+    warnings: list[str] = []
+    monkeypatch.setattr(op.logger, "warning", lambda msg, *args: warnings.append(msg % args))
+
+    result = op.OceanofPDFProvider().download(_record(), tmp_path / "d.epub", None, Event(), None)
+
+    assert result is None
+    described = [message for message in warnings if "had no file link" in message]
+    assert described
+    assert "content-encoding='br'" in described[0]
+    assert "title='Fetching Resource'" in described[0]
+
+
 def test_download_rejects_an_html_page_served_as_the_file(configured, monkeypatch, tmp_path):
     _wire_download(
         monkeypatch,

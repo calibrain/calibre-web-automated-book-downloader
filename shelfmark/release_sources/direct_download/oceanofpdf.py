@@ -204,10 +204,14 @@ def parse_file_redirect(html: str, page_url: str) -> tuple[str, int] | None:
 def _post_fetch_form(action_url: str, fields: dict[str, str], referer: str) -> requests.Response:
     """POST the download form, presenting any clearance the bypasser won for this host."""
     hostname = urlparse(action_url).hostname or ""
+    # Not DOWNLOAD_HEADERS wholesale: its Accept-Encoding offers "br", Cloudflare answers
+    # in Brotli when offered, and requests cannot decode it without the brotli package -
+    # the page came back as compressed bytes with no link to find. Leaving Accept-Encoding
+    # to requests offers only what it can decode.
     headers = {
-        **downloader.DOWNLOAD_HEADERS,
         "User-Agent": downloader.get_cf_user_agent_for_domain(hostname)
         or downloader.DOWNLOAD_HEADERS["User-Agent"],
+        "Accept-Language": downloader.DOWNLOAD_HEADERS["Accept-Language"],
         "Referer": referer,
         "Origin": f"{urlparse(referer).scheme}://{urlparse(referer).netloc}",
     }
@@ -220,6 +224,34 @@ def _post_fetch_form(action_url: str, fields: dict[str, str], referer: str) -> r
         proxies=network.get_proxies(action_url),
         verify=network.get_ssl_verify(action_url),
     )
+
+
+def _log_unresolved_fetch_page(response: requests.Response) -> None:
+    """Record what the download form returned when no file link could be read off it.
+
+    The response body is not in the debug bundle, so without this a changed page, a
+    challenge and an undecoded body all look the same: "did not return a file link".
+    Diagnostics must never fail a download, so this swallows its own errors.
+    """
+    try:
+        text = response.text or ""
+        title_match = re.search(
+            r"<title[^>]*>(.*?)</title>", text[:8000], re.IGNORECASE | re.DOTALL
+        )
+        logger.warning(
+            "OceanofPDF download page had no file link: status=%s url=%s bytes=%d "
+            "content-type=%r content-encoding=%r title=%r meta_refresh=%s challenge_marker=%r",
+            response.status_code,
+            response.url,
+            len(text),
+            response.headers.get("Content-Type"),
+            response.headers.get("Content-Encoding"),
+            " ".join(title_match.group(1).split())[:120] if title_match else None,
+            "http-equiv" in text.lower() and "refresh" in text.lower(),
+            challenge_marker(text),
+        )
+    except Exception:
+        logger.debug("Could not describe the OceanofPDF download page", exc_info=True)
 
 
 def _is_challenge(response: requests.Response) -> bool:
@@ -331,7 +363,10 @@ class OceanofPDFProvider:
             downloader.html_get_page(book_url, cancel_flag=cancel_flag, use_bypasser=True)
             response = _post_fetch_form(action_url, fields, book_url)
         response.raise_for_status()
-        return parse_file_redirect(response.text, response.url or action_url)
+        resolved = parse_file_redirect(response.text, response.url or action_url)
+        if resolved is None:
+            _log_unresolved_fetch_page(response)
+        return resolved
 
     def download(
         self,
