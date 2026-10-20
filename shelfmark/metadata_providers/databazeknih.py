@@ -450,7 +450,7 @@ class DatabazeKnihProvider(MetadataProvider):
         book_id = _id_from_link(str(data.get("url", "")))
         if not book_id:
             # Pages without a JSON-LD url still carry the id on the rating buttons
-            tag = soup.find(attrs={"data-typeid": True})
+            tag = soup.select_one("[data-typeid]")
             book_id = str(tag["data-typeid"]) if tag else ""
         title = _clean_text(str(data.get("name", "")))
         authors = [_clean_author(n) for n in _ld_names(data.get("author"))]
@@ -539,7 +539,8 @@ class DatabazeKnihProvider(MetadataProvider):
         name = _clean_text(str(link.get("title") or link.get_text())) or None
         # The part number follows the link, up to the next series link
         text = []
-        for elem in link.parent.next_siblings:
+        parent = link.parent
+        for elem in parent.next_siblings if parent else ():
             if isinstance(elem, Tag):
                 if elem.find("a", href=re.compile(r"^/serie/")):
                     break

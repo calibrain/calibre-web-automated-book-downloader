@@ -275,4 +275,5 @@ def process_folder_output(
         message = f"Complete ({len(final_paths)} files)"
     status_callback("complete", message)
 
+    task.download_paths = [str(path) for path in final_paths]
     return str(final_paths[0])

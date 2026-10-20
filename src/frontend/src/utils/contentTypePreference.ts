@@ -10,7 +10,7 @@ import type { ContentType } from '../types';
 export const CONTENT_TYPE_STORAGE_KEY = 'preferred-content-type.v2';
 
 /** Where the current content type came from, which decides what may still override it. */
-export type ContentTypeSource =
+type ContentTypeSource =
   /** Nothing has chosen a tab, so a configured default may still apply. */
   | 'unset'
   /** This browser stored a choice, or something explicit set one. Defaults do not apply. */

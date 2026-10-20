@@ -1,3 +1,5 @@
+import type { ColumnColorHint } from '../types';
+
 // Color styles with transparent backgrounds and contrasting text
 interface ColorStyle {
   bg: string;
@@ -131,14 +133,6 @@ function getFlagColor(flag?: string): ColorStyle {
   const normalized = flag.trim().toLowerCase();
   if (!normalized) return FALLBACK_COLOR;
   return FLAG_COLORS[normalized] || DEFAULT_FLAG_COLOR;
-}
-
-/**
- * Color hint type for dynamic column coloring.
- */
-interface ColumnColorHint {
-  type: 'static' | 'map';
-  value: string;
 }
 
 /**

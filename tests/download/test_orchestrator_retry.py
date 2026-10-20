@@ -332,3 +332,51 @@ def test_get_book_path_reports_a_missing_file_rather_than_a_dead_path(monkeypatc
 
     assert path is None
     assert returned_task is task
+
+
+def test_get_book_paths_returns_every_file_still_on_disk(monkeypatch, tmp_path):
+    import shelfmark.download.orchestrator as orchestrator
+
+    parts = [tmp_path / f"Part {n}.mp3" for n in (1, 2, 3)]
+    for part in parts[:2]:
+        part.write_bytes(b"audio")
+    task = DownloadTask(
+        task_id="task-book-paths-1",
+        source="direct_download",
+        title="Chapters",
+        download_path=str(parts[0]),
+        download_paths=[str(part) for part in parts],
+    )
+
+    mock_queue = MagicMock()
+    mock_queue.get_task.return_value = task
+    monkeypatch.setattr(orchestrator, "book_queue", mock_queue)
+
+    paths, returned_task = orchestrator.get_book_paths(task.task_id)
+
+    assert paths == [str(parts[0]), str(parts[1])]
+    assert returned_task is task
+
+
+def test_get_book_paths_ignores_a_list_that_no_longer_holds_download_path(monkeypatch, tmp_path):
+    import shelfmark.download.orchestrator as orchestrator
+
+    stale = tmp_path / "old-attempt.mp3"
+    current = tmp_path / "current.epub"
+    stale.write_bytes(b"old")
+    current.write_bytes(b"new")
+    task = DownloadTask(
+        task_id="task-book-paths-2",
+        source="direct_download",
+        title="Retried",
+        download_path=str(current),
+        download_paths=[str(stale)],
+    )
+
+    mock_queue = MagicMock()
+    mock_queue.get_task.return_value = task
+    monkeypatch.setattr(orchestrator, "book_queue", mock_queue)
+
+    paths, _ = orchestrator.get_book_paths(task.task_id)
+
+    assert paths == [str(current)]

@@ -1,6 +1,6 @@
 // Settings field types matching backend settings_registry.py
 
-export type FieldType =
+type FieldType =
   | 'TextField'
   | 'PasswordField'
   | 'NumberField'
@@ -28,17 +28,17 @@ export interface ShowWhenCondition {
   notEmpty?: boolean; // If true, show when field has any non-empty value
 }
 
-export type ShowWhen = ShowWhenCondition | ShowWhenCondition[];
+type ShowWhen = ShowWhenCondition | ShowWhenCondition[];
 
 // Conditional disable configuration
-export interface DisabledWhenCondition {
+interface DisabledWhenCondition {
   field: string; // The field key to check
   value: string | string[] | boolean; // The value(s) that disable this field
   reason?: string; // Explanation shown when disabled
 }
 
 // Base field interface - common properties
-export interface BaseField {
+interface BaseField {
   key: string;
   label: string;
   type: FieldType;
@@ -139,20 +139,14 @@ export interface CustomComponentFieldConfig extends BaseField {
   wrapInFieldWrapper?: boolean; // Whether to render with standard FieldWrapper layout
 }
 
-export interface TableFieldColumnOption {
+interface TableFieldColumnOption {
   value: string;
   label: string;
   description?: string;
   childOf?: string;
 }
 
-export type TableFieldColumnType =
-  | 'text'
-  | 'password'
-  | 'select'
-  | 'multiselect'
-  | 'checkbox'
-  | 'path';
+type TableFieldColumnType = 'text' | 'password' | 'select' | 'multiselect' | 'checkbox' | 'path';
 
 export interface TableFieldColumn {
   key: string;
