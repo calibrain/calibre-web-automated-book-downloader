@@ -20,11 +20,13 @@ import type {
   ContentType,
   RequestPolicyMode,
   PackBook,
+  InspectReleaseResponse,
   PackPlan,
 } from '../types';
 import { isMetadataBook } from '../types';
 import { bookSupportsTargets } from '../utils/bookTargetLoader';
 import { getColorStyleFromHint } from '../utils/colorMaps';
+import { groupFilesByFormat, type FormatGroup } from '../utils/formatReview';
 import {
   LANGUAGE_OPTION_DEFAULT,
   getLanguageFilterValues,
@@ -55,6 +57,7 @@ import { BookDownloadButton } from './BookDownloadButton';
 import { BookTargetDropdown } from './BookTargetDropdown';
 import { Dropdown } from './Dropdown';
 import { DropdownList } from './DropdownList';
+import { FormatReviewPanel } from './FormatReviewPanel';
 import { LanguageMultiSelect } from './LanguageMultiSelect';
 import { PackReviewPanel } from './PackReviewPanel';
 import { ReleaseCell } from './ReleaseCell';
@@ -788,6 +791,13 @@ const ReleaseModalSession = ({
     books: PackBook[];
   } | null>(null);
   const [packSubmitting, setPackSubmitting] = useState(false);
+  // Format picker: `chooseFormats` is the header toggle; `formatReview` holds an inspected
+  // release with several formats awaiting the user's selection.
+  const [chooseFormats, setChooseFormats] = useState(false);
+  const [formatReview, setFormatReview] = useState<{
+    release: Release;
+    groups: FormatGroup[];
+  } | null>(null);
   const isCombinedMode = combinedMode != null;
   const combinedPhase = combinedMode?.phase ?? null;
   const combinedStepLabel = combinedMode?.stepLabel ?? '';
@@ -1233,6 +1243,7 @@ const ReleaseModalSession = ({
         // reviewed and filed as separate books instead of one mangled item.
         let inspected = false;
         let plan: PackPlan | null = null;
+        let inspectedFiles: InspectReleaseResponse['files'] = [];
         let reason: string | null = null;
         try {
           const inspection = await inspectRelease(
@@ -1240,6 +1251,7 @@ const ReleaseModalSession = ({
           );
           inspected = inspection.inspected;
           plan = inspection.plan;
+          inspectedFiles = inspection.files;
           reason = inspection.reason;
         } catch (error) {
           console.error('Release inspection failed:', error);
@@ -1247,6 +1259,16 @@ const ReleaseModalSession = ({
         if (inspected && plan?.is_pack) {
           setPackReview({ release, plan, books: plan.books });
           return;
+        }
+        if (inspected && chooseFormats && plan) {
+          const groups = groupFilesByFormat(
+            inspectedFiles,
+            new Set(plan.books.flatMap((planBook) => planBook.files)),
+          );
+          if (groups.length > 1) {
+            setFormatReview({ release, groups });
+            return;
+          }
         }
         // Not a pack (or couldn't be inspected): queue exactly as before. A release we
         // couldn't inspect might still be an unnoticed pack, so leave a console breadcrumb
@@ -1278,11 +1300,29 @@ const ReleaseModalSession = ({
       contentType,
       handleClose,
       multiBook,
+      chooseFormats,
     ],
   );
 
+  const handleFormatConfirm = useCallback(
+    async (ignoredFiles: string[]): Promise<void> => {
+      if (!book || !formatReview) {
+        return;
+      }
+      setPackSubmitting(true);
+      try {
+        await onDownload(book, formatReview.release, contentType, { ignoredFiles });
+        handleClose();
+      } finally {
+        setPackSubmitting(false);
+      }
+    },
+    // oxlint-disable-next-line react/memo-dependencies
+    [book, formatReview, onDownload, contentType, handleClose],
+  );
+
   const handlePackConfirm = useCallback(
-    async (books: PackBook[] | null): Promise<void> => {
+    async (books: PackBook[] | null, ignoredFiles: string[] = []): Promise<void> => {
       if (!book || !packReview) {
         return;
       }
@@ -1292,7 +1332,7 @@ const ReleaseModalSession = ({
           book,
           packReview.release,
           contentType,
-          books ? { multiBook: true, bookPlan: toBookPlanPayload(books) } : {},
+          books ? { multiBook: true, bookPlan: toBookPlanPayload(books), ignoredFiles } : {},
         );
         handleClose();
       } finally {
@@ -1871,6 +1911,37 @@ const ReleaseModalSession = ({
                       </button>
                     )}
 
+                    {/* Format picker toggle: choose which formats of a release to download */}
+                    {!isCombinedMode && (
+                      <button
+                        type="button"
+                        onClick={() => setChooseFormats((prev) => !prev)}
+                        className={`hover-surface relative rounded-full p-2.5 text-zinc-500 transition-colors dark:text-zinc-400 ${
+                          chooseFormats ? 'text-emerald-600 dark:text-emerald-400' : ''
+                        }`}
+                        aria-label="Choose formats"
+                        aria-pressed={chooseFormats}
+                        title="Choose formats: when a release has several formats, pick which ones to download."
+                      >
+                        <svg
+                          className="h-4 w-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                          strokeWidth={1.5}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"
+                          />
+                        </svg>
+                        {chooseFormats && (
+                          <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-emerald-500" />
+                        )}
+                      </button>
+                    )}
+
                     {/* Manual query button */}
                     <button
                       type="button"
@@ -2271,6 +2342,17 @@ const ReleaseModalSession = ({
             {/* Release list content */}
             <div className="min-h-[200px]">
               {(() => {
+                if (formatReview) {
+                  return (
+                    <FormatReviewPanel
+                      release={formatReview.release}
+                      groups={formatReview.groups}
+                      onBack={() => setFormatReview(null)}
+                      onConfirm={handleFormatConfirm}
+                      isSubmitting={packSubmitting}
+                    />
+                  );
+                }
                 if (packReview) {
                   return (
                     <PackReviewPanel

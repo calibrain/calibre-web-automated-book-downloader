@@ -210,3 +210,48 @@ def test_single_group_with_multi_book_flag_uses_searched_title(tmp_path):
     assert result is not None
     assert (ingest / "James S. A. Corey" / "Drive" / "Drive.m4b").exists()
     assert statuses[-1] == ("complete", "Complete")
+
+
+def test_ignored_book_is_not_filed_even_though_the_plan_omits_it(tmp_path):
+    staging = tmp_path / "staging"
+    ingest = tmp_path / "ingest"
+    staging.mkdir()
+    ingest.mkdir()
+    pack = _nested_pack(tmp_path)
+
+    task = _audiobook_task(
+        book_plan=[
+            {
+                "title": "Empire of Silence",
+                "series_position": 1.0,
+                "year": None,
+                "files": ["Book 1 - Empire of Silence/empire.m4b"],
+            }
+        ],
+        ignored_files=["Book 2 - Howling Dark/howling.m4b"],
+    )
+
+    result, _statuses = _run(pack, task, ingest, staging)
+
+    assert result is not None
+    filed = sorted(p.name for p in ingest.rglob("*.m4b"))
+    assert filed == ["Empire of Silence.m4b"]
+
+
+def test_ignored_file_is_skipped_from_a_single_remaining_book(tmp_path):
+    staging = tmp_path / "staging"
+    ingest = tmp_path / "ingest"
+    staging.mkdir()
+    ingest.mkdir()
+    pack = _nested_pack(tmp_path)
+
+    task = _audiobook_task(
+        multi_book=True,
+        ignored_files=["Book 2 - Howling Dark/howling.m4b"],
+    )
+
+    result, _statuses = _run(pack, task, ingest, staging)
+
+    assert result is not None
+    assert [p.name for p in ingest.rglob("*.m4b")] != []
+    assert not any("howling" in p.name.lower() for p in ingest.rglob("*"))

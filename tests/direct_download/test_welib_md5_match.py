@@ -63,3 +63,37 @@ def test_a_page_that_is_not_md5_addressed_keeps_taking_the_first_download():
     assert (
         _resolve("https://example.org/book/42", page) == f"https://example.org/files/{OTHER}.epub"
     )
+
+
+def test_a_slow_download_link_is_followed_through_its_countdown():
+    """Issue #1447: welib's Download leads to a slow_download page with AA's countdown.
+
+    It was handed straight to the downloader, which got the countdown HTML instead of
+    the file. It must be resolved like an AA slow link: wait, re-fetch, take the link.
+    """
+    slow_url = f"https://welib.org/slow_download/{WANTED}/0/0"
+    file_url = f"https://partner.example/files/{WANTED}.epub"
+    pages = {
+        WELIB_PAGE: [f'<a href="/slow_download/{WANTED}/0/0">Download</a>'],
+        slow_url: [
+            '<span class="js-partner-countdown">1</span>',
+            f'<a href="{file_url}">📚 Download now</a>',
+        ],
+    }
+    fetched: list[str] = []
+
+    def fake_get_page(url, **_kwargs):
+        fetched.append(url)
+        return pages[url].pop(0)
+
+    with (
+        patch.object(annas_archive.downloader, "html_get_page", side_effect=fake_get_page),
+        patch.object(
+            annas_archive.network, "get_aa_base_url", return_value="https://annas-archive.gl"
+        ),
+        patch.object(annas_archive, "_is_configured_zlib_link", return_value=False),
+    ):
+        resolved = annas_archive._get_download_url(WELIB_PAGE, "Amorino", selector=object())  # type: ignore[arg-type]
+
+    assert resolved == file_url
+    assert fetched == [WELIB_PAGE, slow_url, slow_url]

@@ -117,6 +117,7 @@ export function getProtocolDotColor(protocol?: string): string {
   const p = protocol.toLowerCase();
   if (p === 'torrent') return 'bg-orange-500';
   if (p === 'nzb' || p === 'usenet') return 'bg-sky-500';
+  if (p === 'soulseek') return 'bg-emerald-500';
   return 'bg-gray-400';
 }
 

@@ -6,6 +6,8 @@ export interface ReleaseDownloadOptions {
   multiBook?: boolean;
   /** The split the user approved in the pack review panel. */
   bookPlan?: PackBook[];
+  /** Files from the pack the user chose to skip (release-relative paths). */
+  ignoredFiles?: string[];
 }
 
 /** Download count for a release, preferring what the release itself reports. */
@@ -68,6 +70,9 @@ export function buildReleaseDownloadPayload(
   }
   if (options.bookPlan) {
     payload.book_plan = options.bookPlan;
+  }
+  if (options.ignoredFiles && options.ignoredFiles.length > 0) {
+    payload.ignored_files = options.ignoredFiles;
   }
   return payload;
 }

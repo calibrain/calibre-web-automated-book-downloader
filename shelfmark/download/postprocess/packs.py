@@ -357,6 +357,34 @@ def group_files_into_books(
     ]
 
 
+def drop_ignored_files(book_files: list[Path], ignored: list[str] | None) -> list[Path]:
+    """Remove files the user chose to skip in the pack review.
+
+    Ignored entries are release-relative paths. A file matches by relative path first,
+    then by one path being a suffix of the other (the root can shift after extraction),
+    then by basename when that basename is unique among the files.
+    """
+    if not book_files or not ignored:
+        return book_files
+    _root, rel_by_path = _relative_paths(book_files)
+    wanted = {i.replace("\\", "/").lstrip("./") for i in ignored if i and i.strip()}
+    name_counts: dict[str, int] = {}
+    for path in book_files:
+        name_counts[path.name] = name_counts.get(path.name, 0) + 1
+
+    def is_ignored(path: Path) -> bool:
+        rel = rel_by_path[path]
+        if rel in wanted:
+            return True
+        if any(w.endswith("/" + rel) or rel.endswith("/" + w) for w in wanted):
+            return True
+        return name_counts[path.name] == 1 and any(
+            PurePosixPath(w).name == path.name for w in wanted
+        )
+
+    return [p for p in book_files if not is_ignored(p)]
+
+
 def match_plan_to_files(
     plan: list[PackBook],
     book_files: list[Path],

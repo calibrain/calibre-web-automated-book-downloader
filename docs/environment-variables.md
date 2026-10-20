@@ -16,6 +16,7 @@ This document lists all configuration options that can be set via environment va
 - [Advanced](#advanced)
 - [Prowlarr](#prowlarr)
 - [Newznab](#newznab)
+- [Soulseek (slskd)](#soulseek-slskd)
 - [AudiobookBay](#audiobookbay)
 - [Libgen Search](#libgen-search)
 - [IRC](#irc)
@@ -1498,6 +1499,129 @@ Automatically retry search without category filtering if no results are found
 
 </details>
 
+## Soulseek (slskd)
+
+| Variable | Description | Type | Default |
+|----------|-------------|------|---------|
+| `SLSKD_ENABLED` | Enable searching and downloading books through slskd | boolean | `false` |
+| `SLSKD_URL` | Base URL of the slskd web interface | string | _none_ |
+| `SLSKD_API_KEY` | An API key from slskd's configuration (web.authentication.api_keys) with the readwrite role | string (secret) | _none_ |
+| `SLSKD_DOWNLOAD_PATH` | Where slskd's completed downloads folder is mounted inside Shelfmark. Leave empty when both containers see it at the same path, or use Settings > Advanced > Remote Path Mappings with client 'slskd'. | string | _none_ |
+| `SLSKD_ISOLATE_DOWNLOADS` | Download into a folder of its own inside slskd's downloads folder (needs slskd 0.26 or newer). Other apps using the same slskd cannot mix files with it or lose track of it when they clear slskd's list of finished transfers, and Shelfmark confirms a download by the files on disk. | boolean | `true` |
+| `SLSKD_DESTINATION_PREFIX` | The folder, inside slskd's downloads folder, that holds one folder per download. It must not climb out of slskd's downloads folder. | string | `shelfmark` |
+| `SLSKD_KEEP_COMPLETED` | Leave the finished files (and their transfer records) in slskd after Shelfmark copies them to your library, so they stay shared with other Soulseek users. Turn off to delete them once imported. | boolean | `true` |
+| `SLSKD_SEARCH_TIMEOUT` | How long a Soulseek search collects peer responses. Longer waits find more peers but make every search slower. | number | `15` |
+| `SLSKD_RESPONSE_LIMIT` | Stop a search early once this many peers have answered | number | `100` |
+| `SLSKD_QUEUE_TIMEOUT_MINUTES` | Give up when the peer has not started sending within this long. Set to 0 to wait indefinitely. | number | `60` |
+| `SLSKD_REMOVE_COMPLETED` | Clear the transfer from slskd's download list after Shelfmark imports it. Applies when each download does not get its own folder. | boolean | `true` |
+
+<details>
+<summary>Detailed descriptions</summary>
+
+#### `SLSKD_ENABLED`
+
+**Enable Soulseek source**
+
+Enable searching and downloading books through slskd
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `SLSKD_URL`
+
+**slskd URL**
+
+Base URL of the slskd web interface
+
+- **Type:** string
+- **Default:** _none_
+
+#### `SLSKD_API_KEY`
+
+**API Key**
+
+An API key from slskd's configuration (web.authentication.api_keys) with the readwrite role
+
+- **Type:** string (secret)
+- **Default:** _none_
+
+#### `SLSKD_DOWNLOAD_PATH`
+
+**Downloads Path**
+
+Where slskd's completed downloads folder is mounted inside Shelfmark. Leave empty when both containers see it at the same path, or use Settings > Advanced > Remote Path Mappings with client 'slskd'.
+
+- **Type:** string
+- **Default:** _none_
+
+#### `SLSKD_ISOLATE_DOWNLOADS`
+
+**Give each download its own folder**
+
+Download into a folder of its own inside slskd's downloads folder (needs slskd 0.26 or newer). Other apps using the same slskd cannot mix files with it or lose track of it when they clear slskd's list of finished transfers, and Shelfmark confirms a download by the files on disk.
+
+- **Type:** boolean
+- **Default:** `true`
+
+#### `SLSKD_DESTINATION_PREFIX`
+
+**Download Folder**
+
+The folder, inside slskd's downloads folder, that holds one folder per download. It must not climb out of slskd's downloads folder.
+
+- **Type:** string
+- **Default:** `shelfmark`
+
+#### `SLSKD_KEEP_COMPLETED`
+
+**Keep finished files in slskd**
+
+Leave the finished files (and their transfer records) in slskd after Shelfmark copies them to your library, so they stay shared with other Soulseek users. Turn off to delete them once imported.
+
+- **Type:** boolean
+- **Default:** `true`
+
+#### `SLSKD_SEARCH_TIMEOUT`
+
+**Search Wait (seconds)**
+
+How long a Soulseek search collects peer responses. Longer waits find more peers but make every search slower.
+
+- **Type:** number
+- **Default:** `15`
+- **Constraints:** min: 3, max: 120
+
+#### `SLSKD_RESPONSE_LIMIT`
+
+**Max Peer Responses**
+
+Stop a search early once this many peers have answered
+
+- **Type:** number
+- **Default:** `100`
+- **Constraints:** min: 10, max: 1000
+
+#### `SLSKD_QUEUE_TIMEOUT_MINUTES`
+
+**Queue Timeout (minutes)**
+
+Give up when the peer has not started sending within this long. Set to 0 to wait indefinitely.
+
+- **Type:** number
+- **Default:** `60`
+- **Constraints:** min: 0, max: 1440
+
+#### `SLSKD_REMOVE_COMPLETED`
+
+**Remove completed transfers from slskd**
+
+Clear the transfer from slskd's download list after Shelfmark imports it. Applies when each download does not get its own folder.
+
+- **Type:** boolean
+- **Default:** `true`
+
+</details>
+
 ## AudiobookBay
 
 | Variable | Description | Type | Default |
@@ -2626,6 +2750,7 @@ How long the bypass helper process may sit unused before it is shut down. Higher
 | `LIBGEN_MIRROR_URLS` | Mirrors are tried in the order you add them until one works. | string (comma-separated) | _empty list_ |
 | `ZLIB_MIRROR_URLS` | Only the first mirror in the list is used. | string (comma-separated) | _empty list_ |
 | `WELIB_MIRROR_URLS` | Only the first mirror in the list is used. | string (comma-separated) | _empty list_ |
+| `OCEANOFPDF_MIRROR_URLS` | Searches and downloads directly, without Anna's Archive. Only the first mirror in the list is used. The site is behind Cloudflare, so the bypass must be enabled. | string (comma-separated) | _empty list_ |
 
 <details>
 <summary>Detailed descriptions</summary>
@@ -2672,6 +2797,15 @@ Only the first mirror in the list is used.
 **Welib**
 
 Only the first mirror in the list is used.
+
+- **Type:** string (comma-separated)
+- **Default:** _empty list_
+
+#### `OCEANOFPDF_MIRROR_URLS`
+
+**OceanofPDF**
+
+Searches and downloads directly, without Anna's Archive. Only the first mirror in the list is used. The site is behind Cloudflare, so the bypass must be enabled.
 
 - **Type:** string (comma-separated)
 - **Default:** _empty list_
