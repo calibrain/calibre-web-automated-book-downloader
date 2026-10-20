@@ -1327,6 +1327,7 @@ How long to cache individual book details. Default: 600 (10 minutes). Max: 60480
 | `PROWLARR_INDEXER_TIMEOUT` | How long to wait for a single indexer to answer a search. Indexers behind FlareSolverr can need 90 seconds or more while a cold Cloudflare challenge is solved; raise this if searches come back empty and the Prowlarr log shows the search still running. | number | `90` |
 | `PROWLARR_AUTO_EXPAND` | Automatically retry search without category filtering if no results are found | boolean | `false` |
 | `PROWLARR_COLLAPSE_DUPLICATES` | Collapse a release that several indexer entries returned down to a single row, keeping the entry with the best Prowlarr priority. Turn this off to see every entry that carried it, which is what makes results from filter-specific entries (freeleech and the like) visible. | boolean | `true` |
+| `PROWLARR_HIDE_UNSUPPORTED_FORMATS` | Hide a result whose title ends in a file extension that is not in Supported Book Formats, such as a .doc or .rtf file. Downloading it would only fail at post-processing. Titles without an extension, archives and audiobook searches are never hidden. | boolean | `true` |
 | `PROWLARR_USE_SEED_PREFERENCES` | Apply per-indexer seed time and ratio preferences from Prowlarr when sending torrents to the download client | boolean | `false` |
 | `PROWLARR_MAM_ID` | The mam_id value MyAnonamouse shows when you create a session. MAM locks each session to one IP or ASN, so reusing Prowlarr's or another client's session often fails with a 403: you will likely need a separate session for Shelfmark if it reaches MAM from another IP (different host, VPN or proxy) or the existing session is ASN-locked to another network. Leave empty to turn enrichment off. | string (secret) | _none_ |
 
@@ -1395,6 +1396,15 @@ Automatically retry search without category filtering if no results are found
 **Show one row per release**
 
 Collapse a release that several indexer entries returned down to a single row, keeping the entry with the best Prowlarr priority. Turn this off to see every entry that carried it, which is what makes results from filter-specific entries (freeleech and the like) visible.
+
+- **Type:** boolean
+- **Default:** `true`
+
+#### `PROWLARR_HIDE_UNSUPPORTED_FORMATS`
+
+**Hide results in formats you did not enable**
+
+Hide a result whose title ends in a file extension that is not in Supported Book Formats, such as a .doc or .rtf file. Downloading it would only fail at post-processing. Titles without an extension, archives and audiobook searches are never hidden.
 
 - **Type:** boolean
 - **Default:** `true`
