@@ -771,6 +771,13 @@ def prowlarr_clients_settings() -> list[SettingsField]:
             placeholder="/downloads",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
         ),
+        TextField(
+            key="QBITTORRENT_DOWNLOAD_DIR_AUDIOBOOK",
+            label="Audiobook Download Directory",
+            description="Server-side directory where audiobook torrents are downloaded. Leave empty to use the Download Directory.",
+            placeholder="/downloads/audiobooks",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
+        ),
         TagListField(
             key="QBITTORRENT_TAG",
             label="Tags",
@@ -831,6 +838,13 @@ def prowlarr_clients_settings() -> list[SettingsField]:
             placeholder="/downloads",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
         ),
+        TextField(
+            key="TRANSMISSION_DOWNLOAD_DIR_AUDIOBOOK",
+            label="Audiobook Download Directory",
+            description="Server-side directory where audiobook torrents are downloaded. Leave empty to use the Download Directory.",
+            placeholder="/downloads/audiobooks",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
+        ),
         # --- Deluge Settings ---
         TextField(
             key="DELUGE_HOST",
@@ -885,6 +899,13 @@ def prowlarr_clients_settings() -> list[SettingsField]:
             placeholder="/downloads",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
         ),
+        TextField(
+            key="DELUGE_DOWNLOAD_DIR_AUDIOBOOK",
+            label="Audiobook Download Directory",
+            description="Server-side directory where audiobook torrents are downloaded. Leave empty to use the Download Directory.",
+            placeholder="/downloads/audiobooks",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
+        ),
         # --- rTorrent Settings ---
         TextField(
             key="RTORRENT_URL",
@@ -933,6 +954,13 @@ def prowlarr_clients_settings() -> list[SettingsField]:
             label="Download Directory",
             description="Server-side directory where torrents are downloaded (optional, uses rTorrent default if not specified)",
             placeholder="/downloads",
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "rtorrent"},
+        ),
+        TextField(
+            key="RTORRENT_DOWNLOAD_DIR_AUDIOBOOK",
+            label="Audiobook Download Directory",
+            description="Server-side directory where audiobook torrents are downloaded. Leave empty to use the Download Directory.",
+            placeholder="/downloads/audiobooks",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "rtorrent"},
         ),
         # Note: Torrent client download path must be mounted identically in both containers.
