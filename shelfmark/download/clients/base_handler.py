@@ -290,7 +290,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
         """How long a motionless torrent with too few seeds is kept (seconds, 0 = never give up)."""
         configured = config.get(NO_SEEDERS_WAIT_SETTING, NO_SEEDERS_WAIT_DEFAULT_MINUTES)
         try:
-            minutes = float(configured)
+            minutes = float(configured)  # pyright: ignore[reportArgumentType]
         except TypeError, ValueError:
             return 0.0
         return minutes * SECONDS_PER_MINUTE if minutes > 0 else 0.0
@@ -298,7 +298,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
     def _min_seeders(self) -> int:
         configured = config.get(MIN_SEEDERS_SETTING, MIN_SEEDERS_DEFAULT)
         try:
-            return max(int(configured), 0)
+            return max(int(configured), 0)  # pyright: ignore[reportArgumentType]
         except TypeError, ValueError:
             return MIN_SEEDERS_DEFAULT
 
@@ -1257,7 +1257,12 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 # Two ways to be given up on, each with its own clock. Too few seeds and not
                 # moving; or no seed at all, moving or not: a torrent running on the pieces
                 # its peers happen to hold stops when they run out.
-                too_few_idle = judged and seeds < min_seeders and status.progress <= last_progress
+                too_few_idle = (
+                    judged
+                    and seeds is not None
+                    and seeds < min_seeders
+                    and status.progress <= last_progress
+                )
                 no_seed_at_all = judged and seeds == 0
                 now = time.monotonic() if too_few_idle or no_seed_at_all else 0.0
                 if too_few_idle:
