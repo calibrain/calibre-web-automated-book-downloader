@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
 import socket
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 try:
     import apprise
@@ -37,6 +39,7 @@ _APPRISE_LOGO_URL = (
 )
 _APPRISE_LOGGER_NAME = "apprise"
 _APPRISE_DISPATCH_ERRORS = (RuntimeError, TypeError, ValueError)
+_USER_ROUTE_PLACEHOLDER_PATTERN = re.compile(r"\{(user|email)\}", re.IGNORECASE)
 
 
 class _ApprisePluginWithUrl(Protocol):
@@ -371,6 +374,60 @@ def _resolve_user_routes(user_id: int | None) -> list[dict[str, str]]:
     return _normalize_routes(
         app_config.get("USER_NOTIFICATION_ROUTES", [], user_id=normalized_user_id)
     )
+
+
+def _get_route_user(user_id: int) -> dict[str, Any] | None:
+    try:
+        from shelfmark.core.user_db import UserDB, get_users_db_path
+
+        return UserDB(get_users_db_path()).get_user(user_id=user_id)
+    except (ImportError, OSError, sqlite3.Error) as exc:
+        logger.warning("Failed to look up user_id=%s for notification routes: %s", user_id, exc)
+        return None
+
+
+def expand_user_route_placeholders(urls: list[str], user_id: int) -> list[str]:
+    """Expand `{User}` and `{Email}` in per-user route URLs from the user's account.
+
+    Placeholders are only filled in the path, query or fragment: a URL with one in its host part
+    is dropped, because Apprise decodes percent-escapes there (so an email such as
+    ``x%40127.0.0.1`` would still reach 127.0.0.1). Values are fully percent-encoded.
+    URLs that need a value the user does not have (e.g. no email on file) are dropped.
+    Callers should still validate the returned URLs, not the templates.
+    """
+    if not any(_USER_ROUTE_PLACEHOLDER_PATTERN.search(url) for url in urls):
+        return urls
+
+    user = _get_route_user(user_id) or {}
+    values = {
+        "user": str(user.get("username") or "").strip(),
+        "email": str(user.get("email") or "").strip(),
+    }
+
+    expanded: list[str] = []
+    for url in urls:
+        if _USER_ROUTE_PLACEHOLDER_PATTERN.search(urlsplit(url).netloc):
+            logger.warning(
+                "Skipping notification route for user_id=%s: {User}/{Email} is not allowed "
+                "in the host part of a URL",
+                user_id,
+            )
+            continue
+        needed = {match.lower() for match in _USER_ROUTE_PLACEHOLDER_PATTERN.findall(url)}
+        missing = sorted(name for name in needed if not values[name])
+        if missing:
+            logger.info(
+                "Skipping notification route for user_id=%s: no %s on file",
+                user_id,
+                ", ".join(missing),
+            )
+            continue
+        expanded.append(
+            _USER_ROUTE_PLACEHOLDER_PATTERN.sub(
+                lambda match: quote(values[match.group(1).lower()], safe=""), url
+            )
+        )
+    return expanded
 
 
 def _resolve_route_urls_for_event(
@@ -716,7 +773,10 @@ def notify_user(
         return
 
     routes = _resolve_user_routes(normalized_user_id)
-    urls = _allowed_user_urls(_resolve_route_urls_for_event(routes, event))
+    urls = expand_user_route_placeholders(
+        _resolve_route_urls_for_event(routes, event), normalized_user_id
+    )
+    urls = _allowed_user_urls(urls)
     if not urls:
         return
 

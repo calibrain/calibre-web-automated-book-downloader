@@ -61,6 +61,8 @@ Override how a user searches, on top of the global search defaults:
 
 Users can configure personal notification routes, separate from the global notification settings. Each route targets a URL (e.g. an Apprise-compatible endpoint) and can be scoped to specific event types or all events.
 
+Route URLs can use `{User}` and `{Email}`, filled in from each user's account when a notification is sent. This lets one default route such as `ntfys://ntfy.sh/shelfmark-{User}` give every user their own topic; a route is skipped for users without the value it needs. Values are URL-encoded, and the expanded URL is what the personal-route checks see.
+
 ### Request Policy (admin-only)
 
 Admins can override the default ebook/audiobook modes and request rules for individual users. See [Per-User Overrides](#per-user-overrides) below.

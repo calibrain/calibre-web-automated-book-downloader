@@ -233,7 +233,9 @@ def build_user_notification_test_response(
         elif "routes" in payload:
             routes_input = payload.get("routes")
 
-    result = build_notification_test_result(routes_input, scope_label="personal", user_scope=True)
+    result = build_notification_test_result(
+        routes_input, scope_label="personal", user_scope=True, user_id=user_id
+    )
     status_code = 200 if result.get("success", False) else 400
     return result, status_code
 

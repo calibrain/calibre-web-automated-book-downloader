@@ -674,6 +674,97 @@ def test_resolve_user_routes_expands_multiselect_event_rows(monkeypatch):
     ]
 
 
+def test_expand_user_route_placeholders_fills_account_details(monkeypatch):
+    monkeypatch.setattr(
+        notifications_module,
+        "_get_route_user",
+        lambda user_id: {"username": "alice", "email": "alice+books@example.com"},
+    )
+
+    urls = notifications_module.expand_user_route_placeholders(
+        [
+            "mailtos://smtp.example.com?to={Email}",
+            "ntfys://ntfy.sh/shelfmark-{user}",
+            "ntfys://ntfy.sh/static",
+        ],
+        7,
+    )
+
+    assert urls == [
+        "mailtos://smtp.example.com?to=alice%2Bbooks%40example.com",
+        "ntfys://ntfy.sh/shelfmark-alice",
+        "ntfys://ntfy.sh/static",
+    ]
+
+
+def test_expand_user_route_placeholders_refuses_placeholder_in_host(monkeypatch):
+    # Apprise decodes %40 in the host, so x%40127.0.0.1 would still reach loopback.
+    monkeypatch.setattr(
+        notifications_module,
+        "_get_route_user",
+        lambda user_id: {"username": "mallory", "email": "x@127.0.0.1"},
+    )
+
+    urls = notifications_module.expand_user_route_placeholders(
+        ["ntfys://{Email}/alerts", "ntfys://{User}.example.com/alerts", "ntfys://ntfy.sh/{User}"],
+        7,
+    )
+
+    assert urls == ["ntfys://ntfy.sh/mallory"]
+
+
+def test_notify_user_does_not_queue_placeholder_host_pointing_at_loopback(monkeypatch):
+    fake_executor = _FakeExecutor()
+    monkeypatch.setattr(notifications_module, "_executor", fake_executor)
+    monkeypatch.setattr(
+        notifications_module,
+        "_resolve_user_routes",
+        lambda _user_id: [{"event": "all", "url": "ntfys://{Email}/alerts"}],
+    )
+    monkeypatch.setattr(
+        notifications_module,
+        "_get_route_user",
+        lambda user_id: {"username": "mallory", "email": "x@127.0.0.1"},
+    )
+
+    context = notifications_module.NotificationContext(
+        event=notifications_module.NotificationEvent.DOWNLOAD_FAILED,
+        title="Example Book",
+        author="Example Author",
+        username="mallory",
+    )
+    notifications_module.notify_user(
+        7, notifications_module.NotificationEvent.DOWNLOAD_FAILED, context
+    )
+
+    assert fake_executor.calls == []
+
+
+def test_expand_user_route_placeholders_drops_routes_missing_a_value(monkeypatch):
+    monkeypatch.setattr(
+        notifications_module,
+        "_get_route_user",
+        lambda user_id: {"username": "carol", "email": None},
+    )
+
+    urls = notifications_module.expand_user_route_placeholders(
+        ["mailtos://smtp.example.com?to={Email}", "ntfys://ntfy.sh/{User}"],
+        7,
+    )
+
+    assert urls == ["ntfys://ntfy.sh/carol"]
+
+
+def test_expand_user_route_placeholders_skips_lookup_without_placeholders(monkeypatch):
+    def _fail_lookup(user_id):
+        raise AssertionError("user lookup should not run")
+
+    monkeypatch.setattr(notifications_module, "_get_route_user", _fail_lookup)
+
+    urls = ["ntfys://ntfy.sh/static"]
+    assert notifications_module.expand_user_route_placeholders(urls, 7) == urls
+
+
 class TestAppriseProxyEnv:
     """Regression tests for issue #956 — proxy settings ignored for notifications."""
 
