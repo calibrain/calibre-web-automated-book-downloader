@@ -1686,6 +1686,18 @@ def download_source_settings() -> list[SettingsField]:
             min_value=30,
             max_value=1800,
         ),
+        NumberField(
+            key="AA_PAGE_LIMIT",
+            label="Max Anna's Archive Results Pages",
+            description=(
+                "Maximum number of results pages to fetch per manual search. "
+                "Each page returns 50 books (up to 500 total). "
+                "Set to 1 for first-page only, up to 10 for full 500 results."
+            ),
+            default=1,
+            min_value=1,
+            max_value=10,
+        ),
         HeadingField(
             key="content_type_routing_heading",
             title="Content-Type Routing",

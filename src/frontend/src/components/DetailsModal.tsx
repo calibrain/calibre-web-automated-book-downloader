@@ -104,6 +104,7 @@ export const DetailsModal = ({
   // Universal mode: Year, Genres (no language, no publisher - often blank from providers)
   // Direct Download mode: Year, Language, Format, Size, Downloads
   const downloadCount = book.info?.Downloads?.[0];
+  const starCount = book.info?.Stars?.[0];
   const metadata = isMetadata
     ? [
         { label: 'Year', value: book.year || '-' },
@@ -117,7 +118,12 @@ export const DetailsModal = ({
         { label: 'Format', value: book.format || '-' },
         { label: 'Size', value: book.size || '-' },
         ...(downloadCount
-          ? [{ label: 'Downloads', value: Number(downloadCount).toLocaleString() }]
+          ? [
+              {
+                label: 'Downloads',
+                value: `${Number(downloadCount).toLocaleString()}${starCount ? ` / ⭐${starCount}` : ''}`,
+              },
+            ]
           : []),
       ];
 

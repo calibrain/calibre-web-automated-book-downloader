@@ -82,7 +82,7 @@ def test_successful_warmup_reports_true(monkeypatch, warmup):
 
     def fake_search(query, _filters):
         seen.append(query)
-        return ["a", "b"]
+        return ["a", "b"], None, 2
 
     monkeypatch.setattr(dd, "search_books", fake_search)
 
@@ -96,7 +96,7 @@ def test_empty_results_are_not_an_error(monkeypatch, warmup):
     import shelfmark.release_sources.direct_download as dd
 
     monkeypatch.setattr(mirrors, "has_aa_mirror_configuration", lambda: True)
-    monkeypatch.setattr(dd, "search_books", lambda q, f: [])
+    monkeypatch.setattr(dd, "search_books", lambda q, f: ([], None, 0))
 
     assert warmup.run_warmup() is False
 

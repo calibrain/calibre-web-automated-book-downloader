@@ -3277,6 +3277,8 @@ def api_releases() -> Response | tuple[Response, int]:
                 info["search_type"] = source_instance.last_search_type
             if hasattr(source_instance, "total_results"):
                 info["total_results"] = source_instance.total_results
+            if hasattr(source_instance, "filtered_out_count"):
+                info["filtered_out_count"] = source_instance.filtered_out_count
             if info:
                 search_info[source_name] = info
 

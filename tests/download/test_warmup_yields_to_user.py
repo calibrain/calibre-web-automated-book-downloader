@@ -22,7 +22,7 @@ def test_warmup_runs_when_nobody_has_searched(monkeypatch):
     searched: list[str] = []
     monkeypatch.setattr(
         "shelfmark.release_sources.direct_download.search_books",
-        lambda query, _filters: (searched.append(query), ["a result"], None)[1:],
+        lambda query, _filters: (searched.append(query), ["a result"], None, 1)[1:],
     )
 
     assert warmup.run_warmup() is True

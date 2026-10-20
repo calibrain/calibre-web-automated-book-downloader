@@ -281,8 +281,8 @@ async function fetchJSON<T>(
 // API functions
 export const searchBooks = async (
   query: string,
-): Promise<{ books: Book[]; totalResults: number | string | null }> => {
-  if (!query) return { books: [], totalResults: null };
+): Promise<{ books: Book[]; totalResults: number | string | null; filteredOutCount: number }> => {
+  if (!query) return { books: [], totalResults: null, filteredOutCount: 0 };
   const response = await fetchJSON<ReleasesResponse>(
     `${API_BASE}/releases?source=direct_download&${query}`,
     {},
@@ -292,7 +292,12 @@ export const searchBooks = async (
   const firstSource = response.sources_searched?.[0];
   const searchInfo = firstSource ? response.search_info?.[firstSource] : undefined;
   const totalResults = searchInfo?.total_results ?? null;
-  return { books: response.releases.map(transformReleaseToDirectBook), totalResults };
+  const filteredOutCount = searchInfo?.filtered_out_count ?? 0;
+  return {
+    books: response.releases.map(transformReleaseToDirectBook),
+    totalResults,
+    filteredOutCount,
+  };
 };
 
 // Metadata search response type (internal)

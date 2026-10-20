@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 import { useSearchMode } from '../../contexts/SearchModeContext';
 import type { Book, ButtonStateInfo } from '../../types';
-import { getDownloadsCount } from '../../types';
+import { getDownloadsCount, getStarCount } from '../../types';
 import { bookSupportsTargets } from '../../utils/bookTargetLoader';
 import { BookActionButton } from '../BookActionButton';
 import { BookTargetDropdown } from '../BookTargetDropdown';
@@ -21,6 +21,7 @@ interface CompactViewProps {
   showDetailsButton?: boolean;
   animationDelay?: number;
   showSeriesPosition?: boolean;
+  index?: number;
   onShowToast?: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
@@ -225,12 +226,16 @@ export const CompactView = ({
               )}
               {(() => {
                 const d = getDownloadsCount(book);
-                return d != null && d > 0 ? (
+                const s = getStarCount(book);
+                if (d == null || d <= 0) return null;
+                const text =
+                  s != null && s > 0 ? `${d.toLocaleString()}/⭐${s}` : d.toLocaleString();
+                return (
                   <>
                     {' '}
-                    <span>•</span> <span>{d.toLocaleString()}</span>{' '}
+                    <span>•</span> <span>{text}</span>{' '}
                   </>
-                ) : null;
+                );
               })()}
             </div>
           )}

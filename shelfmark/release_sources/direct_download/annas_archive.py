@@ -48,6 +48,20 @@ from shelfmark.release_sources.direct_download.common import (
     book_matches_requested_languages as _book_matches_requested_languages,
 )
 
+# ---------------------------------------------------------------------------
+# Config helpers
+# ---------------------------------------------------------------------------
+
+
+def _coerce_positive_int(value: object, default: int) -> int:
+    """Return a positive integer config value or the provided default."""
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int) and value > 0:
+        return value
+    return default
+
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
     from pathlib import Path
@@ -707,21 +721,30 @@ def _extract_total_results_from_html(html: str) -> int | str | None:
     return None
 
 
-def search_books(query: str, filters: SearchFilters) -> tuple[list[BrowseRecord], int | str | None]:
-    """Search for books matching the query.
+def search_books(
+    query: str,
+    filters: SearchFilters,
+    *,
+    page: int = 1,
+) -> tuple[list[BrowseRecord], int | str | None, int]:
+    """Search for books matching the query on a single page.
 
     Args:
         query: Search term (ISBN, title, author, etc.)
         filters: Search filters (language, format, content type, etc.)
+        page: Page number to fetch (default 1).  AA returns 50 results per page.
 
     Returns:
-        Tuple of (List[BrowseRecord], total_count | None): Matching books and total result count
+        Tuple of (books, total_count, raw_page_count) where *raw_page_count* is
+        the number of results returned by AA *before* language filtering, so
+        callers can correctly detect the last page.
 
     Raises:
         SearchUnavailableError: If Anna's Archive cannot be reached
         Exception: If parsing fails
 
     """
+    _t0 = time.perf_counter()
     query_html = quote(query)
 
     if filters.isbn:
@@ -762,21 +785,23 @@ def search_books(query: str, filters: SearchFilters) -> tuple[list[BrowseRecord]
 
     url = (
         f"{network.get_aa_base_url()}"
-        f"/search?index=&page=1&display=table"
+        f"/search?index=&page={page}&display=table"
         f"&acc=aa_download&acc=external_download"
         f"&ext={'&ext='.join(formats_to_use)}"
         f"&q={query_html}"
         f"{filters_query}"
     )
 
+    _fetch_t0 = time.perf_counter()
     # AA gates /search behind a DDoS-Guard JS challenge, which every mirror shares. Rotating
     # to another mirror only collects another 403, so let the bypasser solve it.
     html, tbody = _fetch_search_table(url, selector)
+    _fetch_elapsed = time.perf_counter() - _fetch_t0
     total_count = _extract_total_results_from_html(html) if tbody is not None else None
     if tbody is None:
         if "No files found." in html:
             logger.info("No books found for query: %s", query)
-            return ([], None)
+            return ([], None, 0)
         logger.warning("No results table found for query: %s", query)
         msg = "No books found. Please try another query."
         raise RuntimeError(msg)
@@ -784,6 +809,7 @@ def search_books(query: str, filters: SearchFilters) -> tuple[list[BrowseRecord]
         msg = f"Expected results table tag, got {type(tbody).__name__}"
         raise TypeError(msg)
 
+    _parse_t0 = time.perf_counter()
     books = parse_search_page(
         tbody,
         filters,
@@ -794,6 +820,16 @@ def search_books(query: str, filters: SearchFilters) -> tuple[list[BrowseRecord]
         # (which skips &lang=) needs a local language filter.
         filter_languages=False,
     )
+    _parse_elapsed = time.perf_counter() - _parse_t0
+    logger.debug(
+        "Search parse completed for query=%r page=%d: %d records in %.2fs",
+        query,
+        page,
+        len(books),
+        _parse_elapsed,
+    )
+
+    raw_page_count = len(books)
 
     if path_language_enabled and requested_langs:
         books = [b for b in books if _book_matches_requested_languages(b.language, requested_langs)]
@@ -808,26 +844,36 @@ def search_books(query: str, filters: SearchFilters) -> tuple[list[BrowseRecord]
         )
     )
 
-    # Fetch download counts for all results in batch
-    if books:
-        _enrich_search_results_with_downloads(books)
+    _total_elapsed = time.perf_counter() - _t0
+    logger.info(
+        "Search complete for query=%r page=%d: %d records (fetch=%.2fs, parse=%.2fs, total=%.2fs)",
+        query,
+        page,
+        len(books),
+        _fetch_elapsed,
+        _parse_elapsed,
+        _total_elapsed,
+    )
 
-    return (books, total_count)
+    return (books, total_count, raw_page_count)
 
 
-def _fetch_download_count_inline(book_id: str) -> int | None:
-    """Fetch the download count for a single book from Anna's Archive inline_info API."""
+def _fetch_download_count_inline(book_id: str) -> tuple[int | None, int | None]:
+    """Fetch the download count and star rating for a single book from inline_info API.
+
+    Returns a tuple of (downloads_total, great_quality_count), each possibly None.
+    """
     try:
         url = f"{network.get_aa_base_url()}/dyn/md5/inline_info/{book_id}"
         resp = requests.get(url, timeout=5, headers={"Accept": "application/json"})
         if resp.status_code == 200:
             data = resp.json()
-            count = data.get("downloads_total")
-            if count is not None:
-                return count
+            downloads = data.get("downloads_total")
+            stars = data.get("great_quality_count")
+            return (downloads, stars)
     except Exception:
         logger.debug("Failed to fetch download count for %s", book_id, exc_info=True)
-    return None
+    return (None, None)
 
 
 def _enrich_search_results_with_downloads(books: list[BrowseRecord]) -> None:
@@ -839,18 +885,35 @@ def _enrich_search_results_with_downloads(books: list[BrowseRecord]) -> None:
     if not book_ids:
         return
 
+    _enrich_t0 = time.perf_counter()
+    logger.debug(
+        "Fetching download counts for %d books via inline_info",
+        len(book_ids),
+    )
+
     # Fetch counts in parallel using the inline_info API (cheaper than summary)
     counts: dict[str, int] = {}
+    stars: dict[str, int] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(_fetch_download_count_inline, bid): bid for bid in book_ids}
         for future in concurrent.futures.as_completed(futures):
             bid = futures[future]
             try:
-                count = future.result()
-                if count is not None:
-                    counts[bid] = count
+                download_count, star_count = future.result()
+                if download_count is not None:
+                    counts[bid] = download_count
+                if star_count is not None:
+                    stars[bid] = star_count
             except Exception:
                 logger.debug("Failed to fetch download count for %s", bid, exc_info=True)
+
+    _enrich_elapsed = time.perf_counter() - _enrich_t0
+    logger.debug(
+        "Download count enrichment complete: %d/%d books resolved in %.2fs",
+        len(counts),
+        len(books),
+        _enrich_elapsed,
+    )
 
     # Add counts to each record's info
     for book in books:
@@ -858,6 +921,10 @@ def _enrich_search_results_with_downloads(books: list[BrowseRecord]) -> None:
             if book.info is None:
                 book.info = {}
             book.info["Downloads"] = [str(counts[book.id])]
+        if book.id in stars:
+            if book.info is None:
+                book.info = {}
+            book.info["Stars"] = [str(stars[book.id])]
 
 
 def get_book_info(book_id: str, *, fetch_download_count: bool = True) -> BrowseRecord:
@@ -1866,6 +1933,7 @@ class AnnasArchiveProvider:
     def __init__(self) -> None:
         self._last_search_type = "title_author"
         self._total_results: int | str | None = None
+        self._filtered_out_count: int = 0
 
     @property
     def last_search_type(self) -> str:
@@ -1874,6 +1942,10 @@ class AnnasArchiveProvider:
     @property
     def total_results(self) -> int | str | None:
         return self._total_results
+
+    @property
+    def filtered_out_count(self) -> int:
+        return self._filtered_out_count
 
     def is_enabled(self) -> bool:
         from shelfmark.core import mirrors
@@ -1910,30 +1982,111 @@ class AnnasArchiveProvider:
         query: str,
         filters: SearchFilters,
         *,
-        search_label: str,
-    ) -> list[BrowseRecord]:
-        """Retry AA queries without a language filter when filtered search returns nothing."""
-        results, total_count = self._search_books(query, filters)
+        max_pages: int,
+    ) -> tuple[list[BrowseRecord], int | str | None, SearchFilters]:
+        """Retry AA queries without a language filter when filtered search returns nothing.
+
+        Always returns ``(results, total_count, filters_used)`` so the caller can
+        paginate with the correct (possibly modified) filters.
+        """
+        results, total_count, first_page_raw = self._search_books(query, filters)
         if results or not filters.lang:
             self._total_results = total_count
-            return results
+            self._first_page_raw_count = first_page_raw
+            return results, total_count, filters
 
-        logger.debug(
-            "No %s results with langs=%s, retrying without language filter",
-            search_label,
-            filters.lang,
-        )
-        results, total_count = self._search_books(query, replace(filters, lang=None))
+        filters_used = replace(filters, lang=None)
+        results, total_count, _ = self._search_books(query, filters_used)
         self._total_results = total_count
-        return results
+        return results, total_count, filters_used
+
+    def _search_books_paginated(
+        self,
+        query: str,
+        filters: SearchFilters,
+        *,
+        total_pages: int,
+        first_page_results: list[BrowseRecord] | None = None,
+    ) -> list[BrowseRecord]:
+        """Fetch multiple pages of results for a manual search.
+
+        If *first_page_results* is provided, page 1 is skipped (already fetched)
+        and those results are used as the starting point.  Returns a deduplicated
+        list across all pages.  Download counts are
+        enriched once after the last page is fetched.
+        """
+        seen_ids: set[str] = set()
+        all_results: list[BrowseRecord] = list(first_page_results) if first_page_results else []
+        if first_page_results:
+            for bi in first_page_results:
+                seen_ids.add(bi.id)
+        supported_formats = get_supported_formats()
+        _paginated_t0 = time.perf_counter()
+
+        # Track cumulative count of books filtered out by language
+        filtered_out = 0
+        if first_page_results and hasattr(self, "_first_page_raw_count"):
+            filtered_out += self._first_page_raw_count - len(first_page_results)
+
+        start_page = 2 if first_page_results else 1
+        logger.debug("Manual search: fetching pages %d-%d", start_page, total_pages)
+
+        for page_num in range(start_page, total_pages + 1):
+            if search_deadline.expired():
+                break
+
+            books, _, raw_count = self._search_books(query, filters, page=page_num)
+            _page_elapsed = time.perf_counter() - _paginated_t0
+
+            for bi in books:
+                if bi.id not in seen_ids:
+                    seen_ids.add(bi.id)
+                    all_results.append(bi)
+
+            filtered_out += raw_count - len(books)
+
+            logger.debug(
+                "Manual search page=%d: %d records (raw=%d) in %.2fs",
+                page_num,
+                len(books),
+                raw_count,
+                _page_elapsed,
+            )
+
+            # Stop only if this page returned zero raw results (genuinely exhausted)
+            if raw_count == 0:
+                break
+
+        self._filtered_out_count = filtered_out
+
+        # Single enrichment pass after all pages are collected
+        if all_results:
+            _enrich_search_results_with_downloads(all_results)
+
+        all_results.sort(
+            key=lambda x: (
+                supported_formats.index(x.format)
+                if x.format in supported_formats
+                else len(supported_formats)
+            )
+        )
+
+        return all_results
 
     def _search_books(
         self,
         query: str,
         filters: SearchFilters,
-    ) -> tuple[list[BrowseRecord], int | str | None]:
-        """Call search_books and capture the total result count."""
-        return search_books(query, filters)
+        *,
+        page: int = 1,
+    ) -> tuple[list[BrowseRecord], int | str | None, int]:
+        """Call search_books and capture the total and raw page result counts.
+
+        Returns ``(books, total_count, raw_page_count)`` where *raw_page_count*
+        is the number of results returned by AA *before* language filtering, so
+        callers can correctly detect the last page.
+        """
+        return search_books(query, filters, page=page)
 
     def search(
         self,
@@ -1973,6 +2126,7 @@ class AnnasArchiveProvider:
             content_type: Ignored - Direct download uses format filtering instead
 
         """
+        _search_t0 = time.perf_counter()
         ensure_available()
         lang_filter = plan.languages
 
@@ -1986,10 +2140,38 @@ class AnnasArchiveProvider:
             )
             filters = plan.source_filters or SearchFilters()
             filters.lang = lang_filter if lang_filter is not None else (filters.lang or [])
-            results = self._search_books_with_language_fallback(
-                query, filters, search_label="manual"
-            )
+            result = self._search_books_with_language_fallback(query, filters, max_pages=10)
             self._last_search_type = "manual" if query else "title_author"
+
+            # _search_books_with_language_fallback always returns
+            # (results, total_count, filters_used) when max_pages is set.
+            # Paginate through all pages of results using the filters that
+            # actually produced results (may have lang=None after fallback).
+            results, total_count, filters_used = result  # type: ignore[misc]
+            self._total_results = total_count
+
+            # Calculate how many pages to fetch, capped by user config
+            aa_page_limit = _coerce_positive_int(config.get("AA_PAGE_LIMIT", 1), 1)
+            if isinstance(total_count, str):
+                # Capped at 500+
+                max_pages = min(aa_page_limit, 10)  # 500 / 50 per page
+            elif total_count is not None:
+                max_pages = min(aa_page_limit, (total_count + 49) // 50)  # ceil division
+            else:
+                max_pages = min(aa_page_limit, 10)  # reasonable default when total is unknown
+
+            results = self._search_books_paginated(
+                query,
+                filters_used,
+                total_pages=max_pages,
+                first_page_results=results,
+            )
+            _elapsed = time.perf_counter() - _search_t0
+            logger.info(
+                "AA provider search complete: %d records in %.2fs",
+                len(results),
+                _elapsed,
+            )
             return results
 
         # ISBN search first (unless expand_search requested)
@@ -1999,15 +2181,21 @@ class AnnasArchiveProvider:
         if not expand_search:
             isbn = plan.isbn_candidates[0] if plan.isbn_candidates else None
             if isbn:
-                logger.debug("Searching direct_download: isbn='%s', langs=%s", isbn, lang_filter)
                 filters = SearchFilters(isbn=[isbn])
                 filters.lang = lang_filter if lang_filter is not None else []
                 try:
-                    results, isbn_total = search_books(isbn, filters)
+                    results, isbn_total, isbn_raw = search_books(isbn, filters)
+                    _elapsed = time.perf_counter() - _search_t0
                     if results:
                         logger.info("Found %s releases via ISBN", len(results))
                         self._last_search_type = "isbn"
                         self._total_results = isbn_total
+                        self._filtered_out_count = isbn_raw - len(results)
+                        logger.info(
+                            "AA provider search complete: %d records in %.2fs",
+                            len(results),
+                            _elapsed,
+                        )
                         return results
                     logger.debug("No ISBN results, falling back to title+author")
                 except SearchUnavailableError:
@@ -2022,6 +2210,7 @@ class AnnasArchiveProvider:
         # Execute searches with deduplication
         seen_ids: set = set()
         all_results: list[BrowseRecord] = []
+        filtered_out = 0
 
         for title, langs in searches:
             query = f"{title} {author}".strip()
@@ -2037,12 +2226,46 @@ class AnnasArchiveProvider:
             logger.debug("Searching direct_download: title_author='%s', langs=%s", query, langs)
             filters = SearchFilters(lang=langs if langs is not None else [])
             try:
-                books, title_total = search_books(query, filters)
+                # Fetch first page to get total count for pagination
+                first_page, title_total, first_page_raw = search_books(query, filters)
                 self._total_results = title_total
-                for bi in books:
+
+                # Add first page results
+                for bi in first_page:
                     if bi.id not in seen_ids:
                         seen_ids.add(bi.id)
                         all_results.append(bi)
+
+                filtered_out += first_page_raw - len(first_page)
+
+                # Only paginate if the first page had any results (more pages may exist)
+                if len(first_page) > 0:
+                    # Calculate how many pages to fetch, capped by user config
+                    aa_page_limit = _coerce_positive_int(config.get("AA_PAGE_LIMIT", 1), 1)
+                    if isinstance(title_total, str):
+                        max_pages = min(aa_page_limit, 10)  # 500 / 50 per page
+                    elif title_total is not None:
+                        max_pages = min(aa_page_limit, (title_total + 49) // 50)  # ceil division
+                    else:
+                        max_pages = min(aa_page_limit, 10)  # reasonable default
+
+                    # Fetch additional pages if needed
+                    if max_pages > 1:
+                        for page_num in range(2, max_pages + 1):
+                            if search_deadline.expired():
+                                logger.info(
+                                    "Release search budget spent; stopping pagination at page %d",
+                                    page_num,
+                                )
+                                break
+                            books, _, raw_count = self._search_books(query, filters, page=page_num)
+                            for bi in books:
+                                if bi.id not in seen_ids:
+                                    seen_ids.add(bi.id)
+                                    all_results.append(bi)
+                            filtered_out += raw_count - len(books)
+                            if raw_count == 0:
+                                break
             except SearchUnavailableError:
                 raise
             except Exception:
@@ -2053,27 +2276,53 @@ class AnnasArchiveProvider:
             and any(langs for _, langs in searches)
             and not search_deadline.expired()
         ):
-            logger.debug(
-                "No title+author results with language filter, retrying without language filter"
-            )
             for title, _langs in searches:
                 query = f"{title} {author}".strip()
                 if not query:
                     continue
                 if search_deadline.expired():
-                    logger.info("Release search budget spent; skipping remaining retries")
                     break
 
-                logger.debug("Searching direct_download: title_author='%s', langs=[]", query)
                 try:
-                    books, _ = search_books(query, SearchFilters())
-                    for bi in books:
+                    # Fetch first page to get total count for pagination
+                    first_page, _, _ = search_books(query, SearchFilters())
+
+                    # Add first page results
+                    for bi in first_page:
                         if bi.id not in seen_ids:
                             seen_ids.add(bi.id)
                             all_results.append(bi)
+
+                    # Only paginate if the first page had any results (more pages may exist)
+                    if len(first_page) > 0:
+                        # Calculate how many pages to fetch, capped by user config
+                        aa_page_limit = _coerce_positive_int(config.get("AA_PAGE_LIMIT", 1), 1)
+                        max_pages = min(aa_page_limit, 10)  # reasonable default
+
+                        # Fetch additional pages if needed
+                        if max_pages > 1:
+                            for page_num in range(2, max_pages + 1):
+                                if search_deadline.expired():
+                                    break
+                                books, _, raw_count = self._search_books(
+                                    query, SearchFilters(), page=page_num
+                                )
+                                for bi in books:
+                                    if bi.id not in seen_ids:
+                                        seen_ids.add(bi.id)
+                                        all_results.append(bi)
+                                if raw_count == 0:
+                                    break
                 except SearchUnavailableError:
                     raise
                 except Exception:
                     logger.exception("Search error")
 
+        self._filtered_out_count = filtered_out
+        _elapsed = time.perf_counter() - _search_t0
+        logger.info(
+            "AA provider search complete: %d records in %.2fs",
+            len(all_results),
+            _elapsed,
+        )
         return all_results

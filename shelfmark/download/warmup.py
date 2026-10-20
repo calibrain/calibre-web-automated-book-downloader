@@ -114,7 +114,7 @@ def run_warmup() -> bool:
         from shelfmark.core.models import SearchFilters
         from shelfmark.release_sources.direct_download import search_books
 
-        results, _ = search_books(query, SearchFilters())
+        results, _, _ = search_books(query, SearchFilters())
     except Exception:
         # Broad by design: a warm-up must never take the app down, and the source
         # raises everything from network errors to parse failures.

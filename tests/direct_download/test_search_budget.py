@@ -99,7 +99,7 @@ def test_title_variants_stop_once_the_budget_is_spent(monkeypatch):
         deadline = search_deadline.current()
         if deadline is not None:
             deadline.event.set()
-        return ([], None)
+        return ([], None, 0)
 
     monkeypatch.setattr(aa, "search_books", fake_search_books)
     monkeypatch.setattr(aa, "ensure_available", lambda: None)
@@ -135,7 +135,7 @@ def test_language_filter_retry_is_skipped_on_a_spent_budget(monkeypatch):
             deadline = search_deadline.current()
             if deadline is not None:
                 deadline.event.set()
-        return ([], None)
+        return ([], None, 0)
 
     monkeypatch.setattr(aa, "search_books", fake_search_books)
     monkeypatch.setattr(aa, "ensure_available", lambda: None)

@@ -35,6 +35,7 @@ interface ResultsSectionProps {
   totalFound?: number;
   // Direct mode: total result count from release sources
   directTotalResults?: number | string | null;
+  directFilteredOut?: number;
   onShowToast?: (message: string, type: 'success' | 'error' | 'info') => void;
   resultsSourceUrl?: string;
 }
@@ -56,6 +57,7 @@ export const ResultsSection = ({
   onLoadMore,
   totalFound,
   directTotalResults,
+  directFilteredOut,
   onShowToast,
   resultsSourceUrl,
 }: ResultsSectionProps) => {
@@ -130,17 +132,21 @@ export const ResultsSection = ({
             const totalCount = isCapped ? 500 : Number(count);
             // AA-style: show page range + total
             if (totalCount === 1) {
+              const filterSuffix =
+                directFilteredOut && directFilteredOut > 0 ? `/${directFilteredOut} filtered` : '';
               return (
                 <span className="mx-2 mt-4 px-2 text-xs whitespace-nowrap text-gray-500 dark:text-gray-400">
-                  Result 1 (1 Total)
+                  Result 1 (1 Total{filterSuffix})
                 </span>
               );
             }
-            const shownEnd = Math.min(totalCount, 50);
+            const shownEnd = Math.min(totalCount, books.length);
             const totalStr = isCapped ? '500+' : String(totalCount);
+            const filterSuffix =
+              directFilteredOut && directFilteredOut > 0 ? `/${directFilteredOut} filtered` : '';
             return (
               <span className="mx-2 mt-4 px-2 text-xs whitespace-nowrap text-gray-500 dark:text-gray-400">
-                Results 1-{shownEnd} ({totalStr} Total)
+                Results 1-{shownEnd} ({totalStr} Total{filterSuffix})
               </span>
             );
           })()}

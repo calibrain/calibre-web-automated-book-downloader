@@ -492,6 +492,7 @@ function App() {
     loadMore,
     totalFound,
     directTotalResults,
+    directFilteredOut,
     resultsSourceUrl,
   } = useSearch({
     showToast,
@@ -2612,6 +2613,7 @@ function App() {
             }}
             totalFound={totalFound}
             directTotalResults={directTotalResults}
+            directFilteredOut={directFilteredOut}
             onShowToast={showToast}
             resultsSourceUrl={resultsSourceUrl}
           />

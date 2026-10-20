@@ -438,10 +438,10 @@ const ReleaseRow = ({
 
   // Build grid template based on whether leading cell is shown
   const desktopGridTemplate = showLeadingCell
-    ? `auto ${gridTemplate} auto`
-    : `${gridTemplate} auto`;
+    ? `auto 28px ${gridTemplate} auto`
+    : `28px ${gridTemplate} auto`;
 
-  const mobileGridTemplate = showLeadingCell ? 'auto 1fr auto' : '1fr auto';
+  const mobileGridTemplate = showLeadingCell ? 'auto 28px 1fr auto' : '28px 1fr auto';
 
   const handleRowClick = selectionMode && onSelect ? onSelect : undefined;
   const handleRowKeyDown: KeyboardEventHandler<HTMLDivElement> | undefined =
@@ -482,6 +482,11 @@ const ReleaseRow = ({
       >
         {/* Leading cell: Thumbnail, Badge, or nothing */}
         {showLeadingCell && <LeadingCell config={leadingCell} release={release} />}
+
+        {/* Release number */}
+        <span className="w-7 shrink-0 text-center text-xs font-medium text-zinc-400 dark:text-zinc-500">
+          {index + 1}
+        </span>
 
         {/* Fixed: Title and author */}
         <div className="min-w-0">
@@ -529,6 +534,11 @@ const ReleaseRow = ({
       >
         {/* Leading cell: Thumbnail, Badge, or nothing */}
         {showLeadingCell && <LeadingCell config={leadingCell} release={release} />}
+
+        {/* Release number */}
+        <span className="shrink-0 text-center text-xs font-medium text-zinc-400 dark:text-zinc-500">
+          {index + 1}
+        </span>
 
         <div className="min-w-0">
           {/* Title and author on same line */}
@@ -1816,23 +1826,28 @@ const ReleaseModalSession = ({
                     {(() => {
                       const searchInfo = releasesBySource[activeTab]?.search_info?.[activeTab];
                       const totalCount = searchInfo?.total_results;
+                      const filteredOut = searchInfo?.filtered_out_count;
                       if (totalCount === undefined || totalCount === null || totalCount === 0)
                         return null;
                       const isCapped = totalCount === '500+';
                       const totalCountNum = isCapped ? 500 : Number(totalCount);
                       // AA-style: show page range + total
                       if (totalCountNum === 1) {
+                        const filterSuffix =
+                          filteredOut && filteredOut > 0 ? `/${filteredOut} filtered` : '';
                         return (
                           <span className="mx-2 shrink-0 text-xs whitespace-nowrap text-gray-500 dark:text-gray-400">
-                            Result 1 (1 Total)
+                            Result 1 (1 Total{filterSuffix})
                           </span>
                         );
                       }
-                      const shownEnd = Math.min(totalCountNum, 50);
+                      const shownEnd = Math.min(totalCountNum, filteredReleases.length);
                       const totalStr = isCapped ? '500+' : String(totalCountNum);
+                      const filterSuffix =
+                        filteredOut && filteredOut > 0 ? `/${filteredOut} filtered` : '';
                       return (
                         <span className="mx-2 shrink-0 text-xs whitespace-nowrap text-gray-500 dark:text-gray-400">
-                          Results 1-{shownEnd} ({totalStr} Total)
+                          Results 1-{shownEnd} ({totalStr} Total{filterSuffix})
                         </span>
                       );
                     })()}

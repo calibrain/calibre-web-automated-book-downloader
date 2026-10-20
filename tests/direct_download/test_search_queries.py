@@ -31,9 +31,10 @@ class TestDirectDownloadSearchQueries:
     def test_uses_search_title_for_english_queries(self, monkeypatch):
         captured: list[str] = []
 
-        def fake_search_books(query: str, filters):
+        def fake_search_books(query: str, filters, **kwargs):
+            del kwargs
             captured.append(query)
-            return ([], None)
+            return ([], None, 0)
 
         _enable_direct_download(monkeypatch)
 
@@ -73,9 +74,10 @@ class TestDirectDownloadSearchQueries:
             ],
         }
 
-        def fake_search_books(query: str, filters):
+        def fake_search_books(query: str, filters, **kwargs):
+            del kwargs
             captured.append((query, filters.lang))
-            return (records_by_query[query], None)
+            return (records_by_query[query], None, len(records_by_query[query]))
 
         _enable_direct_download(monkeypatch)
 
@@ -115,11 +117,12 @@ class TestDirectDownloadSearchQueries:
             ],
         }
 
-        def fake_search_books(query: str, filters):
+        def fake_search_books(query: str, filters, **kwargs):
+            del kwargs
             captured.append((query, filters.lang))
             if filters.lang:
-                return ([], None)
-            return (fallback_results[query], None)
+                return ([], None, 0)
+            return (fallback_results[query], None, len(fallback_results[query]))
 
         _enable_direct_download(monkeypatch)
 
@@ -153,11 +156,12 @@ class TestDirectDownloadSearchQueries:
     def test_manual_query_fallback_preserves_other_filters(self, monkeypatch):
         captured: list[tuple[str, list[str] | None, list[str] | None]] = []
 
-        def fake_search_books(query: str, filters):
+        def fake_search_books(query: str, filters, **kwargs):
+            del kwargs
             captured.append((query, filters.lang, filters.format))
             if filters.lang:
-                return ([], None)
-            return ([_browse_record("manual-1", "Manual result")], None)
+                return ([], None, 0)
+            return ([_browse_record("manual-1", "Manual result")], None, 1)
 
         _enable_direct_download(monkeypatch)
 
@@ -179,11 +183,17 @@ class TestDirectDownloadSearchQueries:
         )
         results = source.search(book, plan)
 
+        # Manual search paginates: first call with lang=en returns empty,
+        # retry without lang returns the result, then pagination fetches
+        # remaining pages (which also return the same result, deduplicated).
         assert [release.source_id for release in results] == ["manual-1"]
-        assert captured == [
-            ("mistborn custom query", ["en"], ["epub"]),
-            ("mistborn custom query", None, ["epub"]),
-        ]
+        # First call: with language filter
+        assert captured[0] == ("mistborn custom query", ["en"], ["epub"])
+        # Second call: retry without language filter
+        assert captured[1] == ("mistborn custom query", None, ["epub"])
+        # Remaining calls: pagination (same query, no lang filter)
+        for i in range(2, len(captured)):
+            assert captured[i] == ("mistborn custom query", None, ["epub"])
 
 
 # --- Distant-path language detection tests ---
@@ -336,7 +346,7 @@ def test_search_books_filters_locally_when_path_language_enabled(monkeypatch):
 
     monkeypatch.setattr(aa.downloader, "html_get_page", _fake_html_get_page)
 
-    records, _ = aa.search_books("demo", SearchFilters(lang=["fr"], format=["pdf"]))
+    records, _, _ = aa.search_books("demo", SearchFilters(lang=["fr"], format=["pdf"]))
 
     assert "&lang=" not in captured_url["url"]
     assert len(records) == 1
@@ -380,7 +390,7 @@ def test_search_books_keeps_server_language_matches_when_path_language_disabled(
 
     monkeypatch.setattr(aa.downloader, "html_get_page", _fake_html_get_page)
 
-    records, _ = aa.search_books("demo", SearchFilters(lang=["en"], format=["pdf"]))
+    records, _, _ = aa.search_books("demo", SearchFilters(lang=["en"], format=["pdf"]))
 
     # AA already narrowed by &lang=; its free-text language cells must not be re-matched.
     assert "&lang=en" in captured_url["url"]
