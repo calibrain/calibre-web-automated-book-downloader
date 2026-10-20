@@ -25,6 +25,7 @@ This document lists all configuration options that can be set via environment va
   - [Open Library](#metadata-providers-open-library)
   - [Google Books](#metadata-providers-google-books)
   - [Moly.hu](#metadata-providers-moly.hu)
+  - [Databáze knih](#metadata-providers-databáze-knih)
 - [Direct Download](#direct-download)
   - [Download Sources](#direct-download-download-sources)
   - [Cloudflare Bypass](#direct-download-cloudflare-bypass)
@@ -2330,6 +2331,26 @@ Default sort order for Google Books search results.
 #### `MOLY_ENABLED`
 
 **Enable Moly.hu**
+### Metadata Providers: Databáze knih
+
+| Variable | Description | Type | Default |
+|----------|-------------|------|---------|
+| `DATABAZEKNIH_ENABLED` | Enable Databáze knih as a metadata provider for book searches | boolean | `false` |
+
+<details>
+<summary>Detailed descriptions</summary>
+
+#### `DATABAZEKNIH_ENABLED`
+
+**Enable Databáze knih**
+
+Enable Databáze knih as a metadata provider for book searches
+
+- **Type:** boolean
+- **Default:** `false`
+
+</details>
+
 
 Enable Moly.hu as a metadata provider for book searches
 
