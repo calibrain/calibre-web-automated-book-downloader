@@ -143,3 +143,36 @@ class TestGoogleBooksParseVolume:
         )
 
         assert result is None
+
+
+class _FullPageSession:
+    def __init__(self, count):
+        self.count = count
+
+    def get(self, *args, **kwargs):
+        items = [
+            {"id": f"v{i}", "volumeInfo": {"title": f"Book {i}", "authors": ["Alice Author"]}}
+            for i in range(self.count)
+        ]
+        return _GoogleBooksResponse({"items": items})
+
+
+def test_googlebooks_reports_more_pages_when_limit_exceeds_api_maximum():
+    get_metadata_cache().clear()
+    provider = GoogleBooksProvider(api_key="test-key")
+    provider.session = _FullPageSession(40)
+
+    result = provider.search_paginated(MetadataSearchOptions(query="Dune", limit=100))
+
+    assert len(result.books) == 40
+    assert result.has_more is True
+
+
+def test_googlebooks_reports_no_more_pages_after_a_short_page():
+    get_metadata_cache().clear()
+    provider = GoogleBooksProvider(api_key="test-key")
+    provider.session = _FullPageSession(12)
+
+    result = provider.search_paginated(MetadataSearchOptions(query="Dune", limit=100))
+
+    assert result.has_more is False
