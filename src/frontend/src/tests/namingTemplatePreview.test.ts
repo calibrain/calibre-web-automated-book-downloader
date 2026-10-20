@@ -8,6 +8,13 @@ import {
   SAMPLE_NAMING_METADATA,
 } from '../utils/namingTemplatePreview';
 
+const renderAuthorSort = (author: string): string =>
+  renderNamingTemplate(
+    '{AuthorSort}/{Year}',
+    { ...SAMPLE_NAMING_METADATA, Author: author, AuthorSort: '' },
+    { allowPathSeparators: true },
+  ).value;
+
 describe('namingTemplatePreview', () => {
   it('renders Audiobookshelf-style {{Narrator}} and drops it cleanly when empty', () => {
     const template = '{Author}/{Title} {{Narrator}}/{Title}';
@@ -67,6 +74,21 @@ describe('namingTemplatePreview', () => {
     );
 
     expect(preview.value).toBe('Terry Pratchett/1902');
+  });
+
+  it('renders AuthorSort surname first from the first author', () => {
+    expect(renderAuthorSort('Arthur Conan Doyle')).toBe('Doyle, Arthur Conan/1902');
+    expect(renderAuthorSort('Terry Pratchett, Neil Gaiman')).toBe('Pratchett, Terry/1902');
+    expect(renderAuthorSort('Doyle, Arthur Conan')).toBe('Doyle, Arthur Conan/1902');
+    // The trailing dot of "Jr." is stripped like any other trailing dot in a path component.
+    expect(renderAuthorSort('Martin Luther King Jr.')).toBe('King, Martin Luther, Jr/1902');
+  });
+
+  it('offers AuthorSort as a core variable', () => {
+    const token = NAMING_TEMPLATE_TOKENS.find((t) => t.token === 'AuthorSort');
+
+    expect(token?.group).toBe('Core');
+    expect(token?.audiobookOnly).toBeFalsy();
   });
 
   it('offers FirstAuthor as a core variable', () => {

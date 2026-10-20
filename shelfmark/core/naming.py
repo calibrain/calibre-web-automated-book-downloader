@@ -20,6 +20,7 @@ KNOWN_TOKENS = [
     "primarytitle",
     "originalname",
     "firstauthor",
+    "authorsort",
     "partnumber",
     "language",
     "narrator",
@@ -74,6 +75,43 @@ def first_author(value: object) -> str:
     if not text:
         return ""
     return AUTHOR_LIST_SEPARATOR.split(text, maxsplit=1)[0].strip()
+
+
+# Generational suffixes kept after the given names: "King, Martin Luther, Jr."
+NAME_SUFFIXES = frozenset({"jr", "jr.", "sr", "sr.", "ii", "iii", "iv"})
+
+
+def author_sort(value: object) -> str:
+    """Return the first author as "Last, First" for {AuthorSort}.
+
+    "Arthur Conan Doyle" becomes "Doyle, Arthur Conan", and only the first of
+    several authors is kept. Exactly two comma-separated parts whose first part
+    is a single word ("Doyle, Arthur Conan") are taken to be one name already in
+    "Last, First" form and kept as is. Surname particles ("van", "Le") and
+    surname-first names are not detected; their last word is treated as the
+    surname (see #1178).
+    """
+    text = " ".join(str(value or "").split())
+    if not text:
+        return ""
+
+    entries = [entry for entry in AUTHOR_LIST_SEPARATOR.split(text) if entry]
+    if not entries:
+        return ""
+    if len(entries) == 2 and " " not in entries[0] and ";" not in text:
+        return f"{entries[0]}, {entries[1]}"
+
+    words = entries[0].split(" ")
+    suffix = ""
+    if len(entries) > 1 and entries[1].lower() in NAME_SUFFIXES:
+        suffix = entries[1]
+    elif len(words) > 2 and words[-1].lower() in NAME_SUFFIXES:
+        suffix = words.pop()
+
+    if len(words) < 2:
+        return entries[0]
+    sorted_name = f"{words[-1]}, {' '.join(words[:-1])}"
+    return f"{sorted_name}, {suffix}" if suffix else sorted_name
 
 
 def format_series_position(position: str | float | None) -> str:
@@ -193,6 +231,8 @@ def parse_naming_template(
             value = format_series_position(value)
         elif placeholder_name == "firstauthor" and not value:
             value = first_author(normalized.get("author"))
+        elif placeholder_name == "authorsort" and not value:
+            value = author_sort(normalized.get("author"))
         if value is None:
             return ""
         return str(value).strip()
