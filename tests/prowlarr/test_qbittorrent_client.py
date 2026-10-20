@@ -1590,14 +1590,16 @@ class TestQBittorrentClientAddDownload:
                 call_kwargs = mock_client_instance.torrents_add.call_args.kwargs
                 assert call_kwargs.get("save_path") == "/downloads/books"
 
-    def test_add_download_uses_audiobook_download_dir_for_audiobooks(self, monkeypatch):
-        """Audiobooks use the audiobook download directory; books keep the main one."""
+    def test_add_download_uses_separate_book_and_audiobook_dirs(self, monkeypatch):
+        """With separate directories on, books and audiobooks use their own directories."""
         config_values = {
             "QBITTORRENT_URL": "http://localhost:8080",
             "QBITTORRENT_USERNAME": "admin",
             "QBITTORRENT_PASSWORD": "password",
             "QBITTORRENT_CATEGORY": "books",
-            "QBITTORRENT_DOWNLOAD_DIR": "/downloads/books",
+            "QBITTORRENT_DOWNLOAD_DIR": "/downloads/shared",
+            "QBITTORRENT_SEPARATE_DOWNLOAD_DIRS": True,
+            "QBITTORRENT_DOWNLOAD_DIR_BOOK": "/downloads/books",
             "QBITTORRENT_DOWNLOAD_DIR_AUDIOBOOK": "/downloads/audiobooks",
         }
         monkeypatch.setattr(

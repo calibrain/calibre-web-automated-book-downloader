@@ -131,6 +131,8 @@ class RTorrentClient(DownloadClient):
         self._download_dir = config_text(config.get("RTORRENT_DOWNLOAD_DIR", ""))
         self._label = config_text(config.get("RTORRENT_LABEL", ""))
         self._audiobook_label = config_text(config.get("RTORRENT_AUDIOBOOK_LABEL", ""))
+        self._separate_download_dirs = bool(config.get("RTORRENT_SEPARATE_DOWNLOAD_DIRS", False))
+        self._download_dir_book = config_text(config.get("RTORRENT_DOWNLOAD_DIR_BOOK", ""))
         self._download_dir_audiobook = config_text(
             config.get("RTORRENT_DOWNLOAD_DIR_AUDIOBOOK", "")
         )
@@ -195,7 +197,13 @@ class RTorrentClient(DownloadClient):
                 commands.append(f"d.custom1.set={label}")
 
             download_dir = (
-                resolve_download_dir(self._download_dir, self._download_dir_audiobook, content_type)
+                resolve_download_dir(
+                    separate=self._separate_download_dirs,
+                    shared_dir=self._download_dir,
+                    book_dir=self._download_dir_book,
+                    audiobook_dir=self._download_dir_audiobook,
+                    content_type=content_type,
+                )
                 or self._get_download_dir()
             )
             if download_dir:

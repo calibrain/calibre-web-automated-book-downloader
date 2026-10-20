@@ -189,6 +189,10 @@ class TransmissionClient(DownloadClient):
         _apply_transmission_ssl_verify(self._client, url)
         self._category = config_text(config.get("TRANSMISSION_CATEGORY", "books"))
         self._download_dir = config_text(config.get("TRANSMISSION_DOWNLOAD_DIR", ""))
+        self._separate_download_dirs = bool(
+            config.get("TRANSMISSION_SEPARATE_DOWNLOAD_DIRS", False)
+        )
+        self._download_dir_book = config_text(config.get("TRANSMISSION_DOWNLOAD_DIR_BOOK", ""))
         self._download_dir_audiobook = config_text(
             config.get("TRANSMISSION_DOWNLOAD_DIR_AUDIOBOOK", "")
         )
@@ -243,7 +247,11 @@ class TransmissionClient(DownloadClient):
             if resolved_category:
                 add_kwargs["labels"] = [resolved_category]
             download_dir = resolve_download_dir(
-                self._download_dir, self._download_dir_audiobook, kwargs.get("content_type")
+                separate=self._separate_download_dirs,
+                shared_dir=self._download_dir,
+                book_dir=self._download_dir_book,
+                audiobook_dir=self._download_dir_audiobook,
+                content_type=kwargs.get("content_type"),
             )
             if download_dir:
                 add_kwargs["download_dir"] = download_dir

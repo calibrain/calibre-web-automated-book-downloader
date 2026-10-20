@@ -12,11 +12,20 @@ def config_text(value: object, default: str = "") -> str:
     return str(value)
 
 
-def resolve_download_dir(default_dir: str, audiobook_dir: str, content_type: object) -> str:
-    """Pick the client save directory, preferring the audiobook one for audiobooks."""
-    if audiobook_dir and is_audiobook(content_type if isinstance(content_type, str) else None):
+def resolve_download_dir(
+    *,
+    separate: bool,
+    shared_dir: str,
+    book_dir: str,
+    audiobook_dir: str,
+    content_type: object,
+) -> str:
+    """Pick the client save directory; empty means use the client's own default."""
+    if not separate:
+        return shared_dir
+    if is_audiobook(content_type if isinstance(content_type, str) else None):
         return audiobook_dir
-    return default_dir
+    return book_dir
 
 
 def normalize_http_config_url(value: object, *, require_string: bool = False) -> str:

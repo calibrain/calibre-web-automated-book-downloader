@@ -132,6 +132,8 @@ class DelugeClient(DownloadClient):
 
         self._category = config_text(config.get("DELUGE_CATEGORY", "books"), "books")
         self._download_dir = config_text(config.get("DELUGE_DOWNLOAD_DIR", ""))
+        self._separate_download_dirs = bool(config.get("DELUGE_SEPARATE_DOWNLOAD_DIRS", False))
+        self._download_dir_book = config_text(config.get("DELUGE_DOWNLOAD_DIR_BOOK", ""))
         self._download_dir_audiobook = config_text(config.get("DELUGE_DOWNLOAD_DIR_AUDIOBOOK", ""))
 
     def _next_rpc_id(self) -> int:
@@ -289,7 +291,11 @@ class DelugeClient(DownloadClient):
 
             options: dict[str, Any] = {}
             download_dir = resolve_download_dir(
-                self._download_dir, self._download_dir_audiobook, kwargs.get("content_type")
+                separate=self._separate_download_dirs,
+                shared_dir=self._download_dir,
+                book_dir=self._download_dir_book,
+                audiobook_dir=self._download_dir_audiobook,
+                content_type=kwargs.get("content_type"),
             )
             if download_dir:
                 options["download_location"] = download_dir
