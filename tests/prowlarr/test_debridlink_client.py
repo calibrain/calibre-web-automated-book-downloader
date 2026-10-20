@@ -256,7 +256,7 @@ class TestStatus:
         status = client._handle_torrent_info(partial, state)
 
         assert status.progress == 50.0
-        started.assert_called_once_with(state)
+        started.assert_called_once_with(state, partial["files"])
 
     def test_an_empty_file_list_is_not_treated_as_ready(self, tmp_path, monkeypatch):
         client = self._bare_client()
@@ -326,7 +326,7 @@ class TestStatus:
         state = _state(tmp_path)
         DebridLinkClient._downloads["DL1"] = state
         release = threading.Event()
-        monkeypatch.setattr(client, "_process_and_download", lambda _state: release.wait(5))
+        monkeypatch.setattr(client, "_process_and_download", lambda _state, _files: release.wait(5))
 
         client._maybe_start_download_thread(state)
         try:
@@ -338,6 +338,28 @@ class TestStatus:
 
         assert status.message == "Downloading files via HTTP..."
         assert status.progress == 50.0
+
+    def test_retrieval_reuses_the_files_the_status_check_already_has(self, tmp_path, monkeypatch):
+        client = self._bare_client()
+        state = _state(tmp_path)
+        DebridLinkClient._downloads["DL1"] = state
+        refetched = MagicMock(side_effect=AssertionError("file list fetched a second time"))
+        monkeypatch.setattr(client, "_fetch_file_list", refetched)
+        seen: list[list[dict]] = []
+        monkeypatch.setattr(
+            client, "_process_and_download", lambda _state, files=None: seen.append(files)
+        )
+
+        ready = {
+            "downloadPercent": 100,
+            "files": [{"name": "Dune.epub", "downloadPercent": 100, "downloadUrl": "https://dl/x"}],
+        }
+        client._handle_torrent_info(ready, state)
+        assert state.download_thread is not None
+        state.download_thread.join(5)
+
+        assert seen == [ready["files"]]
+        refetched.assert_not_called()
 
     def test_a_vanished_torrent_becomes_an_error_rather_than_a_stall(self, monkeypatch, tmp_path):
         monkeypatch.setattr("shelfmark.download.clients.debridlink.TMP_DIR", tmp_path)
