@@ -55,7 +55,10 @@ def test_direct_download_explains_aa_requirement_when_only_zlib_is_configured(mo
 
     source = DirectDownloadSource()
 
-    with pytest.raises(SearchUnavailableError, match="Anna's Archive mirror"):
+    with pytest.raises(
+        SearchUnavailableError,
+        match="Anna's Archive or OceanofPDF mirror URL.*only download results found through",
+    ):
         source.search(SimpleNamespace(), SimpleNamespace())
 
 

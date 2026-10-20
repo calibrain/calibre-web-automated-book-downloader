@@ -1,6 +1,6 @@
 import type { RequestRecord } from '../../types';
 
-export type ActivityKind = 'download' | 'request';
+type ActivityKind = 'download' | 'request';
 
 export type ActivityVisualStatus =
   | 'queued'

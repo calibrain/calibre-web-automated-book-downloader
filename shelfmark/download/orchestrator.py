@@ -416,6 +416,28 @@ def get_book_path(task_id: str) -> tuple[str | None, DownloadTask | None]:
         return path, task
 
 
+def get_book_paths(task_id: str) -> tuple[list[str], DownloadTask | None]:
+    """Every file a task's download produced that is still on disk.
+
+    A multi-file release (chapters of an audiobook, a pack) lands as several files;
+    :func:`get_book_path` only knows the first. The list is trusted only while it
+    still contains download_path, so a later output that recorded no list cannot
+    hand back an earlier attempt's files.
+    """
+    path, task = get_book_path(task_id)
+    if path is None or task is None:
+        return [], task
+
+    if path not in task.download_paths:
+        return [path], task
+
+    try:
+        return [p for p in task.download_paths if Path(p).is_file()], task
+    except OSError as e:
+        logger.error_trace(f"Error resolving book paths: {e}")
+        return [path], task
+
+
 def get_book_data(task_id: str) -> tuple[bytes | None, DownloadTask | None]:
     """Get downloaded file data for a specific task.
 

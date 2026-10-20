@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import importlib
+import io
 import sqlite3
 import uuid
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
@@ -354,6 +356,46 @@ class TestActivityRoutes:
 
         assert response.status_code == 200
         assert response.data == file_bytes
+
+    def test_localdownload_zips_a_live_multi_file_download(self, main_module, client, tmp_path):
+        user = _create_user(main_module, prefix="reader")
+        _set_session(client, user_id=user["username"], db_user_id=user["id"], is_admin=False)
+
+        task_id = f"live-localdownload-{uuid.uuid4().hex[:8]}"
+        book_dir = tmp_path / "Chapters"
+        book_dir.mkdir()
+        parts = [book_dir / "Part 1.mp3", book_dir / "Part 2.mp3"]
+        for index, part in enumerate(parts, start=1):
+            part.write_bytes(f"chapter {index}".encode())
+
+        task = DownloadTask(
+            task_id=task_id,
+            source="direct_download",
+            title="Zipped Audiobook",
+            author="Some Author",
+            user_id=user["id"],
+            username=user["username"],
+            download_path=str(parts[0]),
+            download_paths=[str(part) for part in parts],
+        )
+        assert main_module.backend.book_queue.add(task) is True
+
+        try:
+            main_module.backend.book_queue.update_status(task_id, QueueStatus.COMPLETE)
+            with patch.object(main_module, "get_auth_mode", return_value="builtin"):
+                response = client.get(f"/api/localdownload?id={task_id}")
+        finally:
+            main_module.backend.book_queue.cancel_download(task_id)
+
+        assert response.status_code == 200
+        assert response.mimetype == "application/zip"
+        assert (
+            'filename="Some Author - Zipped Audiobook.zip"'
+            in response.headers["Content-Disposition"]
+        )
+        with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+            assert archive.namelist() == ["Part 1.mp3", "Part 2.mp3"]
+            assert archive.read("Part 2.mp3") == b"chapter 2"
 
     def test_localdownload_returns_not_found_for_other_users_live_queue_task(
         self, main_module, client, tmp_path

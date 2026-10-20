@@ -66,10 +66,11 @@ This separation allows:
 A source has both a `ReleaseSource` (for searching) and a `DownloadHandler` (for downloading). They share the same `name` identifier:
 
 ```python
-@register_source("my_source")      # Search registration
+@register_source("my_source")  # Search registration
 class MySource(ReleaseSource): ...
 
-@register_handler("my_source")     # Download registration
+
+@register_handler("my_source")  # Download registration
 class MyHandler(DownloadHandler): ...
 ```
 
@@ -142,10 +143,11 @@ from typing import List
 from shelfmark.metadata_providers import BookMetadata
 from shelfmark.release_sources import Release, ReleaseColumnConfig
 
+
 class ReleaseSource(ABC):
     """Interface for searching a release source."""
 
-    name: str          # Internal identifier: "direct_download", "prowlarr"
+    name: str  # Internal identifier: "direct_download", "prowlarr"
     display_name: str  # User-facing name: "Direct Download", "Prowlarr"
 
     @abstractmethod
@@ -191,14 +193,16 @@ def search(self, book: BookMetadata) -> List[Release]:
     if book.isbn_13:
         api_results = self.api.search_isbn(book.isbn_13)
         for r in api_results:
-            results.append(Release(
-                source="my_source",
-                source_id=r.id,
-                title=r.title,
-                format=r.format,
-                size=r.size,
-                # ... more fields
-            ))
+            results.append(
+                Release(
+                    source="my_source",
+                    source_id=r.id,
+                    title=r.title,
+                    format=r.format,
+                    size=r.size,
+                    # ... more fields
+                )
+            )
 
     # Strategy 2: Fallback to title + author search
     if not results:
@@ -238,6 +242,7 @@ from abc import ABC, abstractmethod
 from typing import Callable, Optional
 from threading import Event
 from shelfmark.core.models import DownloadTask
+
 
 class DownloadHandler(ABC):
     """Interface for executing downloads from a source."""
@@ -285,6 +290,7 @@ downloading it; the default returns `None`, which the UI reports as "can't inspe
 
 ```python
 from shelfmark.download.postprocess.packs import PackFile
+
 
 def list_files(self, release_data: dict[str, Any]) -> list[PackFile] | None:
     """Return the release's files (release-relative paths + sizes), or None."""
@@ -380,20 +386,20 @@ Standardized search result returned by all sources:
 ```python
 @dataclass
 class Release:
-    source: str                      # "direct_download", "prowlarr", "irc"
-    source_id: str                   # Unique ID within that source
-    title: str                       # Display title
+    source: str  # "direct_download", "prowlarr", "irc"
+    source_id: str  # Unique ID within that source
+    title: str  # Display title
 
-    format: Optional[str] = None     # File format: "epub", "mobi", "pdf"
-    size: Optional[str] = None       # Human-readable: "5.2 MB"
-    size_bytes: Optional[int] = None # For sorting
+    format: Optional[str] = None  # File format: "epub", "mobi", "pdf"
+    size: Optional[str] = None  # Human-readable: "5.2 MB"
+    size_bytes: Optional[int] = None  # For sorting
 
     download_url: Optional[str] = None  # Direct download URL if available
-    info_url: Optional[str] = None      # Link to tracker/info page
+    info_url: Optional[str] = None  # Link to tracker/info page
 
-    protocol: Optional[str] = None   # "http", "torrent", "usenet"
-    indexer: Optional[str] = None    # Display name: "Direct Download", "My Indexer"
-    seeders: Optional[int] = None    # For torrents
+    protocol: Optional[str] = None  # "http", "torrent", "usenet"
+    indexer: Optional[str] = None  # Display name: "Direct Download", "My Indexer"
+    seeders: Optional[int] = None  # For torrents
 
     extra: Dict = field(default_factory=dict)  # Source-specific metadata
 ```
@@ -415,7 +421,7 @@ Release(
         "preview": "https://example.com/cover.jpg",
         "quality": "high",
         "publisher": "Publisher Name",
-    }
+    },
 )
 ```
 
@@ -428,15 +434,15 @@ Source-agnostic task in the download queue:
 ```python
 @dataclass
 class DownloadTask:
-    task_id: str                     # Unique ID (e.g., AA MD5, Prowlarr GUID)
-    source: str                      # Handler name: "direct_download"
-    title: str                       # Display title
+    task_id: str  # Unique ID (e.g., AA MD5, Prowlarr GUID)
+    source: str  # Handler name: "direct_download"
+    title: str  # Display title
 
     # Display info (from Release.extra or Release fields)
     author: Optional[str] = None
     format: Optional[str] = None
     size: Optional[str] = None
-    preview: Optional[str] = None    # Cover image URL
+    preview: Optional[str] = None  # Cover image URL
 
     # Runtime state (managed by orchestrator)
     priority: int = 0
@@ -454,8 +460,8 @@ Book information passed to `search()`:
 ```python
 @dataclass
 class BookMetadata:
-    provider: str                    # Metadata provider: "hardcover", "openlibrary"
-    provider_id: str                 # ID in provider's system
+    provider: str  # Metadata provider: "hardcover", "openlibrary"
+    provider_id: str  # ID in provider's system
     title: str
 
     provider_display_name: Optional[str] = None
@@ -466,7 +472,7 @@ class BookMetadata:
     description: Optional[str] = None
     publisher: Optional[str] = None
     publish_year: Optional[int] = None
-    language: Optional[str] = None   # ISO 639-1 code: "en", "de", "fr"
+    language: Optional[str] = None  # ISO 639-1 code: "en", "de", "fr"
     genres: List[str] = field(default_factory=list)
     source_url: Optional[str] = None
     display_fields: List[DisplayField] = field(default_factory=list)
@@ -481,13 +487,13 @@ class BookMetadata:
 ```python
 from shelfmark.release_sources import register_source, register_handler
 
+
 @register_source("my_source")
-class MySource(ReleaseSource):
-    ...
+class MySource(ReleaseSource): ...
+
 
 @register_handler("my_source")
-class MyHandler(DownloadHandler):
-    ...
+class MyHandler(DownloadHandler): ...
 ```
 
 ### Registry Functions
@@ -544,12 +550,13 @@ from shelfmark.core.settings_registry import (
     is_value_from_env,
 )
 
+
 @register_settings(
-    name="my_source",               # Unique identifier
-    display_name="My Source",       # Shown in settings UI
-    icon="globe",                   # Icon name (optional)
-    order=60,                       # Sort order in sidebar
-    group="sources",                # Grouping in sidebar
+    name="my_source",  # Unique identifier
+    display_name="My Source",  # Shown in settings UI
+    icon="globe",  # Icon name (optional)
+    order=60,  # Sort order in sidebar
+    group="sources",  # Grouping in sidebar
 )
 def my_source_settings():
     """Register settings for My Source plugin."""
@@ -559,7 +566,6 @@ def my_source_settings():
             title="My Source Configuration",
             description="Configure connection to My Source API",
         ),
-
         PasswordField(
             key="MY_SOURCE_API_KEY",
             label="API Key",
@@ -567,14 +573,12 @@ def my_source_settings():
             required=True,
             env_supported=True,  # Can be set via MY_SOURCE_API_KEY env var
         ),
-
         TextField(
             key="MY_SOURCE_BASE_URL",
             label="Base URL",
             placeholder="https://api.mysource.com",
             env_supported=True,
         ),
-
         NumberField(
             key="MY_SOURCE_TIMEOUT",
             label="Request Timeout",
@@ -583,14 +587,12 @@ def my_source_settings():
             min_value=5,
             max_value=120,
         ),
-
         CheckboxField(
             key="MY_SOURCE_ENABLED",
             label="Enable My Source",
             description="Include in release searches",
             default=True,
         ),
-
         ActionButton(
             key="test_connection",
             label="Test Connection",
@@ -599,22 +601,19 @@ def my_source_settings():
         ),
     ]
 
+
 def test_my_source_connection():
     """Test connection callback - returns result dict."""
     try:
         # Get current API key
-        api_key = get_setting_value(
-            PasswordField(key="MY_SOURCE_API_KEY", label=""),
-            "my_source"
-        )
+        api_key = get_setting_value(PasswordField(key="MY_SOURCE_API_KEY", label=""), "my_source")
 
         if not api_key:
             return {"success": False, "message": "API key not configured"}
 
         # Test the connection
         response = requests.get(
-            "https://api.mysource.com/ping",
-            headers={"Authorization": f"Bearer {api_key}"}
+            "https://api.mysource.com/ping", headers={"Authorization": f"Bearer {api_key}"}
         )
 
         if response.status_code == 200:
@@ -648,6 +647,7 @@ from shelfmark.core.settings_registry import (
     load_config_file,
 )
 
+
 # In your source/handler class
 def __init__(self):
     # Load from config file
@@ -655,11 +655,9 @@ def __init__(self):
     self.api_key = config.get("MY_SOURCE_API_KEY")
     self.base_url = config.get("MY_SOURCE_BASE_URL", "https://api.mysource.com")
 
+
 # Or use get_setting_value for ENV var priority
-api_key = get_setting_value(
-    PasswordField(key="MY_SOURCE_API_KEY", label=""),
-    "my_source"
-)
+api_key = get_setting_value(PasswordField(key="MY_SOURCE_API_KEY", label=""), "my_source")
 ```
 
 ### Settings Priority
@@ -688,6 +686,7 @@ from shelfmark.release_sources import (
     LeadingCellConfig,
     LeadingCellType,
 )
+
 
 @classmethod
 def get_column_config(cls) -> ReleaseColumnConfig:
@@ -759,7 +758,7 @@ For `BADGE` render type, specify colors:
 
 ```python
 # Use frontend color map (defined in colorMaps.ts)
-ColumnColorHint(type="map", value="format")    # Maps epub→green, pdf→red, etc.
+ColumnColorHint(type="map", value="format")  # Maps epub→green, pdf→red, etc.
 ColumnColorHint(type="map", value="language")  # Maps en→blue, de→yellow, etc.
 
 # Use static Tailwind class
@@ -963,6 +962,7 @@ logger = setup_logger(__name__)
 # Settings Registration
 # ---------------------------------------------------------------------------
 
+
 @register_settings(
     name="booknet",
     display_name="BookNet",
@@ -980,7 +980,6 @@ def booknet_settings():
             link_url="https://booknet.example.com/api-docs",
             link_text="API Documentation",
         ),
-
         PasswordField(
             key="BOOKNET_API_KEY",
             label="API Key",
@@ -988,14 +987,12 @@ def booknet_settings():
             required=True,
             env_supported=True,
         ),
-
         TextField(
             key="BOOKNET_BASE_URL",
             label="Base URL",
             placeholder="https://api.booknet.example.com",
             env_supported=True,
         ),
-
         NumberField(
             key="BOOKNET_TIMEOUT",
             label="Request Timeout",
@@ -1004,14 +1001,12 @@ def booknet_settings():
             min_value=5,
             max_value=120,
         ),
-
         CheckboxField(
             key="BOOKNET_PREFER_EPUB",
             label="Prefer EPUB format",
             description="Sort EPUB results first when available",
             default=True,
         ),
-
         ActionButton(
             key="test_connection",
             label="Test Connection",
@@ -1041,7 +1036,7 @@ def _test_booknet_connection() -> Dict:
             data = response.json()
             return {
                 "success": True,
-                "message": f"Connected! {data.get('books_available', 0):,} books available"
+                "message": f"Connected! {data.get('books_available', 0):,} books available",
             }
         elif response.status_code == 401:
             return {"success": False, "message": "Invalid API key"}
@@ -1057,6 +1052,7 @@ def _test_booknet_connection() -> Dict:
 # ---------------------------------------------------------------------------
 # Release Source Implementation
 # ---------------------------------------------------------------------------
+
 
 @register_source("booknet")
 class BookNetSource(ReleaseSource):
@@ -1090,7 +1086,7 @@ class BookNetSource(ReleaseSource):
 
             # Sort by preference
             if self.prefer_epub:
-                releases.sort(key=lambda r: (0 if r.format == "epub" else 1))
+                releases.sort(key=lambda r: 0 if r.format == "epub" else 1)
 
             return releases
 
@@ -1164,7 +1160,9 @@ class BookNetSource(ReleaseSource):
                     render_type=ColumnRenderType.BADGE,
                     align=ColumnAlign.CENTER,
                     width="70px",
-                    color_hint=ColumnColorHint(type="static", value="bg-purple-500/20 text-purple-400"),
+                    color_hint=ColumnColorHint(
+                        type="static", value="bg-purple-500/20 text-purple-400"
+                    ),
                 ),
                 ColumnSchema(
                     key="extra.language",
@@ -1201,6 +1199,7 @@ class BookNetSource(ReleaseSource):
 # ---------------------------------------------------------------------------
 # Download Handler Implementation
 # ---------------------------------------------------------------------------
+
 
 @register_handler("booknet")
 class BookNetHandler(DownloadHandler):
@@ -1264,8 +1263,7 @@ class BookNetHandler(DownloadHandler):
 
                 # Phase 3: Move to final location
                 safe_title = "".join(
-                    c if c.isalnum() or c in " .-_" else "_"
-                    for c in task.title[:100]
+                    c if c.isalnum() or c in " .-_" else "_" for c in task.title[:100]
                 ).strip()
 
                 final_filename = f"{safe_title}.{task.format or 'epub'}"
@@ -1274,7 +1272,9 @@ class BookNetHandler(DownloadHandler):
                 # Avoid overwriting existing files
                 counter = 1
                 while final_path.exists():
-                    final_path = Path(INGEST_DIR) / f"{safe_title} ({counter}).{task.format or 'epub'}"
+                    final_path = (
+                        Path(INGEST_DIR) / f"{safe_title} ({counter}).{task.format or 'epub'}"
+                    )
                     counter += 1
 
                 shutil.move(str(temp_path), str(final_path))
@@ -1363,6 +1363,7 @@ def is_available(self) -> bool:
     except Exception:
         return False
 
+
 def search(self, book: BookMetadata) -> List[Release]:
     """Return empty list on errors, don't raise."""
     try:
@@ -1446,10 +1447,10 @@ from shelfmark.core.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-logger.debug("Detailed debug info")      # Development only
-logger.info("Normal operation info")     # General progress
-logger.warning("Recoverable issues")     # Fallback used, retry happening
-logger.error("Failures")                 # Unrecoverable errors
+logger.debug("Detailed debug info")  # Development only
+logger.info("Normal operation info")  # General progress
+logger.warning("Recoverable issues")  # Fallback used, retry happening
+logger.error("Failures")  # Unrecoverable errors
 ```
 
 ---

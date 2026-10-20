@@ -194,7 +194,9 @@ def _probe_completed_path(path: Path) -> tuple[bool, OSError | None]:
     return True, None
 
 
-def _completed_file_signature(path: Path, content_type: str | None) -> tuple[tuple[str, int, int], ...] | None:
+def _completed_file_signature(
+    path: Path, content_type: str | None
+) -> tuple[tuple[str, int, int], ...] | None:
     """Return sizes and mtimes for supported files in a completed path."""
     from shelfmark.download.postprocess.policy import (
         get_supported_audiobook_formats,
@@ -202,9 +204,7 @@ def _completed_file_signature(path: Path, content_type: str | None) -> tuple[tup
     )
 
     formats = (
-        get_supported_audiobook_formats()
-        if is_audiobook(content_type)
-        else get_supported_formats()
+        get_supported_audiobook_formats() if is_audiobook(content_type) else get_supported_formats()
     )
     supported_suffixes = {f".{fmt.lstrip('.').lower()}" for fmt in formats}
 

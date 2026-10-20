@@ -6,12 +6,14 @@ import os
 import re
 import sqlite3
 import time
+import unicodedata
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from functools import wraps
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, NoReturn, cast
+from urllib.parse import quote
 
 from flask import Flask, g, jsonify, request, send_file, send_from_directory, session
 from flask_cors import CORS
@@ -55,7 +57,12 @@ from shelfmark.core.cwa_user_sync import upsert_cwa_user
 from shelfmark.core.download_history_service import DownloadHistoryService
 from shelfmark.core.external_user_linking import upsert_external_user
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.models import TERMINAL_QUEUE_STATUSES, QueueStatus, SearchFilters
+from shelfmark.core.models import (
+    TERMINAL_QUEUE_STATUSES,
+    QueueStatus,
+    SearchFilters,
+    build_filename,
+)
 from shelfmark.core.notifications import (
     NotificationContext,
     NotificationEvent,
@@ -95,6 +102,7 @@ from shelfmark.core.viewer_redaction import (
 )
 from shelfmark.download import orchestrator as backend
 from shelfmark.download import warmup
+from shelfmark.download.zip_stream import stream_zip
 from shelfmark.release_sources import (
     BrowseRecord,
     Release,
@@ -103,6 +111,7 @@ from shelfmark.release_sources import (
 )
 
 if TYPE_CHECKING:
+    from shelfmark.core.models import DownloadTask
     from shelfmark.metadata_providers import BookMetadata, MetadataProvider
 
 logger = setup_logger(__name__)
@@ -1800,16 +1809,43 @@ def api_status() -> Response | tuple[Response, int]:
         return jsonify({"error": str(e)}), 500
 
 
+def _attachment_filename_options(download_name: str) -> dict[str, str]:
+    """Content-Disposition filename options, RFC 2231-encoded when not plain ASCII.
+
+    Mirrors what send_file does, for responses built from a generator.
+    """
+    try:
+        download_name.encode("ascii")
+    except UnicodeEncodeError:
+        simple = unicodedata.normalize("NFKD", download_name)
+        simple = simple.encode("ascii", "ignore").decode("ascii")
+        quoted = quote(download_name, safe="!#$&+^`|~")
+        return {"filename": simple, "filename*": f"UTF-8''{quoted}"}
+    return {"filename": download_name}
+
+
+def _zip_download_response(file_paths: list[str], task: DownloadTask) -> Response:
+    """Send a multi-file download (audiobook chapters, a pack) as one streamed ZIP."""
+    download_name = build_filename(task.title or "download", task.author, task.year, "zip")
+    response = Response(stream_zip(file_paths), mimetype="application/zip")
+    response.headers.set(
+        "Content-Disposition", "attachment", **_attachment_filename_options(download_name)
+    )
+    return response
+
+
 @app.route("/api/localdownload", methods=["GET"])
 @login_required
 def api_local_download() -> Response | tuple[Response, int]:
-    """Download an EPUB file from local storage if available.
+    """Download a completed book from local storage if available.
 
     Query Parameters:
         id (str): Book identifier (MD5 hash)
 
     Returns:
-        flask.Response: The EPUB file if found, otherwise an error response.
+        flask.Response: The file if found, a ZIP of all of them when the download
+        produced several (a live task only; history keeps just the first), otherwise
+        an error response.
 
     """
     book_id = request.args.get("id", "")
@@ -1820,8 +1856,8 @@ def api_local_download() -> Response | tuple[Response, int]:
     try:
         # The path, not the bytes: send_file streams it off disk, where reading it
         # first cost two resident copies of the whole book.
-        file_path, book_info = backend.get_book_path(book_id)
-        if file_path is None:
+        file_paths, book_info = backend.get_book_paths(book_id)
+        if not file_paths:
             # Fallback for dismissed/history entries where queue task may no longer exist.
             if download_history_service is not None:
                 is_admin, db_user_id, can_access_status = _resolve_status_scope()
@@ -1853,8 +1889,11 @@ def api_local_download() -> Response | tuple[Response, int]:
             ):
                 return jsonify({"error": "File not found"}), 404
 
+        if book_info is not None and len(file_paths) > 1:
+            return _zip_download_response(file_paths, book_info)
+
         file_name = book_info.get_filename() if book_info is not None else Path(book_id).name
-        return send_file(file_path, download_name=file_name, as_attachment=True)
+        return send_file(file_paths[0], download_name=file_name, as_attachment=True)
 
     except _OPERATIONAL_ERRORS as e:
         logger.error_trace(f"Local download error: {e}")

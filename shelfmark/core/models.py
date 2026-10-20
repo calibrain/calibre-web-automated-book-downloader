@@ -158,6 +158,9 @@ class DownloadTask:
     status: QueueStatus = QueueStatus.QUEUED
     status_message: str | None = None
     download_path: str | None = None
+    # Every file the output step produced, download_path among them. Kept in memory
+    # only: history persists download_path alone.
+    download_paths: list[str] = field(default_factory=list)
     last_error_message: str | None = None
     last_error_type: str | None = None
     staged_path: str | None = None
