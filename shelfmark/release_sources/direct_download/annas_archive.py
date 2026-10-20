@@ -722,11 +722,17 @@ def search_books(query: str, filters: SearchFilters) -> tuple[list[BrowseRecord]
         Exception: If parsing fails
 
     """
-    query_html = quote(query)
-
+    # isbn13:/isbn10: boolean syntax 404s; search the bare ISBN strings instead.
     if filters.isbn:
-        isbns = " || ".join([f"('isbn13:{isbn}' || 'isbn10:{isbn}')" for isbn in filters.isbn])
-        query_html = quote(f"({isbns}) {query}")
+        tokens: list[str] = []
+        for isbn in filters.isbn:
+            if isbn not in tokens:
+                tokens.append(isbn)
+        if query not in tokens:
+            tokens.append(query)
+        query_html = quote(" ".join(tokens))
+    else:
+        query_html = quote(query)
 
     filters_query = ""
 
