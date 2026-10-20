@@ -291,14 +291,17 @@ def _activity_ws_room(actor: _ActorContext) -> str:
     return "admins"
 
 
-def _check_item_ownership(actor: _ActorContext, row: dict[str, Any]) -> str | None:
-    """Return an error string if the actor doesn't own the item, else None."""
+def _actor_owns_item(actor: _ActorContext, row: dict[str, Any]) -> bool:
+    """Admins own every row; a user only the rows recorded under their id.
+
+    A row the actor does not own is answered exactly like a row that does not
+    exist. Answering it differently (403 against 404) would let any user find
+    out which ids exist, one guess at a time.
+    """
     if actor.is_admin:
-        return None
+        return True
     owner_user_id = normalize_positive_int(row.get("user_id"))
-    if owner_user_id != actor.db_user_id:
-        return "Forbidden"
-    return None
+    return owner_user_id == actor.db_user_id
 
 
 def _check_terminal_download(row: dict[str, Any]) -> str | None:
@@ -737,7 +740,10 @@ def register_activity_routes(
                 )
 
             existing = download_history_service.get_by_task_id(task_id)
-            if existing is None:
+            if existing is None or not _actor_owns_item(actor, existing):
+                download_log_context: dict[str, Any] = (
+                    _download_row_log_context(existing) if existing is not None else {}
+                )
                 return _activity_error_response(
                     "dismiss",
                     status_code=404,
@@ -746,6 +752,7 @@ def register_activity_routes(
                     viewer_scope=actor.viewer_scope,
                     item_type="download",
                     item_key=f"download:{task_id}",
+                    **download_log_context,
                 )
 
             live_queue_index = _build_queue_index(queue_status(user_id=actor.owner_scope))
@@ -753,18 +760,6 @@ def register_activity_routes(
                 existing,
                 has_live_queue_entry=task_id in live_queue_index,
             )
-            ownership_error = _check_item_ownership(actor, existing)
-            if ownership_error is not None:
-                return _activity_error_response(
-                    "dismiss",
-                    status_code=403,
-                    error=ownership_error,
-                    auth_mode=resolve_auth_mode(),
-                    viewer_scope=actor.viewer_scope,
-                    item_type="download",
-                    item_key=f"download:{task_id}",
-                    **_download_row_log_context(effective_existing),
-                )
             terminal_error = _check_terminal_download(effective_existing)
             if terminal_error is not None:
                 return _activity_error_response(
@@ -802,7 +797,12 @@ def register_activity_routes(
                 )
 
             request_row = user_db.get_request(request_id)
-            if request_row is None:
+            if request_row is None or not _actor_owns_item(actor, request_row):
+                request_log_context: dict[str, Any] = (
+                    _request_row_log_context(request_row)
+                    if request_row is not None
+                    else {"request_id": request_id}
+                )
                 return _activity_error_response(
                     "dismiss",
                     status_code=404,
@@ -811,21 +811,9 @@ def register_activity_routes(
                     viewer_scope=actor.viewer_scope,
                     item_type="request",
                     item_key=f"request:{request_id}",
-                    request_id=request_id,
+                    **request_log_context,
                 )
 
-            ownership_error = _check_item_ownership(actor, request_row)
-            if ownership_error is not None:
-                return _activity_error_response(
-                    "dismiss",
-                    status_code=403,
-                    error=ownership_error,
-                    auth_mode=resolve_auth_mode(),
-                    viewer_scope=actor.viewer_scope,
-                    item_type="request",
-                    item_key=f"request:{request_id}",
-                    **_request_row_log_context(request_row),
-                )
             terminal_error = _check_terminal_request(request_row)
             if terminal_error is not None:
                 return _activity_error_response(
@@ -952,25 +940,27 @@ def register_activity_routes(
                 if existing is None:
                     missing_item_keys.append(f"download:{viewer_task_id}")
                     continue
+                if not _actor_owns_item(actor, existing):
+                    # Reported with the missing ids below; only the log tells them apart.
+                    _log_activity_rejection(
+                        "dismiss_many",
+                        status_code=404,
+                        reason="Download not found",
+                        auth_mode=resolve_auth_mode(),
+                        viewer_scope=actor.viewer_scope,
+                        item_type="download",
+                        item_key=f"download:{task_id}",
+                        item_count=len(items),
+                        **_download_row_log_context(existing),
+                    )
+                    missing_item_keys.append(f"download:{viewer_task_id}")
+                    continue
                 if live_queue_index is None:
                     live_queue_index = _build_queue_index(queue_status(user_id=actor.owner_scope))
                 effective_existing = _effective_download_row_for_activity(
                     existing,
                     has_live_queue_entry=task_id in live_queue_index,
                 )
-                ownership_error = _check_item_ownership(actor, existing)
-                if ownership_error is not None:
-                    return _activity_error_response(
-                        "dismiss_many",
-                        status_code=403,
-                        error=ownership_error,
-                        auth_mode=resolve_auth_mode(),
-                        viewer_scope=actor.viewer_scope,
-                        item_type="download",
-                        item_key=f"download:{task_id}",
-                        item_count=len(items),
-                        **_download_row_log_context(effective_existing),
-                    )
                 terminal_error = _check_terminal_download(effective_existing)
                 if terminal_error is not None:
                     return _activity_error_response(
@@ -1004,12 +994,11 @@ def register_activity_routes(
                 if request_row is None:
                     missing_item_keys.append(f"request:{request_id}")
                     continue
-                ownership_error = _check_item_ownership(actor, request_row)
-                if ownership_error is not None:
-                    return _activity_error_response(
+                if not _actor_owns_item(actor, request_row):
+                    _log_activity_rejection(
                         "dismiss_many",
-                        status_code=403,
-                        error=ownership_error,
+                        status_code=404,
+                        reason="Request not found",
                         auth_mode=resolve_auth_mode(),
                         viewer_scope=actor.viewer_scope,
                         item_type="request",
@@ -1017,6 +1006,8 @@ def register_activity_routes(
                         item_count=len(items),
                         **_request_row_log_context(request_row),
                     )
+                    missing_item_keys.append(f"request:{request_id}")
+                    continue
                 terminal_error = _check_terminal_request(request_row)
                 if terminal_error is not None:
                     return _activity_error_response(
@@ -1135,11 +1126,14 @@ def register_activity_routes(
                     msg = f"Download history row not found for {item_key}"
                     raise RuntimeError(msg)
 
-                if not actor.is_admin:
-                    owner_user_id = normalize_positive_int(download_row.get("user_id"))
-                    if owner_user_id != actor.db_user_id:
-                        msg = f"Viewer state out of scope for {item_key}"
-                        raise RuntimeError(msg)
+                if not _actor_owns_item(actor, download_row):
+                    # Stale or foreign viewer state must not take the whole page down.
+                    logger.warning(
+                        "Activity history skipped %s: out of scope for viewer %s",
+                        item_key,
+                        actor.viewer_scope,
+                    )
+                    continue
 
                 effective_download_row = _effective_download_row_for_activity(
                     download_row,
@@ -1164,11 +1158,13 @@ def register_activity_routes(
                     msg = f"Request row not found for {item_key}"
                     raise RuntimeError(msg)
 
-                if not actor.is_admin:
-                    owner_user_id = normalize_positive_int(request_row.get("user_id"))
-                    if owner_user_id != actor.db_user_id:
-                        msg = f"Viewer state out of scope for {item_key}"
-                        raise RuntimeError(msg)
+                if not _actor_owns_item(actor, request_row):
+                    logger.warning(
+                        "Activity history skipped %s: out of scope for viewer %s",
+                        item_key,
+                        actor.viewer_scope,
+                    )
+                    continue
 
                 populate_request_usernames([request_row], user_db)
                 entry = _request_history_entry(
