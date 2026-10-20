@@ -22,7 +22,7 @@ dependencies = [
     "qbittorrent-api>=2026.8.1",
     "transmission-rpc",
     "authlib>=1.8.0,<1.9",
-    "apprise>=1.13.1",
+    "apprise>=2.0.0",
     # HTTP/2 client for RFC 8484 DoH: quad9 rejects HTTP/1.1 outright (505), which
     # requests cannot speak. See shelfmark/download/doh_wireformat.py.
     "httpx[http2]>=0.28.1",
