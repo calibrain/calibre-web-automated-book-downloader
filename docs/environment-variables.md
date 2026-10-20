@@ -1037,8 +1037,8 @@ Custom label for the OIDC sign-in button on the login page.
 | `USE_DOH` | Use encrypted DNS queries for improved reliability and privacy. | boolean | `true` |
 | `USING_TOR` | Route all traffic through Tor for enhanced privacy. Requires root startup. | boolean | `false` |
 | `PROXY_MODE` | Choose proxy type. SOCKS5 handles all traffic through a single proxy. | string (choice) | `none` |
-| `HTTP_PROXY` | HTTP proxy URL (e.g., http://proxy:8080) | string | _none_ |
-| `HTTPS_PROXY` | HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS) | string | _none_ |
+| `HTTP_PROXY` | HTTP proxy URL. Supports auth: http://user:pass@host:port | string | _none_ |
+| `HTTPS_PROXY` | HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS). Supports auth: http://user:pass@host:port | string | _none_ |
 | `SOCKS5_PROXY` | SOCKS5 proxy URL. Supports auth: socks5://user:pass@host:port | string | _none_ |
 | `NO_PROXY` | Comma-separated hosts to bypass proxy (e.g., localhost,127.0.0.1,10.*,*.local) | string | _none_ |
 
@@ -1106,7 +1106,7 @@ Choose proxy type. SOCKS5 handles all traffic through a single proxy.
 
 **HTTP Proxy**
 
-HTTP proxy URL (e.g., http://proxy:8080)
+HTTP proxy URL. Supports auth: http://user:pass@host:port
 
 - **Type:** string
 - **Default:** _none_
@@ -1115,7 +1115,7 @@ HTTP proxy URL (e.g., http://proxy:8080)
 
 **HTTPS Proxy**
 
-HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS)
+HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS). Supports auth: http://user:pass@host:port
 
 - **Type:** string
 - **Default:** _none_
