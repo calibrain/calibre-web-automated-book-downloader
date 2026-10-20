@@ -24,6 +24,28 @@ export function toBookPlanPayload(books: PackBook[]): PackBook[] {
     .filter((book) => book.title.length > 0 && book.files.length > 0);
 }
 
+/** Books with the user-ignored files removed; books left with no files are dropped. */
+export function applyIgnoredFiles(books: PackBook[], ignored: ReadonlySet<string>): PackBook[] {
+  if (ignored.size === 0) return books;
+  return books
+    .map((book) => ({ ...book, files: book.files.filter((file) => !ignored.has(file)) }))
+    .filter((book) => book.files.length > 0);
+}
+
+/** Add or remove every file of a book from the ignored set (returns a new set). */
+export function setBookIgnored(
+  ignored: ReadonlySet<string>,
+  book: PackBook,
+  shouldIgnore: boolean,
+): Set<string> {
+  const next = new Set(ignored);
+  for (const file of book.files) {
+    if (shouldIgnore) next.add(file);
+    else next.delete(file);
+  }
+  return next;
+}
+
 function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }

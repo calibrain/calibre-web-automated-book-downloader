@@ -159,7 +159,12 @@ class OpenLibraryProvider(MetadataProvider):
         params: dict[str, Any] = {
             "limit": options.limit,
             "page": options.page,
-            "fields": "key,title,author_name,first_publish_year,cover_i,isbn,publisher,language,subject,ratings_average,ratings_count",
+            "fields": (
+                "key,title,author_name,first_publish_year,cover_i,isbn,publisher,"
+                "language,subject,ratings_average,ratings_count,"
+                "editions,editions.key,editions.title,editions.language,"
+                "editions.isbn,editions.cover_i,editions.publish_year"
+            ),
         }
 
         # Field-first search: use custom field values when provided
@@ -348,7 +353,6 @@ class OpenLibraryProvider(MetadataProvider):
 
             # Get cover URL
             cover_id = doc.get("cover_i")
-            cover_url = f"{COVERS_BASE_URL}/b/id/{cover_id}-L.jpg" if cover_id else None
 
             # Get publishers (take first one)
             publishers = doc.get("publisher", [])
@@ -361,6 +365,53 @@ class OpenLibraryProvider(MetadataProvider):
             # Get subjects as genres (take first 5)
             subjects = doc.get("subject", [])
             genres = subjects[:5] if subjects else []
+
+            # `title`/`isbn`/`cover_i`/`language` above describe the *work*, which
+            # Open Library reports with one canonical title - usually the original-
+            # language edition - regardless of which translation's text actually
+            # matched the search query (e.g. querying "Der Weg der Könige" matches
+            # the German edition of "The Way of Kings", but the work's title field
+            # still says "The Way of Kings"). The nested `editions` block, requested
+            # above, is populated with the specific edition whose own fields
+            # satisfied the query, so prefer its title/isbn/cover/language when one
+            # is present and differs from the work - otherwise both the result shown
+            # to the user and the release search query (which uses `search_title` or
+            # else falls back to `title`, see search_plan._pick_search_title) end up
+            # in the wrong language even though the user searched for a specific
+            # translation by name.
+            title = doc["title"]
+            search_title = None
+            publish_year = doc.get("first_publish_year")
+            matched_edition = next(iter(doc.get("editions", {}).get("docs", [])), None)
+            if matched_edition and matched_edition.get("title"):
+                edition_title = matched_edition["title"]
+                if edition_title != title:
+                    search_title = edition_title
+                    title = edition_title
+
+                    edition_isbns = matched_edition.get("isbn", [])
+                    edition_isbn_10 = next(
+                        (i for i in edition_isbns if len(i) == ISBN_10_LENGTH), None
+                    )
+                    edition_isbn_13 = next(
+                        (i for i in edition_isbns if len(i) == ISBN_13_LENGTH), None
+                    )
+                    isbn_10 = edition_isbn_10 or isbn_10
+                    isbn_13 = edition_isbn_13 or isbn_13
+
+                    cover_id = matched_edition.get("cover_i") or cover_id
+
+                    edition_languages = matched_edition.get("language") or []
+                    if edition_languages:
+                        language = edition_languages[0]
+
+                    # A translation is published later than the work it translates,
+                    # e.g. 2015 for "Der Weg der Könige" against 2010 for the work.
+                    edition_years = matched_edition.get("publish_year") or []
+                    if edition_years:
+                        publish_year = min(edition_years)
+
+            cover_url = f"{COVERS_BASE_URL}/b/id/{cover_id}-L.jpg" if cover_id else None
 
             # Build display fields from Open Library-specific data
             display_fields = []
@@ -377,14 +428,15 @@ class OpenLibraryProvider(MetadataProvider):
             return BookMetadata(
                 provider="openlibrary",
                 provider_id=work_id,
-                title=doc["title"],
+                title=title,
+                search_title=search_title,
                 provider_display_name="Open Library",
                 authors=authors,
                 isbn_10=isbn_10,
                 isbn_13=isbn_13,
                 cover_url=cover_url,
                 publisher=publisher,
-                publish_year=doc.get("first_publish_year"),
+                publish_year=publish_year,
                 language=language,
                 genres=genres,
                 source_url=f"{OPENLIBRARY_BASE_URL}/works/{work_id}",

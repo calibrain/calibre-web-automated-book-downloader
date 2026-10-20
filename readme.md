@@ -17,7 +17,7 @@ Works great alongside the following library tools, with support for automatic im
 ## ✨ Features
 
 - **One-Stop Interface** - A clean, modern UI to search, browse, and download from multiple configured sources in one place
-- **Multiple Sources** - Configurable web, torrent, usenet, and IRC source support
+- **Multiple Sources** - Configurable web, torrent, usenet, IRC, and Soulseek (slskd) source support
 - **Audiobook Support** - Full audiobook search and download with dedicated processing
 - **Flexible Search** - Search metadata providers (Hardcover, Open Library, Google Books) for rich book and audiobook discovery, or query configured sources directly
 - **Multi-User & Requests** - Share your instance with others, let users browse and request books, and manage approvals with configurable notifications
@@ -149,6 +149,7 @@ Some of the additional options available in Settings:
 - **Additional audiobook sources** - Configure additional sources for audiobook discovery
 - **Direct Download mirrors** - Supply your own Anna's Archive mirror URLs; Auto mode tries them in the order listed. The `annas-archive.is` domain does not currently work as a source — use `annas-archive.gl` instead (checked August 2026; mirror availability changes)
 - **IRC** - Add details for IRC book sources and download directly from the UI. Most networks serve audiobooks from the same channel as ebooks (on `irc.irchighway.net` that's `#ebooks`, while `#bookz` is effectively inactive), so leave the separate audiobook channel blank unless your network actually indexes one. IRC audiobooks usually arrive as ZIP/RAR archives — keep those enabled under Supported Audiobook Formats or the releases are filtered out of results
+- **Soulseek (slskd)** - Search the Soulseek network and download through a [slskd](https://github.com/slskd/slskd) instance. Point Shelfmark at slskd's URL with an API key (`web.authentication.api_keys` in `slskd.yml`, role `readwrite`), and mount slskd's downloads folder into the Shelfmark container. If the folder sits at a different path inside Shelfmark, set **Downloads Path** in the slskd settings or add a Remote Path Mapping for client `slskd`. Ebook results are single files; audiobook results group a peer's folder of audio files into one release
 - **Library Link** - Add a link to your Calibre-Web or Grimmory instance in the UI header
 - **File processing** - Customiseable download paths, file renaming and directory creation with template-based renaming
 - **Network Settings** - Custom proxy support (SOCKS5 + HTTP/S) and configurable DNS

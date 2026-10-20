@@ -474,7 +474,7 @@ export interface Release {
   size_bytes?: number; // Size in bytes for sorting
   download_url?: string;
   info_url?: string; // Link to release info page (e.g., tracker page) - makes title clickable
-  protocol?: 'http' | 'torrent' | 'nzb' | 'dcc';
+  protocol?: 'http' | 'torrent' | 'nzb' | 'dcc' | 'soulseek';
   indexer?: string; // Display name for the source/indexer
   seeders?: number; // For torrents
   peers?: string; // For torrents: "seeders/leechers" display string

@@ -37,6 +37,11 @@ refreshes the stall clock on every tick of a loop that proves nothing about the 
 
 from collections.abc import Callable
 
+# Seconds without a changed status or progress value before the orchestrator cancels a
+# download. Lives here so the settings module can derive its minimum without importing the
+# orchestrator.
+STALL_TIMEOUT_SECONDS = 300
+
 # Not a QueueStatus value, so `update_download_status` would reject it anyway; the
 # orchestrator's status_callback intercepts it before that point.
 ACTIVITY_GRACE_STATUS = "__activity_grace__"

@@ -16,6 +16,7 @@ This document lists all configuration options that can be set via environment va
 - [Advanced](#advanced)
 - [Prowlarr](#prowlarr)
 - [Newznab](#newznab)
+- [Soulseek (slskd)](#soulseek-slskd)
 - [AudiobookBay](#audiobookbay)
 - [Libgen Search](#libgen-search)
 - [IRC](#irc)
@@ -25,6 +26,7 @@ This document lists all configuration options that can be set via environment va
   - [Open Library](#metadata-providers-open-library)
   - [Google Books](#metadata-providers-google-books)
   - [Moly.hu](#metadata-providers-moly.hu)
+  - [Databáze knih](#metadata-providers-databáze-knih)
 - [Direct Download](#direct-download)
   - [Download Sources](#direct-download-download-sources)
   - [Cloudflare Bypass](#direct-download-cloudflare-bypass)
@@ -512,8 +514,8 @@ Audiobooks only. AudiobookBay lists it for most releases. In Prowlarr results it
 | `INGEST_DIR` | Directory where downloaded files are saved. Use {User} for per-user folders (e.g. /books/{User}). | string | `/books` |
 | `FILE_ORGANIZATION` | Choose how downloaded book files are named and organized. | string (choice) | `rename` |
 | `NAMING_WORD_SEPARATOR` | Replaces spaces inside naming template values (e.g. 'Conan Doyle' -> 'Conan.Doyle' with '.'). Applies to books and audiobooks, rename and organize templates alike. Literal characters typed into a template (like the '-' in '{Author} - {Title}') are left as-is. Leave empty to keep spaces as-is. | string | _empty string_ |
-| `TEMPLATE_RENAME` | Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension). Universal adds: {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. Rename templates are filename-only (no '/' or '\'); use Organize for folders. Applies to single-file downloads. | string | `{Author} - {Title} ({Year})` |
-| `TEMPLATE_ORGANIZE` | Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension). Universal adds: {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. | string | `{Author}/{Title} ({Year})` |
+| `TEMPLATE_RENAME` | Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension). Universal adds: {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. Rename templates are filename-only (no '/' or '\'); use Organize for folders. Applies to single-file downloads. | string | `{Author} - {Title} ({Year})` |
+| `TEMPLATE_ORGANIZE` | Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension). Universal adds: {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. | string | `{Author}/{Title} ({Year})` |
 | `HARDLINK_TORRENTS` | Create hardlinks instead of copying. Preserves seeding but archives won't be extracted. Don't use if destination is a library ingest folder. | boolean | `false` |
 | `BOOKLORE_HOST` | Base URL of your Grimmory instance | string | _none_ |
 | `BOOKLORE_USERNAME` | Grimmory account username | string | _none_ |
@@ -534,8 +536,8 @@ Audiobooks only. AudiobookBay lists it for most releases. In Prowlarr results it
 | `EMAIL_ALLOW_UNVERIFIED_TLS` | Disable TLS certificate verification (not recommended). | boolean | `false` |
 | `DESTINATION_AUDIOBOOK` | Directory where downloaded audiobook files are saved. Leave empty to use the Books destination. | string | _none_ |
 | `FILE_ORGANIZATION_AUDIOBOOK` | Choose how downloaded audiobook files are named and organized. | string (choice) | `rename` |
-| `TEMPLATE_AUDIOBOOK_RENAME` | Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension), {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. Rename templates are filename-only (no '/' or '\'); use Organize for folders. Applies to single-file downloads. | string | `{Author} - {Title}` |
-| `TEMPLATE_AUDIOBOOK_ORGANIZE` | Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension), {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. {Narrator} and a Series fallback come from MyAnonamouse results (needs a MAM session ID); {{Narrator}} writes Audiobookshelf's '{Name}' style and is left out entirely when there is no narrator. | string | `{Author}/{Title}/{Title}` |
+| `TEMPLATE_AUDIOBOOK_RENAME` | Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension), {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. Rename templates are filename-only (no '/' or '\'); use Organize for folders. Applies to single-file downloads. | string | `{Author} - {Title}` |
+| `TEMPLATE_AUDIOBOOK_ORGANIZE` | Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension), {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. {Narrator} and a Series fallback come from MyAnonamouse results (needs a MAM session ID); {{Narrator}} writes Audiobookshelf's '{Name}' style and is left out entirely when there is no narrator. | string | `{Author}/{Title}/{Title}` |
 | `HARDLINK_TORRENTS_AUDIOBOOK` | Create hardlinks instead of copying. Preserves seeding but archives won't be extracted. Don't use if destination is a library ingest folder. | boolean | `true` |
 | `AUTO_OPEN_DOWNLOADS_SIDEBAR` | Automatically open the downloads sidebar when a new download is queued. | boolean | `false` |
 | `DOWNLOAD_TO_BROWSER_CONTENT_TYPES` | Automatically download completed files to your browser for the selected content types. | string (comma-separated) | _empty list_ |
@@ -588,7 +590,7 @@ Replaces spaces inside naming template values (e.g. 'Conan Doyle' -> 'Conan.Doyl
 
 **Naming Template**
 
-Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension). Universal adds: {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. Rename templates are filename-only (no '/' or '\'); use Organize for folders. Applies to single-file downloads.
+Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension). Universal adds: {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. Rename templates are filename-only (no '/' or '\'); use Organize for folders. Applies to single-file downloads.
 
 - **Type:** string
 - **Default:** `{Author} - {Title} ({Year})`
@@ -597,7 +599,7 @@ Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, 
 
 **Path Template**
 
-Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension). Universal adds: {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty.
+Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension). Universal adds: {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty.
 
 - **Type:** string
 - **Default:** `{Author}/{Title} ({Year})`
@@ -798,7 +800,7 @@ Choose how downloaded audiobook files are named and organized.
 
 **Naming Template**
 
-Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension), {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. Rename templates are filename-only (no '/' or '\'); use Organize for folders. Applies to single-file downloads.
+Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension), {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. Rename templates are filename-only (no '/' or '\'); use Organize for folders. Applies to single-file downloads.
 
 - **Type:** string
 - **Default:** `{Author} - {Title}`
@@ -807,7 +809,7 @@ Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, 
 
 **Path Template**
 
-Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension), {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. {Narrator} and a Series fallback come from MyAnonamouse results (needs a MAM session ID); {{Narrator}} writes Audiobookshelf's '{Name}' style and is left out entirely when there is no narrator.
+Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, {OriginalName} (source filename without extension), {Series}, {SeriesPosition}, {Subtitle}, {PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: {Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. {Narrator} and a Series fallback come from MyAnonamouse results (needs a MAM session ID); {{Narrator}} writes Audiobookshelf's '{Name}' style and is left out entirely when there is no narrator.
 
 - **Type:** string
 - **Default:** `{Author}/{Title}/{Title}`
@@ -1037,8 +1039,8 @@ Custom label for the OIDC sign-in button on the login page.
 | `USE_DOH` | Use encrypted DNS queries for improved reliability and privacy. | boolean | `true` |
 | `USING_TOR` | Route all traffic through Tor for enhanced privacy. Requires root startup. | boolean | `false` |
 | `PROXY_MODE` | Choose proxy type. SOCKS5 handles all traffic through a single proxy. | string (choice) | `none` |
-| `HTTP_PROXY` | HTTP proxy URL (e.g., http://proxy:8080) | string | _none_ |
-| `HTTPS_PROXY` | HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS) | string | _none_ |
+| `HTTP_PROXY` | HTTP proxy URL. Supports auth: http://user:pass@host:port | string | _none_ |
+| `HTTPS_PROXY` | HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS). Supports auth: http://user:pass@host:port | string | _none_ |
 | `SOCKS5_PROXY` | SOCKS5 proxy URL. Supports auth: socks5://user:pass@host:port | string | _none_ |
 | `NO_PROXY` | Comma-separated hosts to bypass proxy (e.g., localhost,127.0.0.1,10.*,*.local) | string | _none_ |
 
@@ -1106,7 +1108,7 @@ Choose proxy type. SOCKS5 handles all traffic through a single proxy.
 
 **HTTP Proxy**
 
-HTTP proxy URL (e.g., http://proxy:8080)
+HTTP proxy URL. Supports auth: http://user:pass@host:port
 
 - **Type:** string
 - **Default:** _none_
@@ -1115,7 +1117,7 @@ HTTP proxy URL (e.g., http://proxy:8080)
 
 **HTTPS Proxy**
 
-HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS)
+HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS). Supports auth: http://user:pass@host:port
 
 - **Type:** string
 - **Default:** _none_
@@ -1497,6 +1499,129 @@ Automatically retry search without category filtering if no results are found
 
 </details>
 
+## Soulseek (slskd)
+
+| Variable | Description | Type | Default |
+|----------|-------------|------|---------|
+| `SLSKD_ENABLED` | Enable searching and downloading books through slskd | boolean | `false` |
+| `SLSKD_URL` | Base URL of the slskd web interface | string | _none_ |
+| `SLSKD_API_KEY` | An API key from slskd's configuration (web.authentication.api_keys) with the readwrite role | string (secret) | _none_ |
+| `SLSKD_DOWNLOAD_PATH` | Where slskd's completed downloads folder is mounted inside Shelfmark. Leave empty when both containers see it at the same path, or use Settings > Advanced > Remote Path Mappings with client 'slskd'. | string | _none_ |
+| `SLSKD_ISOLATE_DOWNLOADS` | Download into a folder of its own inside slskd's downloads folder (needs slskd 0.26 or newer). Other apps using the same slskd cannot mix files with it or lose track of it when they clear slskd's list of finished transfers, and Shelfmark confirms a download by the files on disk. | boolean | `true` |
+| `SLSKD_DESTINATION_PREFIX` | The folder, inside slskd's downloads folder, that holds one folder per download. It must not climb out of slskd's downloads folder. | string | `shelfmark` |
+| `SLSKD_KEEP_COMPLETED` | Leave the finished files (and their transfer records) in slskd after Shelfmark copies them to your library, so they stay shared with other Soulseek users. Turn off to delete them once imported. | boolean | `true` |
+| `SLSKD_SEARCH_TIMEOUT` | How long a Soulseek search collects peer responses. Longer waits find more peers but make every search slower. | number | `15` |
+| `SLSKD_RESPONSE_LIMIT` | Stop a search early once this many peers have answered | number | `100` |
+| `SLSKD_QUEUE_TIMEOUT_MINUTES` | Give up when the peer has not started sending within this long. Set to 0 to wait indefinitely. | number | `60` |
+| `SLSKD_REMOVE_COMPLETED` | Clear the transfer from slskd's download list after Shelfmark imports it. Applies when each download does not get its own folder. | boolean | `true` |
+
+<details>
+<summary>Detailed descriptions</summary>
+
+#### `SLSKD_ENABLED`
+
+**Enable Soulseek source**
+
+Enable searching and downloading books through slskd
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `SLSKD_URL`
+
+**slskd URL**
+
+Base URL of the slskd web interface
+
+- **Type:** string
+- **Default:** _none_
+
+#### `SLSKD_API_KEY`
+
+**API Key**
+
+An API key from slskd's configuration (web.authentication.api_keys) with the readwrite role
+
+- **Type:** string (secret)
+- **Default:** _none_
+
+#### `SLSKD_DOWNLOAD_PATH`
+
+**Downloads Path**
+
+Where slskd's completed downloads folder is mounted inside Shelfmark. Leave empty when both containers see it at the same path, or use Settings > Advanced > Remote Path Mappings with client 'slskd'.
+
+- **Type:** string
+- **Default:** _none_
+
+#### `SLSKD_ISOLATE_DOWNLOADS`
+
+**Give each download its own folder**
+
+Download into a folder of its own inside slskd's downloads folder (needs slskd 0.26 or newer). Other apps using the same slskd cannot mix files with it or lose track of it when they clear slskd's list of finished transfers, and Shelfmark confirms a download by the files on disk.
+
+- **Type:** boolean
+- **Default:** `true`
+
+#### `SLSKD_DESTINATION_PREFIX`
+
+**Download Folder**
+
+The folder, inside slskd's downloads folder, that holds one folder per download. It must not climb out of slskd's downloads folder.
+
+- **Type:** string
+- **Default:** `shelfmark`
+
+#### `SLSKD_KEEP_COMPLETED`
+
+**Keep finished files in slskd**
+
+Leave the finished files (and their transfer records) in slskd after Shelfmark copies them to your library, so they stay shared with other Soulseek users. Turn off to delete them once imported.
+
+- **Type:** boolean
+- **Default:** `true`
+
+#### `SLSKD_SEARCH_TIMEOUT`
+
+**Search Wait (seconds)**
+
+How long a Soulseek search collects peer responses. Longer waits find more peers but make every search slower.
+
+- **Type:** number
+- **Default:** `15`
+- **Constraints:** min: 3, max: 120
+
+#### `SLSKD_RESPONSE_LIMIT`
+
+**Max Peer Responses**
+
+Stop a search early once this many peers have answered
+
+- **Type:** number
+- **Default:** `100`
+- **Constraints:** min: 10, max: 1000
+
+#### `SLSKD_QUEUE_TIMEOUT_MINUTES`
+
+**Queue Timeout (minutes)**
+
+Give up when the peer has not started sending within this long. Set to 0 to wait indefinitely.
+
+- **Type:** number
+- **Default:** `60`
+- **Constraints:** min: 0, max: 1440
+
+#### `SLSKD_REMOVE_COMPLETED`
+
+**Remove completed transfers from slskd**
+
+Clear the transfer from slskd's download list after Shelfmark imports it. Applies when each download does not get its own folder.
+
+- **Type:** boolean
+- **Default:** `true`
+
+</details>
+
 ## AudiobookBay
 
 | Variable | Description | Type | Default |
@@ -1734,6 +1859,7 @@ How long to keep cached search results before they expire.
 | `RTORRENT_DOWNLOAD_DIR` | Server-side directory where torrents are downloaded (optional, uses rTorrent default if not specified) | string | _none_ |
 | `PROWLARR_TORRENT_ACTION` | After a successful import, Remove keeps downloaded files in qBittorrent, Transmission, and Deluge; Remove & Delete Files also deletes them. rTorrent cannot delete download data, so this action leaves its torrent untouched. Blackhole does not support removal. Debrid clients delete temporary local files for either Remove action. | string (choice) | `keep` |
 | `PROWLARR_TORRENT_POST_IMPORT_CATEGORY` | Category or label to assign after a successful import | string | _empty string_ |
+| `TORRENT_STALL_TIMEOUT_MINUTES` | How long a torrent can go without any progress before Shelfmark cancels it. Applies from when the torrent starts and restarts each time it moves. Raise it for slow swarms or magnets that take a while to find peers, or lower it to give up on dead torrents sooner. | number | `15` |
 | `PROWLARR_USENET_CLIENT` | Choose which usenet client to use | string (choice) | _empty string_ |
 | `NZBGET_URL` | URL of your NZBGet instance | string | _none_ |
 | `NZBGET_USERNAME` | NZBGet control username | string | `nzbget` |
@@ -2057,6 +2183,16 @@ Category or label to assign after a successful import
 - **Type:** string
 - **Default:** _empty string_
 
+#### `TORRENT_STALL_TIMEOUT_MINUTES`
+
+**Stall Timeout (minutes)**
+
+How long a torrent can go without any progress before Shelfmark cancels it. Applies from when the torrent starts and restarts each time it moves. Raise it for slow swarms or magnets that take a while to find peers, or lower it to give up on dead torrents sooner.
+
+- **Type:** number
+- **Default:** `15`
+- **Constraints:** min: 5, max: 60
+
 #### `PROWLARR_USENET_CLIENT`
 
 **Usenet Client**
@@ -2319,6 +2455,26 @@ Default sort order for Google Books search results.
 #### `MOLY_ENABLED`
 
 **Enable Moly.hu**
+### Metadata Providers: Databáze knih
+
+| Variable | Description | Type | Default |
+|----------|-------------|------|---------|
+| `DATABAZEKNIH_ENABLED` | Enable Databáze knih as a metadata provider for book searches | boolean | `false` |
+
+<details>
+<summary>Detailed descriptions</summary>
+
+#### `DATABAZEKNIH_ENABLED`
+
+**Enable Databáze knih**
+
+Enable Databáze knih as a metadata provider for book searches
+
+- **Type:** boolean
+- **Default:** `false`
+
+</details>
+
 
 Enable Moly.hu as a metadata provider for book searches
 

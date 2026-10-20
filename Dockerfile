@@ -28,10 +28,10 @@ RUN npm run build
 # than copied into the image. A COPY here would land ~24 MB in a `base` layer that
 # every published image inherits, and a later `rm` cannot take it back out again --
 # a RUN adds a layer, it does not rewrite the one underneath.
-FROM ghcr.io/astral-sh/uv:0.12.22@sha256:f513a91fc62fe7c17567eee97230dd198e43edb8a9fbecca843714a4358fe1bc AS uv
+FROM ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a AS uv
 
 # Use python-slim as the base image
-FROM python:3.14.7-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 AS base
+FROM python:3.14.8-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS base
 
 # Set shell to bash with pipefail option
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -148,20 +148,20 @@ ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 
 FROM base AS shelfmark
 
-# --- Chromium (PINNED to 149.0.7827.196) ---
+# --- Chromium (PINNED to 155.0.8059.79) ---
 # Debian's chromium 150.0.7871.46-1~deb13u1 security update (trixie-security,
-# 2026-07-05) no longer opens the DevTools remote-debugging TCP port at all
-# (no listener, no DevToolsActivePort file, even with a custom --user-data-dir;
-# the RemoteDebuggingAllowed policy does not restore it). The SeleniumBase
-# Pure-CDP driver connects through that port (/json/version), so with 150 every
-# internal bypass dies with "Pure CDP browser startup failed" and all
-# CF-gated downloads fail. Install the last working version from
-# snapshot.debian.org until the bypasser can talk to Chromium >= 150 (e.g.
-# pipe-based DevTools / UC mode) or seleniumbase ships a fix.
+# 2026-07-05) stopped opening the DevTools remote-debugging TCP port that the
+# SeleniumBase Pure-CDP driver connects through (/json/version), so every
+# internal bypass died with "Pure CDP browser startup failed" and 149.0.7827.196
+# was pinned (#1105). Later Debian builds open the port again: 155.0.8059.79
+# starts Pure CDP with the bypasser's own arguments. Still installed from
+# snapshot.debian.org, so the build stays reproducible once trixie-security
+# moves past this version. Bump CHROMIUM_VERSION and CHROMIUM_SNAPSHOT together,
+# and check that the bypasser still starts before relaxing the pin.
 # Chrome 144+ requires --enable-unsafe-swiftshader for WebGL in Docker.
 # This flag is set in internal_bypasser.py _get_browser_args()
-ARG CHROMIUM_VERSION=149.0.7827.196-1~deb13u1
-ARG CHROMIUM_SNAPSHOT=20260704T000000Z
+ARG CHROMIUM_VERSION=155.0.8059.79-1~deb13u1
+ARG CHROMIUM_SNAPSHOT=20261016T000000Z
 
 RUN echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/${CHROMIUM_SNAPSHOT}/ trixie-security main" \
         > /etc/apt/sources.list.d/chromium-pin-snapshot.list && \

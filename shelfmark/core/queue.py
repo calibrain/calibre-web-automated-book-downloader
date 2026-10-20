@@ -152,6 +152,15 @@ class BookQueue:
         hook: Callable[[str, QueueStatus, DownloadTask], None] | None = None
         hook_task: DownloadTask | None = None
         previous_status = self._status.get(book_id)
+        if (
+            previous_status in TERMINAL_QUEUE_STATUSES
+            and status in TERMINAL_QUEUE_STATUSES
+            and previous_status != status
+        ):
+            # The first terminal status wins. A worker that checked its cancel flag just before
+            # a cancel landed would otherwise overwrite CANCELLED with COMPLETE and fire the
+            # terminal hook a second time.
+            return None, None
         self._update_status(book_id, status)
 
         if (

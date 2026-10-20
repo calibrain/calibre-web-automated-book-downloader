@@ -772,7 +772,7 @@ def network_settings() -> list[SettingsField]:
         TextField(
             key="HTTP_PROXY",
             label="HTTP Proxy",
-            description="HTTP proxy URL (e.g., http://proxy:8080)",
+            description="HTTP proxy URL. Supports auth: http://user:pass@host:port",
             placeholder="http://proxy:8080",
             disabled=tor_overrides_network,
             disabled_reason="Proxy settings are not used when Tor routing is enabled.",
@@ -781,7 +781,7 @@ def network_settings() -> list[SettingsField]:
         TextField(
             key="HTTPS_PROXY",
             label="HTTPS Proxy",
-            description="HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS)",
+            description="HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS). Supports auth: http://user:pass@host:port",
             placeholder="http://proxy:8080",
             disabled=tor_overrides_network,
             disabled_reason="Proxy settings are not used when Tor routing is enabled.",
@@ -1138,7 +1138,7 @@ def download_settings() -> list[SettingsField]:
             key="TEMPLATE_RENAME",
             label="Naming Template",
             description=(
-                "Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, {OriginalName} "
+                "Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, {OriginalName} "
                 "(source filename without extension). Universal adds: {Series}, "
                 "{SeriesPosition}, {Subtitle}, {PrimaryTitle}. Use arbitrary prefix/suffix: "
                 "{Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. "
@@ -1157,7 +1157,7 @@ def download_settings() -> list[SettingsField]:
             key="TEMPLATE_ORGANIZE",
             label="Path Template",
             description=(
-                "Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, "
+                "Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, "
                 "{OriginalName} (source filename without extension). Universal adds: {Series}, "
                 "{SeriesPosition}, {Subtitle}, {PrimaryTitle}. Use arbitrary prefix/suffix: "
                 "{Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty."
@@ -1425,7 +1425,7 @@ def download_settings() -> list[SettingsField]:
             key="TEMPLATE_AUDIOBOOK_RENAME",
             label="Naming Template",
             description=(
-                "Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, {OriginalName} "
+                "Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, {OriginalName} "
                 "(source filename without extension), {Series}, {SeriesPosition}, {Subtitle}, "
                 "{PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: "
                 "{Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. "
@@ -1445,7 +1445,7 @@ def download_settings() -> list[SettingsField]:
             key="TEMPLATE_AUDIOBOOK_ORGANIZE",
             label="Path Template",
             description=(
-                "Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, "
+                "Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, "
                 "{OriginalName} (source filename without extension), {Series}, {SeriesPosition}, "
                 "{Subtitle}, {PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: "
                 "{Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. "
@@ -2056,6 +2056,7 @@ def advanced_settings() -> list[SettingsField]:
                         {"value": "rtorrent", "label": "rTorrent"},
                         {"value": "nzbget", "label": "NZBGet"},
                         {"value": "sabnzbd", "label": "SABnzbd"},
+                        {"value": "slskd", "label": "slskd"},
                     ],
                     "defaultValue": "qbittorrent",
                 },

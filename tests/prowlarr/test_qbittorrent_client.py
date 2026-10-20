@@ -471,6 +471,50 @@ class TestQBittorrentClientGetStatus:
             assert status.state_value == "complete"
             assert status.file_path == "/downloads/completed.epub"
 
+    def test_get_status_full_progress_still_downloading_not_complete(self, monkeypatch):
+        """rdt-client reports progress 1.0 while still finalising (state stays "downloading").
+
+        The torrent must not be treated as complete until it leaves the download-side
+        states, or post-processing runs against a content path that does not exist yet.
+        """
+        config_values = {
+            "QBITTORRENT_URL": "http://localhost:8080",
+            "QBITTORRENT_USERNAME": "admin",
+            "QBITTORRENT_PASSWORD": "password",
+            "QBITTORRENT_CATEGORY": "test",
+        }
+        monkeypatch.setattr(
+            "shelfmark.download.clients.qbittorrent.config.get",
+            lambda key, default="": config_values.get(key, default),
+        )
+
+        mock_torrent = MockTorrent(
+            hash_val="abc123",
+            progress=1.0,
+            state="downloading",
+            content_path="/downloads/not-there-yet/",
+        )
+        mock_client_instance = MagicMock()
+        info_payload = mock_torrent.to_dict() | {"save_path": "/downloads"}
+        mock_client_instance._session.get.return_value = create_mock_session_response(
+            [info_payload], status_code=200
+        )
+        mock_client_class = MagicMock(return_value=mock_client_instance)
+
+        with patch.dict("sys.modules", {"qbittorrentapi": MagicMock(Client=mock_client_class)}):
+            import importlib
+
+            import shelfmark.download.clients.qbittorrent as qb_module
+
+            importlib.reload(qb_module)
+
+            client = qb_module.QBittorrentClient()
+            status = client.get_status("abc123")
+
+            assert status.complete is False
+            assert status.state_value == "downloading"
+            assert status.file_path is None
+
     def test_get_status_complete_derives_when_content_path_equals_save_path(self, monkeypatch):
         """Keep get_status() and get_download_path() consistent."""
         config_values = {

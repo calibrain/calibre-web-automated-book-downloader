@@ -31,7 +31,13 @@ from shelfmark.download.postprocess.policy import (
     get_word_separator,
 )
 
-from .packs import BookGroup, PackBook, group_files_into_books, match_plan_to_files
+from .packs import (
+    BookGroup,
+    PackBook,
+    drop_ignored_files,
+    group_files_into_books,
+    match_plan_to_files,
+)
 from .scan import collect_directory_files, scan_directory_tree
 from .types import TransferPlan
 from .workspace import safe_cleanup_path
@@ -198,6 +204,7 @@ def transfer_book_files(
     source_root: Path | None = None,
 ) -> tuple[list[Path], str | None, dict[str, int]]:
     """Transfer discovered book files into their final destination layout."""
+    book_files = drop_ignored_files(book_files, task.ignored_files)
     if not book_files:
         return [], "No book files found", {"hardlink": 0, "copy": 0, "move": 0}
 
@@ -356,7 +363,10 @@ def resolve_book_groups(
         groups = group_files_into_books(
             book_files, series_name=task.series_name, author_name=task.author
         )
-    return groups if len(groups) > 1 else None
+    # An approved plan that lost books to the user's skips still carries the titles they
+    # reviewed, so a single remaining group keeps them instead of the searched title.
+    keeps_plan = bool(task.book_plan and task.ignored_files)
+    return groups if len(groups) > 1 or (keeps_plan and groups) else None
 
 
 def _transfer_book_groups(
@@ -388,6 +398,7 @@ def _transfer_book_groups(
             series_position=group.series_position,
             multi_book=False,
             book_plan=None,
+            ignored_files=None,
         )
         paths, error, op_counts = transfer_book_files(
             group.files,

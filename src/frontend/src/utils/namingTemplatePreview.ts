@@ -37,6 +37,13 @@ export const NAMING_TEMPLATE_TOKENS: NamingTemplateToken[] = [
     group: 'Core',
   },
   {
+    token: 'AuthorSort',
+    label: 'Author (surname first)',
+    description: 'First author as "Last, First"',
+    value: 'Doyle, Arthur Conan',
+    group: 'Core',
+  },
+  {
     token: 'Title',
     label: 'Full title',
     description: 'Title as provided by metadata',
@@ -123,6 +130,7 @@ const KNOWN_TOKENS = [
   'primarytitle',
   'originalname',
   'firstauthor',
+  'authorsort',
   'partnumber',
   'language',
   'narrator',
@@ -137,6 +145,35 @@ const KNOWN_TOKENS = [
 // Mirrors AUTHOR_LIST_SEPARATOR in shelfmark/core/naming.py: authors arrive
 // pre-joined with ',' or ';' and {FirstAuthor} keeps only the first entry.
 const firstAuthor = (value: string): string => value.split(/\s*[,;]\s*/)[0]?.trim() ?? '';
+
+// Mirrors author_sort() in shelfmark/core/naming.py.
+const NAME_SUFFIXES = new Set(['jr', 'jr.', 'sr', 'sr.', 'ii', 'iii', 'iv']);
+
+const authorSort = (value: string): string => {
+  const text = value.split(/\s+/).filter(Boolean).join(' ');
+  const entries = text.split(/\s*[,;]\s*/).filter(Boolean);
+  const [first, second] = entries;
+  if (!first) {
+    return '';
+  }
+  if (entries.length === 2 && second && !first.includes(' ') && !text.includes(';')) {
+    return `${first}, ${second}`;
+  }
+
+  const words = first.split(' ');
+  let suffix = '';
+  if (second && NAME_SUFFIXES.has(second.toLowerCase())) {
+    suffix = second;
+  } else if (words.length > 2 && NAME_SUFFIXES.has(words[words.length - 1].toLowerCase())) {
+    suffix = words.pop() ?? '';
+  }
+
+  if (words.length < 2) {
+    return first;
+  }
+  const sorted = `${words[words.length - 1]}, ${words.slice(0, -1).join(' ')}`;
+  return suffix ? `${sorted}, ${suffix}` : sorted;
+};
 
 const BRACE_PATTERN = /\{([^}]+)\}/g;
 const INVALID_CHARS_PATTERN = /[\\/:*?"<>|]/g;
@@ -190,6 +227,9 @@ export const renderNamingTemplate = (
   const placeholderValue = (placeholderName: string): string => {
     if (placeholderName === 'firstauthor' && !normalized['firstauthor']) {
       return firstAuthor(normalized['author'] ?? '');
+    }
+    if (placeholderName === 'authorsort' && !normalized['authorsort']) {
+      return authorSort(normalized['author'] ?? '');
     }
     return (normalized[placeholderName] ?? '').trim();
   };

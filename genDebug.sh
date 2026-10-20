@@ -134,7 +134,7 @@ else
 fi
 
 # Add environment variables (redacting sensitive info)
-env | grep -v -E "(AA_DONATOR_KEY|HARDCOVER_API_KEY|_KEY=|_SECRET=|_PASSWORD=|_TOKEN=)" | sort > "$LOG_DIR/environment.txt"
+env | grep -v -E "^[^=]*(_KEY|_SECRET|_PASSWORD|_TOKEN)[^=]*=" | sort > "$LOG_DIR/environment.txt"
 
 # Add configuration files (redacting sensitive values)
 CONFIG_DIR=${CONFIG_DIR:-"/config"}

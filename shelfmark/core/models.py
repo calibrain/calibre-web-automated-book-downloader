@@ -143,6 +143,8 @@ class DownloadTask:
     # `multi_book` asks post-processing to split heuristically when no plan exists.
     multi_book: bool = False
     book_plan: list[dict[str, Any]] | None = None
+    # Release-relative paths the user chose to skip in the pack review.
+    ignored_files: list[str] | None = None
 
     # User association (multi-user support)
     user_id: int | None = None  # DB user ID who queued this download
