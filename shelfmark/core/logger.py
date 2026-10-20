@@ -1,6 +1,7 @@
 """Logging configuration and custom logger with error tracing."""
 
 import logging
+import re
 import sys
 from collections.abc import Mapping
 from logging.handlers import RotatingFileHandler
@@ -15,6 +16,29 @@ if TYPE_CHECKING:
 
 _file_handlers: dict[Path, RotatingFileHandler] = {}
 _file_handlers_lock = Lock()
+
+# Query parameters that carry tracker/indexer credentials. Prowlarr guids are often
+# the download URL itself (apikey included), and they end up in task ids that are
+# logged all over the download pipeline, so mask them at the formatter instead.
+_SECRET_QUERY_PARAM_PATTERN = re.compile(
+    r"(?<=[?&;])"
+    r"([a-z0-9_-]*api[_-]?key|api|apitoken|access_token|token|passkey|authkey|rsskey"
+    r"|torrent_pass|auth|key|password|passwd|pwd|pass|secret|sid|uid)"
+    r"=[^&\s#'\"<>;:,)\]]+",
+    re.IGNORECASE,
+)
+
+
+def redact_secrets(text: str) -> str:
+    """Mask credential query parameters in text, keeping the rest of the URL readable."""
+    return _SECRET_QUERY_PARAM_PATTERN.sub(r"\1=(removed)", text)
+
+
+class RedactingFormatter(logging.Formatter):
+    """Formatter that masks credentials in the message, traceback and stack info."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact_secrets(super().format(record))
 
 
 class CustomLogger(logging.Logger):
@@ -162,7 +186,7 @@ def setup_logger(name: str, log_file: Path = LOG_FILE) -> CustomLogger:
     log_level = getattr(logging, LOG_LEVEL, logging.INFO)
     logger.setLevel(log_level)
 
-    formatter = logging.Formatter(
+    formatter = RedactingFormatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
     )
 
