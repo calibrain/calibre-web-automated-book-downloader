@@ -3170,3 +3170,207 @@ class TestDeadSources:
         ranked = [_release(source="prowlarr", source_id="x")]
 
         assert auto_download._demote_dead_sources(ranked, frozenset()) == ranked
+
+
+class TestSharedDeadReleases:
+    """A torrent that stalled for one request is not offered again to another."""
+
+    def _history(self, user_db, task_id, status, message, *, source="audiobookbay"):
+        service = DownloadHistoryService(user_db._db_path)
+        service.record_download(
+            task_id=task_id,
+            user_id=None,
+            username=None,
+            request_id=None,
+            source=source,
+            source_display_name=None,
+            title="A release",
+            author=None,
+            file_format=None,
+            size=None,
+            preview=None,
+            content_type="audiobook",
+            downloads=None,
+            origin="requested",
+            retry_payload=None,
+        )
+        service.finalize_download(task_id=task_id, final_status=status, status_message=message)
+
+    def _dead(self, user_db):
+        return auto_download.recent_dead_releases(user_db._db_path)
+
+    def test_a_stalled_release_is_dead(self, user_db):
+        self._history(user_db, "abc", "cancelled", "Download stalled (no activity for 300s)")
+
+        assert self._dead(user_db) == {("audiobookbay", "abc")}
+
+    def test_a_release_with_no_seeders_is_dead(self, user_db):
+        self._history(user_db, "abc", "error", "No seeders: 0 found, 1 needed, for 5 min (0%)")
+
+        assert self._dead(user_db) == {("audiobookbay", "abc")}
+
+    def test_a_release_that_also_completed_is_not(self, user_db):
+        self._history(user_db, "abc", "cancelled", "Download stalled (no activity for 300s)")
+        self._history(user_db, "abc", "complete", "Complete")
+
+        assert self._dead(user_db) == frozenset()
+
+    def test_a_person_cancelling_does_not_count(self, user_db):
+        self._history(user_db, "abc", "cancelled", "Downloading")
+
+        assert self._dead(user_db) == frozenset()
+
+    def test_soulseek_is_left_to_the_dead_peer_rule(self, user_db):
+        self._history(
+            user_db, "slskd:1", "error", "Download stalled (no activity for 300s)", source="slskd"
+        )
+
+        assert self._dead(user_db) == frozenset()
+
+    def test_old_failures_are_forgotten(self, user_db):
+        self._history(user_db, "abc", "cancelled", "Download stalled (no activity for 300s)")
+
+        later = datetime.now(UTC) + timedelta(days=auto_download.failed_release_retry_days() + 1)
+        assert auto_download.recent_dead_releases(user_db._db_path, now=later) == frozenset()
+
+    def test_no_history_database_means_none_dead(self):
+        assert auto_download.recent_dead_releases(None) == frozenset()
+
+    def test_another_requests_dead_release_is_not_picked(self, user_db, monkeypatch):
+        admin = user_db.create_user(username="admin", role="admin")
+        row = _pending_request(user_db, admin["id"])
+        _stub_provider(monkeypatch, _book())
+        dead = _release(source="prowlarr", source_id="dead", seeders=99)
+        good = _release(source="prowlarr", source_id="good", seeders=1)
+        monkeypatch.setattr(
+            auto_download, "search_source_releases", lambda *_a, **_k: (None, [dead, good], None)
+        )
+        queued: list[str] = []
+
+        def _queue(release_data, _priority, *, user_id, username):
+            queued.append(release_data["source_id"])
+            return True, None
+
+        outcome = auto_download.auto_download_request(
+            user_db,
+            user_db.get_request(row["id"]),
+            sources=["prowlarr"],
+            content_type="audiobook",
+            min_seeders=1,
+            queue_release=_queue,
+            admin_user_id=admin["id"],
+            dead_releases=frozenset({("prowlarr", "dead")}),
+        )
+
+        assert outcome.status == "queued"
+        assert queued == ["good"]
+
+
+class TestFailedReleaseIsTriedAgain:
+    """A failed release is kept out for a number of days, then given another chance."""
+
+    def _history(self, user_db, task_id, status, message, *, source="audiobookbay"):
+        service = DownloadHistoryService(user_db._db_path)
+        service.record_download(
+            task_id=task_id,
+            user_id=None,
+            username=None,
+            request_id=None,
+            source=source,
+            source_display_name=None,
+            title="A release",
+            author=None,
+            file_format=None,
+            size=None,
+            preview=None,
+            content_type="audiobook",
+            downloads=None,
+            origin="requested",
+            retry_payload=None,
+        )
+        service.finalize_download(task_id=task_id, final_status=status, status_message=message)
+
+    def _recent(self, user_db, **kwargs):
+        return auto_download.recent_failed_releases(user_db._db_path, **kwargs)
+
+    def test_a_recent_failure_counts(self, user_db):
+        self._history(user_db, "abc", "error", "Peer transfer failed: Rejected", source="slskd")
+        self._history(user_db, "def", "cancelled", "Download stalled (no activity for 300s)")
+
+        assert self._recent(user_db) == {("slskd", "abc"), ("audiobookbay", "def")}
+
+    def test_an_old_failure_no_longer_counts(self, user_db):
+        self._history(user_db, "abc", "cancelled", "Download stalled (no activity for 300s)")
+
+        later = datetime.now(UTC) + timedelta(days=auto_download.failed_release_retry_days() + 1)
+        assert self._recent(user_db, now=later) == frozenset()
+
+    def test_a_release_that_later_completed_is_not_failed(self, user_db):
+        self._history(user_db, "abc", "cancelled", "Download stalled (no activity for 300s)")
+        self._history(user_db, "abc", "complete", "Complete")
+
+        assert self._recent(user_db) == frozenset()
+
+    @pytest.mark.parametrize("message", ["Interrupted", "Superseded by a completed download"])
+    def test_a_row_that_is_not_the_releases_fault_does_not_count(self, user_db, message):
+        self._history(user_db, "abc", "error", message)
+
+        assert self._recent(user_db) == frozenset()
+
+    def test_the_window_comes_from_the_setting(self, monkeypatch):
+        monkeypatch.setattr(auto_download.app_config, "get", lambda key, default=None: 30)
+        assert auto_download.failed_release_retry_days() == 30
+
+    @pytest.mark.parametrize("value", [None, "soon", 0, -3])
+    def test_a_bad_setting_falls_back_or_is_at_least_a_day(self, monkeypatch, value):
+        monkeypatch.setattr(auto_download.app_config, "get", lambda key, default=None: value)
+        assert auto_download.failed_release_retry_days() >= 1
+
+    def _queue(self, user_db, monkeypatch, remembered, recent_failures):
+        admin = user_db.create_user(username="admin", role="admin")
+        row = _pending_request(user_db, admin["id"])
+        user_db.update_request(
+            row["id"],
+            book_data={
+                **row["book_data"],
+                "failed_releases": [{"source": "prowlarr", "source_id": s} for s in remembered],
+            },
+        )
+        _stub_provider(monkeypatch, _book())
+        failed = _release(source="prowlarr", source_id="failed", seeders=99)
+        other = _release(source="prowlarr", source_id="other", seeders=1)
+        monkeypatch.setattr(
+            auto_download, "search_source_releases", lambda *_a, **_k: (None, [failed, other], None)
+        )
+        queued: list[str] = []
+
+        def _queue_release(release_data, _priority, *, user_id, username):
+            queued.append(release_data["source_id"])
+            return True, None
+
+        auto_download.auto_download_request(
+            user_db,
+            user_db.get_request(row["id"]),
+            sources=["prowlarr"],
+            content_type="audiobook",
+            min_seeders=1,
+            queue_release=_queue_release,
+            admin_user_id=admin["id"],
+            recent_failures=recent_failures,
+        )
+        return queued
+
+    def test_a_recently_failed_release_is_skipped(self, user_db, monkeypatch):
+        queued = self._queue(user_db, monkeypatch, ["failed"], frozenset({("prowlarr", "failed")}))
+
+        assert queued == ["other"]
+
+    def test_a_release_whose_failure_has_aged_out_is_picked_again(self, user_db, monkeypatch):
+        queued = self._queue(user_db, monkeypatch, ["failed"], frozenset())
+
+        assert queued == ["failed"]  # the better-seeded release gets its second chance
+
+    def test_without_a_history_every_remembered_failure_still_counts(self, user_db, monkeypatch):
+        queued = self._queue(user_db, monkeypatch, ["failed"], None)
+
+        assert queued == ["other"]

@@ -214,6 +214,19 @@ def hardcover_sync_settings() -> list[SettingsField]:
             max_value=1440,
         ),
         NumberField(
+            key="AUTO_DOWNLOAD_RETRY_FAILED_RELEASE_DAYS",
+            label="Try a failed release again after (days)",
+            description=(
+                "A release that failed or stalled is kept out of the search for this many "
+                "days, then it may be picked again. A torrent that stalled can be revived "
+                "by new seeds, so a failure should not shut a book out for good. A request "
+                "is still given up on after three failed attempts."
+            ),
+            default=7,
+            min_value=1,
+            max_value=365,
+        ),
+        NumberField(
             key="AUTO_DOWNLOAD_BACKOFF_MAX_DAYS",
             label="Longest wait between searches for an unmatched request (days)",
             description=(

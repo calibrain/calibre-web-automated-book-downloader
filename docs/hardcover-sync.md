@@ -77,6 +77,7 @@ The check **fails closed** here: if an enabled library cannot be read and has no
 | `AUTO_DOWNLOAD_RETRY_DAYS` | Retry failed downloads after (days) | 7 | A failed or interrupted download goes back to pending after this long. 0 turns retries off |
 | `AUTO_DOWNLOAD_BACKOFF_MAX_DAYS` | Longest wait between searches for an unmatched request (days) | 3 | 0 searches every unmatched request every cycle |
 | `AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES` | Try another release after a failed download (minutes) | 0 (off) | Reopens failed or given-up downloads and picks another release this long after, between sync cycles |
+| `AUTO_DOWNLOAD_RETRY_FAILED_RELEASE_DAYS` | Try a failed release again after (days) | 7 | A release that failed or stalled is kept out of the search for this long, then may be picked again; a request is still given up on after three failed attempts |
 | `AUTO_DOWNLOAD_EXISTENCE_CHECK_ENABLED` | Mark audiobooks no store sells | Off | See [Audiobooks no store sells](#audiobooks-no-store-sells). Needs the Audiobookshelf URL and token |
 | `AUTO_DOWNLOAD_EXISTENCE_CHECK_AFTER_PASSES` | Look the book up after (unmatched passes) | 3 | Consecutive passes without a strict match before the stores are asked |
 
