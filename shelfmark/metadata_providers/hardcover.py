@@ -1097,6 +1097,7 @@ class HardcoverProvider(MetadataProvider):
             sort=SortOrder.SERIES_ORDER,
         ),
     )
+    account_search_fields: ClassVar[frozenset[str]] = frozenset({"hardcover_list"})
     search_fields: ClassVar[tuple[SearchField, ...]] = (
         TextSearchField(
             key="author",
