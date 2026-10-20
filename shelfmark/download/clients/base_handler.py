@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Protocol, TypeGuard
 
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.request_helpers import normalize_optional_text
+from shelfmark.core.request_helpers import coerce_int, normalize_optional_text
 from shelfmark.core.utils import is_audiobook
 from shelfmark.download.activity import release_activity_grace, request_activity_grace
 from shelfmark.download.clients import (
@@ -289,18 +289,17 @@ class ExternalClientHandler(DownloadHandler, ABC):
     def _no_seeders_wait_seconds(self) -> float:
         """How long a motionless torrent with too few seeds is kept (seconds, 0 = never give up)."""
         configured = config.get(NO_SEEDERS_WAIT_SETTING, NO_SEEDERS_WAIT_DEFAULT_MINUTES)
+        if not isinstance(configured, (int, float, str)):
+            return 0.0
         try:
-            minutes = float(configured)  # pyright: ignore[reportArgumentType]
-        except TypeError, ValueError:
+            minutes = float(configured)
+        except ValueError:
             return 0.0
         return minutes * SECONDS_PER_MINUTE if minutes > 0 else 0.0
 
     def _min_seeders(self) -> int:
         configured = config.get(MIN_SEEDERS_SETTING, MIN_SEEDERS_DEFAULT)
-        try:
-            return max(int(configured), 0)  # pyright: ignore[reportArgumentType]
-        except TypeError, ValueError:
-            return MIN_SEEDERS_DEFAULT
+        return max(coerce_int(configured, MIN_SEEDERS_DEFAULT), 0)
 
     @staticmethod
     def _seed_count(status: DownloadStatus) -> int | None:
