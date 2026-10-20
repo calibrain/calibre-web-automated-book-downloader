@@ -1592,6 +1592,13 @@ def _get_slow_source_options() -> list[dict[str, str | bool | None]]:
             "isLocked": _get_reason("zlib") is not None,
             "disabledReason": _get_reason("zlib"),
         },
+        {
+            "id": "oceanofpdf",
+            "label": "OceanofPDF",
+            "description": "Searches and downloads on its own, so its position does not matter",
+            "isLocked": _get_reason("oceanofpdf") is not None,
+            "disabledReason": _get_reason("oceanofpdf"),
+        },
     ]
 
 
@@ -1604,6 +1611,7 @@ def _get_slow_source_defaults() -> list[dict[str, str | bool]]:
         {"id": "aa-slow-wait", "enabled": True},
         {"id": "welib", "enabled": _LEGACY_ALLOW_USE_WELIB},
         {"id": "zlib", "enabled": True},
+        {"id": "oceanofpdf", "enabled": True},
     ]
 
 
@@ -1833,6 +1841,7 @@ def _on_save_mirrors(values: dict[str, Any]) -> dict[str, Any]:
         "LIBGEN_MIRROR_URLS",
         "ZLIB_MIRROR_URLS",
         "WELIB_MIRROR_URLS",
+        "OCEANOFPDF_MIRROR_URLS",
     }
 
     for key in mirror_list_keys:
@@ -1917,6 +1926,17 @@ def mirror_settings() -> list[SettingsField]:
             label="Welib",
             description="Only the first mirror in the list is used.",
             placeholder="https://your-welib-mirror.example",
+        ),
+        # === OCEANOFPDF ===
+        TagListField(
+            key="OCEANOFPDF_MIRROR_URLS",
+            label="OceanofPDF",
+            description=(
+                "Searches and downloads directly, without Anna's Archive. Only the first "
+                "mirror in the list is used. The site is behind Cloudflare, so the bypass "
+                "must be enabled."
+            ),
+            placeholder="https://oceanofpdf.com",
         ),
     ]
 

@@ -2750,6 +2750,7 @@ How long the bypass helper process may sit unused before it is shut down. Higher
 | `LIBGEN_MIRROR_URLS` | Mirrors are tried in the order you add them until one works. | string (comma-separated) | _empty list_ |
 | `ZLIB_MIRROR_URLS` | Only the first mirror in the list is used. | string (comma-separated) | _empty list_ |
 | `WELIB_MIRROR_URLS` | Only the first mirror in the list is used. | string (comma-separated) | _empty list_ |
+| `OCEANOFPDF_MIRROR_URLS` | Searches and downloads directly, without Anna's Archive. Only the first mirror in the list is used. The site is behind Cloudflare, so the bypass must be enabled. | string (comma-separated) | _empty list_ |
 
 <details>
 <summary>Detailed descriptions</summary>
@@ -2796,6 +2797,15 @@ Only the first mirror in the list is used.
 **Welib**
 
 Only the first mirror in the list is used.
+
+- **Type:** string (comma-separated)
+- **Default:** _empty list_
+
+#### `OCEANOFPDF_MIRROR_URLS`
+
+**OceanofPDF**
+
+Searches and downloads directly, without Anna's Archive. Only the first mirror in the list is used. The site is behind Cloudflare, so the bypass must be enabled.
 
 - **Type:** string (comma-separated)
 - **Default:** _empty list_
