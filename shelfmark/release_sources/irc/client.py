@@ -123,6 +123,8 @@ class IRCClient:
             # Wrap with TLS if needed
             if self.use_tls:
                 context = ssl.create_default_context()
+                # Python already defaults to TLS 1.2; pin it so an OpenSSL config cannot lower it
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
                 # Skip verification for self-signed certs common on IRC servers
                 context.check_hostname = False
                 context.verify_mode = ssl.CERT_NONE

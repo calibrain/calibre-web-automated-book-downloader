@@ -3197,6 +3197,12 @@ def api_releases() -> Response | tuple[Response, int]:
             # filtered authors (primary authors only, excluding translators/narrators),
             # which gives better release search results than the unfiltered search data
             if title_param:
+                if title_param != book.title:
+                    # A different title is one the search result carried and the book
+                    # record does not, typically a translation's ("Kinder des Nebels" for
+                    # "Mistborn: The Final Empire"). The provider's search_title derives
+                    # from the original and would otherwise win the release search.
+                    book.search_title = title_param
                 book.title = title_param
 
         # Determine which release sources to search

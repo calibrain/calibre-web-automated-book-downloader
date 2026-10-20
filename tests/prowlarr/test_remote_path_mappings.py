@@ -309,6 +309,62 @@ def test_wait_for_completed_path_allows_delayed_remapped_file(monkeypatch, tmp_p
     assert ("locating", "Waiting for completed files...") in recorder.status_updates
 
 
+def test_waits_for_supported_file_to_stop_growing_in_remapped_directory(monkeypatch, tmp_path):
+    import shelfmark.download.clients.base_handler as base_handler
+
+    local_dir = tmp_path / "local" / "downloads" / "book"
+    local_dir.mkdir(parents=True)
+    (local_dir / "book.cue").write_text("cue")
+    (local_dir / "cover.jpg").write_text("cover")
+
+    mock_client = MagicMock()
+    mock_client.name = "qbittorrent"
+    mock_client.get_download_path.return_value = "/remote/downloads/book"
+
+    def config_get(key: str, default=""):
+        if key == "PROWLARR_REMOTE_PATH_MAPPINGS":
+            return [
+                {
+                    "host": "qbittorrent",
+                    "remotePath": "/remote/downloads",
+                    "localPath": str(local_dir.parent),
+                }
+            ]
+        if key == "DOWNLOAD_CLIENT_COMPLETED_PATH_TIMEOUT":
+            return 1
+        return default
+
+    media_file = local_dir / "book.m4b"
+    sleep_calls = 0
+
+    def advance_sync(_seconds: float) -> None:
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls == 1:
+            media_file.write_bytes(b"a")
+        elif sleep_calls == 2:
+            media_file.write_bytes(b"audio")
+
+    handler = ProwlarrHandler()
+    recorder = ProgressRecorder()
+    monkeypatch.setattr(base_handler.config, "get", config_get)
+    monkeypatch.setattr(handler, "_completed_path_retry_interval", lambda: 0.01)
+    monkeypatch.setattr(base_handler.time, "sleep", advance_sync)
+
+    resolved_path, error = handler._wait_for_completed_path(
+        mock_client,
+        "download_id",
+        cancel_flag=None,
+        status_callback=recorder.status_callback,
+        content_type="audiobook",
+    )
+
+    assert resolved_path == local_dir
+    assert error is None
+    assert sleep_calls == 3
+    assert recorder.status_updates.count(("locating", "Waiting for completed files...")) == 3
+
+
 def test_wait_for_completed_path_fails_fast_for_unsafe_mapping(monkeypatch, tmp_path):
     import shelfmark.download.clients.base_handler as base_handler
 

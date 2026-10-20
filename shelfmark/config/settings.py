@@ -772,7 +772,7 @@ def network_settings() -> list[SettingsField]:
         TextField(
             key="HTTP_PROXY",
             label="HTTP Proxy",
-            description="HTTP proxy URL (e.g., http://proxy:8080)",
+            description="HTTP proxy URL. Supports auth: http://user:pass@host:port",
             placeholder="http://proxy:8080",
             disabled=tor_overrides_network,
             disabled_reason="Proxy settings are not used when Tor routing is enabled.",
@@ -781,7 +781,7 @@ def network_settings() -> list[SettingsField]:
         TextField(
             key="HTTPS_PROXY",
             label="HTTPS Proxy",
-            description="HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS)",
+            description="HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS). Supports auth: http://user:pass@host:port",
             placeholder="http://proxy:8080",
             disabled=tor_overrides_network,
             disabled_reason="Proxy settings are not used when Tor routing is enabled.",

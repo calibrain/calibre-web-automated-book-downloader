@@ -23,6 +23,12 @@ from shelfmark.download.clients import (
     get_client,
     list_configured_clients,
 )
+from shelfmark.download.clients.settings import (
+    STALL_TIMEOUT_DEFAULT_MINUTES,
+    STALL_TIMEOUT_MAX_MINUTES,
+    STALL_TIMEOUT_MIN_MINUTES,
+    STALL_TIMEOUT_SETTING,
+)
 from shelfmark.download.fs import run_blocking_io
 from shelfmark.download.permissions_debug import log_path_permission_context
 from shelfmark.release_sources import DownloadHandler, HandoffResult
@@ -53,18 +59,18 @@ def _is_sabnzbd_like_client(candidate: DownloadClient) -> TypeGuard[_SabnzbdLike
 POLL_INTERVAL = 2
 # A torrent the client has queued is waiting for a free slot, not stalled. Its status never
 # changes while it waits, so the orchestrator's stall timer would cancel it after
-# STALL_TIMEOUT. Ask for a grace instead (the orchestrator caps one grace at 16 minutes),
+# STALL_TIMEOUT. Ask for a grace instead (the orchestrator caps one grace at an hour),
 # renew it while the torrent is still queued, and stop at a hard ceiling so a queue that
 # never moves still ends.
 QUEUE_GRACE_SECONDS = 900.0
 QUEUE_GRACE_RENEW_SECONDS = 600.0
 QUEUE_MAX_WAIT_SECONDS = 7200.0
 # Torrents are jerky: a swarm with one seed can sit still for several minutes and then carry
-# on. The orchestrator's default window (STALL_TIMEOUT) is five minutes of no change. A torrent
-# that has already moved gets this longer window, restarted every time its progress goes up,
-# so a dead one still ends 15 minutes after its last movement. One that never moved (a magnet
-# that cannot fetch metadata) keeps the short window and is cleaned up quickly.
-MOVING_STALL_SECONDS = 900.0
+# on, and a magnet can take a while to fetch metadata or find a first peer. The orchestrator
+# ends a download after STALL_TIMEOUT (five minutes) without a change. This setting is the
+# time a torrent may sit without progress before it is cancelled, given once when the
+# torrent starts and restarted every time its progress goes up. The default is 15 minutes;
+# five is the shortest, which is the orchestrator's own timeout and so adds nothing.
 WINDOWS_DRIVE_PREFIX_LENGTH = 2
 SECONDS_PER_MINUTE = 60
 SECONDS_PER_HOUR = 3600
@@ -188,6 +194,46 @@ def _probe_completed_path(path: Path) -> tuple[bool, OSError | None]:
     return True, None
 
 
+def _completed_file_signature(path: Path, content_type: str | None) -> tuple[tuple[str, int, int], ...] | None:
+    """Return sizes and mtimes for supported files in a completed path."""
+    from shelfmark.download.postprocess.policy import (
+        get_supported_audiobook_formats,
+        get_supported_formats,
+    )
+
+    formats = (
+        get_supported_audiobook_formats()
+        if is_audiobook(content_type)
+        else get_supported_formats()
+    )
+    supported_suffixes = {f".{fmt.lstrip('.').lower()}" for fmt in formats}
+
+    try:
+        if path.is_file():
+            candidates = (path,)
+        elif path.is_dir():
+            candidates = path.rglob("*")
+        else:
+            return None
+
+        signature = []
+        for candidate in candidates:
+            if candidate.suffix.lower() not in supported_suffixes:
+                continue
+            try:
+                stat = candidate.stat()
+            except OSError:
+                continue
+            if not candidate.is_file() or stat.st_size <= 0:
+                continue
+            name = candidate.relative_to(path).as_posix() if path.is_dir() else candidate.name
+            signature.append((name, stat.st_size, stat.st_mtime_ns))
+    except OSError:
+        return None
+
+    return tuple(sorted(signature)) or None
+
+
 class ExternalClientHandler(DownloadHandler, ABC):
     """Shared lifecycle handler for sources that hand off to torrent/usenet clients."""
 
@@ -216,6 +262,19 @@ class ExternalClientHandler(DownloadHandler, ABC):
     def _list_configured_clients(self) -> list[str]:
         """List protocols with configured clients."""
         return list_configured_clients()
+
+    @staticmethod
+    def _stall_window_seconds() -> float:
+        """How long a torrent may go without progress, from the user's setting (seconds)."""
+        raw = config.get(STALL_TIMEOUT_SETTING, STALL_TIMEOUT_DEFAULT_MINUTES)
+        try:
+            minutes = float(raw)  # pyright: ignore[reportArgumentType]
+        except TypeError, ValueError:
+            minutes = float(STALL_TIMEOUT_DEFAULT_MINUTES)
+        if not math.isfinite(minutes):
+            minutes = float(STALL_TIMEOUT_DEFAULT_MINUTES)
+        minutes = min(max(minutes, STALL_TIMEOUT_MIN_MINUTES), STALL_TIMEOUT_MAX_MINUTES)
+        return minutes * SECONDS_PER_MINUTE
 
     def _poll_interval(self) -> float:
         """Return the polling interval for status checks."""
@@ -733,9 +792,11 @@ class ExternalClientHandler(DownloadHandler, ABC):
         *,
         cancel_flag: Event | None,
         status_callback: Callable[[str, str | None], None],
+        content_type: str | None = None,
     ) -> tuple[Path | None, str | None]:
-        """Wait briefly for completed files to appear on disk."""
+        """Wait for supported files to appear and stop changing on disk."""
         last_error: str | None = None
+        previous_signature: tuple[tuple[str, int, int], ...] | None = None
         retry_interval = self._completed_path_retry_interval()
         timeout_seconds = self._completed_path_timeout_seconds()
         if retry_interval <= 0 or timeout_seconds <= 0:
@@ -754,7 +815,32 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 log_details=log_details,
             )
             if result.path:
-                return result.path, None
+                if run_blocking_io(result.path.is_file):
+                    return result.path, None
+                signature = run_blocking_io(
+                    _completed_file_signature,
+                    result.path,
+                    content_type,
+                )
+                if signature is not None and signature == previous_signature:
+                    return result.path, None
+                previous_signature = signature
+                last_error = "Completed download has no stable supported files yet."
+                if attempt < max_attempts:
+                    status_callback("locating", "Waiting for completed files...")
+                    logger.debug(
+                        "Supported files are missing or still changing for %s (%s) (attempt %d/%d)",
+                        client.name,
+                        download_id,
+                        attempt,
+                        max_attempts,
+                    )
+                    if cancel_flag:
+                        if cancel_flag.wait(timeout=retry_interval):
+                            return None, last_error
+                    else:
+                        time.sleep(retry_interval)
+                continue
 
             last_error = result.error
 
@@ -855,6 +941,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
                         download_id=download_id,
                         cancel_flag=cancel_flag,
                         status_callback=status_callback,
+                        content_type=task.content_type,
                     )
                     if not source_path_obj:
                         if cancel_flag.is_set():
@@ -986,9 +1073,18 @@ class ExternalClientHandler(DownloadHandler, ABC):
         """
         poll_interval = self._poll_interval()
         queued_since: float | None = None
-        grace_requested_at = 0.0
+        # None, not 0.0: time.monotonic() can be below the renew interval on a host that
+        # booted recently, which would skip the first request.
+        grace_requested_at: float | None = None
         last_progress = 0.0
         start_window_given = False
+        # The setting is for torrents. Usenet keeps the orchestrator's own timeout, which is
+        # the floor of the setting, so no window is requested for it.
+        stall_window = (
+            self._stall_window_seconds()
+            if protocol == "torrent"
+            else float(STALL_TIMEOUT_MIN_MINUTES * SECONDS_PER_MINUTE)
+        )
         # Track consecutive "not found" errors - torrents may take time to appear in client
         not_found_count = 0
         max_not_found_retries = 15  # 15 retries * poll interval ~= 30s grace period
@@ -1078,24 +1174,29 @@ class ExternalClientHandler(DownloadHandler, ABC):
                     now = time.monotonic()
                     if queued_since is None:
                         queued_since = now
-                    if (
-                        now - queued_since < QUEUE_MAX_WAIT_SECONDS
-                        and now - grace_requested_at >= QUEUE_GRACE_RENEW_SECONDS
+                    if now - queued_since < QUEUE_MAX_WAIT_SECONDS and (
+                        grace_requested_at is None
+                        or now - grace_requested_at >= QUEUE_GRACE_RENEW_SECONDS
                     ):
                         request_activity_grace(status_callback, QUEUE_GRACE_SECONDS)
                         grace_requested_at = now
                 elif queued_since is not None:
                     release_activity_grace(status_callback)
                     queued_since = None
-                    grace_requested_at = 0.0
+                    grace_requested_at = None
+                    # The release drops the stall deadline back to the orchestrator's own
+                    # timeout, so the torrent needs a fresh window even if it had one before.
+                    start_window_given = False
 
                 if status.progress > last_progress:
-                    request_activity_grace(status_callback, MOVING_STALL_SECONDS)
+                    if stall_window > STALL_TIMEOUT_MIN_MINUTES * SECONDS_PER_MINUTE:
+                        request_activity_grace(status_callback, stall_window)
                     start_window_given = True
                 elif not start_window_given and status.state != DownloadState.QUEUED:
                     # Metadata and the first peer can take longer than the orchestrator's
                     # stall timeout, so a torrent gets one full window to get going.
-                    request_activity_grace(status_callback, MOVING_STALL_SECONDS)
+                    if stall_window > STALL_TIMEOUT_MIN_MINUTES * SECONDS_PER_MINUTE:
+                        request_activity_grace(status_callback, stall_window)
                     start_window_given = True
                 last_progress = status.progress
 
@@ -1128,6 +1229,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 download_id=download_id,
                 cancel_flag=cancel_flag,
                 status_callback=status_callback,
+                content_type=task.content_type,
             )
             if not source_path_obj:
                 if cancel_flag.is_set():
