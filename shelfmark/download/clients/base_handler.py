@@ -267,10 +267,12 @@ class ExternalClientHandler(DownloadHandler, ABC):
     def _stall_window_seconds() -> float:
         """How long a torrent may go without progress, from the user's setting (seconds)."""
         raw = config.get(STALL_TIMEOUT_SETTING, STALL_TIMEOUT_DEFAULT_MINUTES)
-        try:
-            minutes = float(raw)  # pyright: ignore[reportArgumentType]
-        except TypeError, ValueError:
-            minutes = float(STALL_TIMEOUT_DEFAULT_MINUTES)
+        minutes = float(STALL_TIMEOUT_DEFAULT_MINUTES)
+        if isinstance(raw, (int, float, str)):
+            try:
+                minutes = float(raw)
+            except ValueError:
+                minutes = float(STALL_TIMEOUT_DEFAULT_MINUTES)
         if not math.isfinite(minutes):
             minutes = float(STALL_TIMEOUT_DEFAULT_MINUTES)
         minutes = min(max(minutes, STALL_TIMEOUT_MIN_MINUTES), STALL_TIMEOUT_MAX_MINUTES)
