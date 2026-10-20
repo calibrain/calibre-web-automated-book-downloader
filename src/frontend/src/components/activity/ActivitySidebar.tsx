@@ -9,6 +9,7 @@ import { ActivityCard } from './ActivityCard';
 import type { DownloadStatusKey } from './activityMappers';
 import { downloadToActivityItem, linkedDownloadIdForRequest } from './activityMappers';
 import type { ActivityItem } from './activityTypes';
+import { getClearCompletedTargets } from './clearCompleted';
 
 interface ActivitySidebarProps {
   isOpen: boolean;
@@ -483,38 +484,10 @@ export const ActivitySidebar = ({
 
   const hasUserFilter = isAdmin && availableUsers.length > 1;
 
-  const clearCompletedTargets = useMemo(() => {
-    const targets: ActivityDismissTarget[] = [];
-    const seen = new Set<string>();
-
-    visibleItems.forEach((item) => {
-      const isTerminalDownload =
-        item.kind === 'download' &&
-        (item.visualStatus === 'complete' ||
-          item.visualStatus === 'error' ||
-          item.visualStatus === 'cancelled');
-
-      if (!isTerminalDownload || !item.downloadBookId) {
-        return;
-      }
-
-      const downloadKey = `download:${item.downloadBookId}`;
-      if (!seen.has(downloadKey)) {
-        seen.add(downloadKey);
-        targets.push({ itemType: 'download', itemKey: downloadKey });
-      }
-
-      if (item.requestId) {
-        const requestKey = `request:${item.requestId}`;
-        if (!seen.has(requestKey)) {
-          seen.add(requestKey);
-          targets.push({ itemType: 'request', itemKey: requestKey });
-        }
-      }
-    });
-
-    return targets;
-  }, [visibleItems]);
+  const clearCompletedTargets = useMemo(
+    () => getClearCompletedTargets(visibleItems, visibleRequestItems),
+    [visibleItems, visibleRequestItems],
+  );
 
   const visibleCategoryOrder = useMemo(
     () => getVisibleCategoryOrder(effectiveActiveTab),
