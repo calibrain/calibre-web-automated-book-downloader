@@ -113,6 +113,7 @@ export const SearchSection = ({
           activeQueryTarget={activeQueryTarget}
           onQueryTargetChange={onQueryTargetChange}
           activeQueryField={activeQueryField}
+          optionsLayout="inline"
         />
         {activeQueryTarget === 'manual' && (
           <p className="px-2 text-xs opacity-50">
