@@ -496,6 +496,50 @@ def reject_request(
         raise RequestServiceError(str(exc), status_code=409, code="stale_transition") from exc
 
 
+def reopen_request(
+    user_db: UserDB,
+    *,
+    request_id: int,
+    admin_user_id: int,
+    admin_note: object = None,
+) -> dict[str, Any]:
+    """Move a rejected request back to pending as admin, so the rejection can be undone."""
+    request_row = ensure_request_access(
+        user_db,
+        request_id=request_id,
+        actor_user_id=admin_user_id,
+        is_admin=True,
+    )
+    if request_row["status"] != RequestStatus.REJECTED:
+        msg = "Only a rejected request can be reopened"
+        raise RequestServiceError(msg, status_code=409, code="stale_transition")
+
+    normalized_admin_note = _normalize_admin_note(admin_note)
+
+    # The user may have asked again after the rejection; two pending requests for the
+    # same book would both be worked.
+    book_data = request_row.get("book_data") or {}
+    if isinstance(book_data, dict):
+        duplicate = _find_duplicate_pending_request(
+            user_db,
+            user_id=request_row["user_id"],
+            title=_normalize_match_text(book_data.get("title")),
+            author=_normalize_match_text(book_data.get("author")),
+            content_type=normalize_content_type(
+                request_row.get("content_type") or book_data.get("content_type")
+            ),
+        )
+        if duplicate is not None:
+            msg = "Duplicate pending request exists for this title/author/content_type"
+            raise RequestServiceError(msg, status_code=409, code="duplicate_pending_request")
+
+    reopened = user_db.reopen_rejected_request(request_id, admin_note=normalized_admin_note)
+    if reopened is None:
+        msg = "Request state changed before update"
+        raise RequestServiceError(msg, status_code=409, code="stale_transition")
+    return reopened
+
+
 def fulfil_request(
     user_db: UserDB,
     *,

@@ -709,6 +709,16 @@ export const rejectAdminRequest = async (
   });
 };
 
+export const reopenAdminRequest = async (
+  id: number,
+  body: RejectAdminRequestBody = {},
+): Promise<RequestRecord> => {
+  return fetchJSON<RequestRecord>(buildAdminRequestActionUrl(API.adminRequests, id, 'reopen'), {
+    method: 'POST',
+    body: JSON.stringify(buildRejectAdminRequestBody(body)),
+  });
+};
+
 // Authentication functions
 export const login = async (credentials: LoginCredentials): Promise<AuthResponse> => {
   return fetchJSON<AuthResponse>(API.login, {
