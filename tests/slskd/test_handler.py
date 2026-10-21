@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from shelfmark.core.models import DownloadTask
+from shelfmark.download.activity import ACTIVITY_GRACE_STATUS
 from shelfmark.release_sources import get_handler
 from shelfmark.release_sources.slskd.api import SlskdError
 from shelfmark.release_sources.slskd.handler import (
@@ -48,16 +49,25 @@ class ProgressRecorder:
         self.status_updates.append((status, message))
 
     @property
+    def real(self) -> list[tuple[str, str | None]]:
+        """Statuses a user would see, without the stall-grace signals."""
+        return [(s, m) for s, m in self.status_updates if s != ACTIVITY_GRACE_STATUS]
+
+    @property
+    def graces(self) -> list[float]:
+        return [float(m) for s, m in self.status_updates if s == ACTIVITY_GRACE_STATUS]
+
+    @property
     def last_status(self) -> str | None:
-        return self.status_updates[-1][0] if self.status_updates else None
+        return self.real[-1][0] if self.real else None
 
     @property
     def last_message(self) -> str | None:
-        return self.status_updates[-1][1] if self.status_updates else None
+        return self.real[-1][1] if self.real else None
 
     @property
     def statuses(self) -> list[str]:
-        return [s[0] for s in self.status_updates]
+        return [s[0] for s in self.real]
 
 
 class FakeSlskd:
@@ -245,6 +255,35 @@ class TestLocalPaths:
         assert local_path_for(Path("/dl"), "a\\..\\Book.epub") is None
         assert local_path_for(Path("/dl"), "a\\Author\\..") is None
         assert local_path_for(Path("/dl"), "a\\Author\\") is None
+
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "../../../etc//passwd.epub",  # an empty last folder used to keep the whole path
+            "/abs/path//book.epub",
+            "/abs/path/book.epub",
+            "\\\\server\\share\\book.epub",
+            "a//Book.epub",
+            "a\\.\\Book.epub",
+            "C:\\Book.epub",
+            "C:Book.epub",
+            "a\\D:\\Book.epub",
+            "a\\Author\\Book\0.epub",
+        ],
+    )
+    def test_local_path_refuses_names_that_could_leave_the_root(self, tmp_path, filename):
+        assert local_path_for(tmp_path / "dl", filename) is None
+
+    def test_a_windows_peers_drive_is_only_its_share_root(self):
+        assert local_path_for(Path("/dl"), "C:\\Books\\Author\\x.epub") == Path("/dl/Author/x.epub")
+
+    def test_local_path_refuses_a_folder_that_links_outside_the_root(self, tmp_path):
+        root = tmp_path / "dl"
+        root.mkdir()
+        (tmp_path / "elsewhere").mkdir()
+        (root / "Author").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+
+        assert local_path_for(root, FILE_A) is None
 
     def test_root_override_wins(self, config_values):
         config_values["SLSKD_DOWNLOAD_PATH"] = "/mnt/slskd "
@@ -632,6 +671,91 @@ class TestDownload:
         )
         assert rec.last_status == "error"
         assert "unsafe" in (rec.last_message or "")
+
+    @pytest.mark.parametrize("folder", ["..\\outside\\", "../outside/", "{outside}/"])
+    def test_a_peer_file_name_cannot_reach_files_outside_the_root(
+        self, fast_handler, config_values, tmp_path, folder
+    ):
+        root = tmp_path / "dl"
+        outside = tmp_path / "outside"  # where "../outside" leads from the root
+        root.mkdir()
+        outside.mkdir()
+        names = ["01.mp3", "02.mp3"]
+        for name in names:
+            (outside / name).write_bytes(b"secret")
+        config_values["SLSKD_DOWNLOAD_PATH"] = str(root)
+        # The doubled separator leaves an empty last folder name, which used to let the
+        # whole directory through as the local folder.
+        sep = folder[-1]
+        files = [
+            {"filename": f"{folder.format(outside=outside)}{sep}{name}", "size": 6}
+            for name in names
+        ]
+        done = [_transfer(f["filename"], "Completed, Succeeded", transferred=6) for f in files]
+        fake = FakeSlskd(polls=[done])
+        _mount(fast_handler, fake)
+        rec = ProgressRecorder()
+
+        result = fast_handler.download(
+            _task(files=files), Event(), rec.progress_callback, rec.status_callback
+        )
+
+        assert result is None
+        assert rec.last_status == "error"
+        assert "unsafe" in (rec.last_message or "")
+        assert fake.enqueued == []
+        # A multi-file release is staged with a move: the files must still be there.
+        assert sorted(p.name for p in outside.iterdir()) == names
+
+    def test_a_peer_queue_asks_the_orchestrator_not_to_stall_the_download(
+        self, fast_handler, config_values, tmp_path
+    ):
+        """Queued at the peer, every poll repeats the same status and progress. Without a
+        grace the orchestrator cancels after 5 minutes, long before the queue timeout."""
+        import shelfmark.release_sources.slskd.handler as mod
+
+        config_values["SLSKD_DOWNLOAD_PATH"] = str(tmp_path)
+        queued = _transfer(FILE_A, "Queued, Remotely", placeInQueue=4)
+        fake = FakeSlskd(
+            polls=[
+                [queued],
+                [queued],
+                [_transfer(FILE_A, "InProgress", transferred=500)],
+                [_transfer(FILE_A, "Completed, Succeeded", transferred=1000)],
+            ]
+        )
+        _mount(fast_handler, fake)
+        _write_completed(tmp_path, FILE_A)
+        rec = ProgressRecorder()
+
+        result = fast_handler.download(_task(), Event(), rec.progress_callback, rec.status_callback)
+
+        assert result is not None
+        assert rec.graces, "no activity grace was requested while the peer queued the file"
+        assert rec.graces[0] == mod.QUEUE_GRACE_SECONDS
+        # released once the transfer starts, so the normal stall timer applies again
+        assert rec.graces[-1] == 0.0
+
+    def test_a_long_peer_queue_renews_the_grace_until_the_queue_timeout(
+        self, fast_handler, config_values, monkeypatch
+    ):
+        import shelfmark.release_sources.slskd.handler as mod
+
+        monkeypatch.setattr(SlskdHandler, "_queue_timeout_seconds", lambda self: 3600)
+        clock = iter([0, 0, 700, 1400, 3700])
+        monkeypatch.setattr(SlskdHandler, "_clock", lambda self: next(clock, 3700))
+        fake = FakeSlskd(polls=[[_transfer(FILE_A, "Queued, Remotely", tid="q")]])
+        _mount(fast_handler, fake)
+        rec = ProgressRecorder()
+        cancel = MagicMock(spec=Event)
+        cancel.is_set.side_effect = lambda: fake.poll_count > 10  # never hang
+        cancel.wait.return_value = False
+
+        result = fast_handler.download(_task(), cancel, rec.progress_callback, rec.status_callback)
+
+        assert result is None
+        assert rec.last_message == "Peer did not start the transfer within 60 minutes"
+        assert rec.graces == [mod.QUEUE_GRACE_SECONDS] * 4 + [0.0]
 
     def test_status_check_errors_are_retried(self, fast_handler, config_values, tmp_path):
         config_values["SLSKD_DOWNLOAD_PATH"] = str(tmp_path)

@@ -100,7 +100,10 @@ class FakeSlskd:
         if state == OK and self.write_on_success and filename not in self._written:
             folder = self.root / self._destination
             folder.mkdir(parents=True, exist_ok=True)
-            (folder / filename.rsplit("\\", 1)[-1]).write_bytes(b"x" * size)
+            target = folder / filename.rsplit("\\", 1)[-1]
+            if target.exists():  # slskd keeps the file already there and renames the new one
+                target = target.with_stem(f"{target.stem}_639000000000000000")
+            target.write_bytes(b"x" * size)
             self._written.add(filename)
         done = size if state == OK else 0
         return {
@@ -393,6 +396,71 @@ class TestRejoinAfterARestart:
         assert result is None
         assert rec.real[-1][0] == "error"
         assert "denied" in (rec.real[-1][1] or "")
+
+
+class TestARetryAfterAPartialDownload:
+    """A retry reuses the task's folder, and slskd renames a file that is already there, so
+    files from an attempt that did not finish must not stay behind."""
+
+    def test_a_failed_attempt_leaves_no_files_in_the_folder(self, handler, cfg, tmp_path):
+        fake = FakeSlskd(tmp_path, script={FILE_A: [OK], FILE_B: ["Completed, Errored"]})
+
+        result, _, rec = _run(handler, fake)
+
+        assert result is None
+        assert rec.real[-1][0] == "error"
+        assert not (tmp_path / "shelfmark" / "slskd_abc").exists()
+
+    def test_a_cancelled_attempt_leaves_no_files_in_the_folder(self, handler, cfg, tmp_path):
+        cancel = Event()
+        fake = FakeSlskd(tmp_path, script={FILE_A: [OK], FILE_B: ["InProgress"]})
+        fake.on_get = lambda f, name, state: cancel.set() if name == FILE_B else None
+
+        result, _, rec = _run(handler, fake, cancel=cancel)
+
+        assert result is None
+        assert rec.real[-1][0] == "cancelled"
+        assert not (tmp_path / "shelfmark" / "slskd_abc").exists()
+
+    def test_the_retry_of_a_failed_attempt_completes(self, handler, cfg, tmp_path):
+        first = FakeSlskd(tmp_path, script={FILE_A: [OK], FILE_B: ["Completed, Errored"]})
+        assert _run(handler, first)[0] is None
+
+        result, _, rec = _run(handler, FakeSlskd(tmp_path))
+
+        folder = tmp_path / "shelfmark" / "slskd_abc"
+        assert result == str(folder)
+        assert "error" not in rec.statuses
+        assert sorted(p.name for p in folder.iterdir()) == ["Book One.epub", "Book Two.epub"]
+
+    def test_files_left_by_an_attempt_that_never_cleaned_up_are_replaced(
+        self, handler, cfg, tmp_path
+    ):
+        # Shelfmark restarted after one of the two files had arrived.
+        folder = tmp_path / "shelfmark" / "slskd_abc"
+        folder.mkdir(parents=True)
+        (folder / "Book One.epub").write_bytes(b"x" * 5)
+
+        result, _, rec = _run(handler, FakeSlskd(tmp_path))
+
+        assert result == str(folder)
+        assert "error" not in rec.statuses
+        assert sorted(p.name for p in folder.iterdir()) == ["Book One.epub", "Book Two.epub"]
+
+
+class TestUnsafeFileNames:
+    def test_an_unsafe_peer_file_name_is_refused_before_anything_is_queued(
+        self, handler, cfg, tmp_path
+    ):
+        fake = FakeSlskd(tmp_path)
+        task = _task(files=[{"filename": "../../../etc//passwd.epub", "size": 5}])
+
+        result, _, rec = _run(handler, fake, task=task)
+
+        assert result is None
+        assert rec.real[-1][0] == "error"
+        assert "unsafe" in (rec.real[-1][1] or "")
+        assert fake.batches == []
 
 
 class TestFallbackAndSettings:
