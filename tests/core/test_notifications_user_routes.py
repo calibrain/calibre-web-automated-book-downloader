@@ -106,8 +106,7 @@ class TestSending:
             {"event": "all", "url": "discord://1234567890/abcdefghijk"},
         ]
         with (
-            patch.object(notifications, "_resolve_user_routes", return_value=routes),
-            patch.object(notifications, "user_routes_are_admin_default", return_value=False),
+            patch.object(notifications, "_resolve_user_routes", return_value=(routes, False)),
             patch.object(notifications._executor, "submit") as submit,
         ):
             notifications.notify_user(5, NotificationEvent.REQUEST_CREATED, self._context())
@@ -118,8 +117,7 @@ class TestSending:
     def test_nothing_is_queued_when_every_route_is_refused(self):
         routes = [{"event": "all", "url": "json://127.0.0.1:9/x"}]
         with (
-            patch.object(notifications, "_resolve_user_routes", return_value=routes),
-            patch.object(notifications, "user_routes_are_admin_default", return_value=False),
+            patch.object(notifications, "_resolve_user_routes", return_value=(routes, False)),
             patch.object(notifications._executor, "submit") as submit,
         ):
             notifications.notify_user(5, NotificationEvent.REQUEST_CREATED, self._context())
@@ -129,8 +127,7 @@ class TestSending:
     def test_the_admin_default_is_not_restricted(self):
         routes = [{"event": "all", "url": "mailtos://user:pass@10.0.0.5?to=a@example.com"}]
         with (
-            patch.object(notifications, "_resolve_user_routes", return_value=routes),
-            patch.object(notifications, "user_routes_are_admin_default", return_value=True),
+            patch.object(notifications, "_resolve_user_routes", return_value=(routes, True)),
             patch.object(notifications._executor, "submit") as submit,
         ):
             notifications.notify_user(5, NotificationEvent.REQUEST_CREATED, self._context())
@@ -228,26 +225,43 @@ class TestTestEndpoint:
         assert resp.status_code == 200
         send.assert_called_once()
 
-    def test_the_admin_default_in_effect_is_tested_without_the_personal_checks(self, client):
+    DEFAULT_ROUTE = "mailtos://user:pass@10.0.0.5?to=a@example.com"
+
+    def _inherit_admin_default(self):
         from shelfmark.core.config import config as app_config
 
-        default_route = "mailtos://user:pass@10.0.0.5?to=a@example.com"
-        real_get = app_config.get
+        real_get_for_user = app_config.get_for_user
 
-        def _get(key, default=None, user_id=None):
+        def _get_for_user(key, default=None, user_id=None):
             if key == "USER_NOTIFICATION_ROUTES":
-                return [{"event": "all", "url": default_route}]
-            return real_get(key, default, user_id=user_id)
+                return [{"event": "all", "url": self.DEFAULT_ROUTE}], False
+            return real_get_for_user(key, default, user_id=user_id)
 
+        return patch.object(app_config, "get_for_user", side_effect=_get_for_user)
+
+    # The settings screens always post the routes they show: the inherited default.
+    @pytest.mark.parametrize("body", [{"routes": [{"event": ["all"], "url": DEFAULT_ROUTE}]}, {}])
+    def test_the_inherited_admin_default_is_tested_without_the_personal_checks(self, client, body):
         with (
-            patch.object(app_config, "get", side_effect=_get),
-            patch.object(app_config, "uses_user_override", return_value=False),
+            self._inherit_admin_default(),
             patch(
                 "shelfmark.config.notifications_settings.send_test_notification",
                 return_value={"success": True, "message": "ok"},
             ) as send,
         ):
-            resp = client.post(self.URL, json={})
+            resp = client.post(self.URL, json=body)
 
         assert resp.status_code == 200
-        send.assert_called_once_with([default_route])
+        send.assert_called_once_with([self.DEFAULT_ROUTE])
+
+    def test_edited_routes_are_checked_even_while_inheriting_the_default(self, client):
+        edited = "mailtos://user:pass@10.0.0.5?to=b@example.com"
+        with (
+            self._inherit_admin_default(),
+            patch("shelfmark.config.notifications_settings.send_test_notification") as send,
+        ):
+            resp = client.post(self.URL, json={"routes": [{"event": "all", "url": edited}]})
+
+        assert resp.status_code == 400
+        assert "refused" in resp.json["message"]
+        send.assert_not_called()

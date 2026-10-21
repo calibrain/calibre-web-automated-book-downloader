@@ -6,6 +6,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import apprise
+import pytest
 
 from shelfmark.core import notifications as notifications_module
 
@@ -529,9 +530,9 @@ def test_resolve_admin_routes_returns_empty_when_no_routes(monkeypatch):
 
 
 def test_resolve_user_routes_uses_user_overrides(monkeypatch):
-    def _fake_get(key, default=None, user_id=None):
+    def _fake_get_for_user(key, default=None, user_id=None):
         if user_id != 42:
-            return default
+            return default, False
         values = {
             "USER_NOTIFICATION_ROUTES": [
                 {"event": "all", "url": " ntfys://ntfy.sh/alice "},
@@ -539,16 +540,17 @@ def test_resolve_user_routes_uses_user_overrides(monkeypatch):
                 {"event": "download_failed", "url": "ntfys://ntfy.sh/errors"},
             ],
         }
-        return values.get(key, default)
+        return values.get(key, default), True
 
-    monkeypatch.setattr(notifications_module.app_config, "get", _fake_get)
+    monkeypatch.setattr(notifications_module.app_config, "get_for_user", _fake_get_for_user)
 
-    routes = notifications_module._resolve_user_routes(42)
+    routes, admin_default = notifications_module._resolve_user_routes(42)
 
     assert routes == [
         {"event": "all", "url": "ntfys://ntfy.sh/alice"},
         {"event": "download_failed", "url": "ntfys://ntfy.sh/errors"},
     ]
+    assert admin_default is False
 
 
 def test_notify_user_submits_non_blocking_when_route_matches_event(monkeypatch):
@@ -557,7 +559,7 @@ def test_notify_user_submits_non_blocking_when_route_matches_event(monkeypatch):
     monkeypatch.setattr(
         notifications_module,
         "_resolve_user_routes",
-        lambda _user_id: [{"event": "download_failed", "url": "discord://Webhook/Token"}],
+        lambda _user_id: ([{"event": "download_failed", "url": "discord://Webhook/Token"}], False),
     )
 
     context = notifications_module.NotificationContext(
@@ -652,20 +654,20 @@ def test_resolve_admin_routes_expands_multiselect_event_rows(monkeypatch):
 
 
 def test_resolve_user_routes_expands_multiselect_event_rows(monkeypatch):
-    def _fake_get(key, default=None, user_id=None):
+    def _fake_get_for_user(key, default=None, user_id=None):
         if key != "USER_NOTIFICATION_ROUTES" or user_id != 7:
-            return default
+            return default, False
         return [
             {
                 "event": ["download_complete", "request_fulfilled"],
                 "url": "ntfys://ntfy.sh/user-main",
             },
             {"event": ["all", "download_failed"], "url": "ntfys://ntfy.sh/user-all"},
-        ]
+        ], True
 
-    monkeypatch.setattr(notifications_module.app_config, "get", _fake_get)
+    monkeypatch.setattr(notifications_module.app_config, "get_for_user", _fake_get_for_user)
 
-    routes = notifications_module._resolve_user_routes(7)
+    routes, _ = notifications_module._resolve_user_routes(7)
 
     assert routes == [
         {"event": "download_complete", "url": "ntfys://ntfy.sh/user-main"},
@@ -719,7 +721,7 @@ def test_notify_user_does_not_queue_placeholder_host_pointing_at_loopback(monkey
     monkeypatch.setattr(
         notifications_module,
         "_resolve_user_routes",
-        lambda _user_id: [{"event": "all", "url": "ntfys://{Email}/alerts"}],
+        lambda _user_id: ([{"event": "all", "url": "ntfys://{Email}/alerts"}], False),
     )
     monkeypatch.setattr(
         notifications_module,
@@ -740,12 +742,29 @@ def test_notify_user_does_not_queue_placeholder_host_pointing_at_loopback(monkey
     assert fake_executor.calls == []
 
 
-def test_expand_user_route_placeholders_ignores_an_email_list(monkeypatch):
-    # A list would let a user add recipients to an admin-set mailto route.
+@pytest.mark.parametrize(
+    ("username", "email", "expected"),
+    [
+        # A list would let a user add recipients to an admin-set mailto route.
+        ("mallory", "a@example.com,b@example.com", ["ntfys://ntfy.sh/mallory"]),
+        # Valid syntax, but Apprise decodes %2C and sends to a@evil.com and b@evil.com.
+        ("mallory", '"x,a@evil.com,b@evil.com"@example.com', ["ntfys://ntfy.sh/mallory"]),
+        # Apprise would publish to two topics, "...-John" and "Smith".
+        ("John Smith", "john@example.com", ["mailtos://smtp.example.com?to=john%40example.com"]),
+        ("a/b", "x\\y@example.com", []),
+        # A slash walks the topic path: this would publish to a topic called "admin".
+        ("bob/../admin", "bob@example.com", ["mailtos://smtp.example.com?to=bob%40example.com"]),
+        # A newline splits like any other whitespace.
+        ("eve\nadmin", "eve@example.com\nb@example.com", []),
+    ],
+)
+def test_expand_user_route_placeholders_ignores_values_apprise_would_split(
+    monkeypatch, username, email, expected
+):
     monkeypatch.setattr(
         notifications_module,
         "_get_route_user",
-        lambda user_id: {"username": "mallory", "email": "a@example.com,b@example.com"},
+        lambda user_id: {"username": username, "email": email},
     )
 
     urls = notifications_module.expand_user_route_placeholders(
@@ -753,7 +772,7 @@ def test_expand_user_route_placeholders_ignores_an_email_list(monkeypatch):
         7,
     )
 
-    assert urls == ["ntfys://ntfy.sh/mallory"]
+    assert urls == expected
 
 
 def test_expand_user_route_placeholders_drops_routes_missing_a_value(monkeypatch):

@@ -40,6 +40,9 @@ _APPRISE_LOGO_URL = (
 _APPRISE_LOGGER_NAME = "apprise"
 _APPRISE_DISPATCH_ERRORS = (RuntimeError, TypeError, ValueError)
 _USER_ROUTE_PLACEHOLDER_PATTERN = re.compile(r"\{(user|email)\}", re.IGNORECASE)
+# Apprise splits a decoded value on these, so "John Smith" or '"a,b@x.com"@y.com' would reach
+# extra topics or recipients (e.g. add recipients to an admin-set mailto route).
+_UNSAFE_PLACEHOLDER_VALUE = re.compile(r'[\s,;/\\"]')
 
 
 class _ApprisePluginWithUrl(Protocol):
@@ -366,22 +369,21 @@ def _allowed_user_urls(urls: list[str]) -> list[str]:
     return allowed
 
 
-def _resolve_user_routes(user_id: int | None) -> list[dict[str, str]]:
-    normalized_user_id = _normalize_user_id(user_id)
-    if normalized_user_id is None:
-        return []
-
-    return _normalize_routes(
-        app_config.get("USER_NOTIFICATION_ROUTES", [], user_id=normalized_user_id)
-    )
-
-
-def user_routes_are_admin_default(user_id: int) -> bool:
-    """Whether the user inherits the admin-set default routes rather than having their own.
+def _resolve_user_routes(user_id: int | None) -> tuple[list[dict[str, str]], bool]:
+    """The user's routes, and whether they are the inherited admin default.
 
     Admin-set routes are trusted like the global ones, so they skip the personal-route checks.
+    Both come from one config read, so a settings save in between cannot pair the user's own
+    routes with the admin default's trust.
     """
-    return not app_config.uses_user_override("USER_NOTIFICATION_ROUTES", user_id)
+    normalized_user_id = _normalize_user_id(user_id)
+    if normalized_user_id is None:
+        return [], False
+
+    value, is_own = app_config.get_for_user(
+        "USER_NOTIFICATION_ROUTES", [], user_id=normalized_user_id
+    )
+    return _normalize_routes(value), not is_own
 
 
 def _get_route_user(user_id: int) -> dict[str, Any] | None:
@@ -399,24 +401,30 @@ def expand_user_route_placeholders(urls: list[str], user_id: int) -> list[str]:
 
     Placeholders are only filled in the path, query or fragment: a URL with one in its host part
     is dropped, because Apprise decodes percent-escapes there (so an email such as
-    ``x%40127.0.0.1`` would still reach 127.0.0.1). Values are fully percent-encoded.
-    URLs that need a value the user does not have (e.g. no email on file) are dropped.
+    ``x%40127.0.0.1`` would still reach 127.0.0.1). Values are fully percent-encoded, and a
+    value containing whitespace or any of ``, ; / \\ "`` is ignored, since Apprise would split it
+    into several targets. URLs that need a value the user does not have are dropped.
     Callers should still validate the returned URLs, not the templates.
     """
     if not any(_USER_ROUTE_PLACEHOLDER_PATTERN.search(url) for url in urls):
         return urls
 
     user = _get_route_user(user_id) or {}
-    email = str(user.get("email") or "").strip()
-    # One plain address only: a list (a@x,b@y) would let a user add recipients to an admin route.
-    if email and not is_plain_email_address(email):
-        logger.info(
-            "Ignoring the email on file for user_id=%s in notification routes: "
-            "not a single address",
-            user_id,
-        )
-        email = ""
-    values = {"user": str(user.get("username") or "").strip(), "email": email}
+    values: dict[str, str] = {}
+    for name, field in (("user", "username"), ("email", "email")):
+        value = str(user.get(field) or "").strip()
+        if value and (
+            _UNSAFE_PLACEHOLDER_VALUE.search(value)
+            or (name == "email" and not is_plain_email_address(value))
+        ):
+            logger.info(
+                "Ignoring the %s on file for user_id=%s in notification routes: it could "
+                "split into several targets",
+                field,
+                user_id,
+            )
+            value = ""
+        values[name] = value
 
     expanded: list[str] = []
     for url in urls:
@@ -786,8 +794,7 @@ def notify_user(
     if normalized_user_id is None:
         return
 
-    routes = _resolve_user_routes(normalized_user_id)
-    admin_default = user_routes_are_admin_default(normalized_user_id)
+    routes, admin_default = _resolve_user_routes(normalized_user_id)
     urls = expand_user_route_placeholders(
         _resolve_route_urls_for_event(routes, event), normalized_user_id
     )

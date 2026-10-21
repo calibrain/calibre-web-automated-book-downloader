@@ -88,13 +88,15 @@ def test_get_keeps_empty_string_override(monkeypatch):
 @pytest.mark.parametrize(
     ("override", "from_env", "expected"),
     [
-        ("/user/books", False, True),
-        ("", False, True),
-        (None, False, False),
-        ("/user/books", True, False),
+        ("/user/books", False, ("/user/books", True)),
+        ("", False, ("", True)),
+        (None, False, ("/global/books", False)),
+        ("/user/books", True, ("/global/books", False)),
     ],
 )
-def test_uses_user_override_matches_get(monkeypatch, override, from_env, expected):
+def test_get_for_user_returns_get_value_and_whether_it_is_the_users_own(
+    monkeypatch, override, from_env, expected
+):
     field = _download_field("DESTINATION")
 
     monkeypatch.setattr(config, "_ensure_loaded", lambda: None)
@@ -106,8 +108,9 @@ def test_uses_user_override_matches_get(monkeypatch, override, from_env, expecte
         lambda: SimpleNamespace(is_value_from_env=lambda field: from_env),
     )
 
-    assert config.uses_user_override("DESTINATION", 10) is expected
-    assert config.uses_user_override("DESTINATION", None) is False
+    assert config.get_for_user("DESTINATION", "/default", user_id=10) == expected
+    assert config.get("DESTINATION", "/default", user_id=10) == expected[0]
+    assert config.get_for_user("DESTINATION", "/default", user_id=None) == ("/global/books", False)
 
 
 def test_build_user_preferences_payload_reports_effective_sources(monkeypatch):
