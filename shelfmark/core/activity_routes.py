@@ -954,10 +954,7 @@ def register_activity_routes(
                         item_count=len(items),
                         **_download_row_log_context(existing),
                     )
-                if _check_terminal_download(effective_existing) is not None:
-                    # The list this came from can be older than the download: one that started
-                    # again since is left where it is, not allowed to fail the whole batch.
-                    skipped_item_keys.append(f"download:{viewer_task_id}")
+                    missing_item_keys.append(f"download:{viewer_task_id}")
                     continue
                 if live_queue_index is None:
                     live_queue_index = _build_queue_index(queue_status(user_id=actor.owner_scope))
@@ -965,19 +962,11 @@ def register_activity_routes(
                     existing,
                     has_live_queue_entry=task_id in live_queue_index,
                 )
-                terminal_error = _check_terminal_download(effective_existing)
-                if terminal_error is not None:
-                    return _activity_error_response(
-                        "dismiss_many",
-                        status_code=409,
-                        error=terminal_error,
-                        auth_mode=resolve_auth_mode(),
-                        viewer_scope=actor.viewer_scope,
-                        item_type="download",
-                        item_key=f"download:{task_id}",
-                        item_count=len(items),
-                        **_download_row_log_context(effective_existing),
-                    )
+                if _check_terminal_download(effective_existing) is not None:
+                    # The list this came from can be older than the download: one that started
+                    # again since is left where it is, not allowed to fail the whole batch.
+                    skipped_item_keys.append(f"download:{viewer_task_id}")
+                    continue
                 dismissal_items.append({"item_type": "download", "item_key": f"download:{task_id}"})
                 continue
 
@@ -1010,23 +999,12 @@ def register_activity_routes(
                         item_count=len(items),
                         **_request_row_log_context(request_row),
                     )
-                if _check_terminal_request(request_row) is not None:
-                    # Same for a request that was reopened or retried since the list was drawn.
                     missing_item_keys.append(f"request:{request_id}")
                     continue
-                terminal_error = _check_terminal_request(request_row)
-                if terminal_error is not None:
-                    return _activity_error_response(
-                        "dismiss_many",
-                        status_code=409,
-                        error=terminal_error,
-                        auth_mode=resolve_auth_mode(),
-                        viewer_scope=actor.viewer_scope,
-                        item_type="request",
-                        item_key=f"request:{request_id}",
-                        item_count=len(items),
-                        **_request_row_log_context(request_row),
-                    )
+                if _check_terminal_request(request_row) is not None:
+                    # Same for a request that was reopened or retried since the list was drawn.
+                    skipped_item_keys.append(f"request:{request_id}")
+                    continue
                 dismissal_items.append(
                     {"item_type": "request", "item_key": f"request:{request_id}"}
                 )
