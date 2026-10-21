@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard
@@ -133,14 +133,22 @@ def _extract_url_schemes(urls: Iterable[str]) -> list[str]:
     return schemes
 
 
+# The capture active in the current context. Apprise 2 delivers on its own worker
+# threads but runs them in a copy of the caller's context, so a context variable
+# (unlike the thread id) still tells this dispatch's records apart from those of
+# a dispatch running concurrently on another thread.
+_active_apprise_capture: ContextVar[_AppriseLogCapture | None] = ContextVar(
+    "active_apprise_capture", default=None
+)
+
+
 class _AppriseLogCapture(logging.Handler):
-    def __init__(self, *, thread_id: int) -> None:
+    def __init__(self) -> None:
         super().__init__(level=logging.INFO)
         self.records: list[tuple[int, str, str, str]] = []
-        self._thread_id = thread_id
 
     def emit(self, record: logging.LogRecord) -> None:
-        if record.thread != self._thread_id:
+        if _active_apprise_capture.get() is not self:
             return
 
         message = record.getMessage()
@@ -162,7 +170,8 @@ def _capture_apprise_logs(
 ) -> Iterator[list[tuple[int, str, str, str]]]:
     apprise_logger = logging.getLogger(_APPRISE_LOGGER_NAME)
     previous_level = apprise_logger.level
-    handler = _AppriseLogCapture(thread_id=threading.get_ident())
+    handler = _AppriseLogCapture()
+    token = _active_apprise_capture.set(handler)
     apprise_logger.addHandler(handler)
 
     if previous_level == logging.NOTSET or previous_level > min_level:
@@ -173,6 +182,7 @@ def _capture_apprise_logs(
     finally:
         apprise_logger.removeHandler(handler)
         apprise_logger.setLevel(previous_level)
+        _active_apprise_capture.reset(token)
 
 
 def _log_apprise_records(records: Iterable[tuple[int, str, str, str]]) -> None:
