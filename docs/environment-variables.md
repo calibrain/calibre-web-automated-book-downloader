@@ -1642,6 +1642,8 @@ Clear the transfer from slskd's download list after Shelfmark imports it. Applie
 | `ABB_HOSTNAME` | AudiobookBay domain (e.g., audiobookbay.lu, audiobookbay.is). Required to enable searches. | string | _empty string_ |
 | `ABB_PAGE_LIMIT` | Maximum number of search result pages to fetch (1-10). | number | `1` |
 | `ABB_EXACT_PHRASE` | Wrap generated queries in quotes for stricter matching. If no results are found, Shelfmark retries without quotes. | boolean | `false` |
+| `ABB_SEED_TIME_MINUTES` | How long a finished AudiobookBay torrent keeps seeding before the client stops it. 0 uses the torrent client's own limit. | number | `0` |
+| `ABB_SEED_RATIO` | Share ratio an AudiobookBay torrent should reach before the client stops it. 0 uses the torrent client's own limit. | number | `0.0` |
 | `ABB_RATE_LIMIT_DELAY` | Delay between requests in seconds to avoid rate limiting (0-10). | number | `1.0` |
 
 <details>
@@ -1684,6 +1686,26 @@ Wrap generated queries in quotes for stricter matching. If no results are found,
 
 - **Type:** boolean
 - **Default:** `false`
+
+#### `ABB_SEED_TIME_MINUTES`
+
+**Seed Time (minutes)**
+
+How long a finished AudiobookBay torrent keeps seeding before the client stops it. 0 uses the torrent client's own limit.
+
+- **Type:** number
+- **Default:** `0`
+- **Constraints:** min: 0, max: 525600
+
+#### `ABB_SEED_RATIO`
+
+**Seed Ratio**
+
+Share ratio an AudiobookBay torrent should reach before the client stops it. 0 uses the torrent client's own limit.
+
+- **Type:** number
+- **Default:** `0.0`
+- **Constraints:** min: 0.0, max: 100.0
 
 #### `ABB_RATE_LIMIT_DELAY`
 
