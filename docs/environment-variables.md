@@ -2410,6 +2410,7 @@ Automatically remove a book from the active Hardcover list when you download it
 |----------|-------------|------|---------|
 | `OPENLIBRARY_ENABLED` | Enable Open Library as a metadata provider for book searches | boolean | `false` |
 | `OPENLIBRARY_DEFAULT_SORT` | Default sort order for Open Library search results. | string (choice) | `relevance` |
+| `OPENLIBRARY_WIKIDATA_TITLES` | Open Library lists translations under the original title. When enabled, release searches also try the title in each of your book languages, taken from Wikidata, and a search typed in a non-Latin script (Cyrillic, Greek, ...) that Open Library cannot answer is looked up there. Sends requests to wikidata.org. | boolean | `false` |
 
 <details>
 <summary>Detailed descriptions</summary>
@@ -2432,6 +2433,15 @@ Default sort order for Open Library search results.
 - **Type:** string (choice)
 - **Default:** `relevance`
 - **Options:** `relevance` (Most relevant), `newest` (Newest), `oldest` (Oldest)
+
+#### `OPENLIBRARY_WIKIDATA_TITLES`
+
+**Translated titles from Wikidata**
+
+Open Library lists translations under the original title. When enabled, release searches also try the title in each of your book languages, taken from Wikidata, and a search typed in a non-Latin script (Cyrillic, Greek, ...) that Open Library cannot answer is looked up there. Sends requests to wikidata.org.
+
+- **Type:** boolean
+- **Default:** `false`
 
 </details>
 
