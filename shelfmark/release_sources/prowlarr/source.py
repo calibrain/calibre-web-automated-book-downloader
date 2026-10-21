@@ -348,6 +348,64 @@ AUDIOBOOK_FORMATS = list(CORE_AUDIOBOOK_FORMATS)
 # Combined list for format detection (audiobook formats first for priority)
 ALL_BOOK_FORMATS = AUDIOBOOK_FORMATS + EBOOK_FORMATS
 
+# A trailing file extension on a release title, e.g. "Author - Title.doc".
+_TITLE_EXTENSION_PATTERN = re.compile(r"\.([a-z][a-z0-9]{1,4})\s*$")
+
+# Extensions that are known to be files. Only these are hidden, so dotted titles
+# like "Jane.Eyre.by.Bronte" are not read as a ".bronte" file, and archive
+# containers (zip, rar, 7z) are never hidden.
+_KNOWN_FILE_EXTENSIONS = frozenset(ALL_BOOK_FORMATS) | {
+    "azw4",
+    "chm",
+    "djv",
+    "doc",
+    "docx",
+    "htm",
+    "html",
+    "kfx",
+    "lrf",
+    "lrx",
+    "md",
+    "odt",
+    "oxps",
+    "prc",
+    "rtf",
+    "snb",
+    "tcr",
+    "tpz",
+    "wps",
+    "xps",
+}
+
+# Same default as the Supported Book Formats setting and post-processing.
+_DEFAULT_SUPPORTED_FORMATS = ("epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr")
+
+
+def _unsupported_title_extension(title: str, content_type: str) -> str | None:
+    """Return the trailing extension of a title when it is a format the user did not enable.
+
+    Indexers that are not enriched return plain titles, so a single-file release
+    such as "Author - Title.doc" is only recognisable by its extension. Picking it
+    would download a file that post-processing then discards.
+    """
+    if content_type == "audiobook":
+        return None
+    match = _TITLE_EXTENSION_PATTERN.search(str(title or "").lower())
+    if not match:
+        return None
+    extension = match.group(1)
+    if extension not in _KNOWN_FILE_EXTENSIONS:
+        return None
+    configured = config.get("SUPPORTED_FORMATS", None)
+    if isinstance(configured, str):
+        configured = configured.split(",")
+    if not isinstance(configured, (list, tuple, set)) or not configured:
+        configured = _DEFAULT_SUPPORTED_FORMATS
+    supported = {str(fmt).strip().lower() for fmt in configured}
+    if extension in supported:
+        return None
+    return extension
+
 
 # Backend safeguard: cap total Prowlarr search time per request.
 PROWLARR_SEARCH_TIMEOUT_SECONDS = 120.0
@@ -1298,6 +1356,8 @@ class ProwlarrSource(ReleaseSource):
             # A manual query is the user's own words; ranking it against the
             # metadata author would second-guess what they typed.
             wanted_author = "" if plan.manual_query else plan.author
+            hide_unsupported_formats = config.get("PROWLARR_HIDE_UNSUPPORTED_FORMATS", True)
+            hidden_unsupported = 0
 
             max_bytes = _max_release_bytes(content_type)
             oversized = 0
@@ -1319,6 +1379,18 @@ class ProwlarrSource(ReleaseSource):
                     content_type,
                     enable_format_detection=is_enriched,
                 )
+                if hide_unsupported_formats:
+                    unsupported_extension = _unsupported_title_extension(
+                        release.title, content_type
+                    )
+                    if unsupported_extension:
+                        hidden_unsupported += 1
+                        logger.debug(
+                            "Prowlarr: hiding '%s', .%s is not a supported format",
+                            release.title,
+                            unsupported_extension,
+                        )
+                        continue
                 if idx_id_int is not None and idx_id_int in indexer_priority:
                     release.extra["indexer_priority"] = indexer_priority[idx_id_int]
                 results.append(release)
@@ -1332,6 +1404,11 @@ class ProwlarrSource(ReleaseSource):
                     mam_releases.append(release)
                     mam_indexer = mam_indexer or mam_indexers[idx_id_int]
 
+            if hidden_unsupported:
+                logger.info(
+                    "Prowlarr: hid %s result(s) in a format that is not enabled",
+                    hidden_unsupported,
+                )
             if oversized:
                 logger.debug("Prowlarr: hid %s result(s) over the ebook size limit", oversized)
 

@@ -260,6 +260,18 @@ def prowlarr_config_settings() -> list[SettingsField]:
             show_when={"field": "PROWLARR_ENABLED", "value": True},
         ),
         CheckboxField(
+            key="PROWLARR_HIDE_UNSUPPORTED_FORMATS",
+            label="Hide results in formats you did not enable",
+            default=True,
+            description=(
+                "Hide a result whose title ends in a file extension that is not in Supported "
+                "Book Formats, such as a .doc or .rtf file. Downloading it would only fail at "
+                "post-processing. Titles without an extension, archives and audiobook "
+                "searches are never hidden."
+            ),
+            show_when={"field": "PROWLARR_ENABLED", "value": True},
+        ),
+        CheckboxField(
             key="PROWLARR_USE_SEED_PREFERENCES",
             label="Use Prowlarr seed preferences",
             default=False,

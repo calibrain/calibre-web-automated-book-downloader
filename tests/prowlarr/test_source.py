@@ -26,6 +26,7 @@ from shelfmark.release_sources.prowlarr.source import (
     _release_identity,
     _result_dedup_key,
     _search_budget_seconds,
+    _unsupported_title_extension,
 )
 from shelfmark.release_sources.prowlarr.utils import (
     build_source_id,
@@ -1535,6 +1536,89 @@ class TestProwlarrStaleIndexerSelection:
         fake_client = self._search_with_selection(monkeypatch, [98, 99])
 
         assert fake_client.searched_indexer_ids == []
+
+
+class TestHideUnsupportedFormats:
+    """Plain indexer titles that end in a format the user did not enable are hidden."""
+
+    SUPPORTED = ["epub", "mobi", "azw3"]
+
+    def _patch_config(self, monkeypatch, overrides=None):
+        import shelfmark.release_sources.prowlarr.source as prowlarr_source
+
+        values = {
+            "PROWLARR_INDEXERS": "",
+            "PROWLARR_AUTO_EXPAND": False,
+            "SUPPORTED_FORMATS": self.SUPPORTED,
+            **(overrides or {}),
+        }
+        monkeypatch.setattr(
+            prowlarr_source.config, "get", lambda key, default=None: values.get(key, default)
+        )
+
+    @pytest.mark.parametrize(
+        ("title", "expected"),
+        [
+            ("Иван Вазов - Под игото.doc", "doc"),
+            ("Author - Title.RTF", "rtf"),
+            ("Author - Title.pdf ", "pdf"),
+            ("Author - Title.epub", None),
+            ("Author - Title [EPUB]", None),
+            ("Jane.Eyre.by.Bronte", None),
+            ("Author - Title.rar", None),
+            ("Author - Title.zip", None),
+            ("Author - Title", None),
+            ("", None),
+        ],
+    )
+    def test_unsupported_title_extension(self, monkeypatch, title, expected):
+        self._patch_config(monkeypatch)
+        assert _unsupported_title_extension(title, "ebook") == expected
+
+    def test_audiobook_searches_are_not_filtered(self, monkeypatch):
+        self._patch_config(monkeypatch)
+        assert _unsupported_title_extension("Author - Title.doc", "audiobook") is None
+
+    def test_comma_separated_supported_formats(self, monkeypatch):
+        self._patch_config(monkeypatch, {"SUPPORTED_FORMATS": "epub, doc"})
+        assert _unsupported_title_extension("Author - Title.doc", "ebook") is None
+        assert _unsupported_title_extension("Author - Title.rtf", "ebook") == "rtf"
+
+    def _search(self, monkeypatch, overrides=None):
+        self._patch_config(monkeypatch, overrides)
+        fake_client = FakeTorznabClient(
+            search_results=[
+                {
+                    "guid": f"result-{index}",
+                    "protocol": "torrent",
+                    "title": title,
+                    "magnetUrl": f"magnet:?xt=urn:btih:abc{index}",
+                    "indexerId": 1,
+                    "indexer": "Zamunda",
+                }
+                for index, title in enumerate(
+                    ["Иван Вазов - Под игото.epub", "Иван Вазов - Под игото.doc"]
+                )
+            ]
+        )
+        source = ProwlarrSource()
+        monkeypatch.setattr(source, "_get_client", lambda: fake_client)
+        book = BookMetadata(
+            provider="hardcover", provider_id="123", title="Под игото", authors=["Иван Вазов"]
+        )
+
+        from shelfmark.core.search_plan import build_release_search_plan
+
+        plan = build_release_search_plan(book, languages=["bg"])
+        return source.search(book, plan, content_type="ebook")
+
+    def test_search_hides_unsupported_format(self, monkeypatch):
+        releases = self._search(monkeypatch)
+        assert [release.title for release in releases] == ["Иван Вазов - Под игото.epub"]
+
+    def test_search_keeps_unsupported_format_when_disabled(self, monkeypatch):
+        releases = self._search(monkeypatch, {"PROWLARR_HIDE_UNSUPPORTED_FORMATS": False})
+        assert len(releases) == 2
 
 
 class TestEbookMaxSize:
