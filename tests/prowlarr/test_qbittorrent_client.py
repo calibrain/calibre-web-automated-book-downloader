@@ -1590,6 +1590,63 @@ class TestQBittorrentClientAddDownload:
                 call_kwargs = mock_client_instance.torrents_add.call_args.kwargs
                 assert call_kwargs.get("save_path") == "/downloads/books"
 
+    def test_add_download_uses_separate_book_and_audiobook_dirs(self, monkeypatch):
+        """With separate directories on, books and audiobooks use their own directories."""
+        config_values = {
+            "QBITTORRENT_URL": "http://localhost:8080",
+            "QBITTORRENT_USERNAME": "admin",
+            "QBITTORRENT_PASSWORD": "password",
+            "QBITTORRENT_CATEGORY": "books",
+            "QBITTORRENT_DOWNLOAD_DIR": "/downloads/shared",
+            "QBITTORRENT_SEPARATE_DOWNLOAD_DIRS": True,
+            "QBITTORRENT_DOWNLOAD_DIR_BOOK": "/downloads/books",
+            "QBITTORRENT_DOWNLOAD_DIR_AUDIOBOOK": "/downloads/audiobooks",
+        }
+        monkeypatch.setattr(
+            "shelfmark.download.clients.qbittorrent.config.get",
+            lambda key, default="": config_values.get(key, default),
+        )
+
+        valid_hash = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+        mock_torrent = MockTorrent(hash_val=valid_hash)
+        mock_client_instance = MagicMock()
+        mock_client_instance.torrents_add.return_value = "Ok."
+        mock_client_instance._session.get.return_value = create_mock_session_response(
+            [mock_torrent], status_code=200
+        )
+        mock_client_class = MagicMock(return_value=mock_client_instance)
+
+        with patch.dict("sys.modules", {"qbittorrentapi": MagicMock(Client=mock_client_class)}):
+            import importlib
+
+            import shelfmark.download.clients.qbittorrent as qb_module
+
+            importlib.reload(qb_module)
+
+            with patch(
+                "shelfmark.download.clients.qbittorrent.extract_torrent_info",
+                autospec=True,
+            ) as mock_extract:
+                mock_extract.return_value = TorrentInfo(
+                    info_hash=valid_hash,
+                    torrent_data=None,
+                    is_magnet=True,
+                    magnet_url=f"magnet:?xt=urn:btih:{valid_hash}&dn=test",
+                )
+
+                client = qb_module.QBittorrentClient()
+                client.add_download(
+                    "magnet:?xt=urn:btih:test&dn=test", "Test", content_type="audiobook"
+                )
+                call_kwargs = mock_client_instance.torrents_add.call_args.kwargs
+                assert call_kwargs.get("save_path") == "/downloads/audiobooks"
+
+                client.add_download(
+                    "magnet:?xt=urn:btih:test&dn=test", "Test", content_type="ebook"
+                )
+                call_kwargs = mock_client_instance.torrents_add.call_args.kwargs
+                assert call_kwargs.get("save_path") == "/downloads/books"
+
 
 class TestQBittorrentClientRemove:
     """Tests for QBittorrentClient.remove()."""

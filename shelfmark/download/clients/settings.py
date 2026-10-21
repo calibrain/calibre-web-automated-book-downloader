@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, NoReturn, Protocol, TypeGuard
 
 from shelfmark.core.settings_registry import (
     ActionButton,
+    CheckboxField,
     HeadingField,
     NumberField,
     PasswordField,
@@ -764,12 +765,42 @@ def prowlarr_clients_settings() -> list[SettingsField]:
             default="",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
         ),
+        CheckboxField(
+            key="QBITTORRENT_SEPARATE_DOWNLOAD_DIRS",
+            label="Separate Book and Audiobook Directories",
+            description="Download books and audiobooks to different directories instead of one shared directory.",
+            default=False,
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
+        ),
         TextField(
             key="QBITTORRENT_DOWNLOAD_DIR",
             label="Download Directory",
             description="Server-side directory where torrents are downloaded (optional, uses qBittorrent default if not specified)",
             placeholder="/downloads",
-            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
+            show_when=[
+                {"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
+                {"field": "QBITTORRENT_SEPARATE_DOWNLOAD_DIRS", "value": False},
+            ],
+        ),
+        TextField(
+            key="QBITTORRENT_DOWNLOAD_DIR_BOOK",
+            label="Book Download Directory",
+            description="Server-side directory where book torrents are downloaded (optional, uses qBittorrent default if not specified)",
+            placeholder="/downloads/books",
+            show_when=[
+                {"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
+                {"field": "QBITTORRENT_SEPARATE_DOWNLOAD_DIRS", "value": True},
+            ],
+        ),
+        TextField(
+            key="QBITTORRENT_DOWNLOAD_DIR_AUDIOBOOK",
+            label="Audiobook Download Directory",
+            description="Server-side directory where audiobook torrents are downloaded (optional, uses qBittorrent default if not specified)",
+            placeholder="/downloads/audiobooks",
+            show_when=[
+                {"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
+                {"field": "QBITTORRENT_SEPARATE_DOWNLOAD_DIRS", "value": True},
+            ],
         ),
         TagListField(
             key="QBITTORRENT_TAG",
@@ -824,12 +855,42 @@ def prowlarr_clients_settings() -> list[SettingsField]:
             default="",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
         ),
+        CheckboxField(
+            key="TRANSMISSION_SEPARATE_DOWNLOAD_DIRS",
+            label="Separate Book and Audiobook Directories",
+            description="Download books and audiobooks to different directories instead of one shared directory.",
+            default=False,
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
+        ),
         TextField(
             key="TRANSMISSION_DOWNLOAD_DIR",
             label="Download Directory",
             description="Server-side directory where torrents are downloaded (optional, uses Transmission default if not specified)",
             placeholder="/downloads",
-            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
+            show_when=[
+                {"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
+                {"field": "TRANSMISSION_SEPARATE_DOWNLOAD_DIRS", "value": False},
+            ],
+        ),
+        TextField(
+            key="TRANSMISSION_DOWNLOAD_DIR_BOOK",
+            label="Book Download Directory",
+            description="Server-side directory where book torrents are downloaded (optional, uses Transmission default if not specified)",
+            placeholder="/downloads/books",
+            show_when=[
+                {"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
+                {"field": "TRANSMISSION_SEPARATE_DOWNLOAD_DIRS", "value": True},
+            ],
+        ),
+        TextField(
+            key="TRANSMISSION_DOWNLOAD_DIR_AUDIOBOOK",
+            label="Audiobook Download Directory",
+            description="Server-side directory where audiobook torrents are downloaded (optional, uses Transmission default if not specified)",
+            placeholder="/downloads/audiobooks",
+            show_when=[
+                {"field": "PROWLARR_TORRENT_CLIENT", "value": "transmission"},
+                {"field": "TRANSMISSION_SEPARATE_DOWNLOAD_DIRS", "value": True},
+            ],
         ),
         # --- Deluge Settings ---
         TextField(
@@ -878,12 +939,42 @@ def prowlarr_clients_settings() -> list[SettingsField]:
             default="",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
         ),
+        CheckboxField(
+            key="DELUGE_SEPARATE_DOWNLOAD_DIRS",
+            label="Separate Book and Audiobook Directories",
+            description="Download books and audiobooks to different directories instead of one shared directory.",
+            default=False,
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
+        ),
         TextField(
             key="DELUGE_DOWNLOAD_DIR",
             label="Download Directory",
             description="Server-side directory where torrents are downloaded (optional, uses Deluge default if not specified)",
             placeholder="/downloads",
-            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
+            show_when=[
+                {"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
+                {"field": "DELUGE_SEPARATE_DOWNLOAD_DIRS", "value": False},
+            ],
+        ),
+        TextField(
+            key="DELUGE_DOWNLOAD_DIR_BOOK",
+            label="Book Download Directory",
+            description="Server-side directory where book torrents are downloaded (optional, uses Deluge default if not specified)",
+            placeholder="/downloads/books",
+            show_when=[
+                {"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
+                {"field": "DELUGE_SEPARATE_DOWNLOAD_DIRS", "value": True},
+            ],
+        ),
+        TextField(
+            key="DELUGE_DOWNLOAD_DIR_AUDIOBOOK",
+            label="Audiobook Download Directory",
+            description="Server-side directory where audiobook torrents are downloaded (optional, uses Deluge default if not specified)",
+            placeholder="/downloads/audiobooks",
+            show_when=[
+                {"field": "PROWLARR_TORRENT_CLIENT", "value": "deluge"},
+                {"field": "DELUGE_SEPARATE_DOWNLOAD_DIRS", "value": True},
+            ],
         ),
         # --- rTorrent Settings ---
         TextField(
@@ -928,12 +1019,42 @@ def prowlarr_clients_settings() -> list[SettingsField]:
             placeholder="audiobooks",
             show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "rtorrent"},
         ),
+        CheckboxField(
+            key="RTORRENT_SEPARATE_DOWNLOAD_DIRS",
+            label="Separate Book and Audiobook Directories",
+            description="Download books and audiobooks to different directories instead of one shared directory.",
+            default=False,
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "rtorrent"},
+        ),
         TextField(
             key="RTORRENT_DOWNLOAD_DIR",
             label="Download Directory",
             description="Server-side directory where torrents are downloaded (optional, uses rTorrent default if not specified)",
             placeholder="/downloads",
-            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "rtorrent"},
+            show_when=[
+                {"field": "PROWLARR_TORRENT_CLIENT", "value": "rtorrent"},
+                {"field": "RTORRENT_SEPARATE_DOWNLOAD_DIRS", "value": False},
+            ],
+        ),
+        TextField(
+            key="RTORRENT_DOWNLOAD_DIR_BOOK",
+            label="Book Download Directory",
+            description="Server-side directory where book torrents are downloaded (optional, uses rTorrent default if not specified)",
+            placeholder="/downloads/books",
+            show_when=[
+                {"field": "PROWLARR_TORRENT_CLIENT", "value": "rtorrent"},
+                {"field": "RTORRENT_SEPARATE_DOWNLOAD_DIRS", "value": True},
+            ],
+        ),
+        TextField(
+            key="RTORRENT_DOWNLOAD_DIR_AUDIOBOOK",
+            label="Audiobook Download Directory",
+            description="Server-side directory where audiobook torrents are downloaded (optional, uses rTorrent default if not specified)",
+            placeholder="/downloads/audiobooks",
+            show_when=[
+                {"field": "PROWLARR_TORRENT_CLIENT", "value": "rtorrent"},
+                {"field": "RTORRENT_SEPARATE_DOWNLOAD_DIRS", "value": True},
+            ],
         ),
         # Note: Torrent client download path must be mounted identically in both containers.
         SelectField(
