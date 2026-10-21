@@ -1066,6 +1066,7 @@ export const getSelfUserEditContext = async (): Promise<SelfUserEditContext> => 
 export const updateSelfUser = async (
   data: Partial<Pick<AdminUser, 'email' | 'display_name'>> & {
     password?: string;
+    current_password?: string;
     settings?: Record<string, unknown>;
   },
 ): Promise<AdminUser> => {

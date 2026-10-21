@@ -214,11 +214,23 @@ try:
     import_module("shelfmark.config.users_settings")
     from shelfmark.core.admin_routes import register_admin_routes
     from shelfmark.core.oidc_routes import register_oidc_routes
-    from shelfmark.core.self_user_routes import register_self_user_routes
+    from shelfmark.core.self_user_routes import (
+        PasswordAttemptLimiter,
+        register_self_user_routes,
+    )
 
     register_oidc_routes(app, user_db)
     register_admin_routes(app, user_db)
-    register_self_user_routes(app, user_db)
+    register_self_user_routes(
+        app,
+        user_db,
+        # Looked up when called: the lockout helpers are defined further down this module.
+        password_attempts=PasswordAttemptLimiter(
+            is_locked=lambda username: is_account_locked(username),  # noqa: PLW0108
+            record_failure=lambda username: record_failed_login(username, get_client_ip()),
+            clear=lambda username: clear_failed_logins(username),  # noqa: PLW0108
+        ),
+    )
 except (sqlite3.OperationalError, OSError) as e:
     logger.warning(
         "User database initialization failed: %s. Multi-user authentication features will be disabled. Ensure CONFIG_DIR (%s) exists and is writable.",
