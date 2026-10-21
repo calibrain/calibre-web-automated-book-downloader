@@ -5,7 +5,6 @@ from __future__ import annotations
 import ipaddress
 import logging
 import socket
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar

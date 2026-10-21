@@ -9,7 +9,6 @@ import random
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from email.utils import parseaddr
 from functools import partial
 from pathlib import Path
 from threading import Event, Lock

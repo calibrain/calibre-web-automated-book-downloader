@@ -1,7 +1,6 @@
 """Disk-based image cache with LRU eviction."""
 
 import hashlib
-import ipaddress
 import json
 import threading
 import time
