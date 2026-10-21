@@ -23,6 +23,7 @@ from shelfmark.download.clients._coercion import (
     coerce_optional_int,
     config_text,
     normalize_http_config_url,
+    resolve_download_dir,
 )
 from shelfmark.download.clients.torrent_utils import (
     extract_torrent_info,
@@ -253,6 +254,11 @@ class QBittorrentClient(DownloadClient):
         )
         self._category = config_text(config.get("QBITTORRENT_CATEGORY", "books"))
         self._download_dir = config_text(config.get("QBITTORRENT_DOWNLOAD_DIR", ""))
+        self._separate_download_dirs = bool(config.get("QBITTORRENT_SEPARATE_DOWNLOAD_DIRS", False))
+        self._download_dir_book = config_text(config.get("QBITTORRENT_DOWNLOAD_DIR_BOOK", ""))
+        self._download_dir_audiobook = config_text(
+            config.get("QBITTORRENT_DOWNLOAD_DIR_AUDIOBOOK", "")
+        )
         self._tags = _normalize_tags(config.get("QBITTORRENT_TAG", []))
         # download_id -> qBittorrent's current primary hash, for identities that no
         # longer match it directly. See _resolve_torrent().
@@ -533,8 +539,15 @@ class QBittorrentClient(DownloadClient):
             add_kwargs: _QBittorrentAddKwargs = {"rename": name}
             if category:
                 add_kwargs["category"] = category
-            if self._download_dir:
-                add_kwargs["save_path"] = self._download_dir
+            download_dir = resolve_download_dir(
+                separate=self._separate_download_dirs,
+                shared_dir=self._download_dir,
+                book_dir=self._download_dir_book,
+                audiobook_dir=self._download_dir_audiobook,
+                content_type=kwargs.get("content_type"),
+            )
+            if download_dir:
+                add_kwargs["save_path"] = download_dir
             if tags:
                 add_kwargs["tags"] = ",".join(tags)
             if seeding_time_limit is not None:

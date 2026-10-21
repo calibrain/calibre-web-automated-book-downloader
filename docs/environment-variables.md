@@ -1894,24 +1894,36 @@ How long to keep cached search results before they expire.
 | `DEBRIDLINK_API_KEY` | Debrid-Link API Key from your Debrid-Link account settings | string (secret) | _none_ |
 | `REALDEBRID_API_KEY` | Real-Debrid API Key (Secret Token) from your Real-Debrid account settings | string (secret) | _none_ |
 | `TORBOX_API_KEY` | TorBox API Key from your TorBox account settings | string (secret) | _none_ |
+| `QBITTORRENT_DOWNLOAD_DIR_BOOK` | Server-side directory where book torrents are downloaded (optional, uses qBittorrent default if not specified) | string | _none_ |
+| `QBITTORRENT_DOWNLOAD_DIR_AUDIOBOOK` | Server-side directory where audiobook torrents are downloaded (optional, uses qBittorrent default if not specified) | string | _none_ |
 | `QBITTORRENT_URL` | Web UI URL of your qBittorrent instance | string | _none_ |
 | `QBITTORRENT_USERNAME` | qBittorrent Web UI username | string | _none_ |
 | `QBITTORRENT_PASSWORD` | qBittorrent Web UI password | string (secret) | _none_ |
 | `QBITTORRENT_API_KEY` | Found in qBittorrent: Options > Web UI > API Key (qBittorrent 5.2.0+). Used instead of the username and password when set. | string (secret) | _none_ |
 | `QBITTORRENT_CATEGORY` | Category to assign to book downloads in qBittorrent | string | `books` |
 | `QBITTORRENT_CATEGORY_AUDIOBOOK` | Category for audiobook downloads. Leave empty to use the book category. | string | _empty string_ |
+| `TRANSMISSION_SEPARATE_DOWNLOAD_DIRS` | Download books and audiobooks to different directories instead of one shared directory. | boolean | `false` |
+| `QBITTORRENT_SEPARATE_DOWNLOAD_DIRS` | Download books and audiobooks to different directories instead of one shared directory. | boolean | `false` |
+| `TRANSMISSION_DOWNLOAD_DIR_BOOK` | Server-side directory where book torrents are downloaded (optional, uses Transmission default if not specified) | string | _none_ |
+| `TRANSMISSION_DOWNLOAD_DIR_AUDIOBOOK` | Server-side directory where audiobook torrents are downloaded (optional, uses Transmission default if not specified) | string | _none_ |
 | `QBITTORRENT_DOWNLOAD_DIR` | Server-side directory where torrents are downloaded (optional, uses qBittorrent default if not specified) | string | _none_ |
 | `QBITTORRENT_TAG` | Tag(s) to assign to qBittorrent downloads. Leave empty for no tags. | string (comma-separated) | _empty list_ |
 | `TRANSMISSION_URL` | URL of your Transmission instance (use https:// for TLS) | string | _none_ |
 | `TRANSMISSION_USERNAME` | Transmission RPC username (if authentication enabled) | string | _none_ |
 | `TRANSMISSION_PASSWORD` | Transmission RPC password | string (secret) | _none_ |
+| `DELUGE_SEPARATE_DOWNLOAD_DIRS` | Download books and audiobooks to different directories instead of one shared directory. | boolean | `false` |
 | `TRANSMISSION_CATEGORY` | Label to assign to book downloads in Transmission | string | `books` |
+| `DELUGE_DOWNLOAD_DIR_BOOK` | Server-side directory where book torrents are downloaded (optional, uses Deluge default if not specified) | string | _none_ |
+| `DELUGE_DOWNLOAD_DIR_AUDIOBOOK` | Server-side directory where audiobook torrents are downloaded (optional, uses Deluge default if not specified) | string | _none_ |
 | `TRANSMISSION_CATEGORY_AUDIOBOOK` | Label for audiobook downloads. Leave empty to use the book label. | string | _empty string_ |
 | `TRANSMISSION_DOWNLOAD_DIR` | Server-side directory where torrents are downloaded (optional, uses Transmission default if not specified) | string | _none_ |
 | `DELUGE_HOST` | Hostname/IP or full URL of your Deluge Web UI (deluge-web) | string | `localhost` |
 | `DELUGE_PORT` | Deluge Web UI port (default: 8112) | string | `8112` |
 | `DELUGE_PASSWORD` | Deluge Web UI password (default: deluge) | string (secret) | _none_ |
+| `RTORRENT_SEPARATE_DOWNLOAD_DIRS` | Download books and audiobooks to different directories instead of one shared directory. | boolean | `false` |
 | `DELUGE_CATEGORY` | Label to assign to book downloads in Deluge | string | `books` |
+| `RTORRENT_DOWNLOAD_DIR_BOOK` | Server-side directory where book torrents are downloaded (optional, uses rTorrent default if not specified) | string | _none_ |
+| `RTORRENT_DOWNLOAD_DIR_AUDIOBOOK` | Server-side directory where audiobook torrents are downloaded (optional, uses rTorrent default if not specified) | string | _none_ |
 | `DELUGE_CATEGORY_AUDIOBOOK` | Label for audiobook downloads. Leave empty to use the book label. | string | _empty string_ |
 | `DELUGE_DOWNLOAD_DIR` | Server-side directory where torrents are downloaded (optional, uses Deluge default if not specified) | string | _none_ |
 | `RTORRENT_URL` | XML-RPC URL of your rTorrent instance | string | _none_ |
@@ -2041,6 +2053,15 @@ Category to assign to book downloads in qBittorrent
 - **Default:** `books`
 
 #### `QBITTORRENT_CATEGORY_AUDIOBOOK`
+#### `QBITTORRENT_SEPARATE_DOWNLOAD_DIRS`
+
+**Separate Book and Audiobook Directories**
+
+Download books and audiobooks to different directories instead of one shared directory.
+
+- **Type:** boolean
+- **Default:** `false`
+
 
 **Audiobook Category**
 
@@ -2050,10 +2071,28 @@ Category for audiobook downloads. Leave empty to use the book category.
 - **Default:** _empty string_
 
 #### `QBITTORRENT_DOWNLOAD_DIR`
+#### `QBITTORRENT_DOWNLOAD_DIR_BOOK`
 
 **Download Directory**
 
 Server-side directory where torrents are downloaded (optional, uses qBittorrent default if not specified)
+
+- **Type:** string
+- **Default:** _none_
+
+
+**Book Download Directory**
+
+Server-side directory where book torrents are downloaded (optional, uses qBittorrent default if not specified)
+
+- **Type:** string
+- **Default:** _none_
+
+#### `QBITTORRENT_DOWNLOAD_DIR_AUDIOBOOK`
+
+**Audiobook Download Directory**
+
+Server-side directory where audiobook torrents are downloaded (optional, uses qBittorrent default if not specified)
 
 - **Type:** string
 - **Default:** _none_
@@ -2104,6 +2143,15 @@ Label to assign to book downloads in Transmission
 - **Default:** `books`
 
 #### `TRANSMISSION_CATEGORY_AUDIOBOOK`
+#### `TRANSMISSION_SEPARATE_DOWNLOAD_DIRS`
+
+**Separate Book and Audiobook Directories**
+
+Download books and audiobooks to different directories instead of one shared directory.
+
+- **Type:** boolean
+- **Default:** `false`
+
 
 **Audiobook Label**
 
@@ -2113,10 +2161,28 @@ Label for audiobook downloads. Leave empty to use the book label.
 - **Default:** _empty string_
 
 #### `TRANSMISSION_DOWNLOAD_DIR`
+#### `TRANSMISSION_DOWNLOAD_DIR_BOOK`
 
 **Download Directory**
 
 Server-side directory where torrents are downloaded (optional, uses Transmission default if not specified)
+
+- **Type:** string
+- **Default:** _none_
+
+
+**Book Download Directory**
+
+Server-side directory where book torrents are downloaded (optional, uses Transmission default if not specified)
+
+- **Type:** string
+- **Default:** _none_
+
+#### `TRANSMISSION_DOWNLOAD_DIR_AUDIOBOOK`
+
+**Audiobook Download Directory**
+
+Server-side directory where audiobook torrents are downloaded (optional, uses Transmission default if not specified)
 
 - **Type:** string
 - **Default:** _none_
@@ -2158,6 +2224,15 @@ Label to assign to book downloads in Deluge
 - **Default:** `books`
 
 #### `DELUGE_CATEGORY_AUDIOBOOK`
+#### `DELUGE_SEPARATE_DOWNLOAD_DIRS`
+
+**Separate Book and Audiobook Directories**
+
+Download books and audiobooks to different directories instead of one shared directory.
+
+- **Type:** boolean
+- **Default:** `false`
+
 
 **Audiobook Label**
 
@@ -2167,10 +2242,28 @@ Label for audiobook downloads. Leave empty to use the book label.
 - **Default:** _empty string_
 
 #### `DELUGE_DOWNLOAD_DIR`
+#### `DELUGE_DOWNLOAD_DIR_BOOK`
 
 **Download Directory**
 
 Server-side directory where torrents are downloaded (optional, uses Deluge default if not specified)
+
+- **Type:** string
+- **Default:** _none_
+
+
+**Book Download Directory**
+
+Server-side directory where book torrents are downloaded (optional, uses Deluge default if not specified)
+
+- **Type:** string
+- **Default:** _none_
+
+#### `DELUGE_DOWNLOAD_DIR_AUDIOBOOK`
+
+**Audiobook Download Directory**
+
+Server-side directory where audiobook torrents are downloaded (optional, uses Deluge default if not specified)
 
 - **Type:** string
 - **Default:** _none_
@@ -2212,6 +2305,15 @@ Label to assign to ebook downloads in rTorrent
 - **Default:** `cwabd`
 
 #### `RTORRENT_AUDIOBOOK_LABEL`
+#### `RTORRENT_SEPARATE_DOWNLOAD_DIRS`
+
+**Separate Book and Audiobook Directories**
+
+Download books and audiobooks to different directories instead of one shared directory.
+
+- **Type:** boolean
+- **Default:** `false`
+
 
 **Audiobook Label**
 
@@ -2221,10 +2323,28 @@ Label to assign to audiobook downloads in rTorrent (falls back to Book Label if 
 - **Default:** _none_
 
 #### `RTORRENT_DOWNLOAD_DIR`
+#### `RTORRENT_DOWNLOAD_DIR_BOOK`
 
 **Download Directory**
 
 Server-side directory where torrents are downloaded (optional, uses rTorrent default if not specified)
+
+- **Type:** string
+- **Default:** _none_
+
+
+**Book Download Directory**
+
+Server-side directory where book torrents are downloaded (optional, uses rTorrent default if not specified)
+
+- **Type:** string
+- **Default:** _none_
+
+#### `RTORRENT_DOWNLOAD_DIR_AUDIOBOOK`
+
+**Audiobook Download Directory**
+
+Server-side directory where audiobook torrents are downloaded (optional, uses rTorrent default if not specified)
 
 - **Type:** string
 - **Default:** _none_
