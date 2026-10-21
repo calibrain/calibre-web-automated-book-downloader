@@ -396,6 +396,13 @@ def _test_calibre_library(current_values: dict[str, Any] | None = None) -> dict[
     return library_index.test_connection("calibre", current_values)
 
 
+def _test_audiobookshelf_library(current_values: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Action-button callback: read the Audiobookshelf libraries and count the items."""
+    from shelfmark.core import library_index
+
+    return library_index.test_connection("audiobookshelf", current_values)
+
+
 @register_settings("general", "General", icon="settings", order=0)
 def general_settings() -> list[SettingsField]:
     """Core application settings."""
@@ -443,6 +450,41 @@ def general_settings() -> list[SettingsField]:
             label="Test Calibre library",
             description="Check that Shelfmark can read the Calibre database and count the books.",
             callback=_test_calibre_library,
+        ),
+        CheckboxField(
+            key="LIBRARY_CHECK_AUDIOBOOKSHELF_ENABLED",
+            label="Mark audiobooks already in your Audiobookshelf library",
+            description=(
+                "Ask your Audiobookshelf server which audiobooks you already own, so synced "
+                "and automatic downloads skip them. Read only, nothing is written to Audiobookshelf."
+            ),
+            default=False,
+        ),
+        TextField(
+            key="AUDIOBOOKSHELF_URL",
+            label="Audiobookshelf URL",
+            description=(
+                "Base URL reachable from the Shelfmark container (not the public URL). Often the "
+                "host LAN IP, e.g. http://10.0.0.91:13378."
+            ),
+            placeholder="http://10.0.0.91:13378",
+        ),
+        PasswordField(
+            key="AUDIOBOOKSHELF_TOKEN",
+            label="Audiobookshelf API Token",
+            description="API token from Audiobookshelf (Settings > Users > your user > API Token).",
+        ),
+        TextField(
+            key="AUDIOBOOKSHELF_LIBRARY_IDS",
+            label="Audiobookshelf Library IDs (optional)",
+            description="Comma-separated library IDs to check. Leave blank for all book libraries.",
+            placeholder="Blank = all book libraries",
+        ),
+        ActionButton(
+            key="test_audiobookshelf_library",
+            label="Test Audiobookshelf library",
+            description="Check that Shelfmark can reach Audiobookshelf and count the items.",
+            callback=_test_audiobookshelf_library,
         ),
         HeadingField(
             key="search_defaults_heading",

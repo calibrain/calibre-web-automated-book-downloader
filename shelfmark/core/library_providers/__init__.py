@@ -68,6 +68,7 @@ def all_providers(overrides: Mapping[str, Any] | None = None) -> list[LibraryPro
     Adding a library means writing a module with the :class:`LibraryProvider` shape and
     listing it here. Nothing above this function knows which libraries exist.
     """
+    from shelfmark.core.library_providers.audiobookshelf import AudiobookshelfLibrary
     from shelfmark.core.library_providers.calibre import CalibreLibrary
 
-    return [CalibreLibrary(overrides)]
+    return [CalibreLibrary(overrides), AudiobookshelfLibrary(overrides)]
