@@ -63,6 +63,36 @@ def test_googlebooks_search_does_not_cache_request_failures():
     assert [book.title for book in result] == ["Recovered Book"]
 
 
+def test_googlebooks_paginated_search_does_not_cache_request_failures():
+    get_metadata_cache().clear()
+    provider = GoogleBooksProvider(api_key="test-key")
+    session = _FlakyGoogleBooksSession()
+    provider.session = session
+    options = MetadataSearchOptions(query="Recovered Book")
+
+    assert provider.search_paginated(options).books == []
+
+    result = provider.search_paginated(options)
+
+    assert session.calls == 2
+    assert [book.title for book in result.books] == ["Recovered Book"]
+
+
+def test_googlebooks_isbn_lookup_is_cached():
+    get_metadata_cache().clear()
+    provider = GoogleBooksProvider(api_key="test-key")
+    session = _FlakyGoogleBooksSession()
+    session.calls = 1  # skip the simulated timeout
+    provider.session = session
+
+    first = provider.search_by_isbn("978-0-00-000000-2")
+    second = provider.search_by_isbn("978-0-00-000000-2")
+
+    assert first is not None
+    assert second == first
+    assert session.calls == 2
+
+
 def test_googlebooks_pages_tile_when_limit_exceeds_api_maximum():
     get_metadata_cache().clear()
     provider = GoogleBooksProvider(api_key="test-key")

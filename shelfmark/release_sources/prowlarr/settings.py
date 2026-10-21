@@ -226,6 +226,20 @@ def prowlarr_config_settings() -> list[SettingsField]:
             max_value=MAX_INDEXER_TIMEOUT_SECONDS,
             show_when={"field": "PROWLARR_ENABLED", "value": True},
         ),
+        NumberField(
+            key="PROWLARR_EBOOK_MAX_SIZE_MB",
+            label="Maximum Ebook Size (MB)",
+            description=(
+                "Hide ebook results larger than this. Expanded searches and general indexers can "
+                "return TV series, courses and software next to the books. 0 shows everything, "
+                "and a result with no reported size is always shown. Audiobook searches are not "
+                "limited."
+            ),
+            default=0,
+            min_value=0,
+            max_value=100000,
+            show_when={"field": "PROWLARR_ENABLED", "value": True},
+        ),
         CheckboxField(
             key="PROWLARR_AUTO_EXPAND",
             label="Auto-expand search on no results",

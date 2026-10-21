@@ -102,6 +102,7 @@ class RTorrentClient(DownloadClient):
 
     protocol = "torrent"
     name = "rtorrent"
+    can_delete_files = False
 
     def __init__(self) -> None:
         """Initialize rTorrent client with settings from config."""

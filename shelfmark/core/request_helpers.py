@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from email.utils import parseaddr
 from typing import Any, Protocol, SupportsIndex, SupportsInt, TypeGuard
 
 from shelfmark.core.config import config as app_config
@@ -113,6 +114,12 @@ def coerce_int(value: object, default: int) -> int:
         return int(value)
     except TypeError, ValueError:
         return default
+
+
+def is_plain_email_address(value: str) -> bool:
+    """Return True for a bare address like ``reader@example.com`` (no display name)."""
+    parsed = parseaddr(value or "")[1]
+    return bool(parsed) and "@" in parsed and parsed == value
 
 
 def normalize_optional_text(value: object) -> str | None:

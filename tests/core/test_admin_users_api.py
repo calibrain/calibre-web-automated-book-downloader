@@ -699,6 +699,19 @@ class TestAdminUserUpdateEndpoint:
         assert resp.json["settings"]["DESTINATION"] == "/books/alice"
         assert resp.json["settings"]["BOOKLORE_LIBRARY_ID"] == "2"
 
+    def test_update_settings_admin_is_not_limited_to_global_destination(
+        self, admin_client, user_db
+    ):
+        user = user_db.create_user(username="alice")
+
+        resp = admin_client.put(
+            f"/api/admin/users/{user['id']}",
+            json={"settings": {"DESTINATION": "/other/alice", "BOOKS_OUTPUT_MODE": "custom"}},
+        )
+        assert resp.status_code == 200
+        assert resp.json["settings"]["DESTINATION"] == "/other/alice"
+        assert resp.json["settings"]["BOOKS_OUTPUT_MODE"] == "custom"
+
     def test_update_response_includes_settings(self, admin_client, user_db):
         user = user_db.create_user(username="alice")
         user_db.set_user_settings(user["id"], {"DESTINATION": "/books/alice"})

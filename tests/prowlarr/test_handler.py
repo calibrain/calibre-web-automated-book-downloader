@@ -1535,7 +1535,7 @@ class TestProwlarrHandlerPostProcessCleanup:
         mock_client = MagicMock()
         mock_client.name = "qbittorrent"
         mock_client.set_category.return_value = True
-        handler._cleanup_refs[task.task_id] = (mock_client, "abc123", "torrent")
+        handler._cleanup_refs[task.task_id] = (mock_client, "abc123", "torrent", True)
 
         config_values = {
             "PROWLARR_TORRENT_ACTION": "change_category",
@@ -1555,7 +1555,7 @@ class TestProwlarrHandlerPostProcessCleanup:
         task = DownloadTask(task_id="torrent-no-category", source="prowlarr", title="Test")
 
         mock_client = MagicMock()
-        handler._cleanup_refs[task.task_id] = (mock_client, "abc123", "torrent")
+        handler._cleanup_refs[task.task_id] = (mock_client, "abc123", "torrent", True)
 
         with patch("shelfmark.download.clients.base_handler.config.get", return_value="keep"):
             handler.post_process_cleanup(task, success=True)
@@ -1568,7 +1568,7 @@ class TestProwlarrHandlerPostProcessCleanup:
         task = DownloadTask(task_id="torrent-empty-category", source="prowlarr", title="Test")
 
         mock_client = MagicMock()
-        handler._cleanup_refs[task.task_id] = (mock_client, "abc123", "torrent")
+        handler._cleanup_refs[task.task_id] = (mock_client, "abc123", "torrent", True)
 
         config_values = {
             "PROWLARR_TORRENT_ACTION": "change_category",
@@ -1589,7 +1589,7 @@ class TestProwlarrHandlerPostProcessCleanup:
 
         mock_client = MagicMock()
         mock_client.name = "nzbget"
-        handler._cleanup_refs[task.task_id] = (mock_client, "123", "usenet")
+        handler._cleanup_refs[task.task_id] = (mock_client, "123", "usenet", True)
 
         with patch("shelfmark.download.clients.base_handler.config.get", return_value="move"):
             handler.post_process_cleanup(task, success=True)
@@ -1602,7 +1602,7 @@ class TestProwlarrHandlerPostProcessCleanup:
 
         mock_client = MagicMock()
         mock_client.name = "nzbget"
-        handler._cleanup_refs[task.task_id] = (mock_client, "123", "usenet")
+        handler._cleanup_refs[task.task_id] = (mock_client, "123", "usenet", True)
 
         with patch("shelfmark.download.clients.base_handler.config.get", return_value="copy"):
             handler.post_process_cleanup(task, success=True)
@@ -1615,7 +1615,7 @@ class TestProwlarrHandlerPostProcessCleanup:
 
         mock_client = MagicMock()
         mock_client.name = "nzbget"
-        handler._cleanup_refs[task.task_id] = (mock_client, "123", "usenet")
+        handler._cleanup_refs[task.task_id] = (mock_client, "123", "usenet", True)
         handler._delete_local_download_data = MagicMock(side_effect=ConnectionError("offline"))
 
         with (
@@ -1641,7 +1641,7 @@ class TestProwlarrHandlerPostProcessCleanup:
 
         mock_client = MagicMock()
         mock_client.name = "qbittorrent"
-        handler._cleanup_refs[task.task_id] = (mock_client, "abc123", "torrent")
+        handler._cleanup_refs[task.task_id] = (mock_client, "abc123", "torrent", True)
 
         with patch(
             "shelfmark.download.clients.base_handler.config.get", return_value=torrent_action
@@ -1656,7 +1656,7 @@ class TestProwlarrHandlerPostProcessCleanup:
         task = DownloadTask(task_id="torrent-import-failed", source="prowlarr", title="Test")
 
         mock_client = MagicMock()
-        handler._cleanup_refs[task.task_id] = (mock_client, "abc123", "torrent")
+        handler._cleanup_refs[task.task_id] = (mock_client, "abc123", "torrent", True)
 
         with patch(
             "shelfmark.download.clients.base_handler.config.get",
@@ -1674,7 +1674,7 @@ class TestProwlarrHandlerPostProcessCleanup:
         mock_client = MagicMock()
         mock_client.name = "qbittorrent"
         mock_client.remove.side_effect = ConnectionError("offline")
-        handler._cleanup_refs[task.task_id] = (mock_client, "123", "torrent")
+        handler._cleanup_refs[task.task_id] = (mock_client, "123", "torrent", True)
 
         with (
             patch("shelfmark.download.clients.base_handler.config.get", return_value="remove"),
@@ -1696,7 +1696,7 @@ class TestProwlarrHandlerPostProcessCleanup:
         mock_client = MagicMock()
         mock_client.name = "rtorrent"
         mock_client.remove.return_value = False
-        handler._cleanup_refs[task.task_id] = (mock_client, "abc123", "torrent")
+        handler._cleanup_refs[task.task_id] = (mock_client, "abc123", "torrent", True)
 
         with (
             patch(

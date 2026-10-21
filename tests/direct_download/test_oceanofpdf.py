@@ -336,6 +336,8 @@ class _FakeResponse:
         self.text = text
         self.status_code = status_code
         self.url = url
+        self.headers: dict[str, str] = {}
+        self.is_redirect = False
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -577,3 +579,99 @@ def test_mirror_list_is_normalised_and_first_entry_wins(monkeypatch):
 
     assert mirrors.get_oceanofpdf_mirrors() == ["https://ocean.example", "https://backup.example"]
     assert mirrors.get_oceanofpdf_base_url() == "https://ocean.example"
+
+
+# --- Hostile records and pages ---
+
+
+def _hostile_record(url: str) -> BrowseRecord:
+    return BrowseRecord(
+        id="oceanofpdf:x",
+        title="Dune",
+        source="direct_download",
+        format="epub",
+        source_url=url,
+    )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:8080/admin",
+        "http://169.254.169.254/latest/meta-data/",
+        "https://other.example/book/",
+        "http://ocean.example/authors/dune/",
+        "https://ocean.example:8443/authors/dune/",
+        "file:///etc/passwd",
+    ],
+)
+def test_download_never_fetches_a_source_url_off_the_mirror(configured, monkeypatch, tmp_path, url):
+    requested = _serve_pages(monkeypatch, {url: BOOK_PAGE})
+    posts, downloads = _wire_download(monkeypatch, post_responses=[], payload=b"PK" * 10_000)
+
+    with pytest.raises(RuntimeError):
+        op.OceanofPDFProvider().download(
+            _hostile_record(url), tmp_path / "x.epub", None, Event(), None
+        )
+
+    assert url not in requested
+    assert posts == []
+    assert downloads == []
+
+
+def test_download_refuses_when_the_provider_is_switched_off(configured, monkeypatch, tmp_path):
+    configured["SOURCE_PRIORITY"] = [{"id": "oceanofpdf", "enabled": False}]
+    requested = _serve_pages(monkeypatch, {DUNE_URL: BOOK_PAGE})
+
+    with pytest.raises(RuntimeError):
+        op.OceanofPDFProvider().download(_record(), tmp_path / "x.epub", None, Event(), None)
+
+    assert requested == []
+
+
+@pytest.mark.parametrize(
+    "action",
+    ["http://127.0.0.1:9000/Fetching_Resource.php", "https://evil.example/Fetching_Resource.php"],
+)
+def test_download_never_posts_to_a_form_action_off_the_mirror(
+    configured, monkeypatch, tmp_path, action
+):
+    page = BOOK_PAGE.replace("https://ocean.example/Fetching_Resource.php", action)
+    posts, downloads = _wire_download(monkeypatch, post_responses=[], payload=b"PK" * 10_000)
+    _serve_pages(monkeypatch, {DUNE_URL: page})
+
+    result = op.OceanofPDFProvider().download(_record(), tmp_path / "x.epub", None, Event(), None)
+
+    assert result is None
+    assert posts == []
+    assert downloads == []
+
+
+def test_download_never_fetches_a_file_link_that_is_not_http(configured, monkeypatch, tmp_path):
+    interstitial = _page('<meta http-equiv="refresh" content="0; url=file:///etc/passwd">')
+    _posts, downloads = _wire_download(
+        monkeypatch, post_responses=[_FakeResponse(interstitial)], payload=b"PK" * 10_000
+    )
+
+    result = op.OceanofPDFProvider().download(_record(), tmp_path / "x.epub", None, Event(), None)
+
+    assert result is None
+    assert downloads == []
+
+
+def test_form_post_redirect_off_the_mirror_is_not_followed(configured, monkeypatch, tmp_path):
+    redirect = _FakeResponse("", status_code=302)
+    redirect.is_redirect = True
+    redirect.headers = {"Location": "http://127.0.0.1:9000/internal"}
+    posts, downloads = _wire_download(
+        monkeypatch, post_responses=[redirect], payload=b"PK" * 10_000
+    )
+    gets: list[str] = []
+    monkeypatch.setattr(op.requests, "get", lambda url, **_kw: gets.append(url))
+
+    result = op.OceanofPDFProvider().download(_record(), tmp_path / "x.epub", None, Event(), None)
+
+    assert result is None
+    assert len(posts) == 1
+    assert gets == []
+    assert downloads == []

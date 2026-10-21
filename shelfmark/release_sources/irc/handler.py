@@ -11,6 +11,7 @@ from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
 from shelfmark.release_sources import DownloadHandler, register_handler
 
+from .client import has_control_characters
 from .connection_manager import connection_manager
 from .dcc import DCCError, download_dcc, safe_dcc_filename
 
@@ -81,6 +82,10 @@ class IRCDownloadHandler(DownloadHandler):
         """Download a release via IRC DCC. task.task_id contains the IRC request string."""
         download_request = task.task_id
         logger.info("IRC download: %s...", download_request[:60])
+        if has_control_characters(download_request):
+            logger.warning("IRC download refused: request line contains control characters")
+            status_callback("error", "Invalid IRC request: contains control characters")
+            return None
         expected_server = _server_from_download_request(download_request)
 
         # Get IRC settings

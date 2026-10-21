@@ -10,10 +10,13 @@ from threading import Lock
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
+from shelfmark.core.logger import setup_logger
 from shelfmark.core.request_helpers import normalize_optional_text
 
 if TYPE_CHECKING:
     from types import ModuleType
+
+logger = setup_logger(__name__)
 
 
 def normalize_http_url(
@@ -226,38 +229,124 @@ def _expand_user_destination_placeholder(
     return _USER_PLACEHOLDER_PATTERN.sub(resolved_username, path_value)
 
 
+def get_global_destination(*, is_audiobook: bool = False) -> str:
+    """Return the admin-configured destination template, before {User} expansion.
+
+    The audiobook destination falls back to the books destination when unset.
+    """
+    from shelfmark.core.config import config
+
+    if is_audiobook:
+        audiobook_dest = str(config.get("DESTINATION_AUDIOBOOK", "") or "").strip()
+        if audiobook_dest:
+            return audiobook_dest
+    return str(config.get("DESTINATION", "") or config.get("INGEST_DIR", "/books") or "").strip()
+
+
+def resolve_user_destination_override(
+    override: object,
+    base: str,
+    *,
+    user_id: int | None = None,
+    username: str | None = None,
+) -> Path | None:
+    """Resolve a per-user destination against the global one it must stay inside.
+
+    ``{User}`` is expanded in both values. A relative override is taken relative
+    to the global destination. Returns None when the override is empty, contains
+    a ``..`` segment, or does not resolve to the global destination or a path
+    below it; callers then fall back to the global destination.
+    """
+    if not isinstance(override, str) or not override.strip():
+        return None
+
+    base_expanded = _expand_user_destination_placeholder(
+        base.strip(), user_id=user_id, username=username
+    )
+    base_path = Path(os.path.normpath(base_expanded))
+    if not base_path.is_absolute():
+        return None
+
+    candidate = _expand_user_destination_placeholder(
+        override.strip(), user_id=user_id, username=username
+    )
+    if ".." in Path(candidate).parts:
+        return None
+    candidate_path = Path(os.path.normpath(candidate))
+    if not candidate_path.is_absolute():
+        candidate_path = base_path / candidate_path
+    if not candidate_path.is_relative_to(base_path):
+        return None
+    return candidate_path
+
+
+def _get_user_destination_override(
+    key: str,
+    base: str,
+    *,
+    user_id: int,
+    username: str | None,
+) -> Path | None:
+    """Return the user's own destination for ``key`` when it stays inside ``base``."""
+    from shelfmark.core.config import config
+
+    user_value = config.get(key, "", user_id=user_id)
+    if user_value == config.get(key, ""):
+        return None
+    if not isinstance(user_value, str) or not user_value.strip():
+        return None
+
+    resolved = resolve_user_destination_override(
+        user_value, base, user_id=user_id, username=username
+    )
+    if resolved is None:
+        logger.warning(
+            "Ignoring %s override for user %s: %r is outside the configured destination %r",
+            key,
+            user_id,
+            user_value,
+            base,
+        )
+    return resolved
+
+
 def get_destination(
     *,
     is_audiobook: bool = False,
     user_id: int | None = None,
     username: str | None = None,
 ) -> Path:
-    """Get base destination directory. Audiobooks fall back to main destination."""
-    from shelfmark.core.config import config
+    """Get base destination directory. Audiobooks fall back to main destination.
+
+    A per-user override is only honoured while it resolves inside the global
+    destination; anything else falls back to the global value.
+    """
+    books_base = get_global_destination()
 
     if is_audiobook:
-        # Audiobook destination with fallback to main destination
-        audiobook_dest = config.get("DESTINATION_AUDIOBOOK", "", user_id=user_id)
-        if audiobook_dest:
+        audiobook_base = get_global_destination(is_audiobook=True)
+        if user_id is not None:
+            user_audiobook = _get_user_destination_override(
+                "DESTINATION_AUDIOBOOK", audiobook_base, user_id=user_id, username=username
+            )
+            if user_audiobook is not None:
+                return user_audiobook
+        if audiobook_base != books_base:
             return Path(
                 _expand_user_destination_placeholder(
-                    str(audiobook_dest),
-                    user_id=user_id,
-                    username=username,
+                    audiobook_base, user_id=user_id, username=username
                 )
             )
 
-    # Main destination (also fallback for audiobooks)
-    # Check new setting first, then legacy INGEST_DIR
-    destination = config.get("DESTINATION", "", user_id=user_id) or config.get(
-        "INGEST_DIR", "/books"
-    )
-    return Path(
-        _expand_user_destination_placeholder(
-            str(destination),
-            user_id=user_id,
-            username=username,
+    if user_id is not None:
+        user_destination = _get_user_destination_override(
+            "DESTINATION", books_base, user_id=user_id, username=username
         )
+        if user_destination is not None:
+            return user_destination
+
+    return Path(
+        _expand_user_destination_placeholder(books_base, user_id=user_id, username=username)
     )
 
 

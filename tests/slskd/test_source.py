@@ -3,10 +3,12 @@
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 
 from shelfmark.core.search_plan import ReleaseSearchPlan, ReleaseSearchVariant
 from shelfmark.metadata_providers import BookMetadata
-from shelfmark.release_sources import ReleaseProtocol, get_source
+from shelfmark.release_sources import ReleaseProtocol, SourceUnavailableError, get_source
+from shelfmark.release_sources.slskd.api import SlskdAuthError
 from shelfmark.release_sources.slskd.source import (
     SlskdSource,
     _plan_queries,
@@ -96,6 +98,10 @@ class TestPathHelpers:
         assert remote_directory_name("Author") == "Author"
         assert remote_directory_name("") == ""
 
+    def test_remote_directory_name_skips_an_empty_last_segment(self):
+        assert remote_directory_name("../../../etc/") == "etc"
+        assert remote_directory_name("@@a\\Books\\Author\\") == "Author"
+
     @pytest.mark.parametrize(
         ("name", "ext"),
         [
@@ -136,6 +142,20 @@ class TestIterPeerFiles:
     def test_skips_garbage(self):
         response = _response(files=[None, {"filename": ""}, {"filename": "dir\\"}, "junk"])
         assert iter_peer_files(response) == []
+
+    def test_skips_file_names_that_could_leave_the_downloads_folder(self):
+        evil = [
+            "../../../etc//passwd.epub",
+            "/abs/path//book.epub",
+            "/abs/path/book.epub",
+            "a\\..\\book.epub",
+            "C:\\book.epub",
+            "a\\D:\\book.epub",
+        ]
+        response = _response(files=[*(_file(name) for name in evil), _file("C:\\Books\\ok.epub")])
+        assert [pf.filename for pf in iter_peer_files(response)] == ["C:\\Books\\ok.epub"]
+        releases = build_releases([response], content_type="ebook", formats=EBOOK_FORMATS)
+        assert [r.extra["files"][0]["filename"] for r in releases] == ["C:\\Books\\ok.epub"]
 
     def test_missing_username_yields_nothing(self):
         assert iter_peer_files({"files": [_file("a.epub")]}) == []
@@ -359,7 +379,7 @@ class TestSlskdSource:
     def _config(self, **overrides):
         values = {"SLSKD_ENABLED": True, "SLSKD_URL": "http://slskd:5030", "SLSKD_API_KEY": "k"}
         values.update(overrides)
-        return lambda k, default=None: values.get(k, default)
+        return lambda k, default=None, **_kwargs: values.get(k, default)
 
     def test_registered(self):
         assert isinstance(get_source("slskd"), SlskdSource)
@@ -460,6 +480,51 @@ class TestSlskdSource:
         monkeypatch.setattr(SlskdSource, "_get_client", lambda self: client)
 
         assert len(SlskdSource().search(_make_book(), _make_plan())) == 1
+
+    @pytest.mark.parametrize(
+        ("error", "expected"),
+        [
+            (requests.ConnectionError("Connection refused"), "Connection refused"),
+            (SlskdAuthError("slskd rejected the API key"), "API key"),
+        ],
+    )
+    def test_search_raises_when_every_query_fails(self, monkeypatch, error, expected):
+        """slskd being down or rejecting the key must not read as "no releases found"."""
+        import shelfmark.release_sources.slskd.source as mod
+
+        monkeypatch.setattr(mod.config, "get", self._config())
+        client = MagicMock()
+        client.search.side_effect = error
+        monkeypatch.setattr(SlskdSource, "_get_client", lambda self: client)
+
+        with pytest.raises(SourceUnavailableError, match=expected):
+            SlskdSource().search(_make_book(), _make_plan())
+        assert client.search.call_count == 2  # every query was tried
+
+    def test_search_failure_is_reported_to_the_user(self, monkeypatch):
+        import shelfmark.release_sources.slskd.source as mod
+        from shelfmark.core.release_search import search_source_releases
+
+        monkeypatch.setattr(mod.config, "get", self._config())
+        client = MagicMock()
+        client.search.side_effect = requests.ConnectionError("Connection refused")
+        monkeypatch.setattr(SlskdSource, "_get_client", lambda self: client)
+
+        _, releases, error = search_source_releases("slskd", _make_book())
+
+        assert releases == []
+        assert error is not None
+        assert "Connection refused" in error
+
+    def test_one_failed_query_among_answered_ones_is_not_an_outage(self, monkeypatch):
+        import shelfmark.release_sources.slskd.source as mod
+
+        monkeypatch.setattr(mod.config, "get", self._config())
+        client = MagicMock()
+        client.search.side_effect = [RuntimeError("boom"), []]
+        monkeypatch.setattr(SlskdSource, "_get_client", lambda self: client)
+
+        assert SlskdSource().search(_make_book(), _make_plan()) == []
 
     def test_search_uses_configured_limits(self, monkeypatch):
         import shelfmark.release_sources.slskd.source as mod
