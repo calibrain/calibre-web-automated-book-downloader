@@ -241,6 +241,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
     const selectPanelRef = useRef<HTMLDivElement>(null);
     const autocompletePanelRef = useRef<HTMLDivElement>(null);
     const optionsPanelId = useId();
+    const optionsPanelRef = useRef<HTMLDivElement>(null);
     const isPopover = optionsLayout === 'popover';
     const layoutClasses = OPTIONS_LAYOUT_CLASSES[optionsLayout];
     const [isOptionsOpen, setIsOptionsOpen] = useState(false);
@@ -270,7 +271,8 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
     const combinedSelectorLocked = combinedModeLocked && !isManualTarget;
     const combinedToggleAvailable = !!onCombinedModeChange && !isManualTarget;
 
-    useDismiss(isOptionsOpen && isPopover, [selectorRef], closeOptions);
+    // The inline panel renders below the bar, outside selectorRef.
+    useDismiss(isOptionsOpen, [selectorRef, optionsPanelRef], closeOptions);
     useDismiss(isSelectOpen, [selectPanelRef, selectTriggerRef], () => setIsSelectOpen(false));
     useDismiss(isAutocompleteOpen, [autocompletePanelRef, inputRef], () =>
       setIsAutocompleteOpen(false),
@@ -628,7 +630,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
     ) : null;
 
     const optionsPanel = (
-      <div id={optionsPanelId} className={layoutClasses.panel}>
+      <div id={optionsPanelId} ref={optionsPanelRef} className={layoutClasses.panel}>
         {showContentTypeSelector && (
           <div className={layoutClasses.group}>
             <OptionsGroupHeader label="Content" action={optionsButton} />

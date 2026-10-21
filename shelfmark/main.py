@@ -1622,6 +1622,14 @@ def _emit_activity_update_for_task(*, payload: dict[str, Any], task: Any) -> Non
     )
     if owner_user_id is None:
         return
+    # The owner knows a request-linked download by its opaque id, as /api/status
+    # shows it, since the task id can carry a private tracker's passkey (#1418).
+    task_id = payload.get("task_id")
+    if isinstance(task_id, str):
+        payload = {
+            **payload,
+            "task_id": viewer_download_id(task_id, getattr(task, "request_id", None)),
+        }
     emit_ws_event(
         ws_manager,
         event_name="activity_update",
