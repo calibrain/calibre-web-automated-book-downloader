@@ -1870,6 +1870,8 @@ How long to keep cached search results before they expire.
 | `RTORRENT_AUDIOBOOK_LABEL` | Label to assign to audiobook downloads in rTorrent (falls back to Book Label if not set) | string | _none_ |
 | `RTORRENT_DOWNLOAD_DIR` | Server-side directory where torrents are downloaded (optional, uses rTorrent default if not specified) | string | _none_ |
 | `PROWLARR_TORRENT_ACTION` | After a successful import, Remove keeps downloaded files in qBittorrent, Transmission, and Deluge; Remove & Delete Files also deletes them. rTorrent cannot delete download data, so this action leaves its torrent untouched. Blackhole does not support removal. Debrid clients delete temporary local files for either Remove action. | string (choice) | `keep` |
+| `TORRENT_NO_SEEDERS_WAIT` | Give up on a torrent when its client sees no seed at all for this long, even while it is still downloading, or fewer seeds than the minimum below while nothing is downloading. The torrent is removed and the download marked failed, so another release can be tried. The card shows the seed count and a countdown while it waits. 0 keeps the default behaviour (only the stall timer ends it). Only qBittorrent reports seed counts. | number | `0` |
+| `TORRENT_MIN_SEEDERS` | Seeds the client must see for a motionless torrent to keep waiting. 0 also turns the no-seed check off. | number | `1` |
 | `PROWLARR_TORRENT_POST_IMPORT_CATEGORY` | Category or label to assign after a successful import | string | _empty string_ |
 | `TORRENT_STALL_TIMEOUT_MINUTES` | How long a torrent can go without any progress before Shelfmark cancels it. Applies from when the torrent starts and restarts each time it moves. Raise it for slow swarms or magnets that take a while to find peers, or lower it to give up on dead torrents sooner. | number | `15` |
 | `PROWLARR_USENET_CLIENT` | Choose which usenet client to use | string (choice) | _empty string_ |
@@ -2185,6 +2187,26 @@ After a successful import, Remove keeps downloaded files in qBittorrent, Transmi
 - **Type:** string (choice)
 - **Default:** `keep`
 - **Options:** `keep` (Keep), `remove` (Remove), `remove_and_delete` (Remove & Delete Files), `change_category` (Change Category)
+
+#### `TORRENT_NO_SEEDERS_WAIT`
+
+**Give Up With No Seeders (minutes)**
+
+Give up on a torrent when its client sees no seed at all for this long, even while it is still downloading, or fewer seeds than the minimum below while nothing is downloading. The torrent is removed and the download marked failed, so another release can be tried. The card shows the seed count and a countdown while it waits. 0 keeps the default behaviour (only the stall timer ends it). Only qBittorrent reports seed counts.
+
+- **Type:** number
+- **Default:** `0`
+- **Constraints:** min: 0, max: 240
+
+#### `TORRENT_MIN_SEEDERS`
+
+**Minimum Seeders**
+
+Seeds the client must see for a motionless torrent to keep waiting. 0 also turns the no-seed check off.
+
+- **Type:** number
+- **Default:** `1`
+- **Constraints:** min: 0, max: 1000
 
 #### `PROWLARR_TORRENT_POST_IMPORT_CATEGORY`
 
