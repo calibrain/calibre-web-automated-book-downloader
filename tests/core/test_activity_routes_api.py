@@ -574,6 +574,99 @@ class TestActivityRoutes:
         assert response.status_code == 409
         assert response.json["error"] == "Only terminal requests can be dismissed"
 
+    def test_dismiss_many_skips_a_request_that_is_no_longer_terminal(self, main_module, client):
+        user = _create_user(main_module, prefix="reader")
+        _set_session(client, user_id=user["username"], db_user_id=user["id"], is_admin=False)
+
+        def _make(provider_id, status):
+            return main_module.user_db.create_request(
+                user_id=user["id"],
+                content_type="ebook",
+                request_level="book",
+                policy_mode="request_book",
+                book_data={
+                    "title": f"Request {provider_id}",
+                    "author": "Author",
+                    "provider": "openlibrary",
+                    "provider_id": provider_id,
+                },
+                status=status,
+            )
+
+        done = _make("skip-1", "rejected")
+        reopened = _make("skip-2", "pending")  # the list was drawn before it was reopened
+
+        with patch.object(main_module, "get_auth_mode", return_value="builtin"):
+            response = client.post(
+                "/api/activity/dismiss-many",
+                json={
+                    "items": [
+                        {"item_type": "request", "item_key": f"request:{reopened['id']}"},
+                        {"item_type": "request", "item_key": f"request:{done['id']}"},
+                    ]
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json["count"] == 1
+        assert response.json["skipped_item_keys"] == [f"request:{reopened['id']}"]
+
+    def test_dismiss_many_skips_a_download_that_is_running_again(self, main_module, client):
+        user = _create_user(main_module, prefix="reader")
+        _set_session(client, user_id=user["username"], db_user_id=user["id"], is_admin=False)
+        _record_terminal_download(
+            main_module,
+            task_id="dismiss-many-skip-done",
+            user_id=user["id"],
+            username=user["username"],
+        )
+        running = "dismiss-many-skip-running"
+        main_module.download_history_service.record_download(
+            task_id=running,
+            user_id=user["id"],
+            username=user["username"],
+            request_id=None,
+            source="direct_download",
+            source_display_name="Direct Download",
+            title="Running Again",
+            author="Author",
+            file_format="epub",
+            size="1 MB",
+            preview=None,
+            content_type="ebook",
+            downloads=None,
+            origin="direct",
+            retry_payload=None,
+        )
+        live_status = _sample_status_payload()
+        live_status["downloading"] = {
+            running: {
+                "id": running,
+                "title": "Running Again",
+                "author": "Author",
+                "source": "direct_download",
+                "status_message": "Downloading",
+            }
+        }
+
+        with (
+            patch.object(main_module, "get_auth_mode", return_value="builtin"),
+            patch.object(main_module.backend, "queue_status", return_value=live_status),
+        ):
+            response = client.post(
+                "/api/activity/dismiss-many",
+                json={
+                    "items": [
+                        {"item_type": "download", "item_key": f"download:{running}"},
+                        {"item_type": "download", "item_key": "download:dismiss-many-skip-done"},
+                    ]
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json["count"] == 1
+        assert response.json["skipped_item_keys"] == [f"download:{running}"]
+
     def test_dismiss_emits_activity_update_to_user_room(self, main_module, client):
         user = _create_user(main_module, prefix="reader")
         _set_session(client, user_id=user["username"], db_user_id=user["id"], is_admin=False)

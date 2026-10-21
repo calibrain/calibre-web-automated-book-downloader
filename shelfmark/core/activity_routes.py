@@ -897,6 +897,7 @@ def register_activity_routes(
 
         dismissal_items: list[dict[str, str]] = []
         missing_item_keys: list[str] = []
+        skipped_item_keys: list[str] = []
         live_queue_index: dict[str, tuple[str, dict[str, Any]]] | None = None
         request_linked_task_ids: list[str] | None = None
 
@@ -953,7 +954,10 @@ def register_activity_routes(
                         item_count=len(items),
                         **_download_row_log_context(existing),
                     )
-                    missing_item_keys.append(f"download:{viewer_task_id}")
+                if _check_terminal_download(effective_existing) is not None:
+                    # The list this came from can be older than the download: one that started
+                    # again since is left where it is, not allowed to fail the whole batch.
+                    skipped_item_keys.append(f"download:{viewer_task_id}")
                     continue
                 if live_queue_index is None:
                     live_queue_index = _build_queue_index(queue_status(user_id=actor.owner_scope))
@@ -1006,6 +1010,8 @@ def register_activity_routes(
                         item_count=len(items),
                         **_request_row_log_context(request_row),
                     )
+                if _check_terminal_request(request_row) is not None:
+                    # Same for a request that was reopened or retried since the list was drawn.
                     missing_item_keys.append(f"request:{request_id}")
                     continue
                 terminal_error = _check_terminal_request(request_row)
@@ -1064,7 +1070,10 @@ def register_activity_routes(
             },
         )
 
-        return jsonify({"status": "dismissed", "count": dismissed_count})
+        response: dict[str, Any] = {"status": "dismissed", "count": dismissed_count}
+        if skipped_item_keys:
+            response["skipped_item_keys"] = skipped_item_keys
+        return jsonify(response)
 
     @app.route("/api/activity/history", methods=["GET"])
     def api_activity_history() -> Response | tuple[Response, int]:
