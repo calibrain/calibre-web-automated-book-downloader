@@ -1013,6 +1013,25 @@ def login_required(
     return decorated_function
 
 
+def admin_required(
+    f: Callable[..., Response | tuple[Response, int]],
+) -> Callable[..., Response | tuple[Response, int]]:
+    """Require an authenticated admin session for a Flask route.
+
+    Builds on `login_required`, so auth mode "none" (no users, the single
+    operator owns the instance) still has access.
+    """
+
+    @login_required
+    @wraps(f)
+    def decorated_function(*args: object, **kwargs: object) -> Response | tuple[Response, int]:
+        if get_auth_mode() != "none" and not session.get("is_admin", False):
+            return jsonify({"error": "Admin access required"}), 403
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
 _BASE_TAG = '<base href="/" data-shelfmark-base />'
 
 
@@ -1087,7 +1106,7 @@ if _is_debug_enabled():
             _cleanup_orphan_processes()
 
     @app.route("/api/debug", methods=["GET"])
-    @login_required
+    @admin_required
     def debug() -> Response | tuple[Response, int]:
         """Run `/app/genDebug.sh`, generate a debug zip, and return it.
 
@@ -1123,7 +1142,7 @@ if _is_debug_enabled():
             return jsonify({"error": str(e)}), 500
 
     @app.route("/api/restart", methods=["GET"])
-    @login_required
+    @admin_required
     def restart() -> Response | tuple[Response, int]:
         """Restart the application."""
         os._exit(0)
