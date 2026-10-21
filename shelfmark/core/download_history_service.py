@@ -16,6 +16,7 @@ from shelfmark.core.request_helpers import (
     normalize_optional_text,
     now_utc_iso,
 )
+from shelfmark.core.utils import transform_cover_url
 
 logger = setup_logger(__name__)
 
@@ -203,7 +204,7 @@ class DownloadHistoryService:
             "author": row.get("author"),
             "format": row.get("format"),
             "size": row.get("size"),
-            "preview": row.get("preview"),
+            "preview": transform_cover_url(row.get("preview"), str(row.get("task_id") or "")),
             "content_type": row.get("content_type"),
             "source": row.get("source"),
             "source_display_name": row.get("source_display_name"),
@@ -282,6 +283,11 @@ class DownloadHistoryService:
         On first queue: inserts a new row.
         On retry (row already exists): resets the row back to 'active'
         so the normal finalize path works when the retry completes.
+
+        A task id comes from the release, so a second request that chooses the same release
+        reuses the row. It then takes the row over: the request, requester and what the card
+        shows follow the new download, instead of the new download appearing under the
+        request that first used the release (with that request's notes and state).
         """
         normalized_task_id = _normalize_task_id(task_id)
         normalized_user_id = normalize_optional_positive_int(user_id, "user_id")
@@ -318,7 +324,18 @@ class DownloadHistoryService:
                     download_path = NULL,
                     retry_payload = excluded.retry_payload,
                     terminal_at = ?,
-                    downloads = excluded.downloads
+                    downloads = excluded.downloads,
+                    request_id = COALESCE(excluded.request_id, request_id),
+                    user_id = COALESCE(excluded.user_id, user_id),
+                    username = COALESCE(excluded.username, username),
+                    title = excluded.title,
+                    author = excluded.author,
+                    format = excluded.format,
+                    size = excluded.size,
+                    preview = excluded.preview,
+                    content_type = excluded.content_type,
+                    origin = excluded.origin,
+                    queued_at = excluded.queued_at
                 """,
                     (
                         normalized_task_id,
@@ -420,6 +437,18 @@ class DownloadHistoryService:
                 if normalized is not None:
                     result.append(normalized)
             return result
+        finally:
+            conn.close()
+
+    def list_completed_request_ids(self) -> set[int]:
+        """Return the id of every request that has a download that finished."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT request_id FROM download_history "
+                "WHERE request_id IS NOT NULL AND final_status = 'complete'"
+            ).fetchall()
+            return {int(row["request_id"]) for row in rows}
         finally:
             conn.close()
 
