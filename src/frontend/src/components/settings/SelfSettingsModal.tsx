@@ -33,7 +33,11 @@ interface SelfSettingsModalProps {
 
 const MIN_PASSWORD_LENGTH = 4;
 
-const getPasswordError = (password: string, passwordConfirm: string): string | null => {
+const getPasswordError = (
+  password: string,
+  passwordConfirm: string,
+  currentPassword: string,
+): string | null => {
   if (!password && !passwordConfirm) {
     return null;
   }
@@ -42,6 +46,9 @@ const getPasswordError = (password: string, passwordConfirm: string): string | n
   }
   if (password.length < MIN_PASSWORD_LENGTH) {
     return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
+  }
+  if (!currentPassword) {
+    return 'Current password is required';
   }
   return password === passwordConfirm ? null : 'Passwords do not match';
 };
@@ -121,6 +128,7 @@ const SelfSettingsModalSession = ({
 
   const [editPassword, setEditPassword] = useState('');
   const [editPasswordConfirm, setEditPasswordConfirm] = useState('');
+  const [editCurrentPassword, setEditCurrentPassword] = useState('');
 
   const [themeValue, setThemeValue] = useState(getStoredThemePreference());
 
@@ -157,6 +165,7 @@ const SelfSettingsModalSession = ({
       });
       setEditPassword('');
       setEditPasswordConfirm('');
+      setEditCurrentPassword('');
     } catch (error) {
       setLoadError(getErrorMessage(error, 'Failed to load account settings'));
     } finally {
@@ -185,7 +194,7 @@ const SelfSettingsModalSession = ({
   );
 
   const hasPasswordChanges = editPassword.length > 0 || editPasswordConfirm.length > 0;
-  const passwordError = getPasswordError(editPassword, editPasswordConfirm);
+  const passwordError = getPasswordError(editPassword, editPasswordConfirm, editCurrentPassword);
   const hasChanges = hasSettingsChanges || hasProfileChanges || hasPasswordChanges;
 
   const handleTestNotificationRoutes = useCallback((routes: Array<Record<string, unknown>>) => {
@@ -205,6 +214,7 @@ const SelfSettingsModalSession = ({
       email?: string | null;
       display_name?: string | null;
       password?: string;
+      current_password?: string;
       settings?: Record<string, unknown>;
     } = {};
 
@@ -219,6 +229,7 @@ const SelfSettingsModalSession = ({
     }
     if (editingUser.edit_capabilities.canSetPassword && editPassword) {
       payload.password = editPassword;
+      payload.current_password = editCurrentPassword;
     }
     if (hasSettingsChanges) {
       payload.settings = currentSettingsPayload;
@@ -249,6 +260,7 @@ const SelfSettingsModalSession = ({
     originalUser,
     passwordError,
     editPassword,
+    editCurrentPassword,
   ]);
 
   if (!isOpen && !isClosing) {
@@ -359,6 +371,8 @@ const SelfSettingsModalSession = ({
                     onEditPasswordChange={setEditPassword}
                     editPasswordConfirm={editPasswordConfirm}
                     onEditPasswordConfirmChange={setEditPasswordConfirm}
+                    editCurrentPassword={editCurrentPassword}
+                    onEditCurrentPasswordChange={setEditCurrentPassword}
                     preferencesPlacement="after"
                     preferencesPanel={{
                       hideTitle: true,
