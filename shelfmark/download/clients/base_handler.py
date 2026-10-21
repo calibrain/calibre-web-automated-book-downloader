@@ -1095,6 +1095,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
             while not cancel_flag.is_set():
                 status = client.get_status(download_id)
                 progress_callback(status.progress)
+                task.client_queued = status.state == DownloadState.QUEUED
 
                 # Check for completion
                 if status.complete:
