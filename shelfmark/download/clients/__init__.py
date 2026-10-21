@@ -135,6 +135,9 @@ class DownloadStatus:
     file_path: str | None  # Path in client's download dir (when complete)
     download_speed: int | None = None  # Bytes per second
     eta: int | None = None  # Seconds remaining
+    seeders: int | None = None  # Seeds connected right now (torrent clients that report it)
+    swarm_seeders: int | None = None  # Seeds the tracker says exist, connected or not
+    peers: int | None = None  # Other peers connected right now
 
     @classmethod
     def error(cls, message: str) -> DownloadStatus:

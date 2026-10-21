@@ -215,11 +215,23 @@ try:
     import_module("shelfmark.config.users_settings")
     from shelfmark.core.admin_routes import register_admin_routes
     from shelfmark.core.oidc_routes import register_oidc_routes
-    from shelfmark.core.self_user_routes import register_self_user_routes
+    from shelfmark.core.self_user_routes import (
+        PasswordAttemptLimiter,
+        register_self_user_routes,
+    )
 
     register_oidc_routes(app, user_db)
     register_admin_routes(app, user_db)
-    register_self_user_routes(app, user_db)
+    register_self_user_routes(
+        app,
+        user_db,
+        # Looked up when called: the lockout helpers are defined further down this module.
+        password_attempts=PasswordAttemptLimiter(
+            is_locked=lambda username: is_account_locked(username),  # noqa: PLW0108
+            record_failure=lambda username: record_failed_login(username, get_client_ip()),
+            clear=lambda username: clear_failed_logins(username),  # noqa: PLW0108
+        ),
+    )
 except (sqlite3.OperationalError, OSError) as e:
     logger.warning(
         "User database initialization failed: %s. Multi-user authentication features will be disabled. Ensure CONFIG_DIR (%s) exists and is writable.",
@@ -661,6 +673,7 @@ if user_db is not None:
             resolve_auth_mode=_resolve_auth_mode_for_routes,
             queue_release=_queue_release_for_routes,
             ws_manager=ws_manager,
+            activity_view_state_service=activity_view_state_service,
         )
         if download_history_service is not None and activity_view_state_service is not None:
             register_activity_routes(
@@ -1072,6 +1085,25 @@ def login_required(
     return decorated_function
 
 
+def admin_required(
+    f: Callable[..., Response | tuple[Response, int]],
+) -> Callable[..., Response | tuple[Response, int]]:
+    """Require an authenticated admin session for a Flask route.
+
+    Builds on `login_required`, so auth mode "none" (no users, the single
+    operator owns the instance) still has access.
+    """
+
+    @login_required
+    @wraps(f)
+    def decorated_function(*args: object, **kwargs: object) -> Response | tuple[Response, int]:
+        if get_auth_mode() != "none" and not session.get("is_admin", False):
+            return jsonify({"error": "Admin access required"}), 403
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
 _BASE_TAG = '<base href="/" data-shelfmark-base />'
 
 
@@ -1146,7 +1178,7 @@ if _is_debug_enabled():
             _cleanup_orphan_processes()
 
     @app.route("/api/debug", methods=["GET"])
-    @login_required
+    @admin_required
     def debug() -> Response | tuple[Response, int]:
         """Run `/app/genDebug.sh`, generate a debug zip, and return it.
 
@@ -1182,7 +1214,7 @@ if _is_debug_enabled():
             return jsonify({"error": str(e)}), 500
 
     @app.route("/api/restart", methods=["GET"])
-    @login_required
+    @admin_required
     def restart() -> Response | tuple[Response, int]:
         """Restart the application."""
         os._exit(0)
@@ -1981,10 +2013,11 @@ def api_cover(cover_id: str) -> Response | tuple[Response, int]:
     Images are cached to disk for faster subsequent requests.
 
     Path Parameters:
-        cover_id (str): Cover identifier (book ID or composite key for universal mode)
+        cover_id (str): Cover identifier (book ID or composite key for universal mode).
+            Kept for the link shape only; the cache entry is chosen by `url`.
 
     Query Parameters:
-        url (str): Base64-encoded original image URL (required on first request)
+        url (str): Base64-encoded original image URL (required)
 
     Returns:
         flask.Response: Binary image data with appropriate Content-Type, or 404.
@@ -1994,24 +2027,12 @@ def api_cover(cover_id: str) -> Response | tuple[Response, int]:
         import base64
 
         from shelfmark.config.env import is_covers_cache_enabled
-        from shelfmark.core.image_cache import get_image_cache
+        from shelfmark.core.image_cache import cover_cache_key, get_image_cache
 
         # Check if caching is enabled
         if not is_covers_cache_enabled():
             return jsonify({"error": "Cover caching is disabled"}), 404
 
-        cache = get_image_cache()
-
-        # Try to get from cache first
-        cached = cache.get(cover_id)
-        if cached:
-            image_data, content_type = cached
-            response = app.response_class(response=image_data, status=200, mimetype=content_type)
-            response.headers["Cache-Control"] = "public, max-age=86400"
-            response.headers["X-Cache"] = "HIT"
-            return response
-
-        # Cache miss - get URL from query parameter
         encoded_url = request.args.get("url")
         if not encoded_url:
             return jsonify({"error": "Cover URL not provided"}), 404
@@ -2022,8 +2043,21 @@ def api_cover(cover_id: str) -> Response | tuple[Response, int]:
             logger.warning("Failed to decode cover URL: %s", e)
             return jsonify({"error": "Invalid cover URL encoding"}), 400
 
+        # The entry is keyed by the URL, never by the caller-supplied id: the id would
+        # let any user cache an image of their choosing under another book's link.
+        cache = get_image_cache()
+        cache_key = cover_cache_key(original_url)
+
+        cached = cache.get(cache_key)
+        if cached:
+            image_data, content_type = cached
+            response = app.response_class(response=image_data, status=200, mimetype=content_type)
+            response.headers["Cache-Control"] = "public, max-age=86400"
+            response.headers["X-Cache"] = "HIT"
+            return response
+
         # Fetch and cache the image
-        result = cache.fetch_and_cache(cover_id, original_url)
+        result = cache.fetch_and_cache(cache_key, original_url)
         if not result:
             return jsonify({"error": "Failed to fetch cover image"}), 404
 
@@ -2905,7 +2939,10 @@ def api_metadata_search() -> Response | tuple[Response, int]:
 
         # Extract custom search field values from query params
         fields: dict[str, Any] = {}
+        may_use_account = _session_may_use_provider_account()
         for search_field in provider.search_fields:
+            if search_field.key in provider.account_search_fields and not may_use_account:
+                continue
             value = request.args.get(search_field.key)
             if value is not None:
                 # Strip string values to handle whitespace-only input
@@ -2994,6 +3031,9 @@ def api_metadata_field_options() -> Response:
         if not provider or not provider.is_available():
             return jsonify({"options": []})
 
+        if field_key in provider.account_search_fields and not _session_may_use_provider_account():
+            return jsonify({"options": []})
+
         options = provider.get_search_field_options(field_key, query=query_text or None)
         return jsonify({"options": options})
     except _OPERATIONAL_ERRORS as e:
@@ -3008,6 +3048,16 @@ def _attach_library_ownership(book: Any, book_dict: dict[str, Any]) -> None:
     owned = library_index.ownership(book)
     if owned is not None:
         book_dict["library"] = owned
+
+
+def _session_may_use_provider_account() -> bool:
+    """Whether this session may read or change the metadata provider's own account.
+
+    A provider such as Hardcover is signed in as one account, the instance owner's, and its lists
+    and shelves belong to that person. With no authentication configured the one user is the owner.
+    Otherwise only an admin may use them.
+    """
+    return get_auth_mode() == "none" or bool(session.get("is_admin", False))
 
 
 def _resolve_metadata_provider(provider_name: str) -> MetadataProvider:
@@ -3110,6 +3160,8 @@ def _handle_target_errors(
 def api_metadata_book_targets(provider: str, book_id: str) -> Response | tuple[Response, int]:
     """Get provider-managed list/status targets for a specific book."""
     prov = _resolve_metadata_provider(provider)
+    if not _session_may_use_provider_account():
+        return jsonify({"options": []})
     return jsonify({"options": prov.get_book_targets(book_id)})
 
 
@@ -3127,6 +3179,8 @@ def api_metadata_book_targets_batch(provider: str) -> Response | tuple[Response,
 
     book_ids = [str(bid) for bid in raw_ids[:50]]
 
+    if not _session_may_use_provider_account():
+        return jsonify({"results": {book_id: [] for book_id in book_ids}})
     return jsonify({"results": prov.get_book_targets_batch(book_ids)})
 
 
@@ -3137,6 +3191,8 @@ def api_metadata_book_targets_update(
     provider: str, book_id: str
 ) -> Response | tuple[Response, int]:
     """Set whether a book belongs to a provider-managed list or shelf."""
+    if not _session_may_use_provider_account():
+        return jsonify({"error": "Admin access required"}), 403
     prov = _resolve_metadata_provider(provider)
 
     payload = request.get_json(silent=True) or {}

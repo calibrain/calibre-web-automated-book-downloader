@@ -42,6 +42,7 @@ interface ActivitySidebarProps {
     },
   ) => Promise<void> | void;
   onRequestReject?: (requestId: number, adminNote?: string) => Promise<void> | void;
+  onRequestReopen?: (requestId: number) => Promise<void> | void;
   onRequestDismiss?: (requestId: number) => void;
   onPinnedOpenChange?: (pinnedOpen: boolean) => void;
   pinnedTopOffset?: number;
@@ -234,6 +235,7 @@ export const ActivitySidebar = ({
   onRequestCancel,
   onRequestApprove,
   onRequestReject,
+  onRequestReopen,
   onRequestDismiss,
   onPinnedOpenChange,
   pinnedTopOffset = 0,
@@ -799,7 +801,12 @@ export const ActivitySidebar = ({
             return (
               <div className="divide-y divide-[color-mix(in_srgb,var(--border-muted)_60%,transparent)]">
                 {visibleItems.map((item) => (
-                  <ActivityCard key={item.id} item={item} isAdmin={isAdmin} />
+                  <ActivityCard
+                    key={item.id}
+                    item={item}
+                    isAdmin={isAdmin}
+                    onRequestReopen={onRequestReopen}
+                  />
                 ))}
                 {historyHasMore && (
                   <div className="pt-3 text-center">
@@ -896,6 +903,7 @@ export const ActivitySidebar = ({
                                 }
                               : undefined
                           }
+                          onRequestReopen={onRequestReopen}
                           showRequestDetailsToggle={canShowRequestReview}
                           isRequestDetailsOpen={shouldShowRequestReview}
                           isSelected={shouldShowRequestReview || shouldShowRejectDialog}

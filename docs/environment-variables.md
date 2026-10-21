@@ -542,6 +542,7 @@ Audiobooks only. AudiobookBay lists it for most releases. In Prowlarr results it
 | `AUTO_OPEN_DOWNLOADS_SIDEBAR` | Automatically open the downloads sidebar when a new download is queued. | boolean | `false` |
 | `DOWNLOAD_TO_BROWSER_CONTENT_TYPES` | Automatically download completed files to your browser for the selected content types. | string (comma-separated) | _empty list_ |
 | `MAX_CONCURRENT_DOWNLOADS` | Maximum number of simultaneous downloads. | number | `3` |
+| `MAX_CONCURRENT_DOWNLOADS_PER_SOURCE` | Simultaneous downloads allowed from each source (Soulseek, AudiobookBay, Direct Download and so on). A source at its limit does not hold the others back, so a Soulseek download waiting in a peer's queue cannot stop a torrent from starting. 0 uses the single limit above for all sources together. | number | `0` |
 | `STATUS_TIMEOUT` | How long to keep completed/failed downloads in the queue display. | number | `3600` |
 
 <details>
@@ -851,6 +852,17 @@ Maximum number of simultaneous downloads.
 - **Default:** `3`
 - **Requires restart:** Yes
 - **Constraints:** min: 1, max: 10
+
+#### `MAX_CONCURRENT_DOWNLOADS_PER_SOURCE`
+
+**Max Concurrent Downloads Per Source**
+
+Simultaneous downloads allowed from each source (Soulseek, AudiobookBay, Direct Download and so on). A source at its limit does not hold the others back, so a Soulseek download waiting in a peer's queue cannot stop a torrent from starting. 0 uses the single limit above for all sources together.
+
+- **Type:** number
+- **Default:** `0`
+- **Requires restart:** Yes
+- **Constraints:** min: 0, max: 10
 
 #### `STATUS_TIMEOUT`
 
@@ -1325,6 +1337,7 @@ How long to cache individual book details. Default: 600 (10 minutes). Max: 60480
 | `PROWLARR_API_KEY` | Found in Prowlarr: Settings > General > API Key | string (secret) | _none_ |
 | `PROWLARR_INDEXERS` | Select which indexers to search. 📚 = has book categories. Leave empty to search all. | string (comma-separated) | _empty list_ |
 | `PROWLARR_INDEXER_TIMEOUT` | How long to wait for a single indexer to answer a search. Indexers behind FlareSolverr can need 90 seconds or more while a cold Cloudflare challenge is solved; raise this if searches come back empty and the Prowlarr log shows the search still running. | number | `90` |
+| `PROWLARR_EBOOK_MAX_SIZE_MB` | Hide ebook results larger than this. Expanded searches and general indexers can return TV series, courses and software next to the books. 0 shows everything, and a result with no reported size is always shown. Audiobook searches are not limited. | number | `0` |
 | `PROWLARR_AUTO_EXPAND` | Automatically retry search without category filtering if no results are found | boolean | `false` |
 | `PROWLARR_COLLAPSE_DUPLICATES` | Collapse a release that several indexer entries returned down to a single row, keeping the entry with the best Prowlarr priority. Turn this off to see every entry that carried it, which is what makes results from filter-specific entries (freeleech and the like) visible. | boolean | `true` |
 | `PROWLARR_USE_SEED_PREFERENCES` | Apply per-indexer seed time and ratio preferences from Prowlarr when sending torrents to the download client | boolean | `false` |
@@ -1380,6 +1393,16 @@ How long to wait for a single indexer to answer a search. Indexers behind FlareS
 - **Type:** number
 - **Default:** `90`
 - **Constraints:** min: 5, max: 300
+
+#### `PROWLARR_EBOOK_MAX_SIZE_MB`
+
+**Maximum Ebook Size (MB)**
+
+Hide ebook results larger than this. Expanded searches and general indexers can return TV series, courses and software next to the books. 0 shows everything, and a result with no reported size is always shown. Audiobook searches are not limited.
+
+- **Type:** number
+- **Default:** `0`
+- **Constraints:** min: 0, max: 100000
 
 #### `PROWLARR_AUTO_EXPAND`
 
@@ -1630,6 +1653,8 @@ Clear the transfer from slskd's download list after Shelfmark imports it. Applie
 | `ABB_HOSTNAME` | AudiobookBay domain (e.g., audiobookbay.lu, audiobookbay.is). Required to enable searches. | string | _empty string_ |
 | `ABB_PAGE_LIMIT` | Maximum number of search result pages to fetch (1-10). | number | `1` |
 | `ABB_EXACT_PHRASE` | Wrap generated queries in quotes for stricter matching. If no results are found, Shelfmark retries without quotes. | boolean | `false` |
+| `ABB_SEED_TIME_MINUTES` | How long a finished AudiobookBay torrent keeps seeding before the client stops it. 0 uses the torrent client's own limit. | number | `0` |
+| `ABB_SEED_RATIO` | Share ratio an AudiobookBay torrent should reach before the client stops it. 0 uses the torrent client's own limit. | number | `0.0` |
 | `ABB_RATE_LIMIT_DELAY` | Delay between requests in seconds to avoid rate limiting (0-10). | number | `1.0` |
 
 <details>
@@ -1672,6 +1697,26 @@ Wrap generated queries in quotes for stricter matching. If no results are found,
 
 - **Type:** boolean
 - **Default:** `false`
+
+#### `ABB_SEED_TIME_MINUTES`
+
+**Seed Time (minutes)**
+
+How long a finished AudiobookBay torrent keeps seeding before the client stops it. 0 uses the torrent client's own limit.
+
+- **Type:** number
+- **Default:** `0`
+- **Constraints:** min: 0, max: 525600
+
+#### `ABB_SEED_RATIO`
+
+**Seed Ratio**
+
+Share ratio an AudiobookBay torrent should reach before the client stops it. 0 uses the torrent client's own limit.
+
+- **Type:** number
+- **Default:** `0.0`
+- **Constraints:** min: 0.0, max: 100.0
 
 #### `ABB_RATE_LIMIT_DELAY`
 
@@ -1858,6 +1903,8 @@ How long to keep cached search results before they expire.
 | `RTORRENT_AUDIOBOOK_LABEL` | Label to assign to audiobook downloads in rTorrent (falls back to Book Label if not set) | string | _none_ |
 | `RTORRENT_DOWNLOAD_DIR` | Server-side directory where torrents are downloaded (optional, uses rTorrent default if not specified) | string | _none_ |
 | `PROWLARR_TORRENT_ACTION` | After a successful import, Remove keeps downloaded files in qBittorrent, Transmission, and Deluge; Remove & Delete Files also deletes them. rTorrent cannot delete download data, so this action leaves its torrent untouched. Blackhole does not support removal. Debrid clients delete temporary local files for either Remove action. | string (choice) | `keep` |
+| `TORRENT_NO_SEEDERS_WAIT` | Give up on a torrent when its client sees no seed at all for this long, even while it is still downloading, or fewer seeds than the minimum below while nothing is downloading. The torrent is removed and the download marked failed, so another release can be tried. The card shows the seed count and a countdown while it waits. 0 keeps the default behaviour (only the stall timer ends it). Only qBittorrent reports seed counts. | number | `0` |
+| `TORRENT_MIN_SEEDERS` | Seeds the client must see for a motionless torrent to keep waiting. 0 also turns the no-seed check off. | number | `1` |
 | `PROWLARR_TORRENT_POST_IMPORT_CATEGORY` | Category or label to assign after a successful import | string | _empty string_ |
 | `TORRENT_STALL_TIMEOUT_MINUTES` | How long a torrent can go without any progress before Shelfmark cancels it. Applies from when the torrent starts and restarts each time it moves. Raise it for slow swarms or magnets that take a while to find peers, or lower it to give up on dead torrents sooner. | number | `15` |
 | `PROWLARR_USENET_CLIENT` | Choose which usenet client to use | string (choice) | _empty string_ |
@@ -2173,6 +2220,26 @@ After a successful import, Remove keeps downloaded files in qBittorrent, Transmi
 - **Type:** string (choice)
 - **Default:** `keep`
 - **Options:** `keep` (Keep), `remove` (Remove), `remove_and_delete` (Remove & Delete Files), `change_category` (Change Category)
+
+#### `TORRENT_NO_SEEDERS_WAIT`
+
+**Give Up With No Seeders (minutes)**
+
+Give up on a torrent when its client sees no seed at all for this long, even while it is still downloading, or fewer seeds than the minimum below while nothing is downloading. The torrent is removed and the download marked failed, so another release can be tried. The card shows the seed count and a countdown while it waits. 0 keeps the default behaviour (only the stall timer ends it). Only qBittorrent reports seed counts.
+
+- **Type:** number
+- **Default:** `0`
+- **Constraints:** min: 0, max: 240
+
+#### `TORRENT_MIN_SEEDERS`
+
+**Minimum Seeders**
+
+Seeds the client must see for a motionless torrent to keep waiting. 0 also turns the no-seed check off.
+
+- **Type:** number
+- **Default:** `1`
+- **Constraints:** min: 0, max: 1000
 
 #### `PROWLARR_TORRENT_POST_IMPORT_CATEGORY`
 

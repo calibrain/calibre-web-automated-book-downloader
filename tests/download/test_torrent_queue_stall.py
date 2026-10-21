@@ -229,6 +229,8 @@ def test_a_value_above_the_maximum_is_capped() -> None:
         (500, 3600.0),  # above the maximum
         ("soon", 900.0),  # not a number: the default
         ("", 900.0),
+        (None, 900.0),
+        ([5], 900.0),
         (float("nan"), 900.0),
         (float("inf"), 900.0),
     ],

@@ -70,6 +70,13 @@ _INCOMPLETE_STATES = frozenset(
 )
 
 
+def _non_negative_int(value: object) -> int | None:
+    """A client count, or None when it is missing or the client's "unknown" (-1)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 class _UnsafeQBittorrentPath:
     pass
 
@@ -665,6 +672,10 @@ class QBittorrentClient(DownloadClient):
             torrent_speed = getattr(torrent, "dlspeed", None)
             torrent_speed = torrent_speed if isinstance(torrent_speed, int) else None
 
+            connected_seeds = _non_negative_int(getattr(torrent, "num_seeds", None))
+            swarm_seeds = _non_negative_int(getattr(torrent, "num_complete", None))
+            connected_peers = _non_negative_int(getattr(torrent, "num_leechs", None))
+
             return DownloadStatus(
                 progress=float(torrent_progress) * 100,
                 state="complete" if complete else state,
@@ -673,6 +684,9 @@ class QBittorrentClient(DownloadClient):
                 file_path=file_path,
                 download_speed=torrent_speed,
                 eta=eta,
+                seeders=connected_seeds,
+                swarm_seeders=swarm_seeds,
+                peers=connected_peers,
             )
         except _QBITTORRENT_CLIENT_ERRORS as e:
             return DownloadStatus.error(self._log_error("get_status", e))
