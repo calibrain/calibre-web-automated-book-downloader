@@ -54,7 +54,7 @@ def test_fetch_and_cache_blocks_unsafe_redirect(tmp_path, monkeypatch) -> None:
         calls.append(url)
         return RedirectResponse()
 
-    monkeypatch.setattr("shelfmark.core.image_cache.socket.getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr("shelfmark.download.network.socket.getaddrinfo", fake_getaddrinfo)
     monkeypatch.setattr("shelfmark.core.image_cache.requests.get", fake_get)
 
     assert cache.fetch_and_cache("cover-redirect", "https://example.com/cover.jpg") is None

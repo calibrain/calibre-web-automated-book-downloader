@@ -3,7 +3,6 @@
 import hashlib
 import ipaddress
 import json
-import socket
 import threading
 import time
 from http import HTTPStatus
@@ -15,7 +14,7 @@ import requests
 
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.request_helpers import coerce_int
-from shelfmark.download.network import get_ssl_verify
+from shelfmark.download.network import get_ssl_verify, hostname_resolves_publicly
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -526,13 +525,7 @@ class ImageCacheService:
         if not hostname:
             return None
 
-        try:
-            resolved = socket.getaddrinfo(hostname, None)
-            for _, _, _, _, sockaddr in resolved:
-                ip = ipaddress.ip_address(sockaddr[0])
-                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-                    return None
-        except socket.gaierror, ValueError:
+        if not hostname_resolves_publicly(hostname, use_custom_dns=True):
             return None
 
         return prepared_url

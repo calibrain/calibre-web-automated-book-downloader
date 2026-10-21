@@ -67,6 +67,9 @@ _HTML_SIGNATURES = (b"<!doctype", b"<html")
 # changed page park a download for minutes.
 _MAX_REDIRECT_DELAY_SECONDS = 10
 _POST_TIMEOUT = (10, 30)
+_MAX_POST_REDIRECTS = 5
+_HTTP_TEMP_REDIRECT = 307
+_HTTP_PERM_REDIRECT = 308
 _HTTP_FORBIDDEN = 403
 _HTTP_SERVICE_UNAVAILABLE = 503
 
@@ -92,6 +95,27 @@ def _is_switched_on() -> bool:
         if isinstance(entry, dict) and entry.get("id") == PROVIDER_ID:
             return bool(entry.get("enabled", True))
     return False
+
+
+def _is_site_url(url: str) -> bool:
+    """Whether ``url`` is a page of the configured OceanofPDF mirror itself.
+
+    The book page, the download form's action and any redirect between them must stay on
+    the mirror, same scheme and port, so a record or a page cannot point the fetch at
+    another host. The signed file link is the one URL that legitimately sits elsewhere.
+    """
+    base_url = _base_url()
+    if not base_url:
+        return False
+    try:
+        parsed, base = urlparse(url), urlparse(base_url)
+        return (
+            parsed.scheme == base.scheme
+            and (parsed.hostname or "").lower().rstrip(".") == (base.hostname or "").lower()
+            and parsed.port == base.port
+        )
+    except ValueError:
+        return False
 
 
 def _search_url(base_url: str, query: str) -> str:
@@ -233,15 +257,34 @@ def _post_fetch_form(action_url: str, fields: dict[str, str], referer: str) -> r
         "Referer": referer,
         "Origin": f"{urlparse(referer).scheme}://{urlparse(referer).netloc}",
     }
-    return requests.post(
-        action_url,
-        data=fields,
-        headers=headers,
-        cookies=downloader.get_cf_cookies_for_domain(hostname),
-        timeout=_POST_TIMEOUT,
-        proxies=network.get_proxies(action_url),
-        verify=network.get_ssl_verify(action_url),
-    )
+    method = "POST"
+    url = action_url
+    for _ in range(_MAX_POST_REDIRECTS + 1):
+        if not _is_site_url(url):
+            msg = f"OceanofPDF download form points off the mirror: {url}"
+            raise requests.exceptions.InvalidURL(msg)
+        network.ensure_public_destination(url)
+        common = {
+            "headers": headers,
+            "cookies": downloader.get_cf_cookies_for_domain(hostname),
+            "timeout": _POST_TIMEOUT,
+            "proxies": network.get_proxies(url),
+            "verify": network.get_ssl_verify(url),
+            "allow_redirects": False,
+        }
+        response = (
+            requests.post(url, data=fields, **common)
+            if method == "POST"
+            else requests.get(url, **common)
+        )
+        location = response.headers.get("Location") if response.is_redirect else None
+        if not location:
+            return response
+        url = urljoin(url, location)
+        if response.status_code not in (_HTTP_TEMP_REDIRECT, _HTTP_PERM_REDIRECT):
+            method = "GET"
+    msg = "OceanofPDF download form redirected too many times"
+    raise requests.exceptions.TooManyRedirects(msg)
 
 
 def _log_unresolved_fetch_page(response: requests.Response) -> None:
@@ -404,6 +447,12 @@ class OceanofPDFProvider:
         if not book_url:
             msg = f"OceanofPDF record {book_info.id!r} has no book page URL"
             raise RuntimeError(msg)
+        if not self.is_enabled():
+            msg = "OceanofPDF is not enabled"
+            raise RuntimeError(msg)
+        if not _is_site_url(book_url):
+            msg = f"OceanofPDF record {book_info.id!r} does not point at the configured mirror"
+            raise RuntimeError(msg)
 
         def status(message: str) -> None:
             if status_callback:
@@ -432,6 +481,9 @@ class OceanofPDFProvider:
                 return None
             action, fields = form
             action_url = urljoin(book_url, action)
+            if not _is_site_url(action_url):
+                logger.warning("OceanofPDF download form points off the mirror: %s", action_url)
+                return None
 
             if cancel_flag and cancel_flag.is_set():
                 return None
@@ -441,6 +493,9 @@ class OceanofPDFProvider:
                 logger.warning("OceanofPDF did not return a file link for %s", book_url)
                 return None
             file_url, delay = resolved
+            if urlparse(file_url).scheme not in ("http", "https"):
+                logger.warning("OceanofPDF file link is not an http(s) URL: %s", file_url)
+                return None
 
             wait = min(delay, _MAX_REDIRECT_DELAY_SECONDS)
             if wait > 0:
