@@ -30,9 +30,13 @@ server {
         proxy_set_header X-Forwarded-Host $http_host;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
     }
 }
 ```
+
+Keep the read timeout at least as high as `RELEASE_SEARCH_TIMEOUT` (300 seconds by default). Nginx's own default is 60 seconds, which cuts off any release search that has to solve a protection challenge first. See [Searches that time out behind a proxy](#searches-that-time-out-behind-a-proxy).
 
 ## Subpath setup
 
@@ -163,6 +167,14 @@ If login, settings saves, or downloads appear to fail in the browser but the act
 - Preserve the original port in `Host` and `X-Forwarded-Host` by using `$http_host` rather than `$host` when Shelfmark is exposed on a custom port.
 
 This is especially relevant for Nginx Proxy Manager or custom advanced config snippets that add websocket headers globally.
+
+## Searches that time out behind a proxy
+
+A release search can legitimately take minutes. When a source's protection cookies expire, the next search has to solve a browser challenge before it can run. Shelfmark gives a search up to `RELEASE_SEARCH_TIMEOUT` seconds (300 by default) and says why when it gives up, but a proxy with a shorter read timeout cuts the request off first. The search then fails with a message about the reverse proxy, or, on older versions, with "Unable to reach download source. Network may be restricted or mirrors blocked." A retry often works because the solve finished on the server after the proxy stopped waiting.
+
+- Set the proxy's read timeout to at least `RELEASE_SEARCH_TIMEOUT`. In Nginx and Nginx Proxy Manager (the **Advanced** tab of the proxy host), add the `proxy_read_timeout` and `proxy_send_timeout` lines from the examples above.
+- Cloudflare's proxy gives up after 100 seconds with a `524` error, and only Enterprise plans can raise that. If searches outlast it, reach Shelfmark without going through Cloudflare's proxy, for example on your LAN or over a VPN.
+- To confirm the proxy is the cause, run the same search against Shelfmark directly at `http://<host>:8084`. If it succeeds there, or fails with a specific reason, the proxy was cutting it off.
 
 ---
 
