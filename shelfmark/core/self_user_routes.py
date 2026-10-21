@@ -119,7 +119,11 @@ def _build_optional_user_preferences(
     preference_label: str,
 ) -> tuple[dict[str, Any] | None, tuple[Response, int] | None]:
     try:
-        return _build_user_preferences_payload(user_db, user_id, tab_name), None
+        # Self-service: the user only gets to see values they set themselves.
+        return (
+            _build_user_preferences_payload(user_db, user_id, tab_name, for_self_service=True),
+            None,
+        )
     except ValueError as exc:
         if str(exc) == missing_tab_error:
             return None, (jsonify({"error": missing_tab_error}), 500)
