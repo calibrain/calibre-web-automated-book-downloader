@@ -2,9 +2,9 @@
 
 Test book: *Moby-Dick* by Herman Melville (public domain). Validated live.
 
-  * **Real Chrome solves Cloudflare, end to end (VERIFIED).** AA search/detail are
-    reachable (mock-aa), but the AA *slow-download* links point through the
-    Cloudflare gate (mock-cf). Downloading therefore forces the in-image headless
+  * **Real Chrome solves Cloudflare, end to end (VERIFIED).** The AA mirror is the
+    Cloudflare gate (mock-cf): it passes search/detail through but challenges the
+    AA *slow-download* page. Downloading therefore forces the in-image headless
     Chromium (seleniumbase CDP internal bypasser) to execute the challenge JS,
     harvest ``cf_clearance``, and fetch the gated slow-download page. Moby-Dick
     landing in ``/books`` is only possible if Chrome actually solved the gate —

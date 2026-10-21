@@ -107,17 +107,24 @@ def get_aa_mirrors() -> list[str]:
     return _normalize_configured_urls(config.get("AA_ADDITIONAL_URLS", ""))
 
 
-def has_aa_mirror_configuration() -> bool:
-    """Return True when direct-download search has at least one AA base URL to use."""
-    if get_aa_mirrors():
-        return True
+def get_pinned_aa_base_url() -> str | None:
+    """Return the AA URL the Primary Mirror setting pins, or None when it is Auto.
 
+    The pinned URL need not be in the mirror list.
+    """
     configured_base_url = normalize_http_url(
         _string_config_value(_get_config().get("AA_BASE_URL", "auto")),
         default_scheme="https",
         allow_special=("auto",),
     )
-    return bool(configured_base_url and configured_base_url != "auto")
+    if configured_base_url and configured_base_url != "auto":
+        return configured_base_url
+    return None
+
+
+def has_aa_mirror_configuration() -> bool:
+    """Return True when direct-download search has at least one AA base URL to use."""
+    return bool(get_aa_mirrors()) or get_pinned_aa_base_url() is not None
 
 
 def get_libgen_mirrors() -> list[str]:

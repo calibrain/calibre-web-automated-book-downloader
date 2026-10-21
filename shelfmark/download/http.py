@@ -890,7 +890,6 @@ def download_url(
     except network.UnsafeDestinationError as e:
         logger.warning("Blocked download: %s", e)
         return None
-    network.ensure_public_destination(current_url)
 
     # Build headers with optional referer
     headers = DOWNLOAD_HEADERS.copy()

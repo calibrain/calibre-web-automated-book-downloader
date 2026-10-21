@@ -6,10 +6,7 @@ particularly that clicking on the AdvancedFilters panel does not close
 the main search menu (issue #1301).
 """
 
-import os
 from pathlib import Path
-
-import pytest
 
 # Path to the frontend source code
 FRONTEND_SRC_DIR = Path(__file__).parent.parent.parent / "src" / "frontend" / "src"
@@ -39,9 +36,7 @@ class TestSearchMenuDismiss:
         # Verify that the onMouseDown stopPropagation handler is present
         # This prevents the mousedown event from bubbling up to the document
         # and triggering the useDismiss hook in SearchBar
-        assert (
-            "onMouseDown={(e) => e.stopPropagation()}" in source_code
-        ), (
+        assert "onMouseDown={(e) => e.stopPropagation()}" in source_code, (
             "AdvancedFilters must prevent mousedown events from bubbling up "
             "to the document. Without this, clicking on dropdown options inside "
             "AdvancedFilters will close the main search menu (issue #1301)."
@@ -85,10 +80,9 @@ class TestSearchMenuDismiss:
             "SearchBar should use useDismiss hook for menu dismissal"
         )
 
-        # Verify that useDismiss is called with the appropriate refs
-        assert "selectorRef" in source_code, (
-            "SearchBar should track selectorRef for dismissal"
-        )
-        assert "controlsPanelRef" in source_code, (
-            "SearchBar should track controlsPanelRef for dismissal"
+        # The options menu stays open for clicks inside selectorRef or optionsPanelRef.
+        # AdvancedFilters renders beside SearchBar, outside both, which is why it stops
+        # mousedown from reaching this listener.
+        assert "useDismiss(isOptionsOpen, [selectorRef, optionsPanelRef]" in source_code, (
+            "SearchBar should dismiss the options menu only outside selectorRef and optionsPanelRef"
         )

@@ -86,6 +86,27 @@ def test_configured_mirror_on_a_private_address_is_allowed(monkeypatch):
     network.ensure_public_destination("http://lan-mirror.home/book")
 
 
+def test_pinned_aa_base_url_on_a_private_address_is_allowed(monkeypatch):
+    # The Primary Mirror setting can pin a URL that is not in the mirror list, and
+    # network uses it as the active AA base, so the guard must trust it too.
+    monkeypatch.setattr(
+        mirrors, "_get_config", lambda: {"AA_BASE_URL": "http://aa.lan:8080", "AA_MIRROR_URLS": []}
+    )
+    _resolve_to(monkeypatch, {"aa.lan": "192.168.1.30", "other.lan": "192.168.1.31"})
+
+    network.ensure_public_destination("http://aa.lan:8080/search?q=moby")
+    with pytest.raises(network.UnsafeDestinationError):
+        network.ensure_public_destination("http://other.lan/")
+
+
+def test_auto_aa_base_url_is_not_a_trusted_host(monkeypatch):
+    monkeypatch.setattr(mirrors, "_get_config", lambda: {"AA_BASE_URL": "auto"})
+    _resolve_to(monkeypatch, {"auto": "192.168.1.30"})
+
+    with pytest.raises(network.UnsafeDestinationError):
+        network.ensure_public_destination("http://auto/")
+
+
 def test_redirect_hook_checks_each_hop(monkeypatch):
     _resolve_to(monkeypatch, {"ok.example": "93.184.216.34", "internal.example": "10.0.0.9"})
     hook = network.REDIRECT_GUARD_HOOKS["response"][0]

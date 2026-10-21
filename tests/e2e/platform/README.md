@@ -95,8 +95,8 @@ end-to-end (`docker compose up` + suite + teardown) and passes.
 > gate. The bypasser profiles therefore assert that a gated search *recovers* when the
 > external bypasser is available and still fails cleanly when it is off, while the
 > **`full` profile exercises the real end-to-end
-> CF solve**: AA search/detail are reachable, but the AA slow-download link points
-> at the gate, so downloading Moby-Dick forces the in-image headless Chromium to
+> CF solve**: the gate is the AA mirror but challenges only the slow-download page,
+> so downloading Moby-Dick forces the in-image headless Chromium to
 > detect the challenge, solve it (`_bypass_method_cdp_gui_click`), and fetch the file —
 > verified live (`Challenge detected: cloudflare` → `Bypass successful` → Moby-Dick
 > in `/books`).
@@ -146,10 +146,13 @@ The "everything real" heavy profile (test book: **Moby-Dick**), run nightly / on
 demand (excluded from the PR matrix). It spins up, with **no** mock bypasser, and
 **passes live** (6 passed):
 
-- **Real Chrome solves Cloudflare, end to end (VERIFIED).** AA search/detail are
-  reachable (`mock-aa`), but the AA *slow-download* link points at the Cloudflare
-  gate (`mock-cf`), whose challenge page runs JS that issues `cf_clearance` and
-  reloads. Downloading Moby-Dick forces the in-image headless Chromium (seleniumbase
+- **Real Chrome solves Cloudflare, end to end (VERIFIED).** The AA mirror is the
+  Cloudflare gate (`mock-cf`, `CF_GATED_PATHS=/slow_download/`): it passes
+  search/detail and the final file through to `mock-aa` but challenges the AA
+  *slow-download* page, whose challenge runs JS that issues `cf_clearance` and
+  reloads. The gate has to be the only AA mirror: shelfmark refuses unconfigured
+  hosts that resolve to private addresses, and with a second mirror the mirror
+  selector would rewrite the gated link onto the ungated host. Downloading Moby-Dick forces the in-image headless Chromium (seleniumbase
   CDP, in the `shelfmark` image via `xvfb`+`chromium`) to load the gate, detect the
   challenge (`Challenge detected: cloudflare`), solve it (`_bypass_method_cdp_gui_click`),
   and fetch the cleared "Download now" page → the file lands in `/books`. That
