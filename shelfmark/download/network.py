@@ -592,8 +592,10 @@ def _configured_mirror_hosts() -> set[str]:
     """Hostnames of every mirror the operator configured, which are trusted as given."""
     from shelfmark.core import mirrors
 
+    pinned_aa_url = mirrors.get_pinned_aa_base_url()
     urls = [
         *mirrors.get_aa_mirrors(),
+        *([pinned_aa_url] if pinned_aa_url else []),
         *mirrors.get_libgen_mirrors(),
         *mirrors.get_zlib_mirrors(),
         *mirrors.get_welib_mirrors(),
