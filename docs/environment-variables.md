@@ -46,6 +46,7 @@ These environment variables are used at startup before the settings system loads
 | `ENABLE_LOGGING` | Enable file logging under LOG_ROOT/shelfmark/ (including shelfmark.log and startup logs). | boolean | `true` |
 | `FLASK_HOST` | Host address for the Flask web server. | string | `0.0.0.0` |
 | `FLASK_PORT` | Port number for the Flask web server. | number | `8084` |
+| `SOCKETIO_ALLOWED_ORIGINS` | Extra origins allowed to open the live-update websocket, comma separated (e.g. https://books.example.com). The app's own origin is always allowed, including behind a proxy that sends X-Forwarded-Host and X-Forwarded-Proto. Only needed if your proxy changes Host without sending those headers. | string | `unset` |
 | `SESSION_COOKIE_SECURE` | Enable secure cookies (requires HTTPS). | boolean | `false` |
 | `CWA_DB_PATH` | Path to the Calibre-Web database for authentication integration. | string (path) | `/auth/app.db` |
 | `HIDE_LOCAL_AUTH` | Hide the username/password login form when OIDC is active. | boolean | `false` |
@@ -100,6 +101,13 @@ Port number for the Flask web server.
 
 - **Type:** number
 - **Default:** `8084`
+
+#### `SOCKETIO_ALLOWED_ORIGINS`
+
+Extra origins allowed to open the live-update websocket, comma separated (e.g. https://books.example.com). The app's own origin is always allowed, including behind a proxy that sends X-Forwarded-Host and X-Forwarded-Proto. Only needed if your proxy changes Host without sending those headers.
+
+- **Type:** string
+- **Default:** `unset`
 
 #### `SESSION_COOKIE_SECURE`
 
@@ -1337,6 +1345,7 @@ How long to cache individual book details. Default: 600 (10 minutes). Max: 60480
 | `PROWLARR_API_KEY` | Found in Prowlarr: Settings > General > API Key | string (secret) | _none_ |
 | `PROWLARR_INDEXERS` | Select which indexers to search. 📚 = has book categories. Leave empty to search all. | string (comma-separated) | _empty list_ |
 | `PROWLARR_INDEXER_TIMEOUT` | How long to wait for a single indexer to answer a search. Indexers behind FlareSolverr can need 90 seconds or more while a cold Cloudflare challenge is solved; raise this if searches come back empty and the Prowlarr log shows the search still running. | number | `90` |
+| `PROWLARR_EBOOK_MAX_SIZE_MB` | Hide ebook results larger than this. Expanded searches and general indexers can return TV series, courses and software next to the books. 0 shows everything, and a result with no reported size is always shown. Audiobook searches are not limited. | number | `0` |
 | `PROWLARR_AUTO_EXPAND` | Automatically retry search without category filtering if no results are found | boolean | `false` |
 | `PROWLARR_COLLAPSE_DUPLICATES` | Collapse a release that several indexer entries returned down to a single row, keeping the entry with the best Prowlarr priority. Turn this off to see every entry that carried it, which is what makes results from filter-specific entries (freeleech and the like) visible. | boolean | `true` |
 | `PROWLARR_USE_SEED_PREFERENCES` | Apply per-indexer seed time and ratio preferences from Prowlarr when sending torrents to the download client | boolean | `false` |
@@ -1392,6 +1401,16 @@ How long to wait for a single indexer to answer a search. Indexers behind FlareS
 - **Type:** number
 - **Default:** `90`
 - **Constraints:** min: 5, max: 300
+
+#### `PROWLARR_EBOOK_MAX_SIZE_MB`
+
+**Maximum Ebook Size (MB)**
+
+Hide ebook results larger than this. Expanded searches and general indexers can return TV series, courses and software next to the books. 0 shows everything, and a result with no reported size is always shown. Audiobook searches are not limited.
+
+- **Type:** number
+- **Default:** `0`
+- **Constraints:** min: 0, max: 100000
 
 #### `PROWLARR_AUTO_EXPAND`
 
@@ -1642,6 +1661,8 @@ Clear the transfer from slskd's download list after Shelfmark imports it. Applie
 | `ABB_HOSTNAME` | AudiobookBay domain (e.g., audiobookbay.lu, audiobookbay.is). Required to enable searches. | string | _empty string_ |
 | `ABB_PAGE_LIMIT` | Maximum number of search result pages to fetch (1-10). | number | `1` |
 | `ABB_EXACT_PHRASE` | Wrap generated queries in quotes for stricter matching. If no results are found, Shelfmark retries without quotes. | boolean | `false` |
+| `ABB_SEED_TIME_MINUTES` | How long a finished AudiobookBay torrent keeps seeding before the client stops it. 0 uses the torrent client's own limit. | number | `0` |
+| `ABB_SEED_RATIO` | Share ratio an AudiobookBay torrent should reach before the client stops it. 0 uses the torrent client's own limit. | number | `0.0` |
 | `ABB_RATE_LIMIT_DELAY` | Delay between requests in seconds to avoid rate limiting (0-10). | number | `1.0` |
 
 <details>
@@ -1684,6 +1705,26 @@ Wrap generated queries in quotes for stricter matching. If no results are found,
 
 - **Type:** boolean
 - **Default:** `false`
+
+#### `ABB_SEED_TIME_MINUTES`
+
+**Seed Time (minutes)**
+
+How long a finished AudiobookBay torrent keeps seeding before the client stops it. 0 uses the torrent client's own limit.
+
+- **Type:** number
+- **Default:** `0`
+- **Constraints:** min: 0, max: 525600
+
+#### `ABB_SEED_RATIO`
+
+**Seed Ratio**
+
+Share ratio an AudiobookBay torrent should reach before the client stops it. 0 uses the torrent client's own limit.
+
+- **Type:** number
+- **Default:** `0.0`
+- **Constraints:** min: 0.0, max: 100.0
 
 #### `ABB_RATE_LIMIT_DELAY`
 

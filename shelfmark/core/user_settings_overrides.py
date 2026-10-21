@@ -3,7 +3,13 @@
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
-from shelfmark.core.settings_registry import load_config_file
+from shelfmark.core.settings_registry import (
+    CheckboxField,
+    MultiSelectField,
+    NumberField,
+    SelectField,
+    load_config_file,
+)
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -33,8 +39,36 @@ def get_ordered_user_overridable_fields(tab_name: str) -> list[tuple[str, Any]]:
     return [(field.key, field) for field in tab.fields if field.key in overridable_map]
 
 
-def build_user_preferences_payload(user_db: UserDB, user_id: int, tab_name: str) -> dict[str, Any]:
-    """Build the effective user-preferences payload for a settings tab."""
+# Global values a self-service user may see when they have not set the key
+# themselves. These are mode switches and option picks the settings form needs
+# to lay itself out, and they carry nothing private. Everything else (free text
+# such as paths and email addresses, tables such as notification routes whose
+# URLs embed tokens) stays with the admin.
+_SELF_SERVICE_VISIBLE_FIELD_TYPES = (CheckboxField, NumberField, SelectField, MultiSelectField)
+# Select fields whose value identifies something in the admin's own accounts.
+_SELF_SERVICE_HIDDEN_KEYS = frozenset({"BOOKLORE_LIBRARY_ID", "BOOKLORE_PATH_ID"})
+
+
+def is_global_value_visible_to_user(key: str, field: object) -> bool:
+    """Return whether a self-service user may see the global value of a field."""
+    if key in _SELF_SERVICE_HIDDEN_KEYS:
+        return False
+    return isinstance(field, _SELF_SERVICE_VISIBLE_FIELD_TYPES)
+
+
+def build_user_preferences_payload(
+    user_db: UserDB,
+    user_id: int,
+    tab_name: str,
+    *,
+    for_self_service: bool = False,
+) -> dict[str, Any]:
+    """Build the effective user-preferences payload for a settings tab.
+
+    With ``for_self_service`` the payload is meant for the user it describes:
+    global values they did not set themselves are replaced with ``None`` unless
+    `is_global_value_visible_to_user` allows them. Admin callers get full data.
+    """
     from shelfmark.core.config import config as app_config
 
     settings_registry = get_settings_registry()
@@ -59,7 +93,8 @@ def build_user_preferences_payload(user_db: UserDB, user_id: int, tab_name: str)
         )
         fields_payload.append(serialized)
 
-        global_values[key] = app_config.get(key, field.default)
+        show_global = not for_self_service or is_global_value_visible_to_user(key, field)
+        global_values[key] = app_config.get(key, field.default) if show_global else None
 
         source = "default"
         value = app_config.get(key, field.default, user_id=user_id)
@@ -70,6 +105,9 @@ def build_user_preferences_payload(user_db: UserDB, user_id: int, tab_name: str)
             value = user_settings[key]
         elif key in tab_config:
             source = "global_config"
+
+        if source != "user_override" and not show_global:
+            value = None
 
         effective[key] = {"value": value, "source": source}
 

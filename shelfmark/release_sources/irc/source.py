@@ -31,6 +31,7 @@ from shelfmark.release_sources import (
     register_source,
 )
 
+from .client import has_control_characters
 from .connection_manager import connection_manager
 from .dcc import DCCError, download_dcc, safe_dcc_filename
 from .parser import SearchResult, extract_results_from_zip, parse_results_file
@@ -242,6 +243,10 @@ class IRCReleaseSource(ReleaseSource):
         query = self._build_query(book, plan)
         if not query:
             logger.warning("No search query could be built")
+            return []
+
+        if has_control_characters(query):
+            logger.warning("IRC search refused: query contains control characters")
             return []
 
         # A manual query is the user's own words; ranking it against the metadata

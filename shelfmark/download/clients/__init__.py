@@ -195,6 +195,8 @@ class DownloadClient(ABC):
     name: str
     handoff_only = False
     prefers_torrent_file = False
+    # False when remove(delete_files=True) always fails, as on rTorrent.
+    can_delete_files = True
 
     def _log_error(self, method: str, e: Exception, level: str = "error") -> str:
         """Log a client error with consistent formatting.

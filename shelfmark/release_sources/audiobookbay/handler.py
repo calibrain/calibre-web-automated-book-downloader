@@ -1,10 +1,12 @@
 """AudiobookBay download handler - resolves magnet links and uses shared client lifecycle."""
 
+import math
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
+from shelfmark.core.request_helpers import coerce_int
 from shelfmark.download.clients import (
     DownloadClient,
     get_client,
@@ -53,6 +55,22 @@ def _detail_url_matches_host(detail_url: str, hostname: str) -> bool:
         parsed.scheme.lower() in ALLOWED_DETAIL_URL_SCHEMES
         and bool(detail_hostname)
         and detail_hostname.lower().rstrip(".") == allowed_hostname
+    )
+
+
+def _seed_limits() -> tuple[int | None, float | None]:
+    """The configured seed time (minutes) and share ratio; None leaves the client's own limit."""
+    minutes = coerce_int(config.get("ABB_SEED_TIME_MINUTES", 0), 0)
+    raw_ratio = config.get("ABB_SEED_RATIO", 0)
+    ratio = 0.0
+    if isinstance(raw_ratio, (int, float, str)):
+        try:
+            ratio = float(raw_ratio)
+        except ValueError:
+            ratio = 0.0
+    return (
+        minutes if minutes > 0 else None,
+        ratio if math.isfinite(ratio) and ratio > 0 else None,
     )
 
 
@@ -105,11 +123,14 @@ class AudiobookBayHandler(ExternalClientHandler):
         cached_magnet = task.retry_source_context.get(MAGNET_LINK_CONTEXT_KEY)
         if isinstance(cached_magnet, str) and cached_magnet:
             logger.info("Reusing magnet link from an earlier attempt for task %s", task.task_id)
+            seeding_time_limit, ratio_limit = _seed_limits()
             return DownloadRequest(
                 url=cached_magnet,
                 protocol="torrent",
                 release_name=task.title or "Unknown",
                 expected_hash=None,
+                seeding_time_limit=seeding_time_limit,
+                ratio_limit=ratio_limit,
             )
 
         detail_url = self._resolve_detail_url(task)
@@ -137,11 +158,14 @@ class AudiobookBayHandler(ExternalClientHandler):
         logger.info("Extracted magnet link for task %s", task.task_id)
         task.retry_source_context[MAGNET_LINK_CONTEXT_KEY] = magnet_link
 
+        seeding_time_limit, ratio_limit = _seed_limits()
         return DownloadRequest(
             url=magnet_link,
             protocol="torrent",
             release_name=task.title or "Unknown",
             expected_hash=None,
+            seeding_time_limit=seeding_time_limit,
+            ratio_limit=ratio_limit,
         )
 
     def cancel(self, task_id: str) -> bool:

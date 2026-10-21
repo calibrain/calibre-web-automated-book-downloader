@@ -147,3 +147,66 @@ def test_direct_download_handler_removes_partial_file_when_cancelled_after_downl
     assert result is None
     assert not expected_path.exists()
     assert status_updates[-1] == ("cancelled", "Cancelled")
+
+
+def _hostile_run(monkeypatch, tmp_path, *, file_org, task, cancel_after=False):
+    from shelfmark.release_sources.direct_download import handler as dd
+
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    seen: list = []
+
+    def fake_download_book(book_info, book_path, progress_callback, cancel_flag, status_callback):
+        seen.append(book_path)
+        if cancel_after:
+            cancel_flag.set()
+        return None
+
+    monkeypatch.setattr(dd, "_download_book", fake_download_book)
+    monkeypatch.setattr(dd, "TMP_DIR", tmp_dir)
+    monkeypatch.setattr(
+        config,
+        "get",
+        lambda key, default=None: file_org if key == "FILE_ORGANIZATION" else default,
+    )
+    cancel_flag = Event()
+    result = DirectDownloadHandler().download(
+        task, cancel_flag, lambda _p: None, lambda _s, _m: None
+    )
+    return tmp_dir, seen, result
+
+
+def test_direct_download_handler_never_stages_outside_tmp_dir_via_format(monkeypatch, tmp_path):
+    (tmp_path / "config").mkdir()
+    victim = tmp_path / "config" / "x"
+    victim.write_text("keep")
+    task = DownloadTask(
+        task_id="id",
+        source="direct_download",
+        title=".",
+        format="/../config/x",
+    )
+    tmp_dir, seen, _ = _hostile_run(
+        monkeypatch, tmp_path, file_org="rename", task=task, cancel_after=True
+    )
+    for path in seen:
+        assert path.resolve().parent == tmp_dir.resolve()
+    assert victim.read_text() == "keep"
+
+
+def test_direct_download_handler_refuses_hostile_source_id(monkeypatch, tmp_path):
+    (tmp_path / "config").mkdir()
+    victim = tmp_path / "config" / "x.bin"
+    victim.write_text("keep")
+    task = DownloadTask(
+        task_id="../config/x",
+        source="direct_download",
+        title="t",
+        format="bin",
+    )
+    _tmp_dir, seen, result = _hostile_run(
+        monkeypatch, tmp_path, file_org="none", task=task, cancel_after=True
+    )
+    assert result is None
+    assert seen == []
+    assert victim.read_text() == "keep"

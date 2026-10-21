@@ -7,7 +7,11 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from shelfmark.core.config import config as app_config
-from shelfmark.core.notifications import NotificationEvent, send_test_notification
+from shelfmark.core.notifications import (
+    NotificationEvent,
+    send_test_notification,
+    user_route_url_problem,
+)
 from shelfmark.core.settings_registry import (
     ActionButton,
     HeadingField,
@@ -142,8 +146,14 @@ def _extract_unique_route_urls(routes: list[dict[str, Any]]) -> list[str]:
     return urls
 
 
-def build_notification_test_result(routes_input: Any, *, scope_label: str) -> dict[str, Any]:
-    """Validate routes and return a test-notification result payload."""
+def build_notification_test_result(
+    routes_input: Any, *, scope_label: str, user_scope: bool = False
+) -> dict[str, Any]:
+    """Validate routes and return a test-notification result payload.
+
+    ``user_scope`` is for a user's own routes, which may only use the services and public hosts
+    that ``user_route_url_problem`` allows.
+    """
     invalid_event_count = _count_invalid_route_events(routes_input)
     if invalid_event_count:
         return {
@@ -171,6 +181,15 @@ def build_notification_test_result(routes_input: Any, *, scope_label: str) -> di
             "success": False,
             "message": f"Add at least one {scope_label} notification URL route first.",
         }
+
+    if user_scope:
+        for url in urls:
+            problem = user_route_url_problem(url)
+            if problem is not None:
+                return {
+                    "success": False,
+                    "message": f"Personal notification route refused: {problem}.",
+                }
 
     return send_test_notification(urls)
 

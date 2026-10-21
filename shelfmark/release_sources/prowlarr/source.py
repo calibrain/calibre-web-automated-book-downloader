@@ -17,7 +17,7 @@ from shelfmark.core.author_match import AUTHOR_UNKNOWN, author_affinity
 from shelfmark.core.config import config
 from shelfmark.core.languages import normalize_language
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.request_helpers import normalize_optional_text
+from shelfmark.core.request_helpers import coerce_int, normalize_optional_text
 from shelfmark.core.search_plan import ReleaseSearchVariant
 from shelfmark.core.utils import AUDIOBOOK_FORMATS as CORE_AUDIOBOOK_FORMATS
 from shelfmark.core.utils import normalize_http_url
@@ -289,6 +289,22 @@ def _collapse_duplicate_indexer_results(
             kept[existing_position] = result
 
     return kept
+
+
+def _max_release_bytes(content_type: str) -> int | None:
+    """The size above which an ebook result is hidden, or None when no limit is set."""
+    if content_type == "audiobook":
+        return None
+    megabytes = coerce_int(config.get("PROWLARR_EBOOK_MAX_SIZE_MB", 0), 0)
+    return megabytes * _SIZE_UNIT_BASE * _SIZE_UNIT_BASE if megabytes > 0 else None
+
+
+def _is_over_size(result: dict, max_bytes: int | None) -> bool:
+    """Whether a raw result reports a size above the limit. An unknown size is never over."""
+    if max_bytes is None:
+        return False
+    size = coerce_int(result.get("size"), 0)
+    return size > max_bytes
 
 
 def _parse_size(size_bytes: int | None) -> str | None:
@@ -1283,7 +1299,12 @@ class ProwlarrSource(ReleaseSource):
             # metadata author would second-guess what they typed.
             wanted_author = "" if plan.manual_query else plan.author
 
+            max_bytes = _max_release_bytes(content_type)
+            oversized = 0
             for raw_result in all_results:
+                if _is_over_size(raw_result, max_bytes):
+                    oversized += 1
+                    continue
                 result_with_seed_settings = _apply_indexer_seed_settings(
                     raw_result, indexer_seed_settings
                 )
@@ -1310,6 +1331,9 @@ class ProwlarrSource(ReleaseSource):
                 if idx_id_int in mam_indexers:
                     mam_releases.append(release)
                     mam_indexer = mam_indexer or mam_indexers[idx_id_int]
+
+            if oversized:
+                logger.debug("Prowlarr: hid %s result(s) over the ebook size limit", oversized)
 
             mam_session_id = _get_mam_session_id()
             if mam_session_id and mam_releases:

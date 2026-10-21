@@ -1,5 +1,6 @@
 """Disk-based image cache with LRU eviction."""
 
+import hashlib
 import ipaddress
 import json
 import socket
@@ -50,6 +51,18 @@ TRANSIENT_CACHE_TTL = 60
 
 _MIN_WEBP_HEADER_LENGTH = 12
 HTTP_NOT_FOUND = HTTPStatus.NOT_FOUND
+
+
+def cover_cache_key(url: str) -> str:
+    """Return the cache key for a cover fetched from `url`.
+
+    The key is derived from the URL alone, so a request can only ever fill the
+    entry for the image it names. The book id in the proxy path is not part of
+    it: any caller could otherwise pick another book's id and have the image
+    they chose served to everyone under it. One URL also maps to one entry no
+    matter which id the proxy link carries.
+    """
+    return hashlib.sha256(url.strip().encode()).hexdigest()[:32]
 
 
 def _detect_image_type(data: bytes) -> tuple[str, str] | None:

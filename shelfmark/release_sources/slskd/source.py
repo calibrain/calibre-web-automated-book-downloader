@@ -34,6 +34,7 @@ from shelfmark.release_sources import (
     ReleaseSource,
     SortOption,
     SourceActionButton,
+    SourceUnavailableError,
     register_source,
 )
 from shelfmark.release_sources.prowlarr.source import _parse_size
@@ -82,8 +83,33 @@ def split_remote_path(filename: str) -> tuple[str, str]:
 
 
 def remote_directory_name(directory: str) -> str:
-    """Return the last segment of a remote directory path."""
-    return split_remote_path(directory)[1] or directory
+    """Return the last non-empty segment of a remote directory path."""
+    return next((part for part in reversed(re.split(r"[\\/]", directory)) if part), "")
+
+
+_DRIVE = re.compile(r"^[A-Za-z]:")
+
+
+def safe_remote_segments(filename: str) -> list[str] | None:
+    """The segments of a peer's file path, or None when the path is unsafe to lay out locally.
+
+    slskd turns the last folder and the file name into a path under its downloads folder, and
+    a peer controls both. A path with an empty, ``.`` or ``..`` segment is refused, which
+    covers one starting at ``/`` or ``\\`` and an empty last folder (``a//b.epub``). A drive
+    (``C:``) is allowed only as the first of three or more segments: Windows peers share from
+    there, and slskd keeps just the last folder, so it never reaches a local path.
+    """
+    text = str(filename or "")
+    if "\0" in text:
+        return None
+    segments = re.split(r"[\\/]", text)
+    if any(not part or part in {".", ".."} for part in segments):
+        return None
+    if any(_DRIVE.match(part) for part in segments[1:]) or (
+        len(segments) < 3 and _DRIVE.match(segments[0])  # the drive would be the local folder
+    ):
+        return None
+    return segments
 
 
 def file_extension(basename: str) -> str:
@@ -149,9 +175,10 @@ def iter_peer_files(response: dict[str, Any]) -> list[PeerFile]:
         filename = str(raw.get("filename") or "").strip()
         if not filename:
             continue
-        directory, basename = split_remote_path(filename)
-        if not basename:
+        if safe_remote_segments(filename) is None:
+            logger.debug("slskd: skipping unsafe file name from %s: %r", username, filename)
             continue
+        directory, basename = split_remote_path(filename)
         peer_files.append(
             PeerFile(
                 username=username,
@@ -502,6 +529,7 @@ class SlskdSource(ReleaseSource):
 
         releases: list[Release] = []
         answered: list[list[dict[str, Any]]] = []
+        last_error: Exception | None = None
         # Expanding keeps going through every variant even after one produced results.
         for index, query in enumerate(queries, start=1):
             if releases and not expand_search:
@@ -516,14 +544,20 @@ class SlskdSource(ReleaseSource):
                     wait_seconds=wait_seconds,
                     response_limit=response_limit,
                 )
-            except Exception:
+            except Exception as e:
                 logger.exception("slskd search failed for '%s'", query)
+                last_error = e
                 continue
 
             answered.append(responses)
             releases = build_releases(
                 merge_responses(answered), content_type=content_type, formats=formats
             )
+
+        if not answered and last_error is not None:
+            # slskd being down or rejecting the API key is not "no releases found".
+            msg = f"search failed: {last_error}"
+            raise SourceUnavailableError(msg) from last_error
 
         releases.sort(key=rank_key)
         if releases:

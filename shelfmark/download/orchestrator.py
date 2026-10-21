@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.models import DownloadTask, QueueStatus, SearchMode
+from shelfmark.core.models import DownloadTask, QueueStatus, SearchMode, normalize_format
 from shelfmark.core.queue import book_queue
 from shelfmark.core.request_helpers import (
     normalize_optional_text,
@@ -238,6 +238,18 @@ def _build_retry_resolution_fields(
     }
 
 
+# Sources whose source_id becomes a staging file name (the handlers use it as one when
+# FILE_ORGANIZATION is "none"), so it must not carry path components.
+_FILENAME_ID_SOURCES = frozenset({"direct_download", "libgen"})
+
+
+def _source_id_is_unsafe_filename(source: str, source_id: object) -> bool:
+    if source not in _FILENAME_ID_SOURCES:
+        return False
+    text = str(source_id)
+    return any(ch in text for ch in "/\\\0") or ".." in text
+
+
 def queue_release(
     release_data: dict,
     priority: int = 0,
@@ -251,6 +263,10 @@ def queue_release(
         if unavailable_message:
             logger.warning("Rejected queue request for unavailable source %s", source)
             return False, unavailable_message
+
+        if _source_id_is_unsafe_filename(source, release_data["source_id"]):
+            logger.warning("Rejected queue request with unsafe source_id for %s", source)
+            return False, "Invalid release identifier"
 
         extra = release_data.get("extra", {})
         raw_request_id = release_data.get("_request_id")
@@ -316,7 +332,7 @@ def queue_release(
             title=release_data.get("title", "Unknown"),
             author=author,
             year=year,
-            format=release_data.get("format"),
+            format=normalize_format(release_data.get("format")),
             size=release_data.get("size"),
             downloads=release_data.get("downloads") or extra.get("downloads"),
             preview=preview,
@@ -613,7 +629,7 @@ def _restore_task_from_retry_payload(payload: object) -> DownloadTask | None:
         title=title,
         author=normalize_optional_text(payload.get("author")),
         year=normalize_optional_text(payload.get("year")),
-        format=normalize_optional_text(payload.get("format")),
+        format=normalize_format(payload.get("format")),
         size=normalize_optional_text(payload.get("size")),
         downloads=int(payload["downloads"]) if payload.get("downloads") is not None else None,
         preview=normalize_optional_text(payload.get("preview")),

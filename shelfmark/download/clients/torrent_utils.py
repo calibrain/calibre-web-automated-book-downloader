@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import re
+import socket
 import time
 from binascii import Error as BinasciiError
 from dataclasses import dataclass
@@ -262,8 +264,10 @@ def _fetch_torrent_info(url: str) -> TorrentInfo:
         current_url = url
         redirects_remaining = _TORRENT_FETCH_MAX_REDIRECTS
         while True:
+            trusted = _is_trusted_torrent_fetch_url(current_url)
+            _check_torrent_fetch_hop(current_url, trusted=trusted)
             request_headers = dict(headers)
-            if not _is_trusted_torrent_fetch_url(current_url):
+            if not trusted:
                 request_headers.pop("X-Api-Key", None)
 
             resp = requests.get(
@@ -326,6 +330,34 @@ def _fetch_torrent_info(url: str) -> TorrentInfo:
         message = _redact_urls_in_text(str(e))
         logger.warning("Could not fetch torrent file: %s: %s", type(e).__name__, message)
         return TorrentInfo(info_hash=None, torrent_data=None, is_magnet=False, fetch_error=message)
+
+
+def _resolve_host_addresses(host: str) -> list[str]:
+    """Resolve a host with the system resolver; raises OSError when it does not resolve."""
+    return [str(info[4][0]) for info in socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)]
+
+
+def _is_public_address(address: str) -> bool:
+    ip = ipaddress.ip_address(address.split("%", 1)[0])
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_global
+
+
+def _check_torrent_fetch_hop(url: str, *, trusted: bool) -> None:
+    """Refuse a fetch hop that is not http(s) or that resolves to a non-public address.
+
+    The configured Prowlarr/Newznab origin is exempt because it commonly lives
+    on the LAN and its own download links point back at it.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("torrent fetch refused: URL is not http or https")
+    if trusted:
+        return
+    addresses = _resolve_host_addresses(parsed.hostname)
+    if not addresses or not all(_is_public_address(address) for address in addresses):
+        raise ValueError("torrent fetch refused: address is not public")
 
 
 def _is_trusted_torrent_fetch_url(url: str) -> bool:
