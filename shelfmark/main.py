@@ -1941,10 +1941,11 @@ def api_cover(cover_id: str) -> Response | tuple[Response, int]:
     Images are cached to disk for faster subsequent requests.
 
     Path Parameters:
-        cover_id (str): Cover identifier (book ID or composite key for universal mode)
+        cover_id (str): Cover identifier (book ID or composite key for universal mode).
+            Kept for the link shape only; the cache entry is chosen by `url`.
 
     Query Parameters:
-        url (str): Base64-encoded original image URL (required on first request)
+        url (str): Base64-encoded original image URL (required)
 
     Returns:
         flask.Response: Binary image data with appropriate Content-Type, or 404.
@@ -1954,24 +1955,12 @@ def api_cover(cover_id: str) -> Response | tuple[Response, int]:
         import base64
 
         from shelfmark.config.env import is_covers_cache_enabled
-        from shelfmark.core.image_cache import get_image_cache
+        from shelfmark.core.image_cache import cover_cache_key, get_image_cache
 
         # Check if caching is enabled
         if not is_covers_cache_enabled():
             return jsonify({"error": "Cover caching is disabled"}), 404
 
-        cache = get_image_cache()
-
-        # Try to get from cache first
-        cached = cache.get(cover_id)
-        if cached:
-            image_data, content_type = cached
-            response = app.response_class(response=image_data, status=200, mimetype=content_type)
-            response.headers["Cache-Control"] = "public, max-age=86400"
-            response.headers["X-Cache"] = "HIT"
-            return response
-
-        # Cache miss - get URL from query parameter
         encoded_url = request.args.get("url")
         if not encoded_url:
             return jsonify({"error": "Cover URL not provided"}), 404
@@ -1982,8 +1971,21 @@ def api_cover(cover_id: str) -> Response | tuple[Response, int]:
             logger.warning("Failed to decode cover URL: %s", e)
             return jsonify({"error": "Invalid cover URL encoding"}), 400
 
+        # The entry is keyed by the URL, never by the caller-supplied id: the id would
+        # let any user cache an image of their choosing under another book's link.
+        cache = get_image_cache()
+        cache_key = cover_cache_key(original_url)
+
+        cached = cache.get(cache_key)
+        if cached:
+            image_data, content_type = cached
+            response = app.response_class(response=image_data, status=200, mimetype=content_type)
+            response.headers["Cache-Control"] = "public, max-age=86400"
+            response.headers["X-Cache"] = "HIT"
+            return response
+
         # Fetch and cache the image
-        result = cache.fetch_and_cache(cover_id, original_url)
+        result = cache.fetch_and_cache(cache_key, original_url)
         if not result:
             return jsonify({"error": "Failed to fetch cover image"}), 404
 
