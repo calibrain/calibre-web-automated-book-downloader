@@ -347,6 +347,7 @@ class MetadataProvider(ABC):
         requires_auth: True if API key/authentication is required
         supported_sorts: List of SortOrder values this provider supports
         search_fields: List of provider-specific search fields
+        account_search_fields: Search fields that read the provider's own account, admin only
         capabilities: Declarative capabilities exposed to shared UI code
 
     """
@@ -356,6 +357,9 @@ class MetadataProvider(ABC):
     requires_auth: bool
     supported_sorts: ClassVar[tuple[SortOrder, ...]] = (SortOrder.RELEVANCE,)
     search_fields: ClassVar[tuple[SearchField, ...]] = ()
+    # Search fields that read the provider's own account (private lists, shelves) rather than public
+    # data. Only an admin may use them; see ``_session_may_use_provider_account``.
+    account_search_fields: ClassVar[frozenset[str]] = frozenset()
     capabilities: ClassVar[tuple[MetadataCapability, ...]] = ()
 
     @abstractmethod
