@@ -40,7 +40,8 @@ _TORRENT_FETCH_ERRORS = (
     ValueError,
 )
 _TORRENT_PARSE_ERRORS = (IndexError, KeyError, TypeError, ValueError)
-_TRUSTED_TORRENT_FETCH_URL_CONFIG_KEYS = ("PROWLARR_URL", "NEWZNAB_URL")
+_PROWLARR_KEY_URL_CONFIG_KEYS = ("PROWLARR_URL", "NEWZNAB_URL")
+_TRUSTED_TORRENT_FETCH_URL_CONFIG_KEYS = (*_PROWLARR_KEY_URL_CONFIG_KEYS, "JACKETT_URL")
 
 # Successful torrent fetches are reused for a short window so one add attempt
 # hits the download link only once. Tracker download links (e.g. private
@@ -267,7 +268,10 @@ def _fetch_torrent_info(url: str) -> TorrentInfo:
             trusted = _is_trusted_torrent_fetch_url(current_url)
             _check_torrent_fetch_hop(current_url, trusted=trusted)
             request_headers = dict(headers)
-            if not trusted:
+            # Jackett links carry their own key; Prowlarr's must never reach Jackett.
+            if not trusted or not _is_trusted_torrent_fetch_url(
+                current_url, _PROWLARR_KEY_URL_CONFIG_KEYS
+            ):
                 request_headers.pop("X-Api-Key", None)
 
             resp = requests.get(
@@ -360,13 +364,15 @@ def _check_torrent_fetch_hop(url: str, *, trusted: bool) -> None:
         raise ValueError("torrent fetch refused: address is not public")
 
 
-def _is_trusted_torrent_fetch_url(url: str) -> bool:
+def _is_trusted_torrent_fetch_url(
+    url: str, config_keys: tuple[str, ...] = _TRUSTED_TORRENT_FETCH_URL_CONFIG_KEYS
+) -> bool:
     parsed = urlparse(url)
     origin = _url_origin(parsed)
     if origin is None:
         return False
 
-    for key in _TRUSTED_TORRENT_FETCH_URL_CONFIG_KEYS:
+    for key in config_keys:
         configured_url = str(config.get(key, "") or "").strip()
         if not configured_url:
             continue

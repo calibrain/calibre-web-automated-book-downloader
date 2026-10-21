@@ -291,11 +291,13 @@ def _collapse_duplicate_indexer_results(
     return kept
 
 
-def _max_release_bytes(content_type: str) -> int | None:
+def _max_release_bytes(
+    content_type: str, config_key: str = "PROWLARR_EBOOK_MAX_SIZE_MB"
+) -> int | None:
     """The size above which an ebook result is hidden, or None when no limit is set."""
     if content_type == "audiobook":
         return None
-    megabytes = coerce_int(config.get("PROWLARR_EBOOK_MAX_SIZE_MB", 0), 0)
+    megabytes = coerce_int(config.get(config_key, 0), 0)
     return megabytes * _SIZE_UNIT_BASE * _SIZE_UNIT_BASE if megabytes > 0 else None
 
 
@@ -633,8 +635,14 @@ def _prowlarr_result_to_release(
     search_content_type: str = "ebook",
     *,
     enable_format_detection: bool = False,
+    source: str = "prowlarr",
+    source_id: str | None = None,
 ) -> Release:
-    """Convert a Prowlarr API result to a Release object."""
+    """Convert a Prowlarr-shaped result to a Release object.
+
+    Other Torznab-based sources (Jackett) reuse this with their own ``source`` name
+    and a ``source_id`` that is unique across their indexers.
+    """
     raw_title = result.get("title", "Unknown")
     title = raw_title
     size_bytes = result.get("size")
@@ -688,7 +696,7 @@ def _prowlarr_result_to_release(
         formats_display = _formats_display(formats)
         language_detected = _extract_mam_language(str(raw_title or ""))
 
-    source_id = build_source_id(result)
+    source_id = source_id or build_source_id(result)
 
     # Cache the raw Prowlarr result so handler can look it up by source_id
     cache_release(source_id, result)
@@ -715,7 +723,7 @@ def _prowlarr_result_to_release(
         add_indexer_flag("FreeLeech")
 
     return Release(
-        source="prowlarr",
+        source=source,
         source_id=source_id,
         title=title,
         format=format_detected,

@@ -52,19 +52,24 @@ class ProwlarrSearchError(RuntimeError):
     """
 
 
-def resolve_indexer_timeout(timeout: object = None) -> int:
+def resolve_indexer_timeout(
+    timeout: object = None, *, config_key: str = "PROWLARR_INDEXER_TIMEOUT"
+) -> int:
     """Resolve the per-indexer search timeout, falling back to config.
+
+    ``config_key`` lets other Torznab-proxy sources (Jackett) reuse the clamping.
 
     Out-of-range and unparsable values are clamped rather than rejected: this
     feeds an HTTP timeout, and a bad setting should not take searching down.
     """
     if timeout is None:
-        timeout = config.get("PROWLARR_INDEXER_TIMEOUT", DEFAULT_INDEXER_TIMEOUT_SECONDS)
+        timeout = config.get(config_key, DEFAULT_INDEXER_TIMEOUT_SECONDS)
 
     resolved = coerce_int_like(timeout)
     if resolved is None:
         logger.warning(
-            "Invalid PROWLARR_INDEXER_TIMEOUT %r - using %ss",
+            "Invalid %s %r - using %ss",
+            config_key,
             timeout,
             DEFAULT_INDEXER_TIMEOUT_SECONDS,
         )
