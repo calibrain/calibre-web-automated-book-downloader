@@ -383,3 +383,61 @@ class TestMatchPlanToFiles:
         assert set(groups[0].files) == {b1_t1, b1_t2}
         assert groups[1].title == "Book 2"
         assert set(groups[1].files) == {b2_t1, b2_t2}
+
+
+class TestDropIgnoredFiles:
+    def test_drops_by_relative_path_and_keeps_others(self, tmp_path: Path):
+        from shelfmark.download.postprocess.packs import drop_ignored_files
+
+        files = [tmp_path / "A" / "a.m4b", tmp_path / "A" / "a.epub", tmp_path / "B" / "b.m4b"]
+        assert drop_ignored_files(files, ["A/a.epub"]) == [files[0], files[2]]
+
+    def test_basename_fallback_only_when_unique(self, tmp_path: Path):
+        from shelfmark.download.postprocess.packs import drop_ignored_files
+
+        files = [tmp_path / "A" / "01.mp3", tmp_path / "B" / "01.mp3", tmp_path / "B" / "x.mp3"]
+        assert drop_ignored_files(files, ["x.mp3"]) == files[:2]
+        assert drop_ignored_files(files, ["Z/01.mp3"]) == files
+
+    def test_no_ignored_is_a_noop(self, tmp_path: Path):
+        from shelfmark.download.postprocess.packs import drop_ignored_files
+
+        files = [tmp_path / "a.m4b"]
+        assert drop_ignored_files(files, None) is files
+
+    @pytest.mark.parametrize("skipped", ["Extras/Book.epub", "Pack/Extras/Book.epub"])
+    def test_a_skipped_subfolder_file_keeps_the_root_file_of_the_same_name(
+        self, tmp_path: Path, skipped: str
+    ):
+        from shelfmark.download.postprocess.packs import drop_ignored_files
+
+        kept = tmp_path / "Pack" / "Book.epub"
+        files = [kept, tmp_path / "Pack" / "Extras" / "Book.epub"]
+        assert drop_ignored_files(files, [skipped]) == [kept]
+
+    def test_an_ambiguous_skip_drops_nothing(self, tmp_path: Path):
+        from shelfmark.download.postprocess.packs import drop_ignored_files
+
+        files = [tmp_path / "X" / "Book.epub", tmp_path / "Y" / "Book.epub"]
+        assert drop_ignored_files(files, ["Book.epub"]) == files
+
+    def test_drops_audiobookbay_glued_folder_and_file_names(self, tmp_path: Path):
+        from shelfmark.download.postprocess.packs import drop_ignored_files
+
+        root = tmp_path / "Cradle - Will Wight Books 1-10"
+        skysworn = root / "Will Wight - Skysworn Cradle, Book 4" / "Skysworn Cradle, Book 4.m4b"
+        uncrowned = root / "Uncrowned Cradle, Book 7.m4b"
+        files = [skysworn, uncrowned]
+        glued = "Will Wight - Skysworn Cradle, Book 4 Skysworn Cradle, Book 4.m4b"
+        assert drop_ignored_files(files, [glued]) == [uncrowned]
+
+    def test_glued_names_pick_the_right_folder_for_chaptered_tracks(self, tmp_path: Path):
+        from shelfmark.download.postprocess.packs import drop_ignored_files
+
+        files = [
+            tmp_path / "Pack" / "Book 1" / "01.mp3",
+            tmp_path / "Pack" / "Book 1" / "02.mp3",
+            tmp_path / "Pack" / "Book 2" / "01.mp3",
+            tmp_path / "Pack" / "Book 2" / "02.mp3",
+        ]
+        assert drop_ignored_files(files, ["Book 2 01.mp3", "Book 2 02.mp3"]) == files[:2]

@@ -9,22 +9,23 @@ import random
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from email.utils import parseaddr
+from functools import partial
 from pathlib import Path
 from threading import Event, Lock
 from typing import TYPE_CHECKING, Any
 
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.models import DownloadTask, QueueStatus, SearchMode
+from shelfmark.core.models import DownloadTask, QueueStatus, SearchMode, normalize_format
 from shelfmark.core.queue import book_queue
 from shelfmark.core.request_helpers import (
+    is_plain_email_address,
     normalize_optional_text,
     normalize_positive_int,
 )
 from shelfmark.core.utils import is_audiobook as check_audiobook
 from shelfmark.core.utils import transform_cover_url
-from shelfmark.download.activity import parse_activity_grace
+from shelfmark.download.activity import STALL_TIMEOUT_SECONDS, parse_activity_grace
 from shelfmark.download.fs import run_blocking_io
 from shelfmark.download.postprocess.pipeline import is_torrent_source, safe_cleanup_path
 from shelfmark.download.postprocess.router import post_process_download
@@ -69,25 +70,24 @@ _last_activity: dict[str, float] = {}
 _last_progress_value: dict[str, float] = {}
 # De-duplicate status updates (keep-alive updates shouldn't spam clients)
 _last_status_event: dict[str, tuple[str, str | None]] = {}
-STALL_TIMEOUT = 300  # 5 minutes without progress/status update = stalled
+STALL_TIMEOUT = STALL_TIMEOUT_SECONDS  # 5 minutes without progress/status update = stalled
 # Absolute deadlines (time.time()) until which stall detection is suppressed for a task.
 # Long single-shot operations (protection bypass, etc.) declare their own upper bound via
 # `shelfmark.download.activity` instead of faking progress. See set_activity_grace().
 _activity_grace: dict[str, float] = {}
+# The size of the last grace a task asked for, so a stall message can report the window the
+# task actually had instead of the default.
+_activity_grace_seconds: dict[str, float] = {}
 # A caller cannot buy immortality: the largest grace any operation may request. Must stay
 # above the largest budget any caller can declare (see http._bypass_grace_seconds).
-_MAX_ACTIVITY_GRACE_SECONDS = 960.0
+# The torrent stall setting (base_handler.STALL_TIMEOUT_MAX_MINUTES) can ask for up to an hour.
+_MAX_ACTIVITY_GRACE_SECONDS = 3600.0
 COORDINATOR_LOOP_ERROR_RETRY_DELAY = 1.0
 # Ceiling for the exponential backoff applied to repeated coordinator loop failures.
 _COORDINATOR_LOOP_ERROR_MAX_DELAY = 30.0
 _PROGRESS_BROADCAST_START_PERCENT = 1
 _PROGRESS_BROADCAST_COMPLETE_PERCENT = 99
 _PROGRESS_BROADCAST_MIN_DELTA = 10
-
-
-def _is_plain_email_address(value: str) -> bool:
-    parsed = parseaddr(value or "")[1]
-    return bool(parsed) and "@" in parsed and parsed == value
 
 
 def _resolve_email_destination(
@@ -101,7 +101,7 @@ def _resolve_email_destination(
     """
     configured_recipient = str(config.get("EMAIL_RECIPIENT", "", user_id=user_id) or "").strip()
     if configured_recipient:
-        if _is_plain_email_address(configured_recipient):
+        if is_plain_email_address(configured_recipient):
             return configured_recipient, None
         return None, "Configured email recipient is invalid"
 
@@ -233,6 +233,18 @@ def _build_retry_resolution_fields(
     }
 
 
+# Sources whose source_id becomes a staging file name (the handlers use it as one when
+# FILE_ORGANIZATION is "none"), so it must not carry path components.
+_FILENAME_ID_SOURCES = frozenset({"direct_download", "libgen"})
+
+
+def _source_id_is_unsafe_filename(source: str, source_id: object) -> bool:
+    if source not in _FILENAME_ID_SOURCES:
+        return False
+    text = str(source_id)
+    return any(ch in text for ch in "/\\\0") or ".." in text
+
+
 def queue_release(
     release_data: dict,
     priority: int = 0,
@@ -246,6 +258,10 @@ def queue_release(
         if unavailable_message:
             logger.warning("Rejected queue request for unavailable source %s", source)
             return False, unavailable_message
+
+        if _source_id_is_unsafe_filename(source, release_data["source_id"]):
+            logger.warning("Rejected queue request with unsafe source_id for %s", source)
+            return False, "Invalid release identifier"
 
         extra = release_data.get("extra", {})
         raw_request_id = release_data.get("_request_id")
@@ -282,6 +298,9 @@ def queue_release(
         language = release_data.get("language") or extra.get("language")
         multi_book = bool(release_data.get("multi_book") or extra.get("multi_book"))
         book_plan = _normalize_book_plan(release_data.get("book_plan") or extra.get("book_plan"))
+        ignored_files = _normalize_ignored_files(
+            release_data.get("ignored_files") or extra.get("ignored_files")
+        )
 
         books_output_mode = (
             str(config.get("BOOKS_OUTPUT_MODE", "folder", user_id=user_id) or "folder")
@@ -308,7 +327,7 @@ def queue_release(
             title=release_data.get("title", "Unknown"),
             author=author,
             year=year,
-            format=release_data.get("format"),
+            format=normalize_format(release_data.get("format")),
             size=release_data.get("size"),
             downloads=release_data.get("downloads") or extra.get("downloads"),
             preview=preview,
@@ -321,6 +340,7 @@ def queue_release(
             language=language,
             multi_book=multi_book or book_plan is not None,
             book_plan=book_plan,
+            ignored_files=ignored_files,
             search_mode=search_mode,
             output_mode=output_mode,
             output_args=output_args,
@@ -408,6 +428,28 @@ def get_book_path(task_id: str) -> tuple[str | None, DownloadTask | None]:
         return path, task
 
 
+def get_book_paths(task_id: str) -> tuple[list[str], DownloadTask | None]:
+    """Every file a task's download produced that is still on disk.
+
+    A multi-file release (chapters of an audiobook, a pack) lands as several files;
+    :func:`get_book_path` only knows the first. The list is trusted only while it
+    still contains download_path, so a later output that recorded no list cannot
+    hand back an earlier attempt's files.
+    """
+    path, task = get_book_path(task_id)
+    if path is None or task is None:
+        return [], task
+
+    if path not in task.download_paths:
+        return [path], task
+
+    try:
+        return [p for p in task.download_paths if Path(p).is_file()], task
+    except OSError as e:
+        logger.error_trace(f"Error resolving book paths: {e}")
+        return [path], task
+
+
 def get_book_data(task_id: str) -> tuple[bytes | None, DownloadTask | None]:
     """Get downloaded file data for a specific task.
 
@@ -464,6 +506,14 @@ def can_retry_download_task(
         return _has_fresh_retry_context(task)
 
     return _has_staged_retry_source(task)
+
+
+def _normalize_ignored_files(value: object) -> list[str] | None:
+    """Keep only non-empty string paths from a user-ignored file list."""
+    if not isinstance(value, list):
+        return None
+    files = [f for f in value if isinstance(f, str) and f.strip()]
+    return files or None
 
 
 def _normalize_book_plan(value: object) -> list[dict[str, Any]] | None:
@@ -525,6 +575,7 @@ def serialize_task_for_retry(task: DownloadTask) -> dict[str, Any]:
         "search_mode": search_mode,
         "multi_book": bool(getattr(task, "multi_book", False)),
         "book_plan": _normalize_book_plan(getattr(task, "book_plan", None)),
+        "ignored_files": _normalize_ignored_files(getattr(task, "ignored_files", None)),
         "output_mode": getattr(task, "output_mode", None),
         "output_args": dict(raw_output_args) if isinstance(raw_output_args, dict) else {},
         "user_id": getattr(task, "user_id", None),
@@ -573,7 +624,7 @@ def _restore_task_from_retry_payload(payload: object) -> DownloadTask | None:
         title=title,
         author=normalize_optional_text(payload.get("author")),
         year=normalize_optional_text(payload.get("year")),
-        format=normalize_optional_text(payload.get("format")),
+        format=normalize_format(payload.get("format")),
         size=normalize_optional_text(payload.get("size")),
         downloads=int(payload["downloads"]) if payload.get("downloads") is not None else None,
         preview=normalize_optional_text(payload.get("preview")),
@@ -587,6 +638,7 @@ def _restore_task_from_retry_payload(payload: object) -> DownloadTask | None:
         search_mode=search_mode,
         multi_book=bool(payload.get("multi_book", False)),
         book_plan=_normalize_book_plan(payload.get("book_plan")),
+        ignored_files=_normalize_ignored_files(payload.get("ignored_files")),
         output_mode=normalize_optional_text(payload.get("output_mode")),
         output_args=dict(output_args) if isinstance(output_args, dict) else {},
         user_id=normalize_positive_int(payload.get("user_id")),
@@ -1014,6 +1066,7 @@ def _cleanup_progress_tracking(task_id: str) -> None:
         _last_progress_value.pop(task_id, None)
         _last_status_event.pop(task_id, None)
         _activity_grace.pop(task_id, None)
+        _activity_grace_seconds.pop(task_id, None)
 
 
 def _finalize_download_failure(task_id: str) -> None:
@@ -1077,6 +1130,7 @@ def set_activity_grace(book_id: str, seconds: float) -> None:
     grace = min(max(grace, 0.0), _MAX_ACTIVITY_GRACE_SECONDS)
     with _progress_lock:
         _activity_grace[book_id] = time.time() + grace
+        _activity_grace_seconds[book_id] = grace
 
 
 def clear_activity_grace(book_id: str) -> None:
@@ -1087,6 +1141,7 @@ def clear_activity_grace(book_id: str) -> None:
     """
     with _progress_lock:
         _activity_grace.pop(book_id, None)
+        _activity_grace_seconds.pop(book_id, None)
         _last_activity[book_id] = time.time()
 
 
@@ -1116,20 +1171,54 @@ def _cancel_stalled_task(task_id: str) -> None:
     logger.warning("Download stalled for %s, cancelling", task_id)
     # The message goes first: the terminal hook copies it into the history row, and a cancel
     # that records the last poll's message ("Queued") hides that the timer ended the download.
+    with _progress_lock:
+        window = max(STALL_TIMEOUT, _activity_grace_seconds.get(task_id, 0.0))
     book_queue.update_status_message(
         task_id,
-        f"Download stalled (no activity for {STALL_TIMEOUT}s)",
+        f"Download stalled (no activity for {int(window)}s)",
     )
     book_queue.cancel_download(task_id)
+
+
+# With a per-source limit the pool must hold every source's downloads at once.
+_MAX_SOURCES = 8
+
+
+def _per_source_limit() -> int:
+    """Downloads allowed at once from one source, or 0 when only the global limit applies."""
+    return normalize_positive_int(config.get("MAX_CONCURRENT_DOWNLOADS_PER_SOURCE", 0)) or 0
+
+
+def _source_has_room(task: DownloadTask, *, running: dict[str | None, int], limit: int) -> bool:
+    """Whether the task's source is below its limit of simultaneous downloads."""
+    return running.get(task.source, 0) < limit
+
+
+def _working_source_of(task_id: str) -> str | None:
+    """The source a running task counts against, or None when it is only waiting in a client queue."""
+    task = book_queue.get_task(task_id)
+    if task is None or task.client_queued:
+        return None
+    return task.source
+
+
+def _source_of(task_id: str) -> str | None:
+    task = book_queue.get_task(task_id)
+    return task.source if task is not None else None
 
 
 def concurrent_download_loop() -> None:
     """Run the main concurrent download coordinator."""
     max_workers = normalize_positive_int(config.MAX_CONCURRENT_DOWNLOADS) or 1
+    per_source = _per_source_limit()
+    pool_size = per_source * _MAX_SOURCES if per_source else max_workers
     main_loop_sleep_time = _config_float(config.MAIN_LOOP_SLEEP_TIME, 0.5)
-    logger.info("Starting concurrent download loop with %s workers", max_workers)
+    if per_source:
+        logger.info("Starting concurrent download loop with %s downloads per source", per_source)
+    else:
+        logger.info("Starting concurrent download loop with %s workers", max_workers)
 
-    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="Download") as executor:
+    with ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="Download") as executor:
         active_futures: dict[Future, tuple[str, Event]] = {}  # Track active download futures
         stalled_tasks: set[str] = set()  # Track tasks already cancelled due to stall
         consecutive_errors = 0
@@ -1193,19 +1282,36 @@ def concurrent_download_loop() -> None:
                     stalled_tasks.add(task_id)
 
                 # Start new downloads if we have capacity
-                while len(active_futures) < max_workers:
-                    next_download = book_queue.get_next()
+                while len(active_futures) < pool_size:
+                    running_by_source: dict[str | None, int] = {}
+                    if per_source:
+                        for running_id, _flag in active_futures.values():
+                            key = _working_source_of(running_id)
+                            if key is not None:
+                                running_by_source[key] = running_by_source.get(key, 0) + 1
+                    accept = (
+                        partial(_source_has_room, running=running_by_source, limit=per_source)
+                        if per_source
+                        else None
+                    )
+                    next_download = book_queue.get_next(accept) if accept else book_queue.get_next()
                     if not next_download:
                         break
 
-                    # Stagger concurrent downloads to avoid rate limiting on shared download servers
-                    # Only delay if other downloads are already active
-                    if active_futures:
+                    task_id, cancel_flag = next_download
+
+                    # Stagger concurrent downloads to avoid rate limiting on shared download
+                    # servers. With per-source limits only a download from the same source
+                    # shares a server, so only those wait for each other.
+                    sharing_a_server = (
+                        running_by_source.get(_source_of(task_id), 0) > 0
+                        if per_source
+                        else bool(active_futures)
+                    )
+                    if sharing_a_server:
                         stagger_delay = _RNG.uniform(2, 5)
                         logger.debug("Staggering download start by %.1fs", stagger_delay)
                         time.sleep(stagger_delay)
-
-                    task_id, cancel_flag = next_download
 
                     # Submit download job to thread pool
                     future = executor.submit(_process_single_download, task_id, cancel_flag)

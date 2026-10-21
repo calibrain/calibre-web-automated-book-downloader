@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 
 import type { PackBook } from '../types';
 import {
+  applyIgnoredFiles,
   describePackPlan,
   parseSeriesPositionInput,
+  setBookIgnored,
   toBookPlanPayload,
   updateReviewBook,
 } from '../utils/packReview';
@@ -49,5 +51,26 @@ describe('packReview.describePackPlan', () => {
       '2 books · 3 files · 2 files ignored',
     );
     expect(describePackPlan([books[0]], [])).toBe('1 book · 1 file');
+  });
+});
+
+describe('packReview.applyIgnoredFiles', () => {
+  it('removes ignored files and drops books left empty', () => {
+    const result = applyIgnoredFiles(books, new Set(['b2.m4b', 'a.m4b']));
+    expect(result).toEqual([{ ...books[1], files: ['b.m4b'] }]);
+  });
+
+  it('returns the input untouched when nothing is ignored', () => {
+    expect(applyIgnoredFiles(books, new Set())).toBe(books);
+  });
+});
+
+describe('packReview.setBookIgnored', () => {
+  it('adds and removes every file of a book without mutating the input', () => {
+    const start = new Set<string>();
+    const added = setBookIgnored(start, books[1], true);
+    expect([...added].toSorted()).toEqual(['b.m4b', 'b2.m4b']);
+    expect(start.size).toBe(0);
+    expect(setBookIgnored(added, books[1], false).size).toBe(0);
   });
 });

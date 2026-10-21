@@ -18,7 +18,8 @@ from shelfmark.release_sources import get_handler
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from flask import Flask, Response
+    from flask import Flask
+    from werkzeug.wrappers import Response
 
 logger = setup_logger(__name__)
 
@@ -82,8 +83,16 @@ def inspect_release(data: dict[str, Any]) -> dict[str, Any]:
 def register_release_inspect_routes(
     app: Flask,
     login_required: Callable[..., Any],
+    *,
+    policy_gate: Callable[[dict[str, Any]], tuple[Response, int] | None] | None = None,
 ) -> None:
-    """Register POST /api/releases/inspect."""
+    """Register POST /api/releases/inspect.
+
+    `policy_gate` is given the validated payload and returns the refusal response
+    for a user whose request policy does not let them see the release, or None.
+    Listing a release's files reaches the source through shared credentials, so
+    the gate runs before the handler is asked anything.
+    """
 
     @app.route("/api/releases/inspect", methods=["POST"])
     @login_required
@@ -99,4 +108,8 @@ def register_release_inspect_routes(
             get_handler(str(data["source"]))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
+        if policy_gate is not None:
+            refusal = policy_gate(data)
+            if refusal is not None:
+                return refusal
         return jsonify(inspect_release(data))

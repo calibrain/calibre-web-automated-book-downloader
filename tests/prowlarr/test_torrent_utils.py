@@ -593,6 +593,126 @@ class TestExtractTorrentInfo:
         assert mock_get.call_count == 6
 
 
+class TestTorrentFetchHopCheck:
+    """Each hop of the torrent fetch must point at a public address."""
+
+    @staticmethod
+    def _setup(monkeypatch, resolutions, responses, config_values=None):
+        values = config_values or {"PROWLARR_URL": "https://prowlarr.example"}
+        monkeypatch.setattr(
+            "shelfmark.download.clients.torrent_utils.config.get",
+            lambda key, default="": values.get(key, default),
+        )
+        monkeypatch.setattr(
+            "shelfmark.download.clients.torrent_utils._resolve_host_addresses",
+            lambda host: resolutions[host],
+        )
+        mock_get = MagicMock(side_effect=responses)
+        monkeypatch.setattr("shelfmark.download.clients.torrent_utils.requests.get", mock_get)
+        return mock_get
+
+    @staticmethod
+    def _redirect(location):
+        response = MagicMock(status_code=302)
+        response.headers = {"Location": location}
+        return response
+
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "127.0.0.1",
+            "169.254.169.254",
+            "10.0.0.5",
+            "192.168.1.10",
+            "::1",
+            "fe80::1",
+            "::ffff:127.0.0.1",
+        ],
+    )
+    def test_redirect_to_non_public_address_is_refused(self, monkeypatch, address):
+        mock_get = self._setup(
+            monkeypatch,
+            {"prowlarr.example": ["10.0.0.2"], "evil.example": [address]},
+            [self._redirect("http://evil.example/x")],
+        )
+
+        result = extract_torrent_info("https://prowlarr.example/1/download", fetch_torrent=True)
+
+        assert result.torrent_data is None
+        assert result.fetch_error
+        mock_get.assert_called_once()
+
+    def test_any_non_public_answer_refuses_the_hop(self, monkeypatch):
+        mock_get = self._setup(
+            monkeypatch,
+            {"mixed.example": ["93.184.216.34", "127.0.0.1"]},
+            [MagicMock(status_code=200, content=b"")],
+        )
+
+        result = extract_torrent_info("https://mixed.example/a.torrent", fetch_torrent=True)
+
+        assert result.fetch_error
+        mock_get.assert_not_called()
+
+    def test_initial_url_to_loopback_is_refused(self, monkeypatch):
+        mock_get = self._setup(monkeypatch, {"127.0.0.1": ["127.0.0.1"]}, [])
+
+        result = extract_torrent_info("http://127.0.0.1:8080/a.torrent", fetch_torrent=True)
+
+        assert result.fetch_error
+        mock_get.assert_not_called()
+
+    def test_non_http_redirect_scheme_is_refused(self, monkeypatch):
+        mock_get = self._setup(
+            monkeypatch,
+            {"prowlarr.example": ["10.0.0.2"]},
+            [self._redirect("ftp://prowlarr.example/x")],
+        )
+
+        result = extract_torrent_info("https://prowlarr.example/1/download", fetch_torrent=True)
+
+        assert result.fetch_error
+        mock_get.assert_called_once()
+
+    def test_configured_prowlarr_host_may_be_on_the_lan(self, monkeypatch):
+        info_dict = {b"name": b"b", b"length": 1, b"piece length": 16384, b"pieces": b"\x00" * 20}
+        torrent_data = bencode_encode({b"info": info_dict})
+        final = MagicMock(status_code=200, content=torrent_data)
+        final.raise_for_status = MagicMock()
+        mock_get = self._setup(
+            monkeypatch,
+            {"prowlarr.lan": ["192.168.1.20"]},
+            [final],
+            {"PROWLARR_URL": "http://prowlarr.lan:9696", "PROWLARR_API_KEY": "secret"},
+        )
+
+        result = extract_torrent_info(
+            "http://prowlarr.lan:9696/1/download?indexer=7", fetch_torrent=True
+        )
+
+        assert result.torrent_data == torrent_data
+        assert mock_get.call_args.kwargs["headers"].get("X-Api-Key") == "secret"
+
+    def test_unresolvable_name_reports_a_fetch_error(self, monkeypatch):
+        def fail(host):
+            raise OSError("Name or service not known")
+
+        monkeypatch.setattr(
+            "shelfmark.download.clients.torrent_utils.config.get",
+            lambda key, default="": default,
+        )
+        monkeypatch.setattr(
+            "shelfmark.download.clients.torrent_utils._resolve_host_addresses", fail
+        )
+        mock_get = MagicMock()
+        monkeypatch.setattr("shelfmark.download.clients.torrent_utils.requests.get", mock_get)
+
+        result = extract_torrent_info("https://nowhere.invalid/a.torrent", fetch_torrent=True)
+
+        assert result.fetch_error
+        mock_get.assert_not_called()
+
+
 class TestExtractHashFromMagnet:
     """Tests for extracting hash from magnet links."""
 

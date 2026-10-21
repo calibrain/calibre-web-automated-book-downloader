@@ -23,12 +23,13 @@ from shelfmark.core.settings_registry import (
     ActionButton,
 )
 
+
 @register_settings(
-    name="my_plugin",           # Unique identifier
-    display_name="My Plugin",   # Shown in sidebar
-    icon="wrench",              # Icon name
-    order=100,                  # Sort order (lower = higher in list)
-    group="metadata_providers"  # Optional: group in sidebar
+    name="my_plugin",  # Unique identifier
+    display_name="My Plugin",  # Shown in sidebar
+    icon="wrench",  # Icon name
+    order=100,  # Sort order (lower = higher in list)
+    group="metadata_providers",  # Optional: group in sidebar
 )
 def my_plugin_settings():
     return [
@@ -46,6 +47,7 @@ def my_plugin_settings():
         ),
     ]
 
+
 def _test_connection():
     # Perform connection test
     return {"success": True, "message": "Connected successfully!"}
@@ -59,16 +61,16 @@ Single-line text input for strings.
 
 ```python
 TextField(
-    key="MY_SETTING",           # Config key
-    label="Setting Name",       # Display label
-    description="Help text",    # Optional description below field
-    default="",                 # Default value
+    key="MY_SETTING",  # Config key
+    label="Setting Name",  # Display label
+    description="Help text",  # Optional description below field
+    default="",  # Default value
     placeholder="Enter value",  # Placeholder text
-    max_length=100,             # Optional max characters
-    required=False,             # Is this field required?
-    requires_restart=False,     # Does changing this need a restart?
-    show_when=None,             # Conditional visibility (see below)
-    disabled_when=None,         # Conditional disable (see below)
+    max_length=100,  # Optional max characters
+    required=False,  # Is this field required?
+    requires_restart=False,  # Does changing this need a restart?
+    show_when=None,  # Conditional visibility (see below)
+    disabled_when=None,  # Conditional disable (see below)
 )
 ```
 
@@ -98,7 +100,7 @@ NumberField(
     default=30,
     min_value=5,
     max_value=300,
-    step=1,                     # Increment step
+    step=1,  # Increment step
     required=False,
 )
 ```
@@ -160,12 +162,13 @@ Button that executes a callback function. Does not store a value.
 
 ```python
 ActionButton(
-    key="test_connection",      # Unique key for the action
-    label="Test Connection",    # Button text
+    key="test_connection",  # Unique key for the action
+    label="Test Connection",  # Button text
     description="Test the API connection",
-    style="primary",            # "default", "primary", or "danger"
-    callback=my_callback_fn,    # Function to execute
+    style="primary",  # "default", "primary", or "danger"
+    callback=my_callback_fn,  # Function to execute
 )
+
 
 def my_callback_fn():
     """Callback must return dict with 'success' and 'message' keys."""
@@ -182,11 +185,11 @@ Display-only section heading with optional link. Does not store a value.
 
 ```python
 HeadingField(
-    key="section_heading",      # Unique key
-    title="Configuration",      # Heading text
+    key="section_heading",  # Unique key
+    title="Configuration",  # Heading text
     description="Configure the plugin settings below",
     link_url="https://example.com/docs",  # Optional link
-    link_text="View Documentation",       # Link text
+    link_text="View Documentation",  # Link text
 )
 ```
 
@@ -204,8 +207,14 @@ CustomComponentField(
     label="Request Policy Rules",
     description="Custom editor for policy defaults and matrix rules.",
     value_fields=[
-        SelectField(key="REQUEST_POLICY_DEFAULT_EBOOK", label="Default Ebook Mode", default="download"),
-        SelectField(key="REQUEST_POLICY_DEFAULT_AUDIOBOOK", label="Default Audiobook Mode", default="download"),
+        SelectField(
+            key="REQUEST_POLICY_DEFAULT_EBOOK", label="Default Ebook Mode", default="download"
+        ),
+        SelectField(
+            key="REQUEST_POLICY_DEFAULT_AUDIOBOOK",
+            label="Default Audiobook Mode",
+            default="download",
+        ),
         TableField(key="REQUEST_POLICY_RULES", label="Rules", columns=_rule_columns, default=[]),
     ],
     wrap_in_field_wrapper=True,  # use standard FieldWrapper label/description layout
@@ -263,7 +272,7 @@ NumberField(
     disabled_when={
         "field": "FEATURE_ENABLED",
         "value": False,
-        "reason": "Enable the feature first"
+        "reason": "Enable the feature first",
     },
 )
 ```
@@ -284,6 +293,7 @@ register_group(
     icon="folder",
     order=50,
 )
+
 
 # Then register settings to the group
 @register_settings(
@@ -426,10 +436,7 @@ class MyProvider(MetadataProvider):
 
     def __init__(self, api_key: str = None):
         self.api_key = api_key or config.get("MY_PROVIDER_API_KEY", "")
-        self.base_url = config.get(
-            "MY_PROVIDER_BASE_URL",
-            "https://api.myprovider.com/v1"
-        )
+        self.base_url = config.get("MY_PROVIDER_BASE_URL", "https://api.myprovider.com/v1")
 
     def is_available(self) -> bool:
         return bool(self.api_key)

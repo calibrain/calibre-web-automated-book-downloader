@@ -7,6 +7,7 @@ API Documentation: https://developers.google.com/books/docs/v1/using
 """
 
 from contextlib import suppress
+from dataclasses import replace
 from http import HTTPStatus
 from typing import Any, ClassVar
 
@@ -32,6 +33,7 @@ from shelfmark.metadata_providers import (
     MetadataProvider,
     MetadataSearchOptions,
     SearchField,
+    SearchResult,
     SearchType,
     SortOrder,
     TextSearchField,
@@ -211,6 +213,10 @@ class GoogleBooksProvider(MetadataProvider):
         except Exception:
             logger.exception("Google Books get_book error")
             return None
+
+    def search_paginated(self, options: MetadataSearchOptions) -> SearchResult:
+        """Google returns at most 40 per page, so a full page is 40 whatever limit asked for."""
+        return super().search_paginated(replace(options, limit=min(options.limit, 40)))
 
     @cacheable(
         ttl_key="METADATA_CACHE_BOOK_TTL",

@@ -64,12 +64,12 @@ The script navigates to the main page, enters the search query, and waits for "M
 
 ```python
 # Navigate to main page first to reset SPA state
-page.goto('http://localhost:8084/')
-page.wait_for_load_state('networkidle')
+page.goto("http://localhost:8084/")
+page.wait_for_load_state("networkidle")
 
 # Enter search query and submit
-page.fill('input[type="search"]', f'{title} {author}')
-page.press('input[type="search"]', 'Enter')
+page.fill('input[type="search"]', f"{title} {author}")
+page.press('input[type="search"]', "Enter")
 
 # Wait for "Most relevant" to appear (indicates search results are fully rendered)
 page.wait_for_selector('span.text-sm.font-medium:has-text("Most relevant")', timeout=60000)
@@ -87,18 +87,20 @@ def parse_books(page):
     btns = page.query_selector_all('button[data-action="download"]')
     books = []
     for i, btn in enumerate(btns):
-        content = btn.evaluate_handle('el => el.parentElement.parentElement').inner_html()
-        
-        title_match = re.search(r'<h3[^>]*>(.*?)</h3>', content, re.IGNORECASE | re.DOTALL)
-        title = title_match.group(1).strip() if title_match else 'Unknown'
-        
-        author_match = re.search(r'class="min-w-0 truncate text-xs[^"]*"[^>]*>(.*?)<', content, re.IGNORECASE | re.DOTALL)
-        author = author_match.group(1).strip() if author_match else 'Unknown'
-        
-        dl_match = re.search(r'<span>•</span>\s*<span>([\d,]+)</span>', content)
-        downloads = int(dl_match.group(1).replace(',', '')) if dl_match else 0
-        
-        books.append({'index': i, 'title': title, 'author': author, 'downloads': downloads})
+        content = btn.evaluate_handle("el => el.parentElement.parentElement").inner_html()
+
+        title_match = re.search(r"<h3[^>]*>(.*?)</h3>", content, re.IGNORECASE | re.DOTALL)
+        title = title_match.group(1).strip() if title_match else "Unknown"
+
+        author_match = re.search(
+            r'class="min-w-0 truncate text-xs[^"]*"[^>]*>(.*?)<', content, re.IGNORECASE | re.DOTALL
+        )
+        author = author_match.group(1).strip() if author_match else "Unknown"
+
+        dl_match = re.search(r"<span>•</span>\s*<span>([\d,]+)</span>", content)
+        downloads = int(dl_match.group(1).replace(",", "")) if dl_match else 0
+
+        books.append({"index": i, "title": title, "author": author, "downloads": downloads})
     return books
 ```
 
@@ -106,19 +108,19 @@ def parse_books(page):
 
 ```python
 # Filter books matching the search criteria
-matching_books = [b for b in books if matches_search(b['title'], b['author'], title, author)]
+matching_books = [b for b in books if matches_search(b["title"], b["author"], title, author)]
 
 if matching_books:
-    best = max(matching_books, key=lambda x: x['downloads'])
-    
+    best = max(matching_books, key=lambda x: x["downloads"])
+
     # CRITICAL: Click on the article h3 to open detail view
-    h3s = page.query_selector_all('article h3')
-    if best['index'] < len(h3s):
-        h3s[best['index']].click()
+    h3s = page.query_selector_all("article h3")
+    if best["index"] < len(h3s):
+        h3s[best["index"]].click()
         page.wait_for_timeout(300)
-    
+
     # Then click the download button
-    btn = page.query_selector_all('button[data-action="download"]')[best['index']]
+    btn = page.query_selector_all('button[data-action="download"]')[best["index"]]
     btn.click()
     page.wait_for_timeout(500)
 ```
@@ -130,14 +132,14 @@ if matching_books:
 ```python
 for i in range(60):
     page.wait_for_timeout(5000)
-    activity_text = page.inner_text('aside')
-    
-    if 'IN PROGRESS' in activity_text:
+    activity_text = page.inner_text("aside")
+
+    if "IN PROGRESS" in activity_text:
         print("Download started!")
-    elif 'Complete' in activity_text or 'Saved' in activity_text:
+    elif "Complete" in activity_text or "Saved" in activity_text:
         print("Download complete!")
         break
-    elif 'No activity' in activity_text:
+    elif "No activity" in activity_text:
         print("Download not started")
         break
 ```
@@ -146,7 +148,7 @@ for i in range(60):
 
 ```python
 # Click "Clear Completed" using JavaScript
-page.evaluate('''
+page.evaluate("""
     () => {
         for (const b of document.querySelectorAll('button')) {
             if (b.textContent.includes('Clear Completed')) {
@@ -155,7 +157,7 @@ page.evaluate('''
             }
         }
     }
-''')
+""")
 
 page.wait_for_timeout(2000)
 ```

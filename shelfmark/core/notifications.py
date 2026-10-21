@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
-import threading
+import socket
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard
@@ -133,14 +135,22 @@ def _extract_url_schemes(urls: Iterable[str]) -> list[str]:
     return schemes
 
 
+# The capture active in the current context. Apprise 2 delivers on its own worker
+# threads but runs them in a copy of the caller's context, so a context variable
+# (unlike the thread id) still tells this dispatch's records apart from those of
+# a dispatch running concurrently on another thread.
+_active_apprise_capture: ContextVar[_AppriseLogCapture | None] = ContextVar(
+    "active_apprise_capture", default=None
+)
+
+
 class _AppriseLogCapture(logging.Handler):
-    def __init__(self, *, thread_id: int) -> None:
+    def __init__(self) -> None:
         super().__init__(level=logging.INFO)
         self.records: list[tuple[int, str, str, str]] = []
-        self._thread_id = thread_id
 
     def emit(self, record: logging.LogRecord) -> None:
-        if record.thread != self._thread_id:
+        if _active_apprise_capture.get() is not self:
             return
 
         message = record.getMessage()
@@ -162,7 +172,8 @@ def _capture_apprise_logs(
 ) -> Iterator[list[tuple[int, str, str, str]]]:
     apprise_logger = logging.getLogger(_APPRISE_LOGGER_NAME)
     previous_level = apprise_logger.level
-    handler = _AppriseLogCapture(thread_id=threading.get_ident())
+    handler = _AppriseLogCapture()
+    token = _active_apprise_capture.set(handler)
     apprise_logger.addHandler(handler)
 
     if previous_level == logging.NOTSET or previous_level > min_level:
@@ -173,6 +184,7 @@ def _capture_apprise_logs(
     finally:
         apprise_logger.removeHandler(handler)
         apprise_logger.setLevel(previous_level)
+        _active_apprise_capture.reset(token)
 
 
 def _log_apprise_records(records: Iterable[tuple[int, str, str, str]]) -> None:
@@ -283,6 +295,72 @@ def _resolve_admin_routes() -> list[dict[str, str]]:
 
 def _normalize_user_id(value: object) -> int | None:
     return normalize_positive_int(value)
+
+
+# A user's own routes are sent from the server, so they must not be able to reach hosts the user
+# could not reach themselves. These services always talk to the vendor's own host, whatever the
+# rest of the URL says.
+_USER_ROUTE_FIXED_HOST_SCHEMES = frozenset({"discord", "slack", "tgram", "pover", "pbul"})
+# These connect to the host written in the URL, so that host has to be a public one.
+_USER_ROUTE_HOST_SCHEMES = frozenset({"ntfy", "ntfys", "gotify", "gotifys"})
+
+
+def _is_public_address(address: str) -> bool:
+    try:
+        parsed = ipaddress.ip_address(address.split("%", 1)[0])
+    except ValueError:
+        return False
+    if isinstance(parsed, ipaddress.IPv6Address) and parsed.ipv4_mapped is not None:
+        parsed = parsed.ipv4_mapped
+    return parsed.is_global and not parsed.is_multicast
+
+
+def _host_is_public(host: str) -> bool:
+    """Whether every address the host resolves to is a public one. A host that does not resolve
+    has nothing to connect to, so it passes."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return True
+    return all(_is_public_address(str(info[4][0])) for info in infos)
+
+
+def _apprise_host(url: str) -> str | None:
+    """The host Apprise itself reads from the URL, which can differ from urlsplit's reading."""
+    if apprise is None:
+        return None
+    try:
+        plugin = apprise.Apprise.instantiate(url)
+    except Exception:  # noqa: BLE001 - an unparsable URL is judged on urlsplit alone
+        return None
+    host = getattr(plugin, "host", None)
+    return host if isinstance(host, str) and host else None
+
+
+def user_route_url_problem(url: str) -> str | None:
+    """Why a user may not use this URL for a personal route, or None when it is allowed."""
+    scheme = urlsplit(url).scheme.lower()
+    if scheme in _USER_ROUTE_FIXED_HOST_SCHEMES:
+        return None
+    if scheme not in _USER_ROUTE_HOST_SCHEMES:
+        return f"'{scheme or url}' is not available for personal notification routes"
+    hosts = {urlsplit(url).hostname, _apprise_host(url)} - {None}
+    for host in hosts:
+        if not _host_is_public(str(host)):
+            return f"'{host}' is not a public address"
+    return None
+
+
+def _allowed_user_urls(urls: list[str]) -> list[str]:
+    """The URLs a user's routes may send to; the rest are logged and dropped."""
+    allowed: list[str] = []
+    for url in urls:
+        problem = user_route_url_problem(url)
+        if problem is None:
+            allowed.append(url)
+        else:
+            logger.warning("Dropping a personal notification route: %s", problem)
+    return allowed
 
 
 def _resolve_user_routes(user_id: int | None) -> list[dict[str, str]]:
@@ -638,7 +716,7 @@ def notify_user(
         return
 
     routes = _resolve_user_routes(normalized_user_id)
-    urls = _resolve_route_urls_for_event(routes, event)
+    urls = _allowed_user_urls(_resolve_route_urls_for_event(routes, event))
     if not urls:
         return
 
@@ -671,6 +749,10 @@ def _dispatch_user_async(
     context: NotificationContext,
     urls: list[str],
 ) -> None:
+    # Checked again at send time: the host may resolve differently than when it was queued.
+    urls = _allowed_user_urls(urls)
+    if not urls:
+        return
     result = _send_admin_event(event, context, urls)
     if not result.get("success", False):
         logger.warning(

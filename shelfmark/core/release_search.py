@@ -47,7 +47,10 @@ def search_source_releases(
 
     try:
         source = get_source(source_name)
+    except ValueError:
+        return None, [], f"Unknown source: {source_name}"
 
+    try:
         plan = build_release_search_plan(
             search_book,
             languages=languages,
@@ -84,8 +87,6 @@ def search_source_releases(
         releases = source.search(
             search_book, plan, expand_search=expand_search, content_type=content_type
         )
-    except ValueError:
-        return None, [], f"Unknown source: {source_name}"
     except (SourceUnavailableError, *_OPERATIONAL_ERRORS) as exc:
         logger.warning("Release search failed for source %s: %s", source_name, exc)
         return None, [], f"{source_name}: {exc!s}"

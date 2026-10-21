@@ -357,6 +357,74 @@ def group_files_into_books(
     ]
 
 
+def _single_best(scores: dict[Path, int]) -> Path | None:
+    """Return the highest-scoring path, or None when nothing scored or the best ties."""
+    if not scores:
+        return None
+    best = max(scores.values())
+    top = [path for path, score in scores.items() if score == best]
+    return top[0] if len(top) == 1 else None
+
+
+def _match_ignored_entry(entry: str, parts_by_path: dict[Path, tuple[str, ...]]) -> Path | None:
+    """Find the one on-disk file a skipped release path refers to (see `drop_ignored_files`)."""
+    wanted = PurePosixPath(entry).parts
+    if not wanted:
+        return None
+    for path, parts in parts_by_path.items():
+        if parts == wanted:
+            return path
+
+    # The root can shift after extraction, so one path may end with the other. The file
+    # sharing the most trailing components wins: a skipped `Extras/Book.epub` is the
+    # subfolder copy, not a kept `Book.epub` in the root.
+    shared: dict[Path, int] = {}
+    for path, parts in parts_by_path.items():
+        depth = min(len(parts), len(wanted))
+        if parts[-depth:] == wanted[-depth:]:
+            shared[path] = depth
+    if (match := _single_best(shared)) is not None:
+        return match
+
+    same_name = [path for path, parts in parts_by_path.items() if parts[-1] == wanted[-1]]
+    if len(same_name) == 1:
+        return same_name[0]
+
+    # AudiobookBay glues "<folder> <file>" into one name; the file whose trailing
+    # components, joined the same way, end that name on the most components wins.
+    glued = wanted[-1].lower()
+    tails: dict[Path, int] = {}
+    for path, parts in parts_by_path.items():
+        for depth in range(len(parts), 0, -1):
+            tail = " ".join(parts[-depth:]).lower()
+            if glued == tail or glued.endswith(" " + tail):
+                tails[path] = depth
+                break
+    return _single_best(tails)
+
+
+def drop_ignored_files(book_files: list[Path], ignored: list[str] | None) -> list[Path]:
+    """Remove files the user chose to skip in the pack review.
+
+    Ignored entries are release-relative paths, and each one drops at most one file:
+    the file at that relative path, else the one sharing the most trailing components
+    with it (the root can shift after extraction), else the only file with that
+    basename, else the one its AudiobookBay-style glued "<folder> <file>" name ends
+    with. A tie drops nothing, since keeping a skipped file beats losing a kept one.
+    """
+    if not book_files or not ignored:
+        return book_files
+    _root, rel_by_path = _relative_paths(book_files)
+    parts_by_path = {path: PurePosixPath(rel).parts for path, rel in rel_by_path.items()}
+    wanted = {i.replace("\\", "/").lstrip("./") for i in ignored if i and i.strip()}
+    dropped = {
+        match
+        for entry in wanted
+        if (match := _match_ignored_entry(entry, parts_by_path)) is not None
+    }
+    return [p for p in book_files if p not in dropped]
+
+
 def match_plan_to_files(
     plan: list[PackBook],
     book_files: list[Path],

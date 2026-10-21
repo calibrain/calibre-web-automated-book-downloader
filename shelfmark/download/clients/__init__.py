@@ -135,6 +135,9 @@ class DownloadStatus:
     file_path: str | None  # Path in client's download dir (when complete)
     download_speed: int | None = None  # Bytes per second
     eta: int | None = None  # Seconds remaining
+    seeders: int | None = None  # Seeds connected right now (torrent clients that report it)
+    swarm_seeders: int | None = None  # Seeds the tracker says exist, connected or not
+    peers: int | None = None  # Other peers connected right now
 
     @classmethod
     def error(cls, message: str) -> DownloadStatus:
@@ -192,6 +195,8 @@ class DownloadClient(ABC):
     name: str
     handoff_only = False
     prefers_torrent_file = False
+    # False when remove(delete_files=True) always fails, as on rTorrent.
+    can_delete_files = True
 
     def _log_error(self, method: str, e: Exception, level: str = "error") -> str:
         """Log a client error with consistent formatting.

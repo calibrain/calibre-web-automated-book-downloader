@@ -1,6 +1,11 @@
 """Tests for core notification rendering and dispatch helpers."""
 
+import contextvars
 import logging
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import apprise
 
 from shelfmark.core import notifications as notifications_module
 
@@ -364,6 +369,76 @@ def test_dispatch_to_apprise_logs_captured_apprise_warning_messages(monkeypatch)
         "Apprise source [apprise.plugins.pushover]: Failed to send Pushover notification" in msg
         for msg in warning_messages
     )
+
+
+class _ServerErrorHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.send_response(500)
+        self.end_headers()
+
+    def log_message(self, format, *args):  # noqa: A002
+        return
+
+
+def test_dispatch_to_apprise_reports_failure_logged_on_apprise_worker_thread():
+    """Apprise 2 delivers on its own worker threads, which log the plugin's reason."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _ServerErrorHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        result = notifications_module._dispatch_to_apprise(
+            [f"json://127.0.0.1:{server.server_address[1]}/hook"],
+            title="Test",
+            body="Body",
+            notify_type=apprise.NotifyType.INFO,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert result["success"] is False
+    assert len(result["details"]) == 1
+    assert result["details"][0].startswith("json: ")
+    assert "error=500" in result["details"][0]
+
+
+def test_dispatch_to_apprise_ignores_apprise_records_of_other_dispatches(monkeypatch):
+    fake_apprise = _FakeAppriseModule()
+    monkeypatch.setattr(notifications_module, "apprise", fake_apprise)
+
+    def _log_warning(message):
+        logging.getLogger("apprise.plugins.json").warning(message)
+
+    def _notify(**kwargs):
+        _ = kwargs
+        # A dispatch running concurrently on another thread, in its own context.
+        other = threading.Thread(
+            target=_log_warning,
+            args=("Another dispatch failed",),
+            context=contextvars.Context(),
+        )
+        other.start()
+        other.join()
+        # Apprise's worker thread, running in a copy of this dispatch's context.
+        worker = threading.Thread(
+            target=contextvars.copy_context().run,
+            args=(_log_warning, "This dispatch failed"),
+        )
+        worker.start()
+        worker.join()
+        return False
+
+    monkeypatch.setattr(fake_apprise.client, "notify", _notify)
+
+    result = notifications_module._dispatch_to_apprise(
+        ["json://example.invalid/hook"],
+        title="Test",
+        body="Body",
+        notify_type=_FakeNotifyType.INFO,
+    )
+
+    assert result["details"] == ["json: apprise.plugins.json: This dispatch failed"]
 
 
 def test_dispatch_to_apprise_logs_add_exception_at_debug_with_trace(monkeypatch):

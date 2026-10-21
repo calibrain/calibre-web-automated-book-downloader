@@ -16,6 +16,7 @@
 #   - NZBHydra:     http://localhost:5076 (no auth by default)
 #   - SABnzbd:      http://localhost:8085 (complete setup wizard for API key)
 #   - rTorrent:     http://localhost:8000 (admin / admin - if auth enabled)
+#   - slskd:        http://localhost:5030 (slskd / slskdslskd; API key in .local/test-clients/slskd/config/slskd.yml)
 #
 
 services:
@@ -39,6 +40,7 @@ services:
       #   - NZBHydra: http://nzbhydra:5076
       #   - SABnzbd: http://sabnzbd:8080
       #   - rTorrent: http://rtorrent:80 (XMLRPC via HTTP) or rtorrent (port 5000 for SCGI)
+      #   - slskd: http://slskd:5030 (downloads land in /downloads/slskd/complete)
     ports:
       - "8084:8084"
     volumes:
@@ -68,6 +70,7 @@ services:
       - transmission
       - deluge
       - rtorrent
+      - slskd
     restart: unless-stopped
 
   prowlarr:
@@ -198,3 +201,20 @@ services:
       - 5076:5076
     restart: unless-stopped
 
+  slskd:
+    image: slskd/slskd:latest
+    container_name: test-slskd
+    environment:
+      - TZ=UTC
+      # Bootstrap: write .local/test-clients/slskd/config/slskd.yml first (see
+      # scripts/test_clients.py for a template). It holds the Soulseek login, the
+      # API key Shelfmark uses, and the download directories below.
+      - SLSKD_CONFIG=/app/slskd.yml
+    volumes:
+      - ./.local/test-clients/slskd/config:/app
+      - ./.local/test-clients/slskd/shares:/shares:ro
+      - ./.local/test-clients/downloads:/downloads
+    ports:
+      - "5030:5030"  # Web UI / API
+      - "50300:50300"  # Soulseek peer listen port
+    restart: unless-stopped

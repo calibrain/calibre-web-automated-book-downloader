@@ -562,6 +562,7 @@ export type DownloadReleasePayload = {
   search_mode?: 'direct' | 'universal';
   multi_book?: boolean; // Split a multi-book pack into one book per subfolder/file
   book_plan?: PackBook[]; // The split the user approved before download
+  ignored_files?: string[]; // Pack files the user chose to skip
 };
 
 /** Inspect a release's file list before download (same body as downloadRelease). */
@@ -703,6 +704,16 @@ export const rejectAdminRequest = async (
   body: RejectAdminRequestBody = {},
 ): Promise<RequestRecord> => {
   return fetchJSON<RequestRecord>(buildAdminRequestActionUrl(API.adminRequests, id, 'reject'), {
+    method: 'POST',
+    body: JSON.stringify(buildRejectAdminRequestBody(body)),
+  });
+};
+
+export const reopenAdminRequest = async (
+  id: number,
+  body: RejectAdminRequestBody = {},
+): Promise<RequestRecord> => {
+  return fetchJSON<RequestRecord>(buildAdminRequestActionUrl(API.adminRequests, id, 'reopen'), {
     method: 'POST',
     body: JSON.stringify(buildRejectAdminRequestBody(body)),
   });
@@ -860,9 +871,9 @@ export const getReleases = async (
 
 // Admin user management API
 
-export type AdminAuthSource = 'builtin' | 'oidc' | 'proxy' | 'cwa';
+type AdminAuthSource = 'builtin' | 'oidc' | 'proxy' | 'cwa';
 
-export interface AdminUserEditCapabilities {
+interface AdminUserEditCapabilities {
   authSource: AdminAuthSource;
   canSetPassword: boolean;
   canEditRole: boolean;
@@ -1065,6 +1076,7 @@ export const getSelfUserEditContext = async (): Promise<SelfUserEditContext> => 
 export const updateSelfUser = async (
   data: Partial<Pick<AdminUser, 'email' | 'display_name'>> & {
     password?: string;
+    current_password?: string;
     settings?: Record<string, unknown>;
   },
 ): Promise<AdminUser> => {

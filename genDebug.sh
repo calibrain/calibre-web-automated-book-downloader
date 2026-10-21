@@ -91,8 +91,14 @@ echo | openssl s_client -connect cloudflare.com:443 2>&1 | grep -E "Verify retur
 echo "" >> "$LOG_DIR/network_info.txt"
 
 # Add installed packages
+# The image ships without pip, so ask the app's interpreter directly
 echo "=== Installed Python Packages ===" > "$LOG_DIR/packages.txt"
-pip list >> "$LOG_DIR/packages.txt" 2>&1 || echo "pip not found" >> "$LOG_DIR/packages.txt"
+python - >> "$LOG_DIR/packages.txt" 2>&1 <<'PY' || echo "Could not list Python packages" >> "$LOG_DIR/packages.txt"
+import importlib.metadata as metadata
+
+for dist in sorted(metadata.distributions(), key=lambda dist: (dist.name or "").lower()):
+    print(f"{dist.name}=={dist.version}")
+PY
 echo "" >> "$LOG_DIR/packages.txt"
 
 # Check Permissions
@@ -133,8 +139,19 @@ else
   echo "Not running in Docker container" >> "$LOG_DIR/container_info.txt"
 fi
 
-# Add environment variables (redacting sensitive info)
-env | grep -v -E "(AA_DONATOR_KEY|HARDCOVER_API_KEY|_KEY=|_SECRET=|_PASSWORD=|_TOKEN=)" | sort > "$LOG_DIR/environment.txt"
+# Add environment variables (redacting sensitive info and the credentials in URLs
+# such as a proxy's http://user:pass@host:port)
+env | grep -v -E "^[^=]*(_KEY|_SECRET|_PASSWORD|_TOKEN|_MAM_ID)[^=]*=" | sed -E 's#(://)[^/@[:space:]]+@#\1[REDACTED]@#g' | sort > "$LOG_DIR/environment.txt"
+
+# Redact sensitive fields (API keys, passwords, tokens, the MAM session id), the
+# credentials in URLs, and notification URLs, which carry their service's token
+redact_config_json() {
+  sed -E \
+    -e 's/("(AA_DONATOR_KEY|HARDCOVER_API_KEY|[^"]*_KEY|[^"]*_SECRET|[^"]*_PASSWORD|[^"]*_TOKEN|[^"]*_MAM_ID)"[[:space:]]*:[[:space:]]*")[^"]+"/\1[REDACTED]"/g' \
+    -e 's#(://)[^/@[:space:]"]+@#\1[REDACTED]@#g' \
+    -e 's#("url"[[:space:]]*:[[:space:]]*"([[:alnum:]+.-]+://)?)[^"]+"#\1[REDACTED]"#g' \
+    "$1"
+}
 
 # Add configuration files (redacting sensitive values)
 CONFIG_DIR=${CONFIG_DIR:-"/config"}
@@ -143,9 +160,7 @@ if [ -d "$CONFIG_DIR" ]; then
 
   # Copy and redact main settings file
   if [ -f "$CONFIG_DIR/settings.json" ]; then
-    # Redact sensitive fields (API keys, passwords, tokens)
-    sed -E 's/("(AA_DONATOR_KEY|HARDCOVER_API_KEY|[^"]*_KEY|[^"]*_SECRET|[^"]*_PASSWORD|[^"]*_TOKEN)"[[:space:]]*:[[:space:]]*")[^"]+"/\1[REDACTED]"/g' \
-      "$CONFIG_DIR/settings.json" > "$LOG_DIR/config/settings.json" 2>/dev/null
+    redact_config_json "$CONFIG_DIR/settings.json" > "$LOG_DIR/config/settings.json" 2>/dev/null
   fi
 
   # Copy and redact plugin config files
@@ -154,8 +169,7 @@ if [ -d "$CONFIG_DIR" ]; then
     for config_file in "$CONFIG_DIR/plugins"/*.json; do
       if [ -f "$config_file" ]; then
         filename=$(basename "$config_file")
-        sed -E 's/("(AA_DONATOR_KEY|HARDCOVER_API_KEY|[^"]*_KEY|[^"]*_SECRET|[^"]*_PASSWORD|[^"]*_TOKEN)"[[:space:]]*:[[:space:]]*")[^"]+"/\1[REDACTED]"/g' \
-          "$config_file" > "$LOG_DIR/config/plugins/$filename" 2>/dev/null
+        redact_config_json "$config_file" > "$LOG_DIR/config/plugins/$filename" 2>/dev/null
       fi
     done
   fi

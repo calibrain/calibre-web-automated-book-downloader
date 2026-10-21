@@ -356,6 +356,7 @@ function App() {
     cancelRequest: cancelUserRequest,
     fulfilRequest: fulfilSidebarRequest,
     rejectRequest: rejectSidebarRequest,
+    reopenRequest: reopenSidebarRequest,
   } = useRequests({
     isAdmin: requestRoleIsAdmin,
   });
@@ -372,6 +373,7 @@ function App() {
     activityHistoryHasMore,
     prefetchActivityHistory,
     refreshActivitySnapshot,
+    refreshHistoryIfLoaded,
     resetActivity,
     handleActivityTabChange,
     handleActivityHistoryLoadMore,
@@ -834,6 +836,8 @@ function App() {
         }
 
         prevSearchModeRef.current = cfg.search_mode;
+        // The browser tab follows the configured search page title.
+        document.title = cfg.search_page_title?.trim() || 'Shelfmark';
         setConfig({
           ...cfg,
           metadata_default_sort: resolvedMetadataDefaultSort,
@@ -1789,6 +1793,30 @@ function App() {
       }
     },
     [refreshActivitySnapshot, requestRoleIsAdmin, rejectSidebarRequest, showToast],
+  );
+
+  const handleRequestReopen = useCallback(
+    async (requestId: number) => {
+      if (!requestRoleIsAdmin) {
+        return;
+      }
+
+      try {
+        await reopenSidebarRequest(requestId);
+        await refreshActivitySnapshot();
+        refreshHistoryIfLoaded();
+        showToast('Request reopened', 'success');
+      } catch (error) {
+        showToast(getErrorMessage(error, 'Failed to reopen request'), 'error');
+      }
+    },
+    [
+      refreshActivitySnapshot,
+      refreshHistoryIfLoaded,
+      requestRoleIsAdmin,
+      reopenSidebarRequest,
+      showToast,
+    ],
   );
 
   const handleRequestApprove = useCallback(
@@ -2751,6 +2779,7 @@ function App() {
         onRequestCancel={showRequestsTab ? handleRequestCancel : undefined}
         onRequestApprove={requestRoleIsAdmin ? handleRequestApprove : undefined}
         onRequestReject={requestRoleIsAdmin ? handleRequestReject : undefined}
+        onRequestReopen={requestRoleIsAdmin ? handleRequestReopen : undefined}
         onRequestDismiss={showRequestsTab ? handleRequestDismiss : undefined}
         onPinnedOpenChange={setSidebarPinnedOpen}
         pinnedTopOffset={headerHeight}

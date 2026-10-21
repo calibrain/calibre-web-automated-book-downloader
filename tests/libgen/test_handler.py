@@ -2,6 +2,7 @@
 
 import io
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from shelfmark.core.models import DownloadTask
@@ -129,3 +130,40 @@ def test_download_cancelled_before_start(tmp_path):
         )
     assert result is None
     status.assert_any_call("cancelled", "Cancelled")
+
+
+def test_hostile_format_cannot_escape_tmp_dir(tmp_path):
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    (tmp_path / "config").mkdir()
+    task = DownloadTask(
+        task_id=f"libgen:{html.MD5_A}",
+        source="libgen",
+        title=".",
+        format="/../config/x",
+        size="6 MB",
+    )
+    result, _ = _run(
+        task,
+        tmp_dir,
+        mirrors_list=["https://libgen.li"],
+        fetch_page=lambda url, timeout=(5, 10): html.ADS_HTML,
+        download_url=lambda *a, **k: _buf(),
+    )
+    assert not (tmp_path / "config" / "x").exists()
+    assert result is not None
+    assert Path(result).parent == tmp_dir
+
+
+def test_hostile_md5_cannot_escape_tmp_dir(tmp_path):
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    result, _ = _run(
+        _task("libgen:../../evil", "epub"),
+        tmp_dir,
+        mirrors_list=["https://libgen.li"],
+        fetch_page=lambda url, timeout=(5, 10): html.ADS_HTML,
+        download_url=lambda *a, **k: _buf(),
+    )
+    assert result is None
+    assert not (tmp_path / "evil.epub").exists()

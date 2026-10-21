@@ -24,6 +24,7 @@ from shelfmark.core.requests_service import (
     fulfil_request,
     reject_request,
     reopen_failed_request,
+    reopen_request,
     sync_delivery_states_from_queue_status,
 )
 from shelfmark.core.user_db import UserDB
@@ -803,6 +804,94 @@ def test_sync_delivery_states_preserves_retryable_error_state(user_db):
 # ---------------------------------------------------------------------------
 # book_data validation
 # ---------------------------------------------------------------------------
+
+
+def _fulfilled_with_release(user_db, user_id, source_id):
+    return user_db.create_request(
+        user_id=user_id,
+        source_hint="slskd",
+        content_type="audiobook",
+        request_level="release",
+        policy_mode="request_release",
+        book_data=_book_data("audiobook"),
+        release_data={"source": "slskd", "source_id": source_id, "title": "The Sworn Sword"},
+        status="fulfilled",
+        delivery_state="queued",
+    )
+
+
+def test_sync_delivery_states_an_earlier_failure_does_not_undo_a_later_delivery(user_db):
+    user = user_db.create_user(username="alice")
+    request = _fulfilled_with_release(user_db, user["id"], "second-try")
+
+    updated = sync_delivery_states_from_queue_status(
+        user_db,
+        queue_status={
+            "complete": {
+                "second-try": {"id": "second-try", "request_id": request["id"]},
+            },
+            "error": {
+                "first-try": {
+                    "id": "first-try",
+                    "request_id": request["id"],
+                    "retry_available": False,
+                    "status_message": "Peer transfer failed: Rejected",
+                },
+            },
+        },
+        user_id=user["id"],
+    )
+
+    refreshed = user_db.get_request(request["id"])
+    assert refreshed["status"] == "fulfilled"
+    assert refreshed["delivery_state"] == "complete"
+    assert [row["id"] for row in updated] == [request["id"]]
+
+
+def test_sync_delivery_states_a_running_retry_outranks_an_earlier_failure(user_db):
+    user = user_db.create_user(username="alice")
+    request = _fulfilled_with_release(user_db, user["id"], "retry")
+
+    sync_delivery_states_from_queue_status(
+        user_db,
+        queue_status={
+            "downloading": {"retry": {"id": "retry", "request_id": request["id"]}},
+            "error": {
+                "first-try": {
+                    "id": "first-try",
+                    "request_id": request["id"],
+                    "retry_available": False,
+                },
+            },
+        },
+        user_id=user["id"],
+    )
+
+    refreshed = user_db.get_request(request["id"])
+    assert refreshed["status"] == "fulfilled"
+    assert refreshed["delivery_state"] == "downloading"
+
+
+def test_sync_delivery_states_a_failure_alone_still_reopens(user_db):
+    user = user_db.create_user(username="alice")
+    request = _fulfilled_with_release(user_db, user["id"], "only-try")
+
+    sync_delivery_states_from_queue_status(
+        user_db,
+        queue_status={
+            "error": {
+                "only-try": {
+                    "id": "only-try",
+                    "request_id": request["id"],
+                    "retry_available": False,
+                    "status_message": "Download failed",
+                },
+            },
+        },
+        user_id=user["id"],
+    )
+
+    assert user_db.get_request(request["id"])["status"] == "pending"
 
 
 def test_create_request_rejects_non_dict_book_data(user_db):
@@ -1642,3 +1731,155 @@ def test_create_request_normalizes_content_type_from_book_data(user_db):
     )
 
     assert created["content_type"] == "audiobook"
+
+
+def _rejected_request(user_db, *, request_level="book", release_data=None, note=None):
+    alice = user_db.create_user(username="alice")
+    admin = user_db.create_user(username="admin", role="admin")
+    created = create_request(
+        user_db,
+        user_id=alice["id"],
+        source_hint="prowlarr",
+        content_type="ebook",
+        request_level=request_level,
+        policy_mode="request_release" if release_data else "request_book",
+        book_data=_book_data(),
+        release_data=release_data,
+        note=note,
+    )
+    reject_request(
+        user_db,
+        request_id=created["id"],
+        admin_user_id=admin["id"],
+        admin_note="Sounds like a dumb book",
+    )
+    return alice, admin, created
+
+
+def test_reopen_request_moves_rejected_back_to_pending(user_db):
+    _alice, admin, created = _rejected_request(user_db)
+
+    reopened = reopen_request(user_db, request_id=created["id"], admin_user_id=admin["id"])
+
+    assert reopened["status"] == "pending"
+    assert reopened["reviewed_by"] is None
+    assert reopened["reviewed_at"] is None
+    assert reopened["admin_note"] is None
+    assert reopened["delivery_state"] == "none"
+
+
+def test_reopen_request_keeps_what_the_user_asked_for(user_db):
+    _alice, admin, created = _rejected_request(
+        user_db,
+        request_level="release",
+        release_data=_release_data(),
+        note="It is for my dog",
+    )
+
+    reopened = reopen_request(
+        user_db,
+        request_id=created["id"],
+        admin_user_id=admin["id"],
+        admin_note="  Fair enough  ",
+    )
+
+    assert reopened["request_level"] == "release"
+    assert reopened["release_data"] == _release_data()
+    assert reopened["note"] == "It is for my dog"
+    assert reopened["admin_note"] == "Fair enough"
+
+
+@pytest.mark.parametrize("status", ["pending", "cancelled"])
+def test_reopen_request_refuses_a_request_that_is_not_rejected(user_db, status):
+    alice = user_db.create_user(username="alice")
+    admin = user_db.create_user(username="admin", role="admin")
+    created = create_request(
+        user_db,
+        user_id=alice["id"],
+        source_hint="prowlarr",
+        content_type="ebook",
+        request_level="book",
+        policy_mode="request_book",
+        book_data=_book_data(),
+    )
+    if status == "cancelled":
+        cancel_request(user_db, request_id=created["id"], actor_user_id=alice["id"])
+
+    with pytest.raises(RequestServiceError) as exc_info:
+        reopen_request(user_db, request_id=created["id"], admin_user_id=admin["id"])
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "stale_transition"
+    assert user_db.get_request(created["id"])["status"] == status
+
+
+def test_reopen_request_refuses_a_fulfilled_request(user_db):
+    alice = user_db.create_user(username="alice")
+    admin = user_db.create_user(username="admin", role="admin")
+    created = create_request(
+        user_db,
+        user_id=alice["id"],
+        source_hint="prowlarr",
+        content_type="ebook",
+        request_level="release",
+        policy_mode="request_release",
+        book_data=_book_data(),
+        release_data=_release_data(),
+    )
+    fulfil_request(
+        user_db,
+        request_id=created["id"],
+        admin_user_id=admin["id"],
+        queue_release=lambda *a, **kw: (True, None),
+    )
+
+    with pytest.raises(RequestServiceError) as exc_info:
+        reopen_request(user_db, request_id=created["id"], admin_user_id=admin["id"])
+
+    assert exc_info.value.code == "stale_transition"
+    assert user_db.get_request(created["id"])["status"] == "fulfilled"
+
+
+def test_reopen_request_refuses_when_the_user_already_asked_again(user_db):
+    alice, admin, created = _rejected_request(user_db)
+    create_request(
+        user_db,
+        user_id=alice["id"],
+        source_hint="prowlarr",
+        content_type="ebook",
+        request_level="book",
+        policy_mode="request_book",
+        book_data=_book_data(),
+    )
+
+    with pytest.raises(RequestServiceError) as exc_info:
+        reopen_request(user_db, request_id=created["id"], admin_user_id=admin["id"])
+
+    assert exc_info.value.code == "duplicate_pending_request"
+    assert user_db.get_request(created["id"])["status"] == "rejected"
+
+
+def test_reopen_request_rejects_a_non_string_admin_note(user_db):
+    _alice, admin, created = _rejected_request(user_db)
+
+    with pytest.raises(RequestServiceError) as exc_info:
+        reopen_request(user_db, request_id=created["id"], admin_user_id=admin["id"], admin_note=42)
+
+    assert exc_info.value.status_code == 400
+    assert user_db.get_request(created["id"])["status"] == "rejected"
+
+
+def test_reopen_rejected_request_returns_none_for_unknown_or_other_states(user_db):
+    assert user_db.reopen_rejected_request(999_999) is None
+
+    alice = user_db.create_user(username="alice")
+    created = create_request(
+        user_db,
+        user_id=alice["id"],
+        source_hint="prowlarr",
+        content_type="ebook",
+        request_level="book",
+        policy_mode="request_book",
+        book_data=_book_data(),
+    )
+    assert user_db.reopen_rejected_request(created["id"]) is None
