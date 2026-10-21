@@ -279,6 +279,7 @@ interface UseActivityResult {
   activityHistoryHasMore: boolean;
   prefetchActivityHistory: () => void;
   refreshActivitySnapshot: () => Promise<void>;
+  refreshHistoryIfLoaded: () => void;
   handleActivityTabChange: (tab: 'all' | 'downloads' | 'requests' | 'history') => void;
   resetActivity: () => void;
   handleActivityHistoryLoadMore: () => void;
@@ -570,6 +571,7 @@ export const useActivity = ({
     activityHistoryHasMore,
     prefetchActivityHistory,
     refreshActivitySnapshot,
+    refreshHistoryIfLoaded,
     handleActivityTabChange,
     resetActivity,
     handleActivityHistoryLoadMore,

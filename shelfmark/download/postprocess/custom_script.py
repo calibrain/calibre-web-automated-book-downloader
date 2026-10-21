@@ -112,6 +112,18 @@ def prepare_custom_script_execution(
     )
 
 
+def _target_argument(execution: CustomScriptExecution) -> str:
+    """The target as one argv entry; a relative name starting with "-" gets "./" first.
+
+    Many scripts read a leading "-" as an option. Path() drops "./", so this has
+    to be applied to the string. Absolute mode starts with "/" and is unchanged.
+    """
+    target = str(execution.target_arg)
+    if execution.mode == "relative" and target.startswith("-"):
+        return f"./{target}"
+    return target
+
+
 def run_custom_script(
     execution: CustomScriptExecution,
     *,
@@ -152,7 +164,7 @@ def run_custom_script(
 
         result = run_blocking_io(
             subprocess.run,
-            [execution.script_path, str(execution.target_arg)],
+            [execution.script_path, _target_argument(execution)],
             **run_kwargs,
         )
         if result.stdout:

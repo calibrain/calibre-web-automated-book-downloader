@@ -241,4 +241,36 @@ describe('activityCardModel', () => {
     expect(model.actions.length).toBe(1);
     expect(model.actions[0]?.kind).toBe('download-dismiss');
   });
+
+  it('offers reopen on a rejected request to admins only', () => {
+    const rejected = makeItem({
+      kind: 'request',
+      visualStatus: 'rejected',
+      requestId: 43,
+      downloadBookId: undefined,
+    });
+
+    const adminModel = buildActivityCardModel(rejected, true);
+    expect(adminModel.actions.map((action) => action.kind)).toEqual([
+      'request-reopen',
+      'request-dismiss',
+    ]);
+
+    const requesterModel = buildActivityCardModel(rejected, false);
+    expect(requesterModel.actions.map((action) => action.kind)).toEqual(['request-dismiss']);
+  });
+
+  it('does not offer reopen on a cancelled request', () => {
+    const model = buildActivityCardModel(
+      makeItem({
+        kind: 'request',
+        visualStatus: 'cancelled',
+        requestId: 44,
+        downloadBookId: undefined,
+      }),
+      true,
+    );
+
+    expect(model.actions.map((action) => action.kind)).toEqual(['request-dismiss']);
+  });
 });

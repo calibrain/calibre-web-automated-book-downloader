@@ -305,3 +305,120 @@ def test_download_task_completes_blackhole_handoff_without_post_processing(
             call(task.task_id, "Cancelled, but the torrent was already handed off to blackhole")
             in queue.update_status_message.call_args_list
         )
+
+
+class _PoolRecorder:
+    """Stands in for the thread pool: remembers what was started and never finishes it."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        self.max_workers = kwargs.get("max_workers")
+        _PoolRecorder.last = self
+        self.started: list[str] = []
+
+    def __enter__(self) -> _PoolRecorder:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    def submit(self, fn, task_id, cancel_flag):
+        from concurrent.futures import Future
+
+        self.started.append(task_id)
+        return Future()  # never done, so the download stays running
+
+
+def _run_one_pass(monkeypatch, tasks, *, per_source, global_limit=3):
+    import shelfmark.download.orchestrator as orchestrator
+    from shelfmark.core.queue import BookQueue
+
+    queue = BookQueue()
+    for task in tasks:
+        assert queue.add(task) is True
+    values = {
+        "MAX_CONCURRENT_DOWNLOADS_PER_SOURCE": per_source,
+        "MAX_CONCURRENT_DOWNLOADS": global_limit,
+        "MAIN_LOOP_SLEEP_TIME": 0.0,
+    }
+    monkeypatch.setattr(orchestrator, "book_queue", queue)
+    monkeypatch.setattr(orchestrator, "ThreadPoolExecutor", _PoolRecorder)
+
+    def sleep(delay):
+        if delay == 0.0:  # the loop's own pause ends the pass; a stagger delay is just skipped
+            raise _StopLoop
+
+    monkeypatch.setattr(orchestrator.time, "sleep", sleep)
+    monkeypatch.setattr(orchestrator.config, "get", lambda k, d=None: values.get(k, d))
+    monkeypatch.setattr(
+        orchestrator.config, "MAX_CONCURRENT_DOWNLOADS", global_limit, raising=False
+    )
+    monkeypatch.setattr(orchestrator.config, "MAIN_LOOP_SLEEP_TIME", 0.0, raising=False)
+    with pytest.raises(_StopLoop):
+        orchestrator.concurrent_download_loop()
+    return _PoolRecorder.last
+
+
+def _t(source, task_id):
+    return DownloadTask(task_id=task_id, source=source, title=task_id)
+
+
+def test_a_source_at_its_limit_does_not_hold_back_the_others(monkeypatch):
+    pool = _run_one_pass(
+        monkeypatch,
+        [_t("slskd", "s1"), _t("slskd", "s2"), _t("slskd", "s3"), _t("audiobookbay", "torrent")],
+        per_source=1,
+    )
+
+    assert sorted(pool.started) == ["s1", "torrent"]
+
+
+def test_each_source_gets_its_own_limit(monkeypatch):
+    pool = _run_one_pass(
+        monkeypatch,
+        [_t("slskd", "s1"), _t("slskd", "s2"), _t("audiobookbay", "a1"), _t("audiobookbay", "a2")],
+        per_source=2,
+    )
+
+    assert sorted(pool.started) == ["a1", "a2", "s1", "s2"]
+
+
+def test_with_no_per_source_limit_the_one_global_limit_applies(monkeypatch):
+    pool = _run_one_pass(
+        monkeypatch,
+        [_t("slskd", "s1"), _t("slskd", "s2"), _t("audiobookbay", "a1"), _t("audiobookbay", "a2")],
+        per_source=0,
+        global_limit=3,
+    )
+
+    assert len(pool.started) == 3
+
+
+def test_the_pool_is_big_enough_for_every_source_at_its_limit(monkeypatch):
+    import shelfmark.download.orchestrator as orchestrator
+
+    pool = _run_one_pass(monkeypatch, [], per_source=2)
+
+    assert pool.max_workers == 2 * orchestrator._MAX_SOURCES
+
+
+def test_a_source_has_room_only_below_its_limit():
+    import shelfmark.download.orchestrator as orchestrator
+
+    task = _t("slskd", "x")
+
+    assert orchestrator._source_has_room(task, running={"slskd": 1}, limit=2) is True
+    assert orchestrator._source_has_room(task, running={"slskd": 2}, limit=2) is False
+    assert orchestrator._source_has_room(task, running={"audiobookbay": 5}, limit=2) is True
+
+
+def test_a_task_waiting_in_its_clients_queue_does_not_use_up_its_source(monkeypatch):
+    waiting = DownloadTask(task_id="waiting", source="audiobookbay", title="w", client_queued=True)
+    pool = _run_one_pass(
+        monkeypatch,
+        [waiting, _t("audiobookbay", "next"), _t("audiobookbay", "third")],
+        per_source=1,
+    )
+
+    # "waiting" is first and takes the one slot; being queued in qBittorrent it gives it back,
+    # so "next" starts; "next" is working, so "third" has to wait.
+    assert pool.started == ["waiting", "next"]

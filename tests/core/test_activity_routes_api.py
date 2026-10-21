@@ -1123,18 +1123,161 @@ class TestActivityRoutes:
                     },
                 )
 
-        assert response.status_code == 403
-        assert response.json["error"] == "Forbidden"
-        mock_warning.assert_called_once()
-        log_message = mock_warning.call_args.args[0]
-        assert "Activity dismiss_many rejected" in log_message
-        assert "status=403" in log_message
-        assert "reason=Forbidden" in log_message
-        assert "auth_mode=builtin" in log_message
-        assert f"viewer_scope=user:{intruder['id']}" in log_message
-        assert f"owner_user_id={owner['id']}" in log_message
-        assert "final_status=complete" in log_message
-        assert "request_id=321" in log_message
+        # Another user's row is answered exactly like a missing one, so the id cannot
+        # be probed. The log still carries the owner context for the operator.
+        assert response.status_code == 404
+        assert response.json == {
+            "error": "One or more activity items were not found",
+            "missing_item_keys": ["download:forbidden-download-task"],
+        }
+        log_messages = [call.args[0] for call in mock_warning.call_args_list]
+        assert any(
+            "Activity dismiss_many rejected" in message
+            and "status=404" in message
+            and "auth_mode=builtin" in message
+            and f"viewer_scope=user:{intruder['id']}" in message
+            and f"owner_user_id={owner['id']}" in message
+            and "final_status=complete" in message
+            and "request_id=321" in message
+            for message in log_messages
+        )
+
+    def test_dismiss_answers_another_users_download_like_a_missing_one(self, main_module, client):
+        owner = _create_user(main_module, prefix="owner")
+        intruder = _create_user(main_module, prefix="intruder")
+        _set_session(
+            client, user_id=intruder["username"], db_user_id=intruder["id"], is_admin=False
+        )
+        _record_terminal_download(
+            main_module,
+            task_id="foreign-dismiss-task",
+            user_id=owner["id"],
+            username=owner["username"],
+        )
+
+        with patch.object(main_module, "get_auth_mode", return_value="builtin"):
+            foreign = client.post(
+                "/api/activity/dismiss",
+                json={"item_type": "download", "item_key": "download:foreign-dismiss-task"},
+            )
+            missing = client.post(
+                "/api/activity/dismiss",
+                json={"item_type": "download", "item_key": "download:no-such-task"},
+            )
+
+        assert foreign.status_code == missing.status_code == 404
+        assert foreign.json == missing.json == {"error": "Download not found"}
+        assert "download:foreign-dismiss-task" not in _hidden_item_keys(
+            main_module, viewer_scope=f"user:{intruder['id']}"
+        )
+
+    def test_dismiss_answers_another_users_request_like_a_missing_one(self, main_module, client):
+        owner = _create_user(main_module, prefix="owner")
+        intruder = _create_user(main_module, prefix="intruder")
+        _set_session(
+            client, user_id=intruder["username"], db_user_id=intruder["id"], is_admin=False
+        )
+        request_row = main_module.user_db.create_request(
+            user_id=owner["id"],
+            content_type="ebook",
+            request_level="book",
+            policy_mode="request_book",
+            book_data={"title": "Owner's Request", "provider": "openlibrary", "provider_id": "x"},
+            status="fulfilled",
+            delivery_state="none",
+        )
+
+        with patch.object(main_module, "get_auth_mode", return_value="builtin"):
+            foreign = client.post(
+                "/api/activity/dismiss",
+                json={"item_type": "request", "item_key": f"request:{request_row['id']}"},
+            )
+            missing = client.post(
+                "/api/activity/dismiss",
+                json={"item_type": "request", "item_key": "request:987654321"},
+            )
+            many = client.post(
+                "/api/activity/dismiss-many",
+                json={
+                    "items": [
+                        {"item_type": "request", "item_key": f"request:{request_row['id']}"},
+                        {"item_type": "request", "item_key": "request:987654321"},
+                    ]
+                },
+            )
+
+        assert foreign.status_code == missing.status_code == 404
+        assert foreign.json == missing.json == {"error": "Request not found"}
+        assert many.status_code == 404
+        assert many.json["missing_item_keys"] == [
+            f"request:{request_row['id']}",
+            "request:987654321",
+        ]
+
+    def test_admin_still_dismisses_another_users_download(self, main_module, client):
+        owner = _create_user(main_module, prefix="owner")
+        admin = _create_user(main_module, prefix="admin", role="admin")
+        _set_session(client, user_id=admin["username"], db_user_id=admin["id"], is_admin=True)
+        _record_terminal_download(
+            main_module,
+            task_id="admin-foreign-dismiss-task",
+            user_id=owner["id"],
+            username=owner["username"],
+        )
+
+        with patch.object(main_module, "get_auth_mode", return_value="builtin"):
+            response = client.post(
+                "/api/activity/dismiss",
+                json={"item_type": "download", "item_key": "download:admin-foreign-dismiss-task"},
+            )
+
+        assert response.status_code == 200
+        assert "download:admin-foreign-dismiss-task" in _hidden_item_keys(
+            main_module, viewer_scope="admin:shared"
+        )
+
+    def test_history_skips_rows_the_viewer_does_not_own(self, main_module, client):
+        owner = _create_user(main_module, prefix="owner")
+        viewer = _create_user(main_module, prefix="viewer")
+        _set_session(client, user_id=viewer["username"], db_user_id=viewer["id"], is_admin=False)
+        _record_terminal_download(
+            main_module,
+            task_id="history-own-task",
+            user_id=viewer["id"],
+            username=viewer["username"],
+        )
+        _record_terminal_download(
+            main_module,
+            task_id="history-foreign-task",
+            user_id=owner["id"],
+            username=owner["username"],
+        )
+        foreign_request = main_module.user_db.create_request(
+            user_id=owner["id"],
+            content_type="ebook",
+            request_level="book",
+            policy_mode="request_book",
+            book_data={"title": "Owner's Request", "provider": "openlibrary", "provider_id": "y"},
+            status="fulfilled",
+            delivery_state="none",
+        )
+        # Viewer state that references rows this viewer does not own.
+        for item_type, item_key in (
+            ("download", "download:history-foreign-task"),
+            ("request", f"request:{foreign_request['id']}"),
+            ("download", "download:history-own-task"),
+        ):
+            main_module.activity_view_state_service.dismiss(
+                viewer_scope=f"user:{viewer['id']}",
+                item_type=item_type,
+                item_key=item_key,
+            )
+
+        with patch.object(main_module, "get_auth_mode", return_value="builtin"):
+            response = client.get("/api/activity/history?limit=10&offset=0")
+
+        assert response.status_code == 200
+        assert [row["item_key"] for row in response.json] == ["download:history-own-task"]
 
     def test_snapshot_backfills_undismissed_terminal_download_from_download_history(
         self, main_module, client

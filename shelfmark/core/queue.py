@@ -92,12 +92,23 @@ class BookQueue:
                 logger.warning("Queue hook failed while adding task %s: %s", task_id, exc)
         return True
 
-    def get_next(self) -> tuple[str, Event] | None:
-        """Get next task ID from queue with cancellation flag."""
-        # Use iterative approach to avoid stack overflow if many items are cancelled
-        while True:
-            try:
-                queue_item = self._queue.get_nowait()
+    def get_next(
+        self, accept: Callable[[DownloadTask], bool] | None = None
+    ) -> tuple[str, Event] | None:
+        """Get next task ID from queue with cancellation flag.
+
+        ``accept`` lets the caller pass over tasks it cannot start yet (their source is at its
+        limit). A task passed over keeps its place: it goes back with the same priority and
+        arrival time, so it is first in line once there is room.
+        """
+        passed_over: list[QueueItem] = []
+        try:
+            # Use iterative approach to avoid stack overflow if many items are cancelled
+            while True:
+                try:
+                    queue_item = self._queue.get_nowait()
+                except queue.Empty:
+                    return None
                 task_id = queue_item.book_id  # QueueItem uses book_id as the ID field
 
                 with self._lock:
@@ -105,14 +116,19 @@ class BookQueue:
                     if task_id in self._status and self._status[task_id] == QueueStatus.CANCELLED:
                         continue  # Skip cancelled items, try next
 
+                    task = self._task_data.get(task_id)
+                    if accept is not None and task is not None and not accept(task):
+                        passed_over.append(queue_item)
+                        continue
+
                     # Create cancellation flag for this download
                     cancel_flag = Event()
                     self._cancel_flags[task_id] = cancel_flag
                     self._active_downloads[task_id] = True
-            except queue.Empty:
-                return None
-            else:
                 return task_id, cancel_flag
+        finally:
+            for item in passed_over:
+                self._queue.put(item)
 
     def get_task(self, task_id: str) -> DownloadTask | None:
         """Get a task by its ID."""

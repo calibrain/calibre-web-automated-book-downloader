@@ -158,15 +158,17 @@ def test_a_download_with_no_request_is_closed_out_and_keeps_its_manual_retry(db)
     assert history.is_retry_available(row) is True
 
 
-def test_a_download_whose_request_already_completed_is_left_alone(db):
+def test_a_download_whose_request_already_completed_is_closed_without_reopening_it(db):
     user_db, history, path = db
     user = user_db.create_user(username="reader", role="user")
     request = _request(user_db, user["id"], state="complete")
     _download(history, path, task_id="t1", user_id=user["id"], request_id=request["id"])
 
-    assert _run(user_db, history) == {"marked": 0, "reopened": 0}
+    assert _run(user_db, history) == {"marked": 1, "reopened": 0}
 
-    assert history.get_by_task_id("t1")["final_status"] == "active"
+    # Closed as superseded rather than left "active", which the activity list would show as an
+    # interrupted failure on a request that has its book.
+    assert history.get_by_task_id("t1")["final_status"] == "cancelled"
     assert user_db.get_request(request["id"])["delivery_state"] == "complete"
 
 
@@ -248,3 +250,74 @@ def test_the_window_is_configurable(db):
     )
 
     assert _run(user_db, history, reopen_window=timedelta(hours=48)) == {"marked": 1, "reopened": 1}
+
+
+def test_a_stale_row_of_a_request_that_was_delivered_is_closed_as_superseded(db):
+    user_db, history, path = db
+    user = user_db.create_user(username="reader", role="user")
+    request = _request(user_db, user["id"], state="complete", hours_ago=300)
+    _download(
+        history, path, task_id="old", user_id=user["id"], request_id=request["id"], hours_ago=500
+    )
+
+    assert _run(user_db, history) == {"marked": 1, "reopened": 0}
+
+    row = history.get_by_task_id("old")
+    assert row["final_status"] == "cancelled"
+    assert row["status_message"] == startup_reconcile.SUPERSEDED_MESSAGE
+    assert user_db.get_request(request["id"])["status"] == "fulfilled"  # not reopened
+
+
+def test_a_stale_row_is_superseded_when_another_row_of_the_request_finished(db):
+    user_db, history, path = db
+    user = user_db.create_user(username="reader", role="user")
+    request = _request(user_db, user["id"], state="queued", hours_ago=300)
+    _download(
+        history, path, task_id="old", user_id=user["id"], request_id=request["id"], hours_ago=500
+    )
+    _download(
+        history,
+        path,
+        task_id="done",
+        user_id=user["id"],
+        request_id=request["id"],
+        hours_ago=400,
+        final_status="complete",
+    )
+
+    assert _run(user_db, history) == {"marked": 1, "reopened": 0}
+    assert history.get_by_task_id("old")["final_status"] == "cancelled"
+
+
+def test_an_old_row_of_an_undelivered_request_is_still_left_alone(db):
+    user_db, history, path = db
+    user = user_db.create_user(username="reader", role="user")
+    request = _request(user_db, user["id"], state="queued", hours_ago=300)
+    _download(
+        history, path, task_id="old", user_id=user["id"], request_id=request["id"], hours_ago=500
+    )
+
+    assert _run(user_db, history) == {"marked": 0, "reopened": 0}
+    assert history.get_by_task_id("old")["final_status"] == "active"
+
+
+@pytest.mark.parametrize("state", ["queued", "resolving", "locating", "downloading"])
+def test_a_request_with_no_row_that_says_it_is_in_flight_is_reopened(db, state):
+    user_db, history, _path = db
+    user = user_db.create_user(username="reader", role="user")
+    request = _request(user_db, user["id"], state=state)
+
+    assert _run(user_db, history) == {"marked": 0, "reopened": 1}
+
+    assert user_db.get_request(request["id"])["status"] == "pending"
+
+
+@pytest.mark.parametrize("state", ["complete", "error", "cancelled", "none"])
+def test_a_request_with_no_row_in_any_other_state_is_left_alone(db, state):
+    user_db, history, _path = db
+    user = user_db.create_user(username="reader", role="user")
+    request = _request(user_db, user["id"], state=state)
+
+    assert _run(user_db, history) == {"marked": 0, "reopened": 0}
+
+    assert user_db.get_request(request["id"])["status"] == "fulfilled"

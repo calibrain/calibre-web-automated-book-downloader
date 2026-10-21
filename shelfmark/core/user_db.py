@@ -931,6 +931,52 @@ class UserDB:
             finally:
                 conn.close()
 
+    def reopen_rejected_request(
+        self,
+        request_id: int,
+        *,
+        admin_note: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Move a rejected request back to pending so an admin can review it again.
+
+        Terminal statuses are immutable through ``update_request``, so this is its own
+        narrow path, like ``reopen_failed_request``. The request keeps what the user asked
+        for (``request_level``, ``release_data``, ``note``); only the review is undone.
+        Returns None unless the request exists and is currently rejected.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT status FROM download_requests WHERE id = ?",
+                    (request_id,),
+                ).fetchone()
+                if row is None or row["status"] != RequestStatus.REJECTED:
+                    return None
+
+                conn.execute(
+                    """
+                    UPDATE download_requests
+                    SET status = 'pending',
+                        delivery_state = 'none',
+                        delivery_updated_at = NULL,
+                        last_failure_reason = NULL,
+                        admin_note = ?,
+                        reviewed_by = NULL,
+                        reviewed_at = NULL
+                    WHERE id = ? AND status = 'rejected'
+                    """,
+                    (admin_note, request_id),
+                )
+                updated_row = conn.execute(
+                    "SELECT * FROM download_requests WHERE id = ?",
+                    (request_id,),
+                ).fetchone()
+                conn.commit()
+                return self._parse_request_row(updated_row)
+            finally:
+                conn.close()
+
     def rollback_request_fulfilment(
         self,
         request_id: int,
