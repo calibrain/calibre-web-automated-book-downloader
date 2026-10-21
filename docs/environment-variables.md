@@ -46,6 +46,7 @@ These environment variables are used at startup before the settings system loads
 | `ENABLE_LOGGING` | Enable file logging under LOG_ROOT/shelfmark/ (including shelfmark.log and startup logs). | boolean | `true` |
 | `FLASK_HOST` | Host address for the Flask web server. | string | `0.0.0.0` |
 | `FLASK_PORT` | Port number for the Flask web server. | number | `8084` |
+| `SOCKETIO_ALLOWED_ORIGINS` | Extra origins allowed to open the live-update websocket, comma separated (e.g. https://books.example.com). The app's own origin is always allowed, including behind a proxy that sends X-Forwarded-Host and X-Forwarded-Proto. Only needed if your proxy changes Host without sending those headers. | string | `unset` |
 | `SESSION_COOKIE_SECURE` | Enable secure cookies (requires HTTPS). | boolean | `false` |
 | `CWA_DB_PATH` | Path to the Calibre-Web database for authentication integration. | string (path) | `/auth/app.db` |
 | `HIDE_LOCAL_AUTH` | Hide the username/password login form when OIDC is active. | boolean | `false` |
@@ -100,6 +101,13 @@ Port number for the Flask web server.
 
 - **Type:** number
 - **Default:** `8084`
+
+#### `SOCKETIO_ALLOWED_ORIGINS`
+
+Extra origins allowed to open the live-update websocket, comma separated (e.g. https://books.example.com). The app's own origin is always allowed, including behind a proxy that sends X-Forwarded-Host and X-Forwarded-Proto. Only needed if your proxy changes Host without sending those headers.
+
+- **Type:** string
+- **Default:** `unset`
 
 #### `SESSION_COOKIE_SECURE`
 

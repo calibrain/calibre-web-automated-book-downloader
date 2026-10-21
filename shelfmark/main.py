@@ -35,6 +35,7 @@ from shelfmark.config.env import (
     RELEASE_VERSION,
     SESSION_COOKIE_NAME,
     SESSION_COOKIE_SECURE_ENV,
+    SOCKETIO_ALLOWED_ORIGINS,
     _is_config_dir_writable,
     string_to_bool,
 )
@@ -92,6 +93,7 @@ from shelfmark.core.requests_service import (
     reopen_failed_request,
     sync_delivery_states_from_queue_status,
 )
+from shelfmark.core.socketio_origins import build_cors_allowed_origins
 from shelfmark.core.user_db import UserDB
 from shelfmark.core.utils import AUDIOBOOK_FORMATS, normalize_base_path
 from shelfmark.core.viewer_redaction import (
@@ -150,7 +152,8 @@ app.wsgi_app = wsgi_app
 # We run this app under Gunicorn with a gevent websocket worker (even when DEBUG=true),
 # so Socket.IO should always use gevent here.
 async_mode = "gevent"
-socketio_cors_allowed_origins = "*"
+# Same-origin only (python-engineio default), plus any SOCKETIO_ALLOWED_ORIGINS.
+socketio_cors_allowed_origins = build_cors_allowed_origins(SOCKETIO_ALLOWED_ORIGINS)
 
 # Initialize Flask-SocketIO with reverse proxy support
 socketio_path = f"{BASE_PATH}/socket.io" if BASE_PATH else "/socket.io"
@@ -165,7 +168,6 @@ socketio_init_kwargs: dict[str, Any] = {
     "ping_interval": 25,
     # Allow both websocket and polling for better compatibility
     "transports": ["websocket", "polling"],
-    # Enable CORS for all origins (you can restrict this in production)
     "allow_upgrades": True,
     # Important for proxies that buffer
     "http_compression": True,
@@ -183,7 +185,10 @@ def _user_room_queue_status(user_id: int | None = None) -> dict[str, dict[str, A
 
 ws_manager.set_queue_status_fn(_user_room_queue_status)
 logger.info("Flask-SocketIO initialized with async_mode='%s'", async_mode)
-logger.info("Socket.IO CORS allowed origins: %s", socketio_cors_allowed_origins)
+logger.info(
+    "Socket.IO origin check: same-origin plus %s configured origin(s)",
+    len(SOCKETIO_ALLOWED_ORIGINS),
+)
 
 # Ensure all plugins are loaded before starting the download coordinator.
 # This prevents a race condition where the download loop could try to process
