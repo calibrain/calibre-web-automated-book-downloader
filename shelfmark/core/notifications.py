@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover - exercised in tests via monkeypatch
 
 from shelfmark.core.config import config as app_config
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.request_helpers import normalize_positive_int
+from shelfmark.core.request_helpers import is_plain_email_address, normalize_positive_int
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -376,6 +376,14 @@ def _resolve_user_routes(user_id: int | None) -> list[dict[str, str]]:
     )
 
 
+def user_routes_are_admin_default(user_id: int) -> bool:
+    """Whether the user inherits the admin-set default routes rather than having their own.
+
+    Admin-set routes are trusted like the global ones, so they skip the personal-route checks.
+    """
+    return not app_config.uses_user_override("USER_NOTIFICATION_ROUTES", user_id)
+
+
 def _get_route_user(user_id: int) -> dict[str, Any] | None:
     try:
         from shelfmark.core.user_db import UserDB, get_users_db_path
@@ -399,10 +407,16 @@ def expand_user_route_placeholders(urls: list[str], user_id: int) -> list[str]:
         return urls
 
     user = _get_route_user(user_id) or {}
-    values = {
-        "user": str(user.get("username") or "").strip(),
-        "email": str(user.get("email") or "").strip(),
-    }
+    email = str(user.get("email") or "").strip()
+    # One plain address only: a list (a@x,b@y) would let a user add recipients to an admin route.
+    if email and not is_plain_email_address(email):
+        logger.info(
+            "Ignoring the email on file for user_id=%s in notification routes: "
+            "not a single address",
+            user_id,
+        )
+        email = ""
+    values = {"user": str(user.get("username") or "").strip(), "email": email}
 
     expanded: list[str] = []
     for url in urls:
@@ -773,15 +787,24 @@ def notify_user(
         return
 
     routes = _resolve_user_routes(normalized_user_id)
+    admin_default = user_routes_are_admin_default(normalized_user_id)
     urls = expand_user_route_placeholders(
         _resolve_route_urls_for_event(routes, event), normalized_user_id
     )
-    urls = _allowed_user_urls(urls)
+    if not admin_default:
+        urls = _allowed_user_urls(urls)
     if not urls:
         return
 
     try:
-        _executor.submit(_dispatch_user_async, normalized_user_id, event, context, urls)
+        _executor.submit(
+            _dispatch_user_async,
+            normalized_user_id,
+            event,
+            context,
+            urls,
+            admin_default=admin_default,
+        )
     except RuntimeError as exc:
         logger.warning(
             "Failed to queue user notification '%s' for user_id=%s: %s",
@@ -808,9 +831,12 @@ def _dispatch_user_async(
     event: NotificationEvent,
     context: NotificationContext,
     urls: list[str],
+    *,
+    admin_default: bool = False,
 ) -> None:
     # Checked again at send time: the host may resolve differently than when it was queued.
-    urls = _allowed_user_urls(urls)
+    if not admin_default:
+        urls = _allowed_user_urls(urls)
     if not urls:
         return
     result = _send_admin_event(event, context, urls)

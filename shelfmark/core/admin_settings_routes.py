@@ -16,6 +16,7 @@ from shelfmark.config.users_settings import (
     validate_search_preference_value,
 )
 from shelfmark.core.config import config as app_config
+from shelfmark.core.notifications import user_routes_are_admin_default
 from shelfmark.core.request_helpers import coerce_int, is_plain_email_address
 from shelfmark.core.request_policy import parse_policy_mode, validate_policy_rules
 from shelfmark.core.settings_registry import (
@@ -227,14 +228,19 @@ def build_user_notification_test_response(
     from shelfmark.core.config import config as app_config
 
     routes_input = app_config.get("USER_NOTIFICATION_ROUTES", [], user_id=user_id)
+    # Routes in effect that came from the admin default are trusted like at send time;
+    # routes sent in the payload become the user's own once saved, so they are checked.
+    user_scope = not user_routes_are_admin_default(user_id)
     if isinstance(payload, dict):
         if "USER_NOTIFICATION_ROUTES" in payload:
             routes_input = payload.get("USER_NOTIFICATION_ROUTES")
+            user_scope = True
         elif "routes" in payload:
             routes_input = payload.get("routes")
+            user_scope = True
 
     result = build_notification_test_result(
-        routes_input, scope_label="personal", user_scope=True, user_id=user_id
+        routes_input, scope_label="personal", user_scope=user_scope, user_id=user_id
     )
     status_code = 200 if result.get("success", False) else 400
     return result, status_code

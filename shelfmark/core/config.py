@@ -231,6 +231,22 @@ class Config:
 
         return self._cache.get(key, default)
 
+    def uses_user_override(self, key: str, user_id: int | None) -> bool:
+        """Whether ``get(key, user_id=user_id)`` resolves to the user's own value.
+
+        False means the user inherits the deployment-wide value set by an admin or ENV.
+        """
+        self._ensure_loaded()
+
+        if user_id is None or key not in self._field_map:
+            return False
+        field, _ = self._field_map[key]
+        if field.env_supported and _get_registry().is_value_from_env(field):
+            return False
+        if not getattr(field, "user_overridable", False):
+            return False
+        return self._get_user_override(user_id, key) is not None
+
     def __getattr__(self, name: str) -> object:
         """Allow attribute-style access to settings.
 

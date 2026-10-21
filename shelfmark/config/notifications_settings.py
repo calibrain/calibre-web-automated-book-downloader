@@ -349,8 +349,9 @@ def notifications_settings() -> list[SettingsField]:
             label="",
             description=(
                 "Create one route per URL. Start with All, then add event-specific routes "
-                "for targeted delivery. Use {User} or {Email} to fill in each user's account "
-                "details, e.g. ntfys://ntfy.sh/shelfmark-{User}. Need format examples? "
+                "for targeted delivery. Use {User} or {Email} in the path or query to fill in "
+                "each user's account details, e.g. ntfys://ntfy.sh/shelfmark-{User}, or "
+                "mailtos://...?to={Email} in the admin default. Need format examples? "
                 "[View Apprise URL formats](https://appriseit.com/services/)."
             ),
             columns=[

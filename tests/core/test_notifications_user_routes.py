@@ -107,6 +107,7 @@ class TestSending:
         ]
         with (
             patch.object(notifications, "_resolve_user_routes", return_value=routes),
+            patch.object(notifications, "user_routes_are_admin_default", return_value=False),
             patch.object(notifications._executor, "submit") as submit,
         ):
             notifications.notify_user(5, NotificationEvent.REQUEST_CREATED, self._context())
@@ -118,11 +119,36 @@ class TestSending:
         routes = [{"event": "all", "url": "json://127.0.0.1:9/x"}]
         with (
             patch.object(notifications, "_resolve_user_routes", return_value=routes),
+            patch.object(notifications, "user_routes_are_admin_default", return_value=False),
             patch.object(notifications._executor, "submit") as submit,
         ):
             notifications.notify_user(5, NotificationEvent.REQUEST_CREATED, self._context())
 
         submit.assert_not_called()
+
+    def test_the_admin_default_is_not_restricted(self):
+        routes = [{"event": "all", "url": "mailtos://user:pass@10.0.0.5?to=a@example.com"}]
+        with (
+            patch.object(notifications, "_resolve_user_routes", return_value=routes),
+            patch.object(notifications, "user_routes_are_admin_default", return_value=True),
+            patch.object(notifications._executor, "submit") as submit,
+        ):
+            notifications.notify_user(5, NotificationEvent.REQUEST_CREATED, self._context())
+
+        assert submit.call_args.args[-1] == ["mailtos://user:pass@10.0.0.5?to=a@example.com"]
+        assert submit.call_args.kwargs == {"admin_default": True}
+
+    def test_the_send_trusts_the_admin_default(self):
+        with patch.object(notifications, "_send_admin_event") as send:
+            notifications._dispatch_user_async(
+                5,
+                NotificationEvent.REQUEST_CREATED,
+                self._context(),
+                ["json://10.0.0.5:8080/hook"],
+                admin_default=True,
+            )
+
+        assert send.call_args.args[2] == ["json://10.0.0.5:8080/hook"]
 
     def test_the_send_checks_again(self):
         with patch.object(notifications, "_send_admin_event") as send:
@@ -201,3 +227,27 @@ class TestTestEndpoint:
 
         assert resp.status_code == 200
         send.assert_called_once()
+
+    def test_the_admin_default_in_effect_is_tested_without_the_personal_checks(self, client):
+        from shelfmark.core.config import config as app_config
+
+        default_route = "mailtos://user:pass@10.0.0.5?to=a@example.com"
+        real_get = app_config.get
+
+        def _get(key, default=None, user_id=None):
+            if key == "USER_NOTIFICATION_ROUTES":
+                return [{"event": "all", "url": default_route}]
+            return real_get(key, default, user_id=user_id)
+
+        with (
+            patch.object(app_config, "get", side_effect=_get),
+            patch.object(app_config, "uses_user_override", return_value=False),
+            patch(
+                "shelfmark.config.notifications_settings.send_test_notification",
+                return_value={"success": True, "message": "ok"},
+            ) as send,
+        ):
+            resp = client.post(self.URL, json={})
+
+        assert resp.status_code == 200
+        send.assert_called_once_with([default_route])

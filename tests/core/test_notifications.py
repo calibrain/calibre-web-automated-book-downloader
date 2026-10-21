@@ -740,6 +740,22 @@ def test_notify_user_does_not_queue_placeholder_host_pointing_at_loopback(monkey
     assert fake_executor.calls == []
 
 
+def test_expand_user_route_placeholders_ignores_an_email_list(monkeypatch):
+    # A list would let a user add recipients to an admin-set mailto route.
+    monkeypatch.setattr(
+        notifications_module,
+        "_get_route_user",
+        lambda user_id: {"username": "mallory", "email": "a@example.com,b@example.com"},
+    )
+
+    urls = notifications_module.expand_user_route_placeholders(
+        ["mailtos://smtp.example.com?to={Email}", "ntfys://ntfy.sh/{User}"],
+        7,
+    )
+
+    assert urls == ["ntfys://ntfy.sh/mallory"]
+
+
 def test_expand_user_route_placeholders_drops_routes_missing_a_value(monkeypatch):
     monkeypatch.setattr(
         notifications_module,
