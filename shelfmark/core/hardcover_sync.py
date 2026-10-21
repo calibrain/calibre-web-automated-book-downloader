@@ -171,9 +171,17 @@ def sync_wishlist(
         return summary
 
     content_type = str(app_config.get("HARDCOVER_SYNC_CONTENT_TYPE", "audiobook") or "audiobook")
+    from shelfmark.core import library_index
+
+    try:
+        library_index.require_ready(content_type)
+    except library_index.LibraryUnavailableError as exc:
+        # Requesting now would queue books the library may already hold.
+        logger.warning("hardcover-sync: %s; skipping this sync", exc)
+        summary["errors"] += 1
+        return summary
     known_provider_ids = _existing_provider_ids(user_db)
 
-    from shelfmark.core.library_index import is_in_library
     from shelfmark.core.requests_service import RequestServiceError, create_request
 
     for status_id in _configured_statuses():
@@ -187,7 +195,7 @@ def sync_wishlist(
             if _already_downloaded(db_path, book.title, author):
                 summary["skipped"] += 1
                 continue
-            if is_in_library(book, content_type):
+            if library_index.is_in_library(book, content_type):
                 summary["in_library"] += 1
                 logger.info("hardcover-sync: '%s' already in your library; skipping", book.title)
                 continue

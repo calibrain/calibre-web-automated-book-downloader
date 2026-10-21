@@ -466,3 +466,108 @@ def test_an_exact_shelf_title_outranks_a_collection_holding_the_same_book() -> N
     book = _book(title="Dungeon Crawler Carl", authors=["Matt Dinniman"])
 
     assert library_index.match_entries(book, [collection, single]) == "owned"
+
+
+# --------------------------------------------------------------------------- #
+# Fail closed for callers that act on the answer
+# --------------------------------------------------------------------------- #
+def test_a_library_that_suddenly_lists_nothing_keeps_answering_from_the_earlier_index(
+    providers: list[_Provider], monkeypatch: pytest.MonkeyPatch, clock: list[float]
+) -> None:
+    provider = _Provider("audio", {"audiobook"}, [_DCC_ENTRY])
+    providers.append(provider)
+    assert library_index.is_in_library(_book(), "audiobook") is True
+
+    provider.entries = []  # the server's answer changed shape and every item vanished
+    clock[0] += library_index._CACHE_TTL_SECONDS + 1
+    warnings = _warnings(monkeypatch)
+
+    assert library_index.is_in_library(_book(), "audiobook") is True
+    assert library_index.is_in_library(_book(), "audiobook", strict=True) is True
+    assert provider.fetches == 2  # the second answer came from the back-off, not a refetch
+    assert len(warnings) == 1
+    assert "listed no items" in warnings[0]
+
+
+def test_a_library_that_was_never_indexed_may_be_empty(providers: list[_Provider]) -> None:
+    providers.append(_Provider("audio", {"audiobook"}, []))
+
+    assert library_index.is_in_library(_book(), "audiobook") is False
+    assert library_index.is_in_library(_book(), "audiobook", strict=True) is False
+
+
+def test_a_strict_check_still_refuses_during_the_back_off(
+    providers: list[_Provider], clock: list[float]
+) -> None:
+    provider = _Provider("ebook", {"ebook"}, error=OSError("mount gone"))
+    providers.append(provider)
+    with pytest.raises(library_index.LibraryUnavailableError):
+        library_index.is_in_library(_book(), "ebook", strict=True)
+
+    # Inside the back-off nothing is fetched, and the answer must not fall back to "not owned".
+    with pytest.raises(library_index.LibraryUnavailableError):
+        library_index.is_in_library(_book(), "ebook", strict=True)
+    assert provider.fetches == 1
+
+
+def test_a_strict_check_refuses_to_guess_when_a_library_is_down_and_nothing_is_cached(
+    providers: list[_Provider],
+) -> None:
+    providers.append(_Provider("ebook", {"ebook"}, error=OSError("mount gone")))
+
+    with pytest.raises(library_index.LibraryUnavailableError, match=r"Ebook \(test\)"):
+        library_index.is_in_library(_book(), "ebook", strict=True)
+
+
+def test_a_strict_check_still_answers_from_a_stale_cache(
+    providers: list[_Provider], clock: list[float]
+) -> None:
+    provider = _Provider("ebook", {"ebook"}, [_DCC_ENTRY])
+    providers.append(provider)
+    assert library_index.is_in_library(_book(), "ebook", strict=True) is True
+
+    provider.error = RuntimeError("boom")
+    clock[0] += library_index._CACHE_TTL_SECONDS + 1
+
+    assert library_index.is_in_library(_book(), "ebook", strict=True) is True
+
+
+def test_a_down_library_leaves_the_badges_fail_open(providers: list[_Provider]) -> None:
+    providers.append(_Provider("ebook", {"ebook"}, error=OSError("mount gone")))
+
+    assert library_index.ownership(_book()) == {"ebook": None}
+
+
+def test_require_ready_names_the_library_that_cannot_be_read(providers: list[_Provider]) -> None:
+    providers.append(_Provider("audiobook", {"audiobook"}, [_DCC_ENTRY]))
+    providers.append(_Provider("ebook", {"ebook"}, error=OSError("mount gone")))
+
+    with pytest.raises(library_index.LibraryUnavailableError, match=r"Ebook \(test\)"):
+        library_index.require_ready()
+
+
+def test_require_ready_passes_once_every_enabled_library_has_been_read(
+    providers: list[_Provider],
+) -> None:
+    providers.append(_Provider("ebook", {"ebook"}, [_DCC_ENTRY]))
+    providers.append(_Provider("audiobook", {"audiobook"}, [_DCC_ENTRY]))
+
+    library_index.require_ready()  # does not raise
+
+
+def test_require_ready_ignores_a_disabled_library(providers: list[_Provider]) -> None:
+    providers.append(_Provider("ebook", {"ebook"}, enabled=False, error=OSError("mount gone")))
+
+    library_index.require_ready()  # does not raise
+
+
+def test_require_ready_only_checks_the_libraries_for_the_content_type(
+    providers: list[_Provider],
+) -> None:
+    providers.append(_Provider("ebook", {"ebook"}, error=OSError("no such file")))
+    providers.append(_Provider("audio", {"audiobook"}, [_entry("carl")]))
+
+    library_index.require_ready("audiobook")
+
+    with pytest.raises(library_index.LibraryUnavailableError, match="Ebook"):
+        library_index.require_ready("ebook")

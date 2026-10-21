@@ -34,7 +34,7 @@ Among matching releases from the winning source, `m4b` outranks `mp3`, then more
 
 Both shelf sync and automatic downloads ask the libraries you have enabled under [Library Check](library-check.md) whether the book is already there, for the content type being requested, and skip it if so. There is no separate switch on this tab. A library that is not enabled, or that does not hold the requested content type, never causes a skip.
 
-The check **fails open**: a library that cannot be read is logged and the book is treated as not owned, so processing continues.
+The check **fails closed** here: if an enabled library cannot be read and has not been read before, the sync cycle is skipped and an automatic download is held, and the request stays pending until the next cycle. Skipping is the safe side, because carrying on would request or download books the library already holds. Badges in search results still fail open.
 
 ## Settings
 
@@ -74,6 +74,6 @@ Only one run happens at a time. If a scheduled cycle is in progress, **Sync now*
 
 **Requests appear but nothing downloads** — check **Enable automatic downloads** is on, that **Source priority** contains at least one configured source that supports audiobooks, and look for `no strict match` lines in the log. Lowering **Minimum seeders** helps on quiet trackers; loosening the title or author match is deliberately not an option.
 
-**Books you own keep being added** — enable the library check for the format you request (see [Library Check](library-check.md)) and use its test button. Because the check fails open, a library that cannot be read only produces a log warning rather than blocking the sync.
+**Books you own keep being added** — enable the library check for the format you request (see [Library Check](library-check.md)) and use its test button. A library that cannot be read shows up in the log as a skipped cycle.
 
 **Too many requests at once** — the first sync of a large shelf creates one request per book, and the per-user pending limit from **Users & Requests** does not apply to synced requests. Start with a shelf you are happy to see in the queue in full.
