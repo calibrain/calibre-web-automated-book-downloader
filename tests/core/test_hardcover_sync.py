@@ -225,7 +225,7 @@ class TestSyncWishlist:
             },
         )
         _insert_history(db_path, title="Already Downloaded", author="Matt Dinniman")
-        _configure(monkeypatch, HARDCOVER_SYNC_STATUSES="1", LIBRARY_CHECK_ENABLED=True)
+        _configure(monkeypatch, HARDCOVER_SYNC_STATUSES="1")
         monkeypatch.setattr(
             "shelfmark.core.library_index.is_in_library",
             lambda book, *_args, **_kwargs: book.title == "Already Owned",

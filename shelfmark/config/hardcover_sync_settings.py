@@ -13,7 +13,6 @@ from shelfmark.core.settings_registry import (
     PasswordField,
     SelectField,
     SettingsField,
-    TextField,
     register_settings,
 )
 
@@ -49,13 +48,6 @@ def _audiobook_source_options() -> list[dict[str, Any]]:
             }
         )
     return options
-
-
-def _test_library_connection(current_values: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Action-button callback: verify Audiobookshelf connectivity + item count."""
-    from shelfmark.core import library_index
-
-    return library_index.test_connection()
 
 
 def _sync_now(current_values: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -166,46 +158,6 @@ def hardcover_sync_settings() -> list[SettingsField]:
             default=1,
             min_value=0,
             max_value=1000,
-        ),
-        HeadingField(
-            key="library_check_heading",
-            title="Library Check (Audiobookshelf)",
-            description=(
-                "Skip books you already own. When enabled, the sync and auto-download "
-                "steps check your Audiobookshelf library and skip anything already there."
-            ),
-        ),
-        CheckboxField(
-            key="LIBRARY_CHECK_ENABLED",
-            label="Skip books already in Audiobookshelf",
-            description="Check the Audiobookshelf library before adding/downloading a book.",
-            default=False,
-        ),
-        TextField(
-            key="AUDIOBOOKSHELF_URL",
-            label="Audiobookshelf URL",
-            description=(
-                "Base URL reachable from the Shelfmark container (not the public/Cloudflare "
-                "URL). Often the host LAN IP, e.g. http://10.0.0.91:13378."
-            ),
-            placeholder="http://10.0.0.91:13378",
-        ),
-        PasswordField(
-            key="AUDIOBOOKSHELF_TOKEN",
-            label="Audiobookshelf API Token",
-            description="API token from Audiobookshelf (Settings > Users > your user > API Token).",
-        ),
-        TextField(
-            key="AUDIOBOOKSHELF_LIBRARY_IDS",
-            label="Library IDs (optional)",
-            description="Comma-separated library IDs to check. Leave blank for all book libraries.",
-            placeholder="Blank = all book libraries",
-        ),
-        ActionButton(
-            key="test_library_connection",
-            label="Test library connection",
-            description="Check that Shelfmark can reach Audiobookshelf and count the items.",
-            callback=_test_library_connection,
         ),
         ActionButton(
             key="sync_now",

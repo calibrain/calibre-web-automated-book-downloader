@@ -269,17 +269,16 @@ def auto_download_request(
     if book is None:
         return AutoDownloadOutcome(request_id, "skipped", "book not found in provider")
 
-    # Final guard: skip if the book is already in the Audiobookshelf library.
-    if bool(app_config.get("LIBRARY_CHECK_ENABLED", False)):
-        from shelfmark.core.library_index import is_in_library
+    # Final guard: skip if the book is already in a library that is checked for this content type.
+    from shelfmark.core.library_index import is_in_library
 
-        if is_in_library(book):
-            logger.info(
-                "auto-download: request %s (%s) already in library; skipping",
-                request_id,
-                book.title,
-            )
-            return AutoDownloadOutcome(request_id, "in_library", "already in library")
+    if is_in_library(book, content_type):
+        logger.info(
+            "auto-download: request %s (%s) already in library; skipping",
+            request_id,
+            book.title,
+        )
+        return AutoDownloadOutcome(request_id, "in_library", "already in library")
 
     audiobook_formats = _audiobook_formats()
 

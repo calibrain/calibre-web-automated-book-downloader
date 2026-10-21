@@ -243,7 +243,7 @@ class TestAutoDownloadPending:
 class TestAutoDownloadRequest:
     @pytest.fixture(autouse=True)
     def _library_check_off(self, monkeypatch):
-        monkeypatch.setattr(auto_download, "app_config", _Config(LIBRARY_CHECK_ENABLED=False))
+        monkeypatch.setattr(auto_download, "app_config", _Config())
         monkeypatch.setattr(
             "shelfmark.core.library_index.is_in_library", lambda *_args, **_kwargs: False
         )
@@ -348,7 +348,7 @@ class TestAutoDownloadRequest:
         reader = user_db.create_user(username="reader", role="user")
         row = _pending_request(user_db, reader["id"])
         _stub_provider(monkeypatch, _book())
-        monkeypatch.setattr(auto_download, "app_config", _Config(LIBRARY_CHECK_ENABLED=True))
+        monkeypatch.setattr(auto_download, "app_config", _Config())
         monkeypatch.setattr(
             "shelfmark.core.library_index.is_in_library", lambda *_args, **_kwargs: True
         )

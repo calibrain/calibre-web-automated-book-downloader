@@ -171,7 +171,6 @@ def sync_wishlist(
         return summary
 
     content_type = str(app_config.get("HARDCOVER_SYNC_CONTENT_TYPE", "audiobook") or "audiobook")
-    library_check = bool(app_config.get("LIBRARY_CHECK_ENABLED", False))
     known_provider_ids = _existing_provider_ids(user_db)
 
     from shelfmark.core.library_index import is_in_library
@@ -188,9 +187,9 @@ def sync_wishlist(
             if _already_downloaded(db_path, book.title, author):
                 summary["skipped"] += 1
                 continue
-            if library_check and is_in_library(book):
+            if is_in_library(book, content_type):
                 summary["in_library"] += 1
-                logger.info("hardcover-sync: '%s' already in Audiobookshelf; skipping", book.title)
+                logger.info("hardcover-sync: '%s' already in your library; skipping", book.title)
                 continue
 
             try:

@@ -22,7 +22,6 @@ def test_everything_is_off_by_default():
 
     assert fields["HARDCOVER_SYNC_ENABLED"].default is False
     assert fields["AUTO_DOWNLOAD_ENABLED"].default is False
-    assert fields["LIBRARY_CHECK_ENABLED"].default is False
 
 
 def test_schedule_and_content_type_defaults():
@@ -46,7 +45,6 @@ def test_action_buttons_are_registered():
     fields = _field_map()
 
     assert fields["sync_now"].callback is not None
-    assert fields["test_library_connection"].callback is not None
 
 
 def test_sync_now_reports_busy_when_a_run_is_active(monkeypatch):
@@ -71,10 +69,3 @@ def test_sync_now_starts_a_forced_run(monkeypatch):
 
     assert result["success"] is True
     assert seen == [{"force": True}]
-
-
-def test_test_library_connection_delegates_to_library_index(monkeypatch):
-    expected = {"success": True, "message": "Connected. Indexed 3 library item(s)."}
-    monkeypatch.setattr("shelfmark.core.library_index.test_connection", lambda: expected)
-
-    assert settings_registry.execute_action("hardcover_sync", "test_library_connection") == expected
