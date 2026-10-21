@@ -15,7 +15,8 @@ Roles
 ``cloudflare``    Cloudflare-protected origin: returns a 403 "Just a moment..."
                   challenge page (with ``cf-mitigated: challenge``) until the
                   request carries a ``cf_clearance`` cookie, then serves the real
-                  content. Exercises the app's CF detection + bypasser routing
+                  content. ``CF_GATED_PATHS`` limits the challenge to some paths.
+                  Exercises the app's CF detection + bypasser routing
                   (#284, #226, #202, #1030) without running real CF JS.
 ``flaresolverr``  Mock FlareSolverr implementing the ``/v1`` contract. It fetches
                   the requested URL *with* a clearance cookie and returns the
@@ -64,11 +65,12 @@ CLEARANCE_VALUE = "e2e-cleared-token"
 PAYLOAD_NAME = "moby-dick.epub"
 PAYLOAD_URL = f"{os.environ.get('PAYLOAD_PUBLIC_URL', 'http://mock-aa')}/payload/{PAYLOAD_NAME}"
 
-# Base for AA slow-download links on the detail page. When set to the Cloudflare
-# gate (the `full` profile sets it to http://cf.mock.test), the *download* — not the
-# search — is forced through the gate, so a real download triggers the internal
-# Chrome bypasser to solve the challenge. Empty -> same-origin (no CF).
-SLOW_DOWNLOAD_BASE = os.environ.get("SLOW_DOWNLOAD_BASE", "").rstrip("/")
+# Comma-separated path prefixes the cloudflare role challenges. Empty -> every path.
+# The `full` profile gates only /slow_download/, so search/detail pass straight through
+# and the *download* is what makes the internal Chrome bypasser solve the challenge.
+CF_GATED_PATHS = tuple(
+    prefix.strip() for prefix in os.environ.get("CF_GATED_PATHS", "").split(",") if prefix.strip()
+)
 
 # Real public-domain opening of Moby-Dick (Chapter 1, "Loomings").
 _MOBY_DICK_TEXT = (
@@ -183,14 +185,7 @@ def register_origin_aa(flask_app: Flask) -> None:
 
     @flask_app.route("/md5/<book_id>")
     def aa_detail(book_id: str) -> Response:
-        # __SLOW_BASE__ controls where the AA "slow partner server" links point.
-        # In the `full` profile it's the Cloudflare gate, so the *download* (not the
-        # search/detail) is what forces the internal Chrome bypasser to solve CF.
-        body = (
-            _read_fixture("aa_detail.html")
-            .replace("__MD5__", book_id)
-            .replace("__SLOW_BASE__", SLOW_DOWNLOAD_BASE)
-        )
+        body = _read_fixture("aa_detail.html").replace("__MD5__", book_id)
         return make_response(body, 200)
 
     @flask_app.route("/get.php")
@@ -202,8 +197,8 @@ def register_origin_aa(flask_app: Flask) -> None:
     def aa_slow(rest: str) -> Response:
         # The AA "slow partner server" page: an HTML page whose "Download now" link
         # is the final file URL. shelfmark's _extract_slow_download_url parses this.
-        # Reached (in the full profile) only after the internal Chrome bypasser
-        # solves the Cloudflare gate in front of it.
+        # In the full profile this sits behind the Cloudflare gate, so it is reached
+        # only after the internal Chrome bypasser solves the challenge.
         del rest
         file_url = f"{os.environ.get('AA_FILE_BASE', 'http://mock-aa')}/file/{PAYLOAD_NAME}"
         # The visible text must exceed the internal bypasser's "still loading"
@@ -307,8 +302,9 @@ def register_cloudflare(flask_app: Flask) -> None:
     @flask_app.route("/", defaults={"path": ""})
     @flask_app.route("/<path:path>")
     def cf_gate(path: str) -> Response:
-        if request.cookies.get(CLEARANCE_COOKIE) == CLEARANCE_VALUE:
-            # Cleared: proxy the request through to the real AA origin behaviour.
+        gated = not CF_GATED_PATHS or request.path.startswith(CF_GATED_PATHS)
+        if not gated or request.cookies.get(CLEARANCE_COOKIE) == CLEARANCE_VALUE:
+            # Ungated or cleared: proxy the request through to the real AA origin.
             return _cleared_passthrough(path)
         challenge = _read_fixture("cf_challenge.html")
         resp = make_response(challenge, 403)
