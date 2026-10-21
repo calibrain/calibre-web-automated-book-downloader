@@ -20,6 +20,7 @@ from shelfmark.core.logger import setup_logger
 from shelfmark.core.models import DownloadTask, QueueStatus, SearchMode, normalize_format
 from shelfmark.core.queue import book_queue
 from shelfmark.core.request_helpers import (
+    is_plain_email_address,
     normalize_optional_text,
     normalize_positive_int,
 )
@@ -90,11 +91,6 @@ _PROGRESS_BROADCAST_COMPLETE_PERCENT = 99
 _PROGRESS_BROADCAST_MIN_DELTA = 10
 
 
-def _is_plain_email_address(value: str) -> bool:
-    parsed = parseaddr(value or "")[1]
-    return bool(parsed) and "@" in parsed and parsed == value
-
-
 def _resolve_email_destination(
     user_id: int | None = None,
 ) -> tuple[str | None, str | None]:
@@ -106,7 +102,7 @@ def _resolve_email_destination(
     """
     configured_recipient = str(config.get("EMAIL_RECIPIENT", "", user_id=user_id) or "").strip()
     if configured_recipient:
-        if _is_plain_email_address(configured_recipient):
+        if is_plain_email_address(configured_recipient):
             return configured_recipient, None
         return None, "Configured email recipient is invalid"
 

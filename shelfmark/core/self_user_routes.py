@@ -454,11 +454,14 @@ def register_self_user_routes(
                     }
                 ), 400
 
-            validated_settings, validation_errors = validate_user_settings(settings_payload)
+            validated_settings, validation_errors = validate_user_settings(
+                settings_payload, self_service_user=user
+            )
             if validation_errors:
                 return jsonify(
                     {
                         "error": "Invalid settings payload",
+                        "message": "; ".join(validation_errors),
                         "details": validation_errors,
                     }
                 ), 400

@@ -301,6 +301,165 @@ def test_users_me_update_rejects_non_object_settings_payload(app, user_db):
     assert resp.json["error"] == "Settings must be an object"
 
 
+def _config_get_with_values(values: dict[str, object]):
+    def _get(key: str, default: object = None, user_id: int | None = None) -> object:
+        del user_id
+        return values.get(key, default)
+
+    return _get
+
+
+def _put_self_settings(
+    app, user: dict, settings: dict, config_values: dict[str, object] | None = None
+):
+    values = {"VISIBLE_SELF_SETTINGS_SECTIONS": ["delivery"]}
+    values.update(config_values or {})
+    client = _authed_client_for_user(app, user)
+    with patch("shelfmark.core.self_user_routes.load_active_auth_mode", return_value="builtin"):
+        with patch(
+            "shelfmark.core.self_user_routes.app_config.get",
+            side_effect=_config_get_with_values(values),
+        ):
+            return client.put("/api/users/me", json={"settings": settings})
+
+
+@pytest.mark.parametrize(
+    ("global_destination", "override"),
+    [
+        ("/books", "/config"),
+        ("/books", "/books/../config"),
+        ("/books", "/books/{User}/../../config"),
+        ("/books", "../config"),
+        ("/books", "/booksmark"),
+        ("/books/{User}", "/books/bob"),
+        ("/books/{User}", "/books/{User}/../bob"),
+    ],
+)
+def test_users_me_update_rejects_destination_outside_global(
+    app, user_db, global_destination, override
+):
+    user = user_db.create_user(username="alice")
+
+    resp = _put_self_settings(
+        app, user, {"DESTINATION": override}, {"DESTINATION": global_destination}
+    )
+
+    assert resp.status_code == 400
+    assert resp.json["error"] == "Invalid settings payload"
+    assert any("DESTINATION" in detail for detail in resp.json["details"])
+    assert "DESTINATION" in resp.json["message"]
+    assert user_db.get_user_settings(user["id"]) == {}
+
+
+@pytest.mark.parametrize(
+    ("global_destination", "override"),
+    [
+        ("/books", "/books/alice"),
+        ("/books", "/books"),
+        ("/books", "/books/{User}/fiction"),
+        ("/books", "fiction"),
+        ("/books/{User}", "/books/alice/fiction"),
+        ("/books/{User}", "/books/{User}/fiction"),
+    ],
+)
+def test_users_me_update_accepts_destination_inside_global(
+    app, user_db, global_destination, override
+):
+    user = user_db.create_user(username="alice")
+
+    resp = _put_self_settings(
+        app, user, {"DESTINATION": override}, {"DESTINATION": global_destination}
+    )
+
+    assert resp.status_code == 200
+    assert user_db.get_user_settings(user["id"])["DESTINATION"] == override
+
+
+def test_users_me_update_rejects_non_string_destination(app, user_db):
+    user = user_db.create_user(username="alice")
+
+    resp = _put_self_settings(
+        app, user, {"DESTINATION": ["/books/alice"]}, {"DESTINATION": "/books"}
+    )
+
+    assert resp.status_code == 400
+    assert user_db.get_user_settings(user["id"]) == {}
+
+
+def test_users_me_update_audiobook_destination_falls_back_to_books_base(app, user_db):
+    user = user_db.create_user(username="alice")
+    config_values = {"DESTINATION": "/books", "DESTINATION_AUDIOBOOK": ""}
+
+    rejected = _put_self_settings(
+        app, user, {"DESTINATION_AUDIOBOOK": "/audio/alice"}, config_values
+    )
+    assert rejected.status_code == 400
+    assert any("DESTINATION_AUDIOBOOK" in detail for detail in rejected.json["details"])
+    assert user_db.get_user_settings(user["id"]) == {}
+
+    accepted = _put_self_settings(
+        app, user, {"DESTINATION_AUDIOBOOK": "/books/alice/audio"}, config_values
+    )
+    assert accepted.status_code == 200
+    assert user_db.get_user_settings(user["id"])["DESTINATION_AUDIOBOOK"] == "/books/alice/audio"
+
+
+def test_users_me_update_audiobook_destination_uses_global_audiobook_base(app, user_db):
+    user = user_db.create_user(username="alice")
+    config_values = {"DESTINATION": "/books", "DESTINATION_AUDIOBOOK": "/audio"}
+
+    resp = _put_self_settings(app, user, {"DESTINATION_AUDIOBOOK": "/audio/alice"}, config_values)
+
+    assert resp.status_code == 200
+    assert user_db.get_user_settings(user["id"])["DESTINATION_AUDIOBOOK"] == "/audio/alice"
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected_key"),
+    [
+        ({"BOOKS_OUTPUT_MODE": "ftp"}, "BOOKS_OUTPUT_MODE"),
+        ({"BOOKS_OUTPUT_MODE": ["email"]}, "BOOKS_OUTPUT_MODE"),
+        ({"EMAIL_RECIPIENT": "not-an-email"}, "EMAIL_RECIPIENT"),
+        ({"EMAIL_RECIPIENT": "Alice <alice@example.com>"}, "EMAIL_RECIPIENT"),
+        ({"EMAIL_RECIPIENT": ["alice@example.com"]}, "EMAIL_RECIPIENT"),
+        ({"BOOKLORE_LIBRARY_ID": -1}, "BOOKLORE_LIBRARY_ID"),
+        ({"BOOKLORE_LIBRARY_ID": "abc"}, "BOOKLORE_LIBRARY_ID"),
+        ({"BOOKLORE_LIBRARY_ID": True}, "BOOKLORE_LIBRARY_ID"),
+        ({"BOOKLORE_LIBRARY_ID": 2.5}, "BOOKLORE_LIBRARY_ID"),
+        ({"BOOKLORE_PATH_ID": "-3"}, "BOOKLORE_PATH_ID"),
+    ],
+)
+def test_users_me_update_rejects_invalid_delivery_values(app, user_db, settings, expected_key):
+    user = user_db.create_user(username="alice")
+
+    resp = _put_self_settings(app, user, settings)
+
+    assert resp.status_code == 400
+    assert resp.json["error"] == "Invalid settings payload"
+    assert any(expected_key in detail for detail in resp.json["details"])
+    assert user_db.get_user_settings(user["id"]) == {}
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected"),
+    [
+        ({"BOOKS_OUTPUT_MODE": "email"}, {"BOOKS_OUTPUT_MODE": "email"}),
+        ({"EMAIL_RECIPIENT": " alice@example.com "}, {"EMAIL_RECIPIENT": "alice@example.com"}),
+        ({"EMAIL_RECIPIENT": ""}, {"EMAIL_RECIPIENT": ""}),
+        ({"BOOKLORE_LIBRARY_ID": "3"}, {"BOOKLORE_LIBRARY_ID": "3"}),
+        ({"BOOKLORE_LIBRARY_ID": 3}, {"BOOKLORE_LIBRARY_ID": 3}),
+        ({"BOOKLORE_PATH_ID": 0}, {"BOOKLORE_PATH_ID": 0}),
+    ],
+)
+def test_users_me_update_accepts_valid_delivery_values(app, user_db, settings, expected):
+    user = user_db.create_user(username="alice")
+
+    resp = _put_self_settings(app, user, settings)
+
+    assert resp.status_code == 200
+    assert user_db.get_user_settings(user["id"]) == expected
+
+
 def test_users_me_update_rejects_oidc_email_change(app, user_db):
     user = user_db.create_user(
         username="oidc-user",

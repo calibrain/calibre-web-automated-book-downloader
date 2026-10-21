@@ -878,15 +878,13 @@ def _on_save_downloads(values: dict[str, Any]) -> dict[str, Any]:
     if books_output_mode == "email":
         from email.utils import parseaddr
 
-        def _is_plain_email_address(addr: str) -> bool:
-            parsed = parseaddr(addr or "")[1]
-            return bool(parsed) and "@" in parsed and parsed == addr
+        from shelfmark.core.request_helpers import is_plain_email_address
 
         # Preferred model: single recipient for global default and per-user override.
         raw_recipient = str(effective.get("EMAIL_RECIPIENT", "") or "").strip()
 
         # Optional global fallback: validate only when a default recipient is provided.
-        if raw_recipient and not _is_plain_email_address(raw_recipient):
+        if raw_recipient and not is_plain_email_address(raw_recipient):
             return {
                 "error": True,
                 "message": "Email recipient must be a valid plain email address.",
