@@ -30,6 +30,19 @@ logger = setup_logger(__name__)
 # it relabels a stale row that has none.
 INTERRUPTED_MESSAGE = "Interrupted"
 
+# The message a row gets when its request was delivered by another download.
+SUPERSEDED_MESSAGE = "Superseded by a completed download"
+
+# Delivery states of a download that is still working, as far as the request knows.
+_IN_FLIGHT_STATES = frozenset(
+    {
+        QueueStatus.QUEUED,
+        QueueStatus.RESOLVING,
+        QueueStatus.LOCATING,
+        QueueStatus.DOWNLOADING,
+    }
+)
+
 # The failure reason a reopened request is given.
 REOPEN_REASON = "Interrupted by a restart"
 
@@ -53,6 +66,14 @@ def _parse_timestamp(value: object) -> datetime | None:
 def _is_recent(value: object, *, now: datetime, window: timedelta) -> bool:
     stamp = _parse_timestamp(value)
     return stamp is not None and stamp >= now - window
+
+
+def _request_delivered(user_db: UserDB, request_id: int, completed: set[int]) -> bool:
+    """Whether the request already has its book: a finished download, or a delivered state."""
+    if request_id in completed:
+        return True
+    request = user_db.get_request(request_id)
+    return bool(request) and request.get("delivery_state") == QueueStatus.COMPLETE
 
 
 def _request_stamp(request: dict[str, Any]) -> object:
@@ -89,8 +110,19 @@ def reconcile_interrupted_downloads(
     marked = 0
     reopened = 0
 
+    delivered = history_service.list_completed_request_ids()
     for row in history_service.list_active():
         request_id = row.get("request_id")
+        if request_id and _request_delivered(user_db, int(request_id), delivered):
+            # The request already has its book. This row is an attempt that was overtaken, so
+            # it is closed as superseded, not shown as an interrupted failure with a retry.
+            history_service.finalize_download(
+                task_id=str(row["task_id"]),
+                final_status=QueueStatus.CANCELLED.value,
+                status_message=SUPERSEDED_MESSAGE,
+            )
+            marked += 1
+            continue
         if request_id:
             if not _is_recent(row.get("queued_at"), now=now, window=reopen_window):
                 continue
@@ -106,8 +138,9 @@ def reconcile_interrupted_downloads(
         )
         marked += 1
 
-    # A request can be "queued" with no history row at all, for instance when the row was
-    # never written. After a restart nothing is queued, so it is stranded the same way. A
+    # A request can be "queued" (or "downloading", when its row moved to another request) with
+    # no history row at all, for instance when the row was never written. After a restart
+    # nothing is in flight, so it is stranded the same way. A
     # request that has a row is not one of these: delivery_state is only synced while
     # something polls the queue, so a download that finished with nobody watching still says
     # "queued", and the activity API settles it from the row on its next read.
@@ -115,7 +148,7 @@ def reconcile_interrupted_downloads(
     for request in user_db.list_requests(status=RequestStatus.FULFILLED):
         if int(request["id"]) in requests_with_history:
             continue
-        if request.get("delivery_state") != QueueStatus.QUEUED:
+        if request.get("delivery_state") not in _IN_FLIGHT_STATES:
             continue
         if _is_recent(_request_stamp(request), now=now, window=reopen_window) and (
             user_db.reopen_failed_request(int(request["id"]), failure_reason=REOPEN_REASON)

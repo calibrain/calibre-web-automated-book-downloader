@@ -31,6 +31,7 @@ interface ActivityCardProps {
   onRequestReviewApprove?: RequestApproveHandler;
   onRequestReject?: (requestId: number, adminNote?: string) => Promise<void> | void;
   onRequestRejectConfirm?: (requestId: number, adminNote?: string) => Promise<void> | void;
+  onRequestReopen?: (requestId: number) => Promise<void> | void;
   onRequestDismiss?: (requestId: number) => void;
   showRequestDetailsToggle?: boolean;
   isRequestDetailsOpen?: boolean;
@@ -78,6 +79,7 @@ const actionKey = (action: ActivityCardAction): string => {
     case 'request-approve':
       return `${action.kind}-${action.requestId}-${action.record.id}`;
     case 'request-reject':
+    case 'request-reopen':
     case 'request-cancel':
     case 'request-dismiss':
       return `${action.kind}-${action.requestId}`;
@@ -126,6 +128,12 @@ const actionUiConfig = (
         title: 'Reject',
         className: 'text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30',
         icon: 'cross',
+      };
+    case 'request-reopen':
+      return {
+        title: 'Reopen request',
+        className: 'text-sky-600 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/30',
+        icon: 'retry',
       };
     case 'request-cancel':
       return {
@@ -485,6 +493,7 @@ export const ActivityCard = ({
   onRequestReviewApprove,
   onRequestReject,
   onRequestRejectConfirm,
+  onRequestReopen,
   onRequestDismiss,
   showRequestDetailsToggle = false,
   isRequestDetailsOpen = false,
@@ -600,6 +609,9 @@ export const ActivityCard = ({
       case 'request-reject':
         void onRequestReject?.(action.requestId);
         break;
+      case 'request-reopen':
+        void onRequestReopen?.(action.requestId);
+        break;
       case 'request-cancel':
         onRequestCancel?.(action.requestId);
         break;
@@ -624,6 +636,8 @@ export const ActivityCard = ({
         return Boolean(onRequestApprove);
       case 'request-reject':
         return Boolean(onRequestReject);
+      case 'request-reopen':
+        return Boolean(onRequestReopen);
       case 'request-cancel':
         return Boolean(onRequestCancel);
       case 'request-dismiss':

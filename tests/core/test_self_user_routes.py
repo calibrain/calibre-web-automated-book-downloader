@@ -7,8 +7,9 @@ from unittest.mock import patch
 
 import pytest
 from flask import Flask
+from werkzeug.security import check_password_hash, generate_password_hash
 
-from shelfmark.core.self_user_routes import register_self_user_routes
+from shelfmark.core.self_user_routes import PasswordAttemptLimiter, register_self_user_routes
 from shelfmark.core.user_db import UserDB
 
 
@@ -245,10 +246,11 @@ def test_users_me_update_rejects_oidc_email_change(app, user_db):
 
 
 def test_users_me_update_keeps_password_and_profile_when_settings_rejected(app, user_db):
+    old_hash = generate_password_hash("oldpass99")
     user = user_db.create_user(
         username="alice",
         display_name="Alice Old",
-        password_hash="old_hash",
+        password_hash=old_hash,
     )
     client = _authed_client_for_user(app, user)
 
@@ -261,6 +263,7 @@ def test_users_me_update_keeps_password_and_profile_when_settings_rejected(app, 
                 "/api/users/me",
                 json={
                     "password": "newpass99",
+                    "current_password": "oldpass99",
                     "display_name": "Alice New",
                     "settings": {
                         "USER_NOTIFICATION_ROUTES": [
@@ -274,15 +277,16 @@ def test_users_me_update_keeps_password_and_profile_when_settings_rejected(app, 
     assert resp.json["error"] == "Some settings are admin-only"
 
     stored = user_db.get_user(user_id=user["id"])
-    assert stored["password_hash"] == "old_hash"
+    assert stored["password_hash"] == old_hash
     assert stored["display_name"] == "Alice Old"
 
 
 def test_users_me_update_applies_password_profile_and_settings_together(app, user_db):
+    old_hash = generate_password_hash("oldpass99")
     user = user_db.create_user(
         username="alice",
         display_name="Alice Old",
-        password_hash="old_hash",
+        password_hash=old_hash,
     )
     client = _authed_client_for_user(app, user)
 
@@ -295,6 +299,7 @@ def test_users_me_update_applies_password_profile_and_settings_together(app, use
                 "/api/users/me",
                 json={
                     "password": "newpass99",
+                    "current_password": "oldpass99",
                     "display_name": "Alice New",
                     "settings": {"DESTINATION": "/books/alice"},
                 },
@@ -303,6 +308,147 @@ def test_users_me_update_applies_password_profile_and_settings_together(app, use
     assert resp.status_code == 200
 
     stored = user_db.get_user(user_id=user["id"])
-    assert stored["password_hash"] != "old_hash"
+    assert stored["password_hash"] != old_hash
+    assert check_password_hash(stored["password_hash"], "newpass99")
     assert stored["display_name"] == "Alice New"
     assert user_db.get_user_settings(user["id"])["DESTINATION"] == "/books/alice"
+
+
+def _put_password(client, payload):
+    with patch("shelfmark.core.self_user_routes.load_active_auth_mode", return_value="builtin"):
+        return client.put("/api/users/me", json=payload)
+
+
+def _user_with_password(user_db, password="oldpass99"):
+    return user_db.create_user(username="alice", password_hash=generate_password_hash(password))
+
+
+def _stored_password_still(user_db, user, password):
+    return check_password_hash(user_db.get_user(user_id=user["id"])["password_hash"], password)
+
+
+def test_a_new_password_needs_the_current_one(app, user_db):
+    user = _user_with_password(user_db)
+    client = _authed_client_for_user(app, user)
+
+    resp = _put_password(client, {"password": "newpass99"})
+
+    assert resp.status_code == 400
+    assert resp.json["error"] == "Current password is incorrect"
+    assert _stored_password_still(user_db, user, "oldpass99")
+
+
+def test_a_wrong_current_password_changes_nothing(app, user_db):
+    user = _user_with_password(user_db)
+    client = _authed_client_for_user(app, user)
+
+    resp = _put_password(client, {"password": "newpass99", "current_password": "guess"})
+
+    assert resp.status_code == 400
+    assert _stored_password_still(user_db, user, "oldpass99")
+    assert not _stored_password_still(user_db, user, "newpass99")
+
+
+def test_the_right_current_password_sets_the_new_one(app, user_db):
+    user = _user_with_password(user_db)
+    client = _authed_client_for_user(app, user)
+
+    resp = _put_password(client, {"password": "newpass99", "current_password": "oldpass99"})
+
+    assert resp.status_code == 200
+    assert _stored_password_still(user_db, user, "newpass99")
+    assert not _stored_password_still(user_db, user, "oldpass99")
+
+
+@pytest.mark.parametrize("password", [12345, ["newpass99"], {"a": 1}, True])
+def test_a_password_that_is_not_a_string_is_refused(app, user_db, password):
+    user = _user_with_password(user_db)
+    client = _authed_client_for_user(app, user)
+
+    resp = _put_password(client, {"password": password, "current_password": "oldpass99"})
+
+    assert resp.status_code == 400
+    assert _stored_password_still(user_db, user, "oldpass99")
+
+
+@pytest.mark.parametrize("current", [12345, ["oldpass99"], None, ""])
+def test_a_current_password_that_is_not_a_string_is_refused(app, user_db, current):
+    user = _user_with_password(user_db)
+    client = _authed_client_for_user(app, user)
+
+    resp = _put_password(client, {"password": "newpass99", "current_password": current})
+
+    assert resp.status_code == 400
+    assert _stored_password_still(user_db, user, "oldpass99")
+
+
+def test_a_profile_change_without_a_password_needs_no_current_password(app, user_db):
+    user = _user_with_password(user_db)
+    client = _authed_client_for_user(app, user)
+
+    resp = _put_password(client, {"display_name": "Alice"})
+
+    assert resp.status_code == 200
+    assert _stored_password_still(user_db, user, "oldpass99")
+
+
+class _Attempts:
+    """Stands in for the login lockout and remembers what it was asked."""
+
+    def __init__(self, locked=False):
+        self.locked = locked
+        self.failures = []
+        self.cleared = []
+
+    def limiter(self):
+        return PasswordAttemptLimiter(
+            is_locked=lambda username: self.locked,
+            record_failure=lambda username: self.failures.append(username) or False,
+            clear=self.cleared.append,
+        )
+
+
+@pytest.fixture
+def limited_app(user_db):
+    def _make(attempts):
+        test_app = Flask(__name__)
+        test_app.config["SECRET_KEY"] = "test-secret"
+        test_app.config["TESTING"] = True
+        register_self_user_routes(test_app, user_db, password_attempts=attempts.limiter())
+        return test_app
+
+    return _make
+
+
+def test_a_wrong_current_password_counts_toward_the_login_lockout(limited_app, user_db):
+    attempts = _Attempts()
+    user = _user_with_password(user_db)
+    client = _authed_client_for_user(limited_app(attempts), user)
+
+    _put_password(client, {"password": "newpass99", "current_password": "guess"})
+
+    assert attempts.failures == ["alice"]
+    assert attempts.cleared == []
+
+
+def test_a_locked_account_cannot_try_a_current_password(limited_app, user_db):
+    attempts = _Attempts(locked=True)
+    user = _user_with_password(user_db)
+    client = _authed_client_for_user(limited_app(attempts), user)
+
+    resp = _put_password(client, {"password": "newpass99", "current_password": "oldpass99"})
+
+    assert resp.status_code == 429
+    assert _stored_password_still(user_db, user, "oldpass99")
+    assert attempts.failures == []
+
+
+def test_the_right_current_password_clears_the_failures(limited_app, user_db):
+    attempts = _Attempts()
+    user = _user_with_password(user_db)
+    client = _authed_client_for_user(limited_app(attempts), user)
+
+    resp = _put_password(client, {"password": "newpass99", "current_password": "oldpass99"})
+
+    assert resp.status_code == 200
+    assert attempts.cleared == ["alice"]

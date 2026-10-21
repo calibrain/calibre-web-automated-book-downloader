@@ -10,6 +10,7 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from email.utils import parseaddr
+from functools import partial
 from pathlib import Path
 from threading import Event, Lock
 from typing import TYPE_CHECKING, Any
@@ -1168,13 +1169,45 @@ def _cancel_stalled_task(task_id: str) -> None:
     book_queue.cancel_download(task_id)
 
 
+# With a per-source limit the pool must hold every source's downloads at once.
+_MAX_SOURCES = 8
+
+
+def _per_source_limit() -> int:
+    """Downloads allowed at once from one source, or 0 when only the global limit applies."""
+    return normalize_positive_int(config.get("MAX_CONCURRENT_DOWNLOADS_PER_SOURCE", 0)) or 0
+
+
+def _source_has_room(task: DownloadTask, *, running: dict[str | None, int], limit: int) -> bool:
+    """Whether the task's source is below its limit of simultaneous downloads."""
+    return running.get(task.source, 0) < limit
+
+
+def _working_source_of(task_id: str) -> str | None:
+    """The source a running task counts against, or None when it is only waiting in a client queue."""
+    task = book_queue.get_task(task_id)
+    if task is None or task.client_queued:
+        return None
+    return task.source
+
+
+def _source_of(task_id: str) -> str | None:
+    task = book_queue.get_task(task_id)
+    return task.source if task is not None else None
+
+
 def concurrent_download_loop() -> None:
     """Run the main concurrent download coordinator."""
     max_workers = normalize_positive_int(config.MAX_CONCURRENT_DOWNLOADS) or 1
+    per_source = _per_source_limit()
+    pool_size = per_source * _MAX_SOURCES if per_source else max_workers
     main_loop_sleep_time = _config_float(config.MAIN_LOOP_SLEEP_TIME, 0.5)
-    logger.info("Starting concurrent download loop with %s workers", max_workers)
+    if per_source:
+        logger.info("Starting concurrent download loop with %s downloads per source", per_source)
+    else:
+        logger.info("Starting concurrent download loop with %s workers", max_workers)
 
-    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="Download") as executor:
+    with ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="Download") as executor:
         active_futures: dict[Future, tuple[str, Event]] = {}  # Track active download futures
         stalled_tasks: set[str] = set()  # Track tasks already cancelled due to stall
         consecutive_errors = 0
@@ -1238,19 +1271,36 @@ def concurrent_download_loop() -> None:
                     stalled_tasks.add(task_id)
 
                 # Start new downloads if we have capacity
-                while len(active_futures) < max_workers:
-                    next_download = book_queue.get_next()
+                while len(active_futures) < pool_size:
+                    running_by_source: dict[str | None, int] = {}
+                    if per_source:
+                        for running_id, _flag in active_futures.values():
+                            key = _working_source_of(running_id)
+                            if key is not None:
+                                running_by_source[key] = running_by_source.get(key, 0) + 1
+                    accept = (
+                        partial(_source_has_room, running=running_by_source, limit=per_source)
+                        if per_source
+                        else None
+                    )
+                    next_download = book_queue.get_next(accept) if accept else book_queue.get_next()
                     if not next_download:
                         break
 
-                    # Stagger concurrent downloads to avoid rate limiting on shared download servers
-                    # Only delay if other downloads are already active
-                    if active_futures:
+                    task_id, cancel_flag = next_download
+
+                    # Stagger concurrent downloads to avoid rate limiting on shared download
+                    # servers. With per-source limits only a download from the same source
+                    # shares a server, so only those wait for each other.
+                    sharing_a_server = (
+                        running_by_source.get(_source_of(task_id), 0) > 0
+                        if per_source
+                        else bool(active_futures)
+                    )
+                    if sharing_a_server:
                         stagger_delay = _RNG.uniform(2, 5)
                         logger.debug("Staggering download start by %.1fs", stagger_delay)
                         time.sleep(stagger_delay)
-
-                    task_id, cancel_flag = next_download
 
                     # Submit download job to thread pool
                     future = executor.submit(_process_single_download, task_id, cancel_flag)

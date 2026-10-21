@@ -35,7 +35,7 @@ export const buildRequestListUrl = (baseUrl: string, params: RequestListParams =
 export const buildAdminRequestActionUrl = (
   adminRequestsBaseUrl: string,
   id: number,
-  action: 'fulfil' | 'reject',
+  action: 'fulfil' | 'reject' | 'reopen',
 ): string => {
   return `${adminRequestsBaseUrl}/${encodeURIComponent(String(id))}/${action}`;
 };
