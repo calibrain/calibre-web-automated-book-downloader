@@ -6,6 +6,8 @@ from http import HTTPStatus
 from typing import Any
 
 import requests
+from defusedxml import ElementTree as DefusedElementTree
+from defusedxml.common import DefusedXmlException
 
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.request_helpers import normalize_optional_text
@@ -126,19 +128,28 @@ class JackettClient:
             raise_on_error: Propagate failures instead of returning an empty list.
 
         """
-        url = f"{self.base_url}/api/v2.0/indexers"
+        # /api/v2.0/indexers is the admin UI's endpoint and wants a login cookie; the
+        # Torznab "indexers" function lists the same thing for a plain API key.
+        url = self._torznab_url(ALL_INDEXERS_ID)
         try:
             response = self._session.get(
                 url,
-                params={"configured": "true", "apikey": self.api_key},
+                params={"t": "indexers", "configured": "true", "apikey": self.api_key},
                 timeout=self.timeout,
                 verify=get_ssl_verify(url),
             )
+            error = _torznab_error(response.text)
+            if error:
+                msg = f"Jackett error {error[0]}: {error[1]}"
+                raise RuntimeError(msg)
             response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, list):
-                msg = "Unexpected Jackett indexer list response payload"
-                raise TypeError(msg)
+            root = DefusedElementTree.fromstring(response.text)
+        except (DefusedElementTree.ParseError, DefusedXmlException) as e:
+            if raise_on_error:
+                msg = f"Unexpected Jackett indexer list response: {e}"
+                raise ValueError(msg) from e
+            logger.exception("Failed to parse Jackett indexers")
+            return []
         except _JACKETT_CLIENT_ERRORS:
             if raise_on_error:
                 raise
@@ -146,13 +157,13 @@ class JackettClient:
             return []
 
         indexers: list[dict[str, str]] = []
-        for item in payload:
-            if not isinstance(item, dict) or item.get("configured") is False:
+        for item in root.iter("indexer"):
+            if item.get("configured", "true").lower() == "false":
                 continue
             indexer_id = normalize_optional_text(item.get("id"))
             if indexer_id is None:
                 continue
-            name = normalize_optional_text(item.get("name")) or indexer_id
+            name = normalize_optional_text(item.findtext("title")) or indexer_id
             indexers.append({"id": indexer_id, "name": name})
         return indexers
 

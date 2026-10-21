@@ -34,6 +34,12 @@ TORZNAB_XML = """<?xml version="1.0" encoding="UTF-8"?>
  </channel>
 </rss>"""
 
+INDEXERS_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<indexers>
+  <indexer id="a" configured="true"><title>A</title></indexer>
+  <indexer id="b" configured="false"><title>B</title></indexer>
+</indexers>"""
+
 ERROR_XML = '<error code="100" description="Invalid API Key" />'
 
 
@@ -121,21 +127,29 @@ class TestClient:
         client = _client()
         responses = [
             _response("<caps/>"),
-            _response(json_data=[{"id": "a", "name": "A", "configured": True}]),
+            _response(INDEXERS_XML),
         ]
         with patch.object(client._session, "get", side_effect=responses):
             ok, message = client.test_connection()
         assert ok
         assert "1 indexers" in message
 
-    def test_get_indexers_skips_unconfigured(self):
+    def test_get_indexers_uses_torznab_listing_and_skips_unconfigured(self):
         client = _client()
-        payload = [
-            {"id": "a", "name": "A", "configured": True},
-            {"id": "b", "name": "B", "configured": False},
-        ]
-        with patch.object(client._session, "get", return_value=_response(json_data=payload)):
-            assert client.get_indexers() == [{"id": "a", "name": "A"}]
+        with patch.object(client._session, "get", return_value=_response(INDEXERS_XML)) as get:
+            indexers = client.get_indexers()
+
+        assert get.call_args.kwargs["params"]["t"] == "indexers"
+        assert "/api/v2.0/indexers/all/results/torznab/api" in get.call_args.args[0]
+        assert indexers == [{"id": "a", "name": "A"}]
+
+    def test_get_indexers_raises_on_non_xml_when_requested(self):
+        client = _client()
+        with (
+            patch.object(client._session, "get", return_value=_response("<html>login")),
+            pytest.raises(ValueError, match="Unexpected"),
+        ):
+            client.get_indexers(raise_on_error=True)
 
 
 class TestSource:
