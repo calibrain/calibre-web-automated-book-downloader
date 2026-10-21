@@ -155,6 +155,19 @@ def test_a_torrent_leaving_the_queue_at_zero_gets_a_fresh_start_window() -> None
     assert rec.graces == [bh.QUEUE_GRACE_SECONDS, 0.0, WINDOW]
 
 
+def test_a_queued_torrent_that_moves_keeps_its_longer_queue_grace() -> None:
+    # The orchestrator keeps one deadline; a 10-minute window would cut the queue grace short.
+    rec = _poll([_status(Q, 5.0), _status(Q, 6.0)], clock=[0.0, 1.0, 2.0, 3.0], minutes=10)
+
+    assert rec.graces == [bh.QUEUE_GRACE_SECONDS]
+
+
+def test_a_queued_torrent_that_moves_gets_a_window_longer_than_its_queue_grace() -> None:
+    rec = _poll([_status(Q, 5.0)], clock=[0.0, 1.0, 2.0], minutes=30)
+
+    assert rec.graces == [bh.QUEUE_GRACE_SECONDS, 1800.0]
+
+
 def test_a_queued_torrent_is_not_given_the_start_window_yet() -> None:
     assert _poll([_status(Q)] * 4).graces == [bh.QUEUE_GRACE_SECONDS]  # the queue grace only
 

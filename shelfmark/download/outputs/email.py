@@ -6,7 +6,7 @@ import mimetypes
 import smtplib
 import ssl
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr
 from typing import TYPE_CHECKING, Any
@@ -311,6 +311,7 @@ def _post_process_email(
     *,
     preserve_source_on_failure: bool = False,
 ) -> str | None:
+    from shelfmark.download.postprocess.packs import drop_ignored_files
     from shelfmark.download.postprocess.pipeline import (
         CustomScriptContext,
         OutputPlan,
@@ -373,9 +374,15 @@ def _post_process_email(
     )
     if not prepared:
         return None
+    # Files the user skipped in the pack review are not sent.
+    prepared = replace(prepared, files=drop_ignored_files(prepared.files, task.ignored_files))
 
     success = False
     try:
+        if not prepared.files:
+            status_callback("error", "No book files found")
+            return None
+
         limit_mb_raw = core_config.config.get("EMAIL_ATTACHMENT_SIZE_LIMIT_MB", 25)
         attachment_limit_mb = _parse_attachment_limit_mb(limit_mb_raw)
 
