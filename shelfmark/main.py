@@ -80,6 +80,7 @@ from shelfmark.core.request_helpers import (
     normalize_positive_int,
 )
 from shelfmark.core.request_policy import (
+    DEFAULT_SUPPORTED_CONTENT_TYPES,
     PolicyMode,
     get_source_content_type_capabilities,
     merge_request_policy_settings,
@@ -510,7 +511,9 @@ def _resolve_policy_mode_for_current_user(*, source: Any, content_type: Any) -> 
     return resolved_mode
 
 
-def _policy_block_response(mode: PolicyMode) -> tuple[Response, int]:
+def _policy_block_response(
+    mode: PolicyMode, *, error: str = "Download not allowed by policy"
+) -> tuple[Response, int]:
     logger.debug(
         "download policy guard user=%s db_user_id=%s mode=%s",
         session.get("user_id"),
@@ -521,7 +524,7 @@ def _policy_block_response(mode: PolicyMode) -> tuple[Response, int]:
         return (
             jsonify(
                 {
-                    "error": "Download not allowed by policy",
+                    "error": error,
                     "code": "policy_blocked",
                     "required_mode": PolicyMode.BLOCKED.value,
                 }
@@ -531,13 +534,82 @@ def _policy_block_response(mode: PolicyMode) -> tuple[Response, int]:
     return (
         jsonify(
             {
-                "error": "Download not allowed by policy",
+                "error": error,
                 "code": "policy_requires_request",
                 "required_mode": mode.value,
             }
         ),
         403,
     )
+
+
+# Modes under which the user never sees a release list: request_book asks for the
+# book as a whole and blocked gets nothing. request_release still lists releases,
+# since that user picks the one they ask for. Listing goes through the shared
+# source credentials (Prowlarr, torrent clients, scrapers), so the routes that
+# list have to refuse these two modes just as the download route does.
+_RELEASE_LISTING_REFUSED_MODES = frozenset({PolicyMode.REQUEST_BOOK, PolicyMode.BLOCKED})
+
+
+def _release_listing_refusal(*, source: Any, content_type: Any) -> PolicyMode | None:
+    """Return the policy mode when the current user may not list releases from `source`."""
+    mode = _resolve_policy_mode_for_current_user(source=source, content_type=content_type)
+    if mode is not None and mode in _RELEASE_LISTING_REFUSED_MODES:
+        return mode
+    return None
+
+
+def _release_listing_block_response(mode: PolicyMode) -> tuple[Response, int]:
+    return _policy_block_response(mode, error="Release listing not allowed by policy")
+
+
+def _sources_allowed_for_listing(
+    sources: list[str], content_type: Any
+) -> tuple[list[str], PolicyMode | None]:
+    """Drop the sources the current user may not list releases from.
+
+    Returns the sources left and, when any was dropped, the mode of the first one
+    dropped, which is what the response reports when nothing is left.
+    """
+    allowed: list[str] = []
+    refused_mode: PolicyMode | None = None
+    for source_name in sources:
+        refusal = _release_listing_refusal(source=source_name, content_type=content_type)
+        if refusal is None:
+            allowed.append(source_name)
+        elif refused_mode is None:
+            refused_mode = refusal
+    return allowed, refused_mode
+
+
+def _release_source_record_refusal(source_name: str) -> PolicyMode | None:
+    """Policy refusal for resolving one browse record of a release source.
+
+    The record's content type is not known before it is fetched, so the user is
+    refused only when every content type the source supports is refused.
+    """
+    capabilities = get_source_content_type_capabilities()
+    content_types = capabilities.get(normalize_source(source_name)) or set(
+        DEFAULT_SUPPORTED_CONTENT_TYPES
+    )
+    refused_mode: PolicyMode | None = None
+    for content_type in sorted(content_types):
+        refusal = _release_listing_refusal(source=source_name, content_type=content_type)
+        if refusal is None:
+            return None
+        if refused_mode is None:
+            refused_mode = refusal
+    return refused_mode
+
+
+def _release_payload_listing_gate(data: dict[str, Any]) -> tuple[Response, int] | None:
+    """Policy gate for routes that take a release payload, shared with the inspect route."""
+    source = data["source"]
+    resolved_content_type, _inferred = _resolve_release_content_type(data, source)
+    refusal = _release_listing_refusal(source=source, content_type=resolved_content_type)
+    if refusal is None:
+        return None
+    return _release_listing_block_response(refusal)
 
 
 def _resolve_download_user_context(
@@ -1219,7 +1291,7 @@ def _serialize_release(release: Release) -> dict:
     return result
 
 
-register_release_inspect_routes(app, login_required)
+register_release_inspect_routes(app, login_required, policy_gate=_release_payload_listing_gate)
 
 
 @app.route("/api/releases/download", methods=["POST"])
@@ -3230,8 +3302,6 @@ def api_releases() -> Response | tuple[Response, int]:
         source_query_filters = None
         is_source_provider = bool(provider) and source_results_are_releases(provider)
 
-        book: BookMetadata
-
         if not provider or not book_id:
             if not source_filter or not has_browse_filters:
                 return jsonify({"error": "Parameters 'provider' and 'book_id' are required"}), 400
@@ -3239,9 +3309,31 @@ def api_releases() -> Response | tuple[Response, int]:
                 return jsonify(
                     {"error": f"Source does not support browse release search: {source_filter}"}
                 ), 400
-
-            book = _build_source_query_book(query_text, browse_filters)
             source_query_filters = browse_filters
+
+        # Determine which release sources to search
+        if source_filter:
+            sources_to_search = [source_filter]
+        elif is_source_provider:
+            # Source-backed browse flows stay within the source that produced the record.
+            sources_to_search = [provider]
+        else:
+            # Search only enabled sources
+            sources_to_search = [src["name"] for src in list_available_sources() if src["enabled"]]
+
+        # The policy gate comes before anything is asked of a source: listing goes
+        # through the shared source credentials, so a user whose policy never shows
+        # a release list (request_book, blocked) must not reach them.
+        sources_to_search, refused_mode = _sources_allowed_for_listing(
+            sources_to_search, content_type
+        )
+        if not sources_to_search and refused_mode is not None:
+            return _release_listing_block_response(refused_mode)
+
+        book: BookMetadata
+
+        if source_query_filters is not None:
+            book = _build_source_query_book(query_text, browse_filters)
         elif is_source_provider:
             # Source-backed browse flows can reopen the release modal with provider=<source name>.
             # In that flow, treat the source-native record as release-search context instead of
@@ -3299,16 +3391,6 @@ def api_releases() -> Response | tuple[Response, int]:
                     # from the original and would otherwise win the release search.
                     book.search_title = title_param
                 book.title = title_param
-
-        # Determine which release sources to search
-        if source_query_filters is not None or source_filter:
-            sources_to_search = [source_filter]
-        elif is_source_provider:
-            # Source-backed browse flows stay within the source that produced the record.
-            sources_to_search = [provider]
-        else:
-            # Search only enabled sources
-            sources_to_search = [src["name"] for src in list_available_sources() if src["enabled"]]
 
         # Search each source for releases.
         #
@@ -3439,6 +3521,9 @@ def api_release_source_record(source_name: str, record_id: str) -> Response | tu
         from shelfmark.release_sources import get_source
 
         source = get_source(source_name)
+        refused_mode = _release_source_record_refusal(source_name)
+        if refused_mode is not None:
+            return _release_listing_block_response(refused_mode)
         record = source.get_record(record_id)
         if record is None:
             return jsonify({"error": "Record not found"}), 404
