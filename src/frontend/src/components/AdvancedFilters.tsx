@@ -131,10 +131,7 @@ export const AdvancedFilters = ({
   const wrapperClassName = formClassName ? 'px-2' : 'px-2 lg:ml-16 lg:w-[calc(50vw+4rem)]';
 
   const settingsForm = (
-    <div
-      className={wrapperClassName}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
+    <div className={wrapperClassName} role="presentation" onMouseDown={(e) => e.stopPropagation()}>
       {onClose && (
         <div className="mb-1 flex justify-end">
           <button
