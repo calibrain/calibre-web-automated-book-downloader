@@ -120,6 +120,9 @@ class TestStrictMatch:
         release = _release(protocol=ReleaseProtocol.NZB, seeders=None)
         assert _strict(release, min_seeders=5) is True
 
+    def test_a_release_without_a_title_does_not_match(self):
+        assert _strict(_release(title=None)) is False
+
 
 class TestPickBestRelease:
     def test_empty_returns_none(self):

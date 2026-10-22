@@ -147,7 +147,7 @@ def strict_match(
     """Return True only if the release confidently matches the requested audiobook."""
     formats = audiobook_formats if audiobook_formats is not None else _audiobook_formats()
     return (
-        _title_match(book, release.title)
+        _title_match(book, release.title or "")
         and _author_match(book, release)
         and _format_match(release, formats)
         and _seeders_ok(release, min_seeders)

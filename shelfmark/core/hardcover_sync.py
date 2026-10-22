@@ -66,8 +66,8 @@ def _build_provider() -> Any | None:
 
 def resolve_request_owner(user_db: UserDB) -> int | None:
     """Return the lowest-id admin, who owns synced requests and approves auto-downloads."""
-    admins = [user for user in user_db.list_users() if user.get("role") == "admin"]
-    return int(admins[0]["id"]) if admins else None
+    admin = user_db.get_first_admin()
+    return int(admin["id"]) if admin else None
 
 
 def _primary_author(book: BookMetadata) -> str:
