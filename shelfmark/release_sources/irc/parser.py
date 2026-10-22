@@ -5,13 +5,17 @@ Parses the text files sent via DCC that contain search results.
 
 import re
 import zipfile
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.utils import ARCHIVE_FORMATS, AUDIOBOOK_FORMATS
+from shelfmark.core.utils import (
+    ARCHIVE_FORMATS,
+    AUDIOBOOK_FORMATS,
+    DEFAULT_EBOOK_FORMATS,
+    normalize_format_list,
+)
 from shelfmark.core.utils import is_audiobook as check_audiobook
 
 if TYPE_CHECKING:
@@ -52,30 +56,12 @@ ALL_RECOGNIZED_FORMATS = tuple(
 )
 
 
-def _normalize_config_formats(raw_formats: object) -> set[str]:
-    """Normalize configured format values into a lowercase set."""
-    if isinstance(raw_formats, str):
-        return {fmt.strip().lower() for fmt in raw_formats.split(",") if fmt.strip()}
-    if isinstance(raw_formats, Iterable):
-        normalized_formats: set[str] = set()
-        for fmt in raw_formats:
-            normalized = str(fmt).strip().lower()
-            if normalized:
-                normalized_formats.add(normalized)
-        return normalized_formats
-    return set()
-
-
 def _get_supported_formats(content_type: str | None = None) -> set[str]:
     """Get the supported formats for the requested content type."""
     if check_audiobook(content_type):
-        formats = config.get("SUPPORTED_AUDIOBOOK_FORMATS", ["m4b", "mp3"])
-    else:
-        formats = config.get(
-            "SUPPORTED_FORMATS", ["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"]
-        )
-
-    return _normalize_config_formats(formats)
+        formats = config.get("SUPPORTED_AUDIOBOOK_FORMATS", None)
+        return set(normalize_format_list(formats, ["m4b", "mp3"]))
+    return set(normalize_format_list(config.get("SUPPORTED_FORMATS", None), DEFAULT_EBOOK_FORMATS))
 
 
 # Regex to parse result lines
