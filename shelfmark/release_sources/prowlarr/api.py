@@ -11,7 +11,7 @@ import requests
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.utils import normalize_http_url
-from shelfmark.download.network import get_ssl_verify
+from shelfmark.download.network import get_proxies, get_ssl_verify
 from shelfmark.release_sources.prowlarr.torznab import parse_torznab_xml
 from shelfmark.release_sources.prowlarr.utils import coerce_float_like, coerce_int_like
 
@@ -183,6 +183,7 @@ class ProwlarrClient:
                 params=params,
                 json=json_data,
                 timeout=self.timeout,
+                proxies=get_proxies(url),
                 verify=get_ssl_verify(url),
             )
 
@@ -437,6 +438,7 @@ class ProwlarrClient:
                     # Override the session default JSON accept header.
                     "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8"
                 },
+                proxies=get_proxies(url),
                 verify=get_ssl_verify(url),
             )
             if not response.ok:
