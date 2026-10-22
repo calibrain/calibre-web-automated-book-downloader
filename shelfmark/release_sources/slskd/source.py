@@ -19,7 +19,13 @@ if TYPE_CHECKING:
 
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.utils import ARCHIVE_FORMATS, AUDIOBOOK_FORMATS, normalize_http_url
+from shelfmark.core.utils import (
+    ARCHIVE_FORMATS,
+    AUDIOBOOK_FORMATS,
+    DEFAULT_EBOOK_FORMATS,
+    normalize_format_list,
+    normalize_http_url,
+)
 from shelfmark.core.utils import is_audiobook as check_audiobook
 from shelfmark.release_sources import (
     ColumnAlign,
@@ -54,7 +60,6 @@ MAX_QUERY_VARIANTS = 3
 
 # Whole-book audio files: one file holds the entire book, unlike chapter files.
 CONTAINER_FORMATS = frozenset({"m4b", "m4a"})
-_DEFAULT_EBOOK_FORMATS = ["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"]
 _DEFAULT_AUDIOBOOK_FORMATS = [*AUDIOBOOK_FORMATS, *ARCHIVE_FORMATS]
 
 
@@ -126,22 +131,15 @@ def make_source_id(username: str, remote_path: str) -> str:
     return f"{SOURCE_NAME}:{digest}"
 
 
-def _normalize_formats(raw: object, defaults: list[str]) -> set[str]:
-    if isinstance(raw, str):
-        raw = [part for part in raw.replace(",", " ").split() if part]
-    if not isinstance(raw, (list, tuple)):
-        return {f.lower() for f in defaults}
-    formats = {str(item).strip().lower().lstrip(".") for item in raw if str(item).strip()}
-    return formats or {f.lower() for f in defaults}
-
-
 def get_supported_formats(content_type: str | None) -> set[str]:
     """Return the configured formats for the requested content type."""
     if check_audiobook(content_type):
-        return _normalize_formats(
-            config.get("SUPPORTED_AUDIOBOOK_FORMATS", None), _DEFAULT_AUDIOBOOK_FORMATS
+        return set(
+            normalize_format_list(
+                config.get("SUPPORTED_AUDIOBOOK_FORMATS", None), _DEFAULT_AUDIOBOOK_FORMATS
+            )
         )
-    return _normalize_formats(config.get("SUPPORTED_FORMATS", None), _DEFAULT_EBOOK_FORMATS)
+    return set(normalize_format_list(config.get("SUPPORTED_FORMATS", None), DEFAULT_EBOOK_FORMATS))
 
 
 def _coerce_int(value: object) -> int:

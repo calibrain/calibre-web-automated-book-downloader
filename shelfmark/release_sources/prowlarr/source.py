@@ -20,7 +20,7 @@ from shelfmark.core.logger import setup_logger
 from shelfmark.core.request_helpers import coerce_int, normalize_optional_text
 from shelfmark.core.search_plan import ReleaseSearchVariant
 from shelfmark.core.utils import AUDIOBOOK_FORMATS as CORE_AUDIOBOOK_FORMATS
-from shelfmark.core.utils import normalize_http_url
+from shelfmark.core.utils import DEFAULT_EBOOK_FORMATS, normalize_format_list, normalize_http_url
 from shelfmark.release_sources import (
     ColumnAlign,
     ColumnColorHint,
@@ -377,9 +377,6 @@ _KNOWN_FILE_EXTENSIONS = frozenset(ALL_BOOK_FORMATS) | {
     "xps",
 }
 
-# Same default as the Supported Book Formats setting and post-processing.
-_DEFAULT_SUPPORTED_FORMATS = ("epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr")
-
 
 def _unsupported_title_extension(title: str, content_type: str) -> str | None:
     """Return the trailing extension of a title when it is a format the user did not enable.
@@ -396,12 +393,7 @@ def _unsupported_title_extension(title: str, content_type: str) -> str | None:
     extension = match.group(1)
     if extension not in _KNOWN_FILE_EXTENSIONS:
         return None
-    configured = config.get("SUPPORTED_FORMATS", None)
-    if isinstance(configured, str):
-        configured = configured.split(",")
-    if not isinstance(configured, (list, tuple, set)) or not configured:
-        configured = _DEFAULT_SUPPORTED_FORMATS
-    supported = {str(fmt).strip().lower() for fmt in configured}
+    supported = normalize_format_list(config.get("SUPPORTED_FORMATS", None), DEFAULT_EBOOK_FORMATS)
     if extension in supported:
         return None
     return extension
