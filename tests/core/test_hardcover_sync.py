@@ -145,8 +145,10 @@ def test_existing_request_keys_pair_provider_id_with_content_type(user_db):
     user = user_db.create_user(username="reader", role="user")
     for book_data in (
         {"title": "A", "author": "X", "provider": "hardcover", "provider_id": 11},
-        {"title": "B", "author": "X", "provider": "openlibrary", "id": "OL22W"},
-        {"title": "C", "author": "X", "provider": "manual"},
+        {"title": "B", "author": "X", "provider": "hardcover", "id": "22"},
+        {"title": "C", "author": "X", "provider": "openlibrary", "id": "OL22W"},
+        {"title": "D", "author": "X", "provider": "googlebooks", "provider_id": 33},
+        {"title": "E", "author": "X", "provider": "manual"},
     ):
         user_db.create_request(
             user_id=user["id"],
@@ -158,7 +160,7 @@ def test_existing_request_keys_pair_provider_id_with_content_type(user_db):
 
     assert hardcover_sync._existing_request_keys(user_db) == {
         ("11", "audiobook"),
-        ("OL22W", "audiobook"),
+        ("22", "audiobook"),
     }
 
 
