@@ -89,6 +89,64 @@ def _coerce_positive_minutes(raw_minutes: object) -> int | None:
     return minutes if minutes > 0 else None
 
 
+def list_cached_release_files(release_data: dict[str, Any]) -> list[PackFile] | None:
+    """List a cached torrent release's files from its .torrent, without downloading.
+
+    Magnet-only and usenet releases cannot be listed ahead of time. Shared with the
+    Jackett handler, whose releases live in the same cache.
+    """
+    source_id = str(release_data.get("source_id") or "")
+    prowlarr_result = get_release(source_id) if source_id else None
+    if not prowlarr_result or get_protocol(prowlarr_result) != "torrent":
+        return None
+    download_url = sanitize_download_url(str(prowlarr_result.get("downloadUrl") or "").strip())
+    if not download_url or download_url.startswith("magnet:"):
+        return None
+    expected_hash = str(prowlarr_result.get("infoHash") or "").strip() or None
+    info = extract_torrent_info(download_url, expected_hash=expected_hash)
+    if not info.torrent_data:
+        return None
+    return extract_file_list_from_torrent(info.torrent_data)
+
+
+def restore_download_request_from_task(task: DownloadTask) -> DownloadRequest | None:
+    """Rebuild a DownloadRequest from a task's saved retry fields.
+
+    Shared with the Jackett handler.
+    """
+    retry_download_url = normalize_optional_text(getattr(task, "retry_download_url", None))
+    retry_download_protocol = normalize_optional_text(
+        getattr(task, "retry_download_protocol", None)
+    )
+    if retry_download_url is None or retry_download_protocol is None:
+        return None
+
+    protocol = retry_download_protocol.lower()
+    if protocol not in {"torrent", "usenet"}:
+        return None
+
+    ratio_limit = getattr(task, "retry_ratio_limit", None)
+    if not isinstance(ratio_limit, (int, float)) or isinstance(ratio_limit, bool):
+        ratio_limit = None
+
+    seeding_time_limit = getattr(task, "retry_seeding_time_limit_minutes", None)
+    if not isinstance(seeding_time_limit, int) or isinstance(seeding_time_limit, bool):
+        seeding_time_limit = None
+
+    return DownloadRequest(
+        url=retry_download_url,
+        protocol=protocol,
+        release_name=(
+            normalize_optional_text(getattr(task, "retry_release_name", None))
+            or task.title
+            or "Unknown"
+        ),
+        expected_hash=normalize_optional_text(getattr(task, "retry_expected_hash", None)),
+        seeding_time_limit=seeding_time_limit,
+        ratio_limit=float(ratio_limit) if ratio_limit is not None else None,
+    )
+
+
 @register_handler("prowlarr")
 class ProwlarrHandler(ExternalClientHandler):
     """Handler for Prowlarr downloads via configured torrent or usenet client."""
@@ -135,22 +193,8 @@ class ProwlarrHandler(ExternalClientHandler):
         return settings.get(indexer_id)
 
     def list_files(self, release_data: dict[str, Any]) -> list[PackFile] | None:
-        """List a cached torrent release's files from its .torrent, without downloading.
-
-        Magnet-only and usenet releases cannot be listed ahead of time.
-        """
-        source_id = str(release_data.get("source_id") or "")
-        prowlarr_result = get_release(source_id) if source_id else None
-        if not prowlarr_result or get_protocol(prowlarr_result) != "torrent":
-            return None
-        download_url = sanitize_download_url(str(prowlarr_result.get("downloadUrl") or "").strip())
-        if not download_url or download_url.startswith("magnet:"):
-            return None
-        expected_hash = str(prowlarr_result.get("infoHash") or "").strip() or None
-        info = extract_torrent_info(download_url, expected_hash=expected_hash)
-        if not info.torrent_data:
-            return None
-        return extract_file_list_from_torrent(info.torrent_data)
+        """List a cached torrent release's files from its .torrent, without downloading."""
+        return list_cached_release_files(release_data)
 
     def _get_client(self, protocol: str) -> DownloadClient | None:
         """Compatibility shim so module-level patching still works in tests."""
@@ -200,37 +244,7 @@ class ProwlarrHandler(ExternalClientHandler):
     @classmethod
     def _restore_download_request_from_task(cls, task: DownloadTask) -> DownloadRequest | None:
         """Rebuild a DownloadRequest when the in-memory Prowlarr cache is gone."""
-        retry_download_url = normalize_optional_text(getattr(task, "retry_download_url", None))
-        retry_download_protocol = normalize_optional_text(
-            getattr(task, "retry_download_protocol", None)
-        )
-        if retry_download_url is None or retry_download_protocol is None:
-            return None
-
-        protocol = retry_download_protocol.lower()
-        if protocol not in {"torrent", "usenet"}:
-            return None
-
-        ratio_limit = getattr(task, "retry_ratio_limit", None)
-        if not isinstance(ratio_limit, (int, float)) or isinstance(ratio_limit, bool):
-            ratio_limit = None
-
-        seeding_time_limit = getattr(task, "retry_seeding_time_limit_minutes", None)
-        if not isinstance(seeding_time_limit, int) or isinstance(seeding_time_limit, bool):
-            seeding_time_limit = None
-
-        return DownloadRequest(
-            url=retry_download_url,
-            protocol=protocol,
-            release_name=(
-                normalize_optional_text(getattr(task, "retry_release_name", None))
-                or task.title
-                or "Unknown"
-            ),
-            expected_hash=normalize_optional_text(getattr(task, "retry_expected_hash", None)),
-            seeding_time_limit=seeding_time_limit,
-            ratio_limit=float(ratio_limit) if ratio_limit is not None else None,
-        )
+        return restore_download_request_from_task(task)
 
     def _resolve_download(
         self,

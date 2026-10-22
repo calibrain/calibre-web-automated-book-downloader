@@ -1,6 +1,6 @@
 """Jackett download handler - resolves releases and delegates lifecycle to shared clients."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.request_helpers import normalize_optional_text
@@ -25,7 +25,10 @@ from shelfmark.download.clients.base_handler import (
 )
 from shelfmark.release_sources import register_handler
 from shelfmark.release_sources.prowlarr.cache import get_release, remove_release
-from shelfmark.release_sources.prowlarr.handler import ProwlarrHandler
+from shelfmark.release_sources.prowlarr.handler import (
+    list_cached_release_files,
+    restore_download_request_from_task,
+)
 from shelfmark.release_sources.prowlarr.utils import (
     get_preferred_download_url,
     get_protocol,
@@ -35,6 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from shelfmark.core.models import DownloadTask
+    from shelfmark.download.postprocess.packs import PackFile
 
 logger = setup_logger(__name__)
 
@@ -52,12 +56,12 @@ class JackettHandler(ExternalClientHandler):
     are namespaced per source), so protocol and URL selection are reused as-is.
     """
 
-    # Neither depends on handler state: they only read the shared release cache and
-    # the task's retry fields.
-    list_files = ProwlarrHandler.list_files
-    _restore_download_request_from_task = staticmethod(
-        ProwlarrHandler._restore_download_request_from_task
-    )
+    def list_files(self, release_data: dict[str, Any]) -> list[PackFile] | None:
+        return list_cached_release_files(release_data)
+
+    @classmethod
+    def _restore_download_request_from_task(cls, task: DownloadTask) -> DownloadRequest | None:
+        return restore_download_request_from_task(task)
 
     def _get_client(self, protocol: str) -> DownloadClient | None:
         return get_client(protocol)
