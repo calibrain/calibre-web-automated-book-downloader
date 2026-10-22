@@ -43,6 +43,8 @@ _USER_ROUTE_PLACEHOLDER_PATTERN = re.compile(r"\{(user|email)\}", re.IGNORECASE)
 # Apprise splits a decoded value on these, so "John Smith" or '"a,b@x.com"@y.com' would reach
 # extra topics or recipients (e.g. add recipients to an admin-set mailto route).
 _UNSAFE_PLACEHOLDER_VALUE = re.compile(r'[\s,;/\\"]')
+# Percent-encoding leaves dots alone, so a username of ".." would walk up a webhook URL's path.
+_DOTS_ONLY_PLACEHOLDER_VALUE = re.compile(r"\.+")
 
 
 class _ApprisePluginWithUrl(Protocol):
@@ -403,7 +405,8 @@ def expand_user_route_placeholders(urls: list[str], user_id: int) -> list[str]:
     is dropped, because Apprise decodes percent-escapes there (so an email such as
     ``x%40127.0.0.1`` would still reach 127.0.0.1). Values are fully percent-encoded, and a
     value containing whitespace or any of ``, ; / \\ "`` is ignored, since Apprise would split it
-    into several targets. URLs that need a value the user does not have are dropped.
+    into several targets, and so is a value made only of dots, which would change the URL path.
+    URLs that need a value the user does not have are dropped.
     Callers should still validate the returned URLs, not the templates.
     """
     if not any(_USER_ROUTE_PLACEHOLDER_PATTERN.search(url) for url in urls):
@@ -415,11 +418,12 @@ def expand_user_route_placeholders(urls: list[str], user_id: int) -> list[str]:
         value = str(user.get(field) or "").strip()
         if value and (
             _UNSAFE_PLACEHOLDER_VALUE.search(value)
+            or _DOTS_ONLY_PLACEHOLDER_VALUE.fullmatch(value)
             or (name == "email" and not is_plain_email_address(value))
         ):
             logger.info(
                 "Ignoring the %s on file for user_id=%s in notification routes: it could "
-                "split into several targets",
+                "split into several targets or change the URL path",
                 field,
                 user_id,
             )

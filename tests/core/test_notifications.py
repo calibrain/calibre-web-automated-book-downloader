@@ -775,6 +775,32 @@ def test_expand_user_route_placeholders_ignores_values_apprise_would_split(
     assert urls == expected
 
 
+@pytest.mark.parametrize(
+    ("username", "expected"),
+    [
+        # Left unencoded, ".." would turn /notify/.. into /, another path on the same host.
+        (".", []),
+        ("..", []),
+        ("...", []),
+        ("john.doe", ["json://hook.example/notify/john.doe"]),
+        ("..john", ["json://hook.example/notify/..john"]),
+    ],
+)
+def test_expand_user_route_placeholders_ignores_dots_only_values(monkeypatch, username, expected):
+    monkeypatch.setattr(
+        notifications_module,
+        "_get_route_user",
+        lambda user_id: {"username": username, "email": "user@example.com"},
+    )
+
+    urls = notifications_module.expand_user_route_placeholders(
+        ["json://hook.example/notify/{User}"],
+        7,
+    )
+
+    assert urls == expected
+
+
 def test_expand_user_route_placeholders_drops_routes_missing_a_value(monkeypatch):
     monkeypatch.setattr(
         notifications_module,

@@ -61,7 +61,7 @@ Override how a user searches, on top of the global search defaults:
 
 Users can configure personal notification routes, separate from the global notification settings. Each route targets a URL (e.g. an Apprise-compatible endpoint) and can be scoped to specific event types or all events.
 
-Route URLs can use `{User}` and `{Email}` in their path or query, filled in from each user's account when a notification is sent. A route is skipped for users without the value it needs, or whose value contains spaces or any of `, ; / \ "`, since those would split it into several targets. The admin-set default routes apply to every user who hasn't set routes of their own and can use any service, so one default such as `mailtos://user:pass@smtp.example.com?to={Email}` reaches each user at their own address. Routes a user sets themselves stay limited to the personal-route services, e.g. `ntfys://ntfy.sh/shelfmark-{User}`.
+Route URLs can use `{User}` and `{Email}` in their path or query, filled in from each user's account when a notification is sent. A route is skipped for users without the value it needs, or whose value contains spaces or any of `, ; / \ "` (or is only dots, such as `..`), since those would split it into several targets or change the URL path. The admin-set default routes apply to every user who hasn't set routes of their own and can use any service, so one default such as `mailtos://user:pass@smtp.example.com?to={Email}` reaches each user at their own address. The service a default points to then receives each user's email address, so only use one you trust with it. Routes a user sets themselves stay limited to the personal-route services, e.g. `ntfys://ntfy.sh/shelfmark-{User}`.
 
 ### Request Policy (admin-only)
 
