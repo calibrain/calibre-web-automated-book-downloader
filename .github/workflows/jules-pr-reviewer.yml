@@ -21,7 +21,7 @@ jobs:
       contents: read
       checks: write
     steps:
-      - uses: calibrain/jules-pr-reviewer@9061503ac181f0da714bcfa9f16939dd6148f688 # v0.0.2
+      - uses: calibrain/jules-pr-reviewer@v0.0.3
         with:
           jules_api_key: ${{ secrets.JULES_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
