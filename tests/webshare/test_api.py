@@ -154,3 +154,22 @@ def test_unreadable_response_raises():
         pytest.raises(WebshareError),
     ):
         WebshareClient("user", "pw").login()
+
+
+def test_changed_password_forces_new_login():
+    logins = []
+
+    def post(url, data, **kwargs):
+        if url.endswith("/salt/"):
+            return _response(_xml("<salt>s</salt>"))
+        if url.endswith("/login/"):
+            logins.append(data["password"])
+            return _response(_xml(f"<token>T{len(logins)}</token>"))
+        return _response(_xml("<link>https://dl.example/file.epub</link>"))
+
+    with patch.object(api.requests, "post", side_effect=post):
+        WebshareClient("user", "old").file_link("a")
+        WebshareClient("user", "new").file_link("a")
+
+    assert len(logins) == 2
+    assert logins[0] != logins[1]

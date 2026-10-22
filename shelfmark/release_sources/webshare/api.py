@@ -9,6 +9,7 @@ All shelfmark-stateful behaviour (config, task naming) lives in source.py/handle
 """
 
 import hashlib
+import hmac
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -89,7 +90,9 @@ def md5_crypt(password: str, salt: str, magic: str = "$1$") -> str:
     """FreeBSD md5-crypt (``$1$salt$hash``), the scheme Webshare salts passwords with.
 
     Python dropped the ``crypt`` module in 3.13, so this is a straight port of the
-    reference algorithm (the same one ``openssl passwd -1`` implements).
+    reference algorithm (the same one ``openssl passwd -1`` implements). MD5 here is
+    dictated by Webshare's login protocol, not chosen to protect anything at rest, hence
+    ``usedforsecurity=False`` throughout this module.
     """
     salt = salt.removeprefix(magic)
     salt = salt.split("$", 1)[0][:8]
@@ -98,7 +101,7 @@ def md5_crypt(password: str, salt: str, magic: str = "$1$") -> str:
     salt_b = salt.encode()
     magic_b = magic.encode()
 
-    alternate = hashlib.md5(pw + salt_b + pw).digest()  # noqa: S324 - md5-crypt is md5 by definition
+    alternate = hashlib.md5(pw + salt_b + pw, usedforsecurity=False).digest()
     ctx = pw + magic_b + salt_b
     for remaining in range(len(pw), 0, -16):
         ctx += alternate[: min(16, remaining)]
@@ -106,7 +109,7 @@ def md5_crypt(password: str, salt: str, magic: str = "$1$") -> str:
     while length:
         ctx += b"\x00" if length & 1 else pw[:1]
         length >>= 1
-    final = hashlib.md5(ctx).digest()  # noqa: S324
+    final = hashlib.md5(ctx, usedforsecurity=False).digest()
 
     for i in range(1000):
         round_ctx = pw if i & 1 else final
@@ -115,7 +118,7 @@ def md5_crypt(password: str, salt: str, magic: str = "$1$") -> str:
         if i % 7:
             round_ctx += pw
         round_ctx += final if i & 1 else pw
-        final = hashlib.md5(round_ctx).digest()  # noqa: S324
+        final = hashlib.md5(round_ctx, usedforsecurity=False).digest()
 
     encoded = "".join(
         _to64((final[a] << 16) | (final[b] << 8) | final[c], 4)
@@ -127,8 +130,10 @@ def md5_crypt(password: str, salt: str, magic: str = "$1$") -> str:
 
 def hash_password(username: str, password: str, salt: str) -> tuple[str, str]:
     """Return the ``(password, digest)`` pair Webshare's login endpoint expects."""
-    password_hash = hashlib.sha1(md5_crypt(password, salt).encode()).hexdigest()  # noqa: S324
-    digest = hashlib.md5(f"{username}:Webshare:{password_hash}".encode()).hexdigest()  # noqa: S324
+    crypted = md5_crypt(password, salt).encode()
+    password_hash = hashlib.sha1(crypted, usedforsecurity=False).hexdigest()
+    digest_input = f"{username}:Webshare:{password_hash}".encode()
+    digest = hashlib.md5(digest_input, usedforsecurity=False).hexdigest()
     return password_hash, digest
 
 
@@ -193,23 +198,20 @@ def _post(
 class WebshareClient:
     """Session-aware Webshare client.
 
-    The login token is cached per username+password at module level so searches and
+    The login token is cached per username at module level so searches and
     downloads share one session instead of logging in for every request. A call that
     fails while authenticated drops the token and retries once with a fresh login, which
-    covers tokens Webshare expired server-side.
+    covers tokens Webshare expired server-side. A cached token is only reused while the
+    password it was obtained with is unchanged, so editing the password forces a login.
     """
 
     _token_lock = threading.Lock()
-    _tokens: dict[tuple[str, str], str] = {}  # noqa: RUF012 - shared token cache
+    _tokens: dict[str, tuple[str, str]] = {}  # noqa: RUF012 - username -> (password, token)
 
     def __init__(self, username: str, password: str) -> None:
         """Bind the client to one Webshare account."""
         self.username = username
         self.password = password
-
-    @property
-    def _cache_key(self) -> tuple[str, str]:
-        return (self.username, hashlib.sha256(self.password.encode()).hexdigest())
 
     def login(self) -> str:
         """Log in and return a fresh session token (WST)."""
@@ -239,17 +241,19 @@ class WebshareClient:
             raise WebshareError(msg)
 
         with self._token_lock:
-            self._tokens[self._cache_key] = token
+            self._tokens[self.username] = (self.password, token)
         return token
 
     def _token(self) -> str:
         with self._token_lock:
-            token = self._tokens.get(self._cache_key)
-        return token or self.login()
+            cached = self._tokens.get(self.username)
+        if cached and hmac.compare_digest(cached[0].encode(), self.password.encode()):
+            return cached[1]
+        return self.login()
 
     def _invalidate_token(self) -> None:
         with self._token_lock:
-            self._tokens.pop(self._cache_key, None)
+            self._tokens.pop(self.username, None)
 
     def _authed_post(
         self,
