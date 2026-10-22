@@ -969,7 +969,7 @@ def proxy_auth_middleware() -> Response | tuple[Response, int] | None:
             ]
             is_admin = admin_group_name in user_groups
         elif user_db is not None:
-            existing_db_user = user_db.get_user(username=username)
+            existing_db_user = user_db.get_user_cached(username=username)
             if existing_db_user:
                 is_admin = existing_db_user.get("role") == "admin"
             else:
@@ -993,7 +993,7 @@ def proxy_auth_middleware() -> Response | tuple[Response, int] | None:
 
             if raw_db_user_id is not None:
                 try:
-                    session_db_user = user_db.get_user(user_id=int(raw_db_user_id))
+                    session_db_user = user_db.get_user_cached(user_id=int(raw_db_user_id))
                 except TypeError, ValueError:
                     session_db_user = None
 
