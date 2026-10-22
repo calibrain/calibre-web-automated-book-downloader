@@ -221,11 +221,26 @@ class TestConfiguredSourcePriority:
 
         assert auto_download._configured_source_priority() == ["second"]
 
-    @pytest.mark.parametrize("priority", [[], "garbage", [{"id": "unknown"}]])
-    def test_falls_back_to_all_enabled_sources(self, monkeypatch, priority):
+    @pytest.mark.parametrize("priority", [[], "garbage", ["not-a-dict"]])
+    def test_falls_back_to_all_enabled_sources_when_nothing_is_configured(
+        self, monkeypatch, priority
+    ):
         self._configure(monkeypatch, priority)
 
         assert auto_download._configured_source_priority() == ["first", "second"]
+
+    @pytest.mark.parametrize(
+        "priority",
+        [
+            [{"id": "first", "enabled": False}, {"id": "second", "enabled": False}],
+            [{"id": "unavailable"}],
+            [{"id": "unknown"}],
+        ],
+    )
+    def test_a_configured_list_with_nothing_usable_searches_nothing(self, monkeypatch, priority):
+        self._configure(monkeypatch, priority)
+
+        assert auto_download._configured_source_priority() == []
 
 
 class TestAutoDownloadPending:

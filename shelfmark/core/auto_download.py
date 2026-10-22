@@ -212,6 +212,7 @@ def _configured_source_priority() -> list[str]:
 
     raw = app_config.get("AUTO_DOWNLOAD_SOURCE_PRIORITY", [])
     ordered: list[str] = []
+    configured = isinstance(raw, list) and any(isinstance(item, dict) for item in raw)
     if isinstance(raw, list):
         for item in raw:
             if not isinstance(item, dict):
@@ -227,7 +228,14 @@ def _configured_source_priority() -> list[str]:
 
     if ordered:
         return ordered
-    # Fallback: every usable source, registry order.
+    if configured:
+        # A priority list was saved but nothing in it is usable. Falling back to every
+        # source would search the ones the user turned off.
+        logger.warning(
+            "auto-download: every source in the priority list is disabled or unavailable"
+        )
+        return []
+    # Nothing configured yet: every usable source, registry order.
     return [src["name"] for src in available if src.get("enabled")]
 
 
