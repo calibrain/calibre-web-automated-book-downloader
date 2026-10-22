@@ -37,6 +37,8 @@ Among matching releases from the winning source, format ranks first (`m4b` over 
 
 A download that fails, or is interrupted (a restart while it was queued, say), does not stay that way forever. Once the request has sat there for **Retry failed downloads after (days)** (7 by default), it goes back to pending and the next pass searches again. Each pass reopens at most five, oldest first, so a backlog is spread out instead of hitting your sources at once. An interrupted download may pick the same release again, since a torrent already in your client is joined instead of added twice. A download that itself failed, or that Shelfmark's stall timer cancelled, has its release remembered and skipped next time, and the request is given up on after three failed retries. Requests you or an admin cancelled are never retried, and neither are rejected ones: both are decisions. Set the value to 0 to turn retries off.
 
+A request that no source has a match for is not searched every cycle for ever. After three passes in a row with no match it is searched once a day, then every two days, and no further apart than **Longest wait between searches for an unmatched request (days)** (3 by default, 0 searches every unmatched request every cycle). A match, a search that failed (which says nothing about the book) or **Sync now** starts it over.
+
 ### Library check
 
 Both shelf sync and automatic downloads ask the libraries you have enabled under [Library Check](library-check.md) whether the book is already there, for the content type being requested, and skip it if so. There is no separate switch on this tab. A library that is not enabled, or that does not hold the requested content type, never causes a skip.
@@ -57,6 +59,8 @@ The check **fails closed** here: if an enabled library cannot be read and has no
 | `AUTO_DOWNLOAD_SOURCE_PRIORITY` | Audiobook source priority | All usable sources | Drag to order; used for audiobook requests. Sources you disable here, or that are not configured, are skipped |
 | `AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY` | Ebook source priority | All usable sources | Same, for ebook requests |
 | `AUTO_DOWNLOAD_MIN_SEEDERS` | Minimum seeders (torrents) | 1 | Torrent releases below this are ignored |
+| `AUTO_DOWNLOAD_RETRY_DAYS` | Retry failed downloads after (days) | 7 | A failed or interrupted download goes back to pending after this long. 0 turns retries off |
+| `AUTO_DOWNLOAD_BACKOFF_MAX_DAYS` | Longest wait between searches for an unmatched request (days) | 3 | 0 searches every unmatched request every cycle |
 
 One action button sits at the bottom of the tab:
 
