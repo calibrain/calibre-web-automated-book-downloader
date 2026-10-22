@@ -61,7 +61,7 @@ def _jackett_source_id(result: dict) -> str:
     base = (
         result.get("guid")
         or result.get("downloadUrl")
-        or f"{result.get('indexer', 'unknown')}:{hash(result.get('title', 'Unknown'))}"
+        or f"{result.get('indexer', 'unknown')}:{result.get('title', 'Unknown')}"
     )
     indexer_key = normalize_optional_text(result.get("indexerKey"))
     prefix = f"jackett:{indexer_key}" if indexer_key else "jackett"
