@@ -111,11 +111,15 @@ def _book_to_book_data(book: BookMetadata, content_type: str) -> dict[str, Any]:
 
 
 def _existing_request_keys(user_db: UserDB) -> set[tuple[str, str]]:
-    """``(provider_id, content_type)`` pairs already requested, in any status."""
+    """``(hardcover id, content_type)`` pairs already requested, in any status.
+
+    Other providers' ids are not counted, so one that happens to equal a Hardcover id
+    cannot skip a book.
+    """
     keys: set[tuple[str, str]] = set()
     for row in user_db.list_requests():
         book_data = row.get("book_data") or {}
-        if isinstance(book_data, dict):
+        if isinstance(book_data, dict) and book_data.get("provider") == "hardcover":
             pid = book_data.get("provider_id") or book_data.get("id")
             if pid is not None:
                 # Normalized the way requests_service's duplicate check does, so a row
