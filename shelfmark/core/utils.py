@@ -18,6 +18,11 @@ if TYPE_CHECKING:
 
 logger = setup_logger(__name__)
 
+# How long an app database connection waits for another writer before it raises. SQLite's
+# own default is 5 s, which a start-up migration or a restart reconcile can outlast when a
+# backup or a second process holds the file.
+DB_BUSY_TIMEOUT_SECONDS = 30
+
 
 def normalize_http_url(
     url: str | None,

@@ -21,6 +21,7 @@ from shelfmark.core.request_validation import (
     validate_request_level_payload,
     validate_status_transition,
 )
+from shelfmark.core.utils import DB_BUSY_TIMEOUT_SECONDS
 
 logger = setup_logger(__name__)
 
@@ -194,7 +195,7 @@ class UserDB:
         return self._db_path
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
+        conn = sqlite3.connect(self._db_path, timeout=DB_BUSY_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
