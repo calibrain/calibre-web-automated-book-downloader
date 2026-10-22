@@ -1,0 +1,37 @@
+name: Jules PR Review (forks)
+# Fork PRs get no secrets under pull_request, so they are reviewed here under
+# pull_request_target, which runs this file from main with the repo's secrets.
+# That is safe only while nothing here checks out or runs the PR's code: the
+# action reads the diff through the API. Upstream jules-pr-reviewer refuses
+# this event, hence the calibrain fork.
+# The jules-forks environment has no required reviewers on purpose, so fork
+# pushes are reviewed straight away; adding reviewers there (Settings →
+# Environments) would make each run wait for a maintainer's approval.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions: {}
+
+concurrency:
+  # Not jules-review-: the same-repo workflow's skipped runs would cancel this one
+  group: jules-review-fork-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Drafts are skipped here rather than by the action, so they never start a job
+    if: github.event.pull_request.head.repo.full_name != github.repository && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    environment:
+      name: jules-forks
+      deployment: false
+    permissions:
+      pull-requests: write
+      contents: read
+      checks: write
+    steps:
+      - uses: calibrain/jules-pr-reviewer@v0.0.3
+        with:
+          jules_api_key: ${{ secrets.JULES_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          skip_forks: false

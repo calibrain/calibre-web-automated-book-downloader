@@ -1008,11 +1008,11 @@ wheels = [
 
 [[package]]
 name = "publicsuffixlist"
-version = "1.1.0.20261017"
+version = "1.1.0.20261018"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/9c/b5/a921b5b669241f5a0b55b097f9adc646b6e56eac522926b99d8421b83527/publicsuffixlist-1.1.0.20261017.tar.gz", hash = "sha256:eb1e5896671b10d57b3c14cf4e48be5a9c920879b5e91c234a8e158c0730504b", size = 106617, upload-time = "2026-10-17T07:41:59.224Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/b9/aa4b37e174aa71bc4f6e3e31d837f6b2684d6023b69def1c4bc417d9a54e/publicsuffixlist-1.1.0.20261018.tar.gz", hash = "sha256:87861b9d9af2f035e68ad1fd95f9ff1caf92c8c2187ca9cf5c7d8785db0f221b", size = 106617, upload-time = "2026-10-18T07:57:32.211Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/79/76/8364493b415c9a18b4c4e11f61e6492d275ae0c1ed03b8605dd866b0c34c/publicsuffixlist-1.1.0.20261017-py3-none-any.whl", hash = "sha256:416a455ca61a3c0795924bc8319f58795759adc2d02154bc3248f3a27bf3a209", size = 109376, upload-time = "2026-10-17T07:41:57.949Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/d2/b60b418213e89c9adfdf6942f3e5d2ba025796a2b820628902b935ba9bef/publicsuffixlist-1.1.0.20261018-py3-none-any.whl", hash = "sha256:8a9f487ad9a501a56f76d20827d58a5847d34a345df854e3b6a1f301e292e9d4", size = 109375, upload-time = "2026-10-18T07:57:30.374Z" },
 ]
 
 [[package]]
@@ -1610,7 +1610,7 @@ requires-dist = [
     { name = "gunicorn" },
     { name = "httpx", extras = ["http2"], specifier = ">=0.28.1" },
     { name = "psutil" },
-    { name = "publicsuffixlist", specifier = ">=1.1.0.20261017" },
+    { name = "publicsuffixlist", specifier = ">=1.1.0.20261018" },
     { name = "pyautogui", marker = "extra == 'browser'" },
     { name = "python-socketio" },
     { name = "python-xlib", marker = "extra == 'browser'" },
