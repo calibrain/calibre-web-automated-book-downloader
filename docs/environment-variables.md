@@ -18,6 +18,7 @@ This document lists all configuration options that can be set via environment va
 - [Newznab](#newznab)
 - [AudiobookBay](#audiobookbay)
 - [Libgen Search](#libgen-search)
+- [Webshare.cz](#webshare.cz)
 - [IRC](#irc)
 - [Download Clients](#download-clients)
 - [Metadata Providers](#metadata-providers)
@@ -1588,6 +1589,59 @@ Maximum number of results to request per search (1-100).
 - **Type:** number
 - **Default:** `25`
 - **Constraints:** min: 1, max: 100
+
+</details>
+
+## Webshare.cz
+
+| Variable | Description | Type | Default |
+|----------|-------------|------|---------|
+| `WEBSHARE_ENABLED` | Search Webshare.cz by file name and download matching ebooks and audiobooks. Requires a Webshare account; a VIP account is recommended for full download speed. | boolean | `false` |
+| `WEBSHARE_USERNAME` | Your Webshare.cz login. | string | _none_ |
+| `WEBSHARE_PASSWORD` | Your Webshare.cz password. | string (secret) | _none_ |
+| `WEBSHARE_MAX_RESULTS` | Maximum number of files to request per search (1-200). Results are then filtered to your supported ebook or audiobook formats. | number | `50` |
+
+<details>
+<summary>Detailed descriptions</summary>
+
+#### `WEBSHARE_ENABLED`
+
+**Enable Webshare.cz**
+
+Search Webshare.cz by file name and download matching ebooks and audiobooks. Requires a Webshare account; a VIP account is recommended for full download speed.
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `WEBSHARE_USERNAME`
+
+**Username or Email**
+
+Your Webshare.cz login.
+
+- **Type:** string
+- **Default:** _none_
+- **Required:** Yes
+
+#### `WEBSHARE_PASSWORD`
+
+**Password**
+
+Your Webshare.cz password.
+
+- **Type:** string (secret)
+- **Default:** _none_
+- **Required:** Yes
+
+#### `WEBSHARE_MAX_RESULTS`
+
+**Max Results**
+
+Maximum number of files to request per search (1-200). Results are then filtered to your supported ebook or audiobook formats.
+
+- **Type:** number
+- **Default:** `50`
+- **Constraints:** min: 1, max: 200
 
 </details>
 
