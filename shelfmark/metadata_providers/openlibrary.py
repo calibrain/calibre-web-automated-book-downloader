@@ -22,7 +22,7 @@ from shelfmark.core.settings_registry import (
     register_settings,
 )
 from shelfmark.core.text_match import STOPWORDS
-from shelfmark.download.network import get_ssl_verify
+from shelfmark.download.network import get_proxies, get_ssl_verify
 from shelfmark.metadata_providers import (
     BookMetadata,
     DisplayField,
@@ -241,6 +241,7 @@ class OpenLibraryProvider(MetadataProvider):
                 f"{OPENLIBRARY_BASE_URL}/search.json",
                 params=params,
                 timeout=15,
+                proxies=get_proxies(OPENLIBRARY_BASE_URL),
                 verify=get_ssl_verify(OPENLIBRARY_BASE_URL),
             )
             response.raise_for_status()
@@ -285,6 +286,7 @@ class OpenLibraryProvider(MetadataProvider):
             response = self.session.get(
                 f"{OPENLIBRARY_BASE_URL}/works/{book_id}.json",
                 timeout=15,
+                proxies=get_proxies(OPENLIBRARY_BASE_URL),
                 verify=get_ssl_verify(OPENLIBRARY_BASE_URL),
             )
             response.raise_for_status()
@@ -321,6 +323,7 @@ class OpenLibraryProvider(MetadataProvider):
             response = self.session.get(
                 f"{OPENLIBRARY_BASE_URL}/isbn/{clean_isbn}.json",
                 timeout=15,
+                proxies=get_proxies(OPENLIBRARY_BASE_URL),
                 verify=get_ssl_verify(OPENLIBRARY_BASE_URL),
             )
             response.raise_for_status()
@@ -595,6 +598,7 @@ class OpenLibraryProvider(MetadataProvider):
             response = self.session.get(
                 f"{OPENLIBRARY_BASE_URL}{author_key}.json",
                 timeout=10,
+                proxies=get_proxies(OPENLIBRARY_BASE_URL),
                 verify=get_ssl_verify(OPENLIBRARY_BASE_URL),
             )
             response.raise_for_status()
@@ -616,6 +620,7 @@ def _test_openlibrary_connection() -> dict[str, Any]:
             f"{OPENLIBRARY_BASE_URL}/search.json",
             params={"q": "test", "limit": 1},
             timeout=10,
+            proxies=get_proxies(OPENLIBRARY_BASE_URL),
             verify=get_ssl_verify(OPENLIBRARY_BASE_URL),
         )
         response.raise_for_status()
