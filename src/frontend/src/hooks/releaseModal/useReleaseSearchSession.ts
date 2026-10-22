@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 
 import { useSocket } from '../../contexts/SocketContext';
+import { t } from '../../i18n';
 import { getReleaseSources, getReleases } from '../../services/api';
 import type {
   Book,
@@ -311,7 +312,7 @@ export function useReleaseSearchSession(
 
         initializeIndexerFilterForTab(tabName, response);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to fetch releases';
+        const message = err instanceof Error ? err.message : t('Failed to fetch releases');
         setErrorBySource((prev) => ({ ...prev, [tabName]: message }));
       } finally {
         setLoadingBySource((prev) => ({ ...prev, [tabName]: false }));
@@ -353,7 +354,7 @@ export function useReleaseSearchSession(
         console.error('Failed to fetch release sources:', err);
         if (!cancelled) {
           setAvailableSources([]);
-          setSourcesError(err instanceof Error ? err.message : 'Failed to load release sources');
+          setSourcesError(err instanceof Error ? err.message : t('Failed to load release sources'));
         }
       } finally {
         if (!cancelled) {

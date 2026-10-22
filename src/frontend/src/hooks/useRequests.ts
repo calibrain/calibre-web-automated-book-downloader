@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 
+import { t } from '../i18n';
 import {
   cancelRequest as cancelUserRequest,
   fulfilAdminRequest,
@@ -35,7 +36,7 @@ export const useRequests = ({ isAdmin }: UseRequestsOptions): UseRequestsReturn 
     try {
       await cancelUserRequest(id);
     } catch (err) {
-      const message = toErrorMessage(err, 'Failed to cancel request');
+      const message = toErrorMessage(err, t('Failed to cancel request'));
       throw new Error(message, { cause: err });
     }
   }, []);
@@ -48,7 +49,7 @@ export const useRequests = ({ isAdmin }: UseRequestsOptions): UseRequestsReturn 
       manualApproval?: boolean,
     ) => {
       if (!isAdmin) {
-        throw new Error('Admin access required');
+        throw new Error(t('Admin access required'));
       }
 
       try {
@@ -58,7 +59,7 @@ export const useRequests = ({ isAdmin }: UseRequestsOptions): UseRequestsReturn 
           manual_approval: manualApproval,
         });
       } catch (err) {
-        const message = toErrorMessage(err, 'Failed to fulfil request');
+        const message = toErrorMessage(err, t('Failed to fulfil request'));
         throw new Error(message, { cause: err });
       }
     },
@@ -68,7 +69,7 @@ export const useRequests = ({ isAdmin }: UseRequestsOptions): UseRequestsReturn 
   const rejectRequest = useCallback(
     async (id: number, adminNote?: string) => {
       if (!isAdmin) {
-        throw new Error('Admin access required');
+        throw new Error(t('Admin access required'));
       }
 
       try {
@@ -76,7 +77,7 @@ export const useRequests = ({ isAdmin }: UseRequestsOptions): UseRequestsReturn 
           admin_note: adminNote,
         });
       } catch (err) {
-        const message = toErrorMessage(err, 'Failed to reject request');
+        const message = toErrorMessage(err, t('Failed to reject request'));
         throw new Error(message, { cause: err });
       }
     },

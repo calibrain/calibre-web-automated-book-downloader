@@ -4,6 +4,7 @@ import type { Socket } from 'socket.io-client';
 import type { ActivityDismissTarget, ActivityItem } from '../components/activity';
 import { downloadToActivityItem, requestToActivityItem } from '../components/activity';
 import { dedupeHistoryItems } from '../components/activity/activityHistory.js';
+import { t } from '../i18n';
 import type { ActivityHistoryItem, ActivityDismissPayload } from '../services/api';
 import {
   clearActivityHistory,
@@ -239,20 +240,20 @@ const mapHistoryRowToActivityItem = (
     visualStatus = 'rejected';
   }
 
-  let statusLabel = 'Complete';
+  let statusLabel = t('Complete');
   if (visualStatus === 'error') {
-    statusLabel = 'Failed';
+    statusLabel = t('Failed');
   } else if (visualStatus === 'cancelled') {
-    statusLabel = 'Cancelled';
+    statusLabel = t('Cancelled');
   } else if (visualStatus === 'rejected') {
-    statusLabel = viewerRole === 'admin' ? 'Declined' : 'Not approved';
+    statusLabel = viewerRole === 'admin' ? t('Declined') : t('Not approved');
   }
 
   return {
     id: `history-${row.id}`,
     kind: row.item_type === 'request' ? 'request' : 'download',
     visualStatus,
-    title: row.item_type === 'request' ? 'Request' : 'Download',
+    title: row.item_type === 'request' ? t('Request') : t('Download'),
     author: '',
     metaLine: row.item_key,
     statusLabel,
@@ -500,7 +501,7 @@ export const useActivity = ({
           console.error('Request dismiss failed:', error);
           void refreshActivitySnapshot();
           refreshHistoryIfLoaded();
-          showToast(getActivityErrorMessage(error, 'Failed to clear request'), 'error');
+          showToast(getActivityErrorMessage(error, t('Failed to clear request')), 'error');
         });
     },
     [refreshActivitySnapshot, refreshHistoryIfLoaded, showToast],
@@ -521,7 +522,7 @@ export const useActivity = ({
           item_key: item.itemKey,
         })),
         items.map((item) => item.itemKey),
-        'Failed to clear item',
+        t('Failed to clear item'),
       );
     },
     [dismissItems],
@@ -539,7 +540,7 @@ export const useActivity = ({
           item_key: item.itemKey,
         })),
         Array.from(new Set(items.map((item) => item.itemKey))),
-        'Failed to clear finished downloads',
+        t('Failed to clear finished downloads'),
       );
     },
     [dismissItems],
@@ -555,7 +556,7 @@ export const useActivity = ({
       .catch((error) => {
         console.error('Clear history failed:', error);
         void refreshActivityHistory();
-        showToast(getActivityErrorMessage(error, 'Failed to clear history'), 'error');
+        showToast(getActivityErrorMessage(error, t('Failed to clear history')), 'error');
       });
   }, [refreshActivityHistory, refreshActivitySnapshot, resetActivityHistory, showToast]);
 

@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 
+import { t } from '../../i18n';
 import type { SettingsTab, SettingsGroup } from '../../types/settings';
 
 interface SettingsSidebarProps {
@@ -349,7 +350,7 @@ export const SettingsSidebar = ({
             return (
               <div key={item.label} className="px-5 pt-6 pb-2">
                 <span className="text-xs font-semibold tracking-wider uppercase opacity-50">
-                  {item.label}
+                  {t(item.label)}
                 </span>
               </div>
             );
@@ -424,7 +425,7 @@ export const SettingsSidebar = ({
           return (
             <div key={item.label} className="px-4 pt-5 pb-2">
               <span className="text-[11px] font-semibold tracking-wider uppercase opacity-40">
-                {item.label}
+                {t(item.label)}
               </span>
             </div>
           );

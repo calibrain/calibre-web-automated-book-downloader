@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { Book, CreateRequestPayload } from '../types';
 import { toStringValue } from './objectHelpers';
 
@@ -13,7 +14,7 @@ const toText = (value: unknown, fallback: string): string => {
 const formatSourceLabel = (value: unknown): string => {
   const source = (toStringValue(value) ?? '').trim();
   if (!source) {
-    return 'Unknown source';
+    return t('Unknown source');
   }
   return source
     .split('_')
@@ -21,10 +22,16 @@ const formatSourceLabel = (value: unknown): string => {
     .join(' ');
 };
 
-const buildSeriesLine = (name: string, position: number | null, count: number | null): string => {
+export const buildSeriesLine = (
+  name: string,
+  position: number | null,
+  count: number | null,
+): string => {
   if (!name) return '';
   if (position != null) {
-    return `#${position}${count ? ` of ${count}` : ''} in ${name}`;
+    return count
+      ? t('#{position} of {count} in {name}', { position, count, name })
+      : t('#{position} in {name}', { position, name });
   }
   return name;
 };
@@ -58,8 +65,8 @@ export const buildRequestConfirmationPreview = (
   }
 
   return {
-    title: toText(bookData.title ?? releaseData.title, 'Untitled'),
-    author: toText(bookData.author ?? releaseData.author, 'Unknown author'),
+    title: toText(bookData.title ?? releaseData.title, t('Untitled')),
+    author: toText(bookData.author ?? releaseData.author, t('Unknown author')),
     year: toText(bookData.year ?? releaseData.year, ''),
     seriesLine,
     preview,

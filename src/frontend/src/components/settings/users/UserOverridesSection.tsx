@@ -1,3 +1,4 @@
+import { t } from '../../../i18n';
 import type { DeliveryPreferencesResponse } from '../../../services/api';
 import type {
   HeadingFieldConfig,
@@ -23,16 +24,16 @@ interface UserOverridesSectionProps {
 }
 
 const modeOptions = [
-  { value: 'folder', label: 'Folder' },
-  { value: 'email', label: 'Email (SMTP)' },
+  { value: 'folder', label: t('Folder') },
+  { value: 'email', label: t('Email (SMTP)') },
   { value: 'booklore', label: 'Grimmory (API)' },
 ];
 
 const fallbackOutputModeField: SelectFieldConfig = {
   type: 'SelectField',
   key: 'BOOKS_OUTPUT_MODE',
-  label: 'Output Mode',
-  description: 'Choose where completed book files are sent.',
+  label: t('Output Mode'),
+  description: t('Choose where completed book files are sent.'),
   value: 'folder',
   options: modeOptions,
 };
@@ -40,8 +41,8 @@ const fallbackOutputModeField: SelectFieldConfig = {
 const fallbackDestinationField: TextFieldConfig = {
   type: 'TextField',
   key: 'DESTINATION',
-  label: 'Destination',
-  description: 'Directory where downloaded files are saved.',
+  label: t('Destination'),
+  description: t('Directory where downloaded files are saved.'),
   value: '',
   placeholder: '/books',
 };
@@ -49,16 +50,16 @@ const fallbackDestinationField: TextFieldConfig = {
 const fallbackDestinationAudiobookField: TextFieldConfig = {
   type: 'TextField',
   key: 'DESTINATION_AUDIOBOOK',
-  label: 'Destination',
-  description: "Directory for this user's audiobook downloads.",
+  label: t('Destination'),
+  description: t("Directory for this user's audiobook downloads."),
   value: '',
 };
 
 const fallbackBookloreLibraryField: SelectFieldConfig = {
   type: 'SelectField',
   key: 'BOOKLORE_LIBRARY_ID',
-  label: 'Library',
-  description: 'Grimmory library to upload into.',
+  label: t('Library'),
+  description: t('Grimmory library to upload into.'),
   value: '',
   options: [],
 };
@@ -66,8 +67,8 @@ const fallbackBookloreLibraryField: SelectFieldConfig = {
 const fallbackBooklorePathField: SelectFieldConfig = {
   type: 'SelectField',
   key: 'BOOKLORE_PATH_ID',
-  label: 'Path',
-  description: 'Grimmory library path for uploads.',
+  label: t('Path'),
+  description: t('Grimmory library path for uploads.'),
   value: '',
   options: [],
   filterByField: 'BOOKLORE_LIBRARY_ID',
@@ -76,8 +77,8 @@ const fallbackBooklorePathField: SelectFieldConfig = {
 const fallbackEmailRecipientField: TextFieldConfig = {
   type: 'TextField',
   key: 'EMAIL_RECIPIENT',
-  label: 'Email Recipient',
-  description: 'Email address used for this user in Email output mode.',
+  label: t('Email Recipient'),
+  description: t('Email address used for this user in Email output mode.'),
   value: '',
   placeholder: 'reader@example.com',
 };
@@ -85,14 +86,15 @@ const fallbackEmailRecipientField: TextFieldConfig = {
 const fallbackBrowserDownloadField: MultiSelectFieldConfig = {
   type: 'MultiSelectField',
   key: 'DOWNLOAD_TO_BROWSER_CONTENT_TYPES',
-  label: 'Download to Browser',
-  description:
+  label: t('Download to Browser'),
+  description: t(
     'Automatically download completed files to this browser for the selected content types.',
+  ),
   value: [],
   variant: 'dropdown',
   options: [
-    { value: 'book', label: 'Books' },
-    { value: 'audiobook', label: 'Audiobooks' },
+    { value: 'book', label: t('Books') },
+    { value: 'audiobook', label: t('Audiobooks') },
   ],
 };
 
@@ -113,23 +115,26 @@ function toStringValue(value: unknown): string {
 const deliveryHeading: HeadingFieldConfig = {
   type: 'HeadingField',
   key: 'delivery_preferences_heading',
-  title: 'Delivery Preferences',
-  description: 'Editing values here creates per-user settings. Use Reset to inherit global values.',
+  title: t('Delivery Preferences'),
+  description: t(
+    'Editing values here creates per-user settings. Use Reset to inherit global values.',
+  ),
 };
 
 const booksHeading: HeadingFieldConfig = {
   type: 'HeadingField',
   key: 'delivery_preferences_books_heading',
-  title: 'Books',
-  description: 'Output mode and destination behavior for ebooks, comics, and magazines.',
+  title: t('Books'),
+  description: t('Output mode and destination behavior for ebooks, comics, and magazines.'),
 };
 
 const audiobooksHeading: HeadingFieldConfig = {
   type: 'HeadingField',
   key: 'delivery_preferences_audiobooks_heading',
-  title: 'Audiobooks',
-  description:
+  title: t('Audiobooks'),
+  description: t(
     'Audiobooks always use folder output. Use Reset to inherit the global audiobook destination.',
+  ),
 };
 
 const BOOK_PREFERENCE_KEYS: DeliverySettingKey[] = [
@@ -177,8 +182,8 @@ export const UserOverridesSection = ({
   );
   const emailRecipientField: TextFieldConfig = {
     ...emailRecipientFieldSource,
-    label: 'Email Recipient',
-    description: 'Email address used for this user in Email output mode.',
+    label: t('Email Recipient'),
+    description: t('Email address used for this user in Email output mode.'),
   };
 
   const isOverridden = (key: DeliverySettingKey): boolean => {
@@ -297,7 +302,7 @@ export const UserOverridesSection = ({
           resetAction={
             hasBookDeliveryOverride
               ? {
-                  label: 'Reset all',
+                  label: t('Reset all'),
                   onClick: () => resetKeys(availableBookPreferenceKeys),
                 }
               : undefined

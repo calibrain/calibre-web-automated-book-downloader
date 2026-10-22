@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 
+import { t } from '../i18n';
 import { getSettings, updateSettings, executeSettingsAction } from '../services/api';
 import type {
   SettingsResponse,
@@ -176,7 +177,7 @@ export function useSettings(): UseSettingsReturn {
         const response = await loadSettingsIntoCache({ force });
         applySettingsResponse(response, { preserveDirtyValues });
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to load settings';
+        const message = err instanceof Error ? err.message : t('Failed to load settings');
         console.error('Failed to fetch settings:', err);
         cachedSettingsLoadError = cachedSettingsResponse === null ? message : null;
         if (!silent) {
@@ -235,7 +236,7 @@ export function useSettings(): UseSettingsReturn {
       const original = originalValues[tabName];
       if (!current || !original) return false;
 
-      const tab = tabs.find((t) => t.name === tabName);
+      const tab = tabs.find((entry) => entry.name === tabName);
       if (!tab) return false;
 
       for (const field of getValueBearingFields(tab.fields)) {
@@ -263,7 +264,7 @@ export function useSettings(): UseSettingsReturn {
         const originalTabValues = originalValues[tabName] || {};
 
         // Only send values that actually changed
-        const tab = tabs.find((t) => t.name === tabName);
+        const tab = tabs.find((entry) => entry.name === tabName);
         valuesToSave = {};
 
         if (tab) {
@@ -306,8 +307,9 @@ export function useSettings(): UseSettingsReturn {
               applySettingsResponse(response);
               return {
                 success: true,
-                message:
+                message: t(
                   'Settings saved, but the proxy interrupted the response. Latest values were confirmed.',
+                ),
                 updated: Object.keys(valuesToSave),
                 requiresRestart: restartRequiredFor.length > 0,
                 restartRequiredFor,
@@ -321,7 +323,7 @@ export function useSettings(): UseSettingsReturn {
         console.error('Failed to save settings tab:', tabName, err);
         return {
           success: false,
-          message: err instanceof Error ? err.message : 'Failed to save settings',
+          message: err instanceof Error ? err.message : t('Failed to save settings'),
           updated: [],
         };
       } finally {
@@ -349,7 +351,7 @@ export function useSettings(): UseSettingsReturn {
         console.error('Action execution failed:', tabName, actionKey, err);
         return {
           success: false,
-          message: err instanceof Error ? err.message : 'Action failed',
+          message: err instanceof Error ? err.message : t('Action failed'),
         };
       }
     },

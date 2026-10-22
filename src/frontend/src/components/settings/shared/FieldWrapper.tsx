@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 
+import { t } from '../../../i18n';
 import type { SettingsField } from '../../../types/settings';
 import { Tooltip } from '../../shared/Tooltip';
 import { EnvLockBadge } from './EnvLockBadge';
@@ -79,7 +80,7 @@ interface FieldWrapperProps {
 const DisabledBadge = ({ reason }: { reason?: string }) => (
   <span
     className="inline-flex items-center gap-1 rounded border border-zinc-500/30 bg-zinc-500/20 px-1.5 py-0.5 text-xs text-zinc-400"
-    title={reason || 'This setting is not available'}
+    title={reason || t('This setting is not available')}
   >
     <svg
       className="h-3 w-3"
@@ -95,7 +96,7 @@ const DisabledBadge = ({ reason }: { reason?: string }) => (
         d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
       />
     </svg>
-    Unavailable
+    {t('Unavailable')}
   </span>
 );
 
@@ -103,7 +104,7 @@ const DisabledBadge = ({ reason }: { reason?: string }) => (
 const RestartRequiredBadge = () => (
   <span
     className="inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-600 dark:text-amber-400"
-    title="Changing this setting requires a container restart to take effect"
+    title={t('Changing this setting requires a container restart to take effect')}
   >
     <svg
       className="h-3 w-3"
@@ -119,13 +120,13 @@ const RestartRequiredBadge = () => (
         d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
       />
     </svg>
-    Restart
+    {t('Restart')}
   </span>
 );
 
 function formatUserOverrideValue(value: unknown): string {
-  if (value === null || value === undefined) return '(empty)';
-  if (typeof value === 'string') return value || '(empty)';
+  if (value === null || value === undefined) return t('(empty)');
+  if (typeof value === 'string') return value || t('(empty)');
   if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
     return String(value);
   }
@@ -133,9 +134,9 @@ function formatUserOverrideValue(value: unknown): string {
     return value.description ?? value.toString();
   }
   try {
-    return JSON.stringify(value) ?? '(empty)';
+    return JSON.stringify(value) ?? t('(empty)');
   } catch {
-    return '[unserializable value]';
+    return t('[unserializable value]');
   }
 }
 
@@ -159,21 +160,25 @@ const UserOverriddenBadge = ({
           <span className="opacity-70">: {formatUserOverrideValue(entry.value)}</span>
         </div>
       ))}
-      {extraCount > 0 && <div className="text-[11px] opacity-70">and {extraCount} more...</div>}
+      {extraCount > 0 && (
+        <div className="text-[11px] opacity-70">
+          {t('and {count} more...', { count: extraCount })}
+        </div>
+      )}
     </div>
   );
 
   return (
     <Tooltip content={content} position="top">
       <span className="inline-flex items-center gap-1 rounded border border-sky-500/30 bg-sky-500/15 px-1.5 py-0.5 text-xs text-sky-500 dark:text-sky-400">
-        User overridden{count > 1 ? ` (${count})` : ''}
+        {count > 1 ? t('User overridden ({count})', { count }) : t('User overridden')}
       </span>
     </Tooltip>
   );
 };
 
 const ResetActionButton = ({
-  label = 'Reset',
+  label = t('Reset'),
   disabled = false,
   onClick,
 }: {

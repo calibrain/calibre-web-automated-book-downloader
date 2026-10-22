@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import { useMemo } from 'react';
 
+import { t } from '../../../i18n';
 import type {
   MultiSelectFieldConfig,
   TableFieldConfig,
@@ -234,7 +235,7 @@ export const TableField = ({ field, value, onChange, disabled }: TableFieldProps
           disabled={isDisabled}
           className="hover-action rounded-lg border border-(--border-muted) bg-(--bg-soft) px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {field.addLabel || 'Add'}
+          {field.addLabel || t('Add')}
         </button>
       </div>
     );
@@ -277,7 +278,10 @@ export const TableField = ({ field, value, onChange, disabled }: TableFieldProps
                         checked={Boolean(cellValue)}
                         onChange={(e) => updateCell(rowIndex, col.key, e.target.checked)}
                         disabled={isDisabled}
-                        aria-label={`${col.label || col.key} row ${rowIndex + 1}`}
+                        aria-label={t('{column} row {row}', {
+                          column: col.label || col.key,
+                          row: rowIndex + 1,
+                        })}
                         className="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
                       />
                     </div>
@@ -298,7 +302,7 @@ export const TableField = ({ field, value, onChange, disabled }: TableFieldProps
                     {isDisabled ? (
                       <div className="w-full cursor-not-allowed rounded-lg border border-(--border-muted) bg-(--bg-soft) px-3 py-2 text-sm opacity-60 shadow-sm">
                         {options.find((o) => o.value === toPrimitiveString(cellValue))?.label ||
-                          'Select...'}
+                          t('Select...')}
                       </div>
                     ) : (
                       <DropdownList
@@ -307,7 +311,7 @@ export const TableField = ({ field, value, onChange, disabled }: TableFieldProps
                         onChange={(val) =>
                           updateCell(rowIndex, col.key, Array.isArray(val) ? val[0] : val)
                         }
-                        placeholder={col.placeholder || 'Select...'}
+                        placeholder={col.placeholder || t('Select...')}
                         widthClassName="w-full"
                       />
                     )}
@@ -332,7 +336,7 @@ export const TableField = ({ field, value, onChange, disabled }: TableFieldProps
                   value: selectedValues,
                   options,
                   variant: 'dropdown',
-                  placeholder: col.placeholder || 'Select...',
+                  placeholder: col.placeholder || t('Select...'),
                 };
 
                 return (
@@ -362,7 +366,10 @@ export const TableField = ({ field, value, onChange, disabled }: TableFieldProps
                     value={toPrimitiveString(cellValue)}
                     onChange={(e) => updateCell(rowIndex, col.key, e.target.value)}
                     placeholder={col.placeholder}
-                    aria-label={`${col.label || col.key} row ${rowIndex + 1}`}
+                    aria-label={t('{column} row {row}', {
+                      column: col.label || col.key,
+                      row: rowIndex + 1,
+                    })}
                     disabled={isDisabled}
                     className="w-full rounded-lg border border-(--border-muted) bg-(--bg-soft) px-3 py-2 text-sm transition-colors focus:border-sky-500 focus:ring-2 focus:ring-sky-500/50 focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60"
                   />
@@ -376,7 +383,7 @@ export const TableField = ({ field, value, onChange, disabled }: TableFieldProps
                 onClick={() => removeRow(rowIndex)}
                 disabled={isDisabled}
                 className="hover-action rounded-full p-1.5 disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Remove row"
+                aria-label={t('Remove row')}
               >
                 <svg
                   className="h-4 w-4"
@@ -402,7 +409,7 @@ export const TableField = ({ field, value, onChange, disabled }: TableFieldProps
         disabled={isDisabled}
         className="hover-action rounded-lg border border-(--border-muted) bg-(--bg-soft) px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {field.addLabel || 'Add'}
+        {field.addLabel || t('Add')}
       </button>
     </div>
   );

@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import type { DisplayField } from '../../types';
 
 interface DisplayFieldIconProps {
@@ -114,7 +115,7 @@ export function DisplayFieldBadge({ field, className = '' }: DisplayFieldBadgePr
   return (
     <span
       className={`flex items-center gap-0.5 text-xs text-gray-700 dark:text-gray-200 ${className}`}
-      title={field.label}
+      title={t(field.label)}
     >
       <DisplayFieldIcon icon={field.icon} />
       <span>{field.value}</span>

@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 
 import { useSearchMode } from '../contexts/SearchModeContext';
+import { t } from '../i18n';
 import type { Book, ButtonStateInfo } from '../types';
 import { BookDownloadButton } from './BookDownloadButton';
 import { BookGetButton } from './BookGetButton';
@@ -60,7 +61,7 @@ export function BookActionButton({
       fullWidth={fullWidth}
       className={className}
       style={style}
-      ariaLabel={buttonState.text}
+      ariaLabel={t(buttonState.text)}
     />
   );
 }

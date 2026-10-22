@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 
+import { t } from '../../../i18n';
 import type { SelectFieldConfig, TableFieldConfig } from '../../../types/settings';
 import type { RequestPolicyContentType, RequestPolicyMode } from '../users';
 import { RequestPolicyGrid } from '../users';
@@ -45,7 +46,11 @@ export const RequestPolicyGridField = ({
   );
 
   if (!requestRulesField) {
-    return <p className="text-xs opacity-60">Request policy schema is unavailable for this tab.</p>;
+    return (
+      <p className="text-xs opacity-60">
+        {t('Request policy schema is unavailable for this tab.')}
+      </p>
+    );
   }
 
   const globalRequestDefaults = useMemo(

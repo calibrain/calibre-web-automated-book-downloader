@@ -2,6 +2,7 @@ import { useCallback, useLayoutEffect, useRef } from 'react';
 
 import { useLatestCallback } from '../../../hooks/useLatestCallback';
 import { useMountEffect } from '../../../hooks/useMountEffect';
+import { t } from '../../../i18n';
 import type { AdminUser } from '../../../services/api';
 import { testAdminUserNotificationPreferences } from '../../../services/api';
 import {
@@ -223,7 +224,7 @@ export const UsersManagementField = ({
   const handleTestNotificationRoutes = useCallback(
     async (routes: Array<Record<string, unknown>>) => {
       if (!editingUser) {
-        return { success: false, message: 'No user selected for notification test.' };
+        return { success: false, message: t('No user selected for notification test.') };
       }
       return testAdminUserNotificationPreferences(editingUser.id, routes);
     },
@@ -257,7 +258,7 @@ export const UsersManagementField = ({
     if (!editingUser || editingUser.id !== route.userId) {
       return (
         <div className="flex items-center justify-center py-8 text-sm opacity-60">
-          Loading user details...
+          {t('Loading user details...')}
         </div>
       );
     }

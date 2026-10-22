@@ -1,3 +1,4 @@
+import { t } from '../../../i18n';
 import type { DeliveryPreferencesResponse } from '../../../services/api';
 import type {
   HeadingFieldConfig,
@@ -32,11 +33,11 @@ type SearchSettingKey =
 const fallbackSearchModeField: SelectFieldConfig = {
   type: 'SelectField',
   key: 'SEARCH_MODE',
-  label: 'Search Mode',
-  description: 'How you want to search for and download books.',
+  label: t('Search Mode'),
+  description: t('How you want to search for and download books.'),
   value: 'direct',
   options: [
-    { value: 'direct', label: 'Direct' },
+    { value: 'direct', label: t('Direct') },
     { value: 'universal', label: 'Universal' },
   ],
 };
@@ -44,8 +45,8 @@ const fallbackSearchModeField: SelectFieldConfig = {
 const fallbackMetadataProviderField: SelectFieldConfig = {
   type: 'SelectField',
   key: 'METADATA_PROVIDER',
-  label: 'Book Metadata Provider',
-  description: 'Choose which metadata provider to use for book searches.',
+  label: t('Book Metadata Provider'),
+  description: t('Choose which metadata provider to use for book searches.'),
   value: '',
   options: [],
 };
@@ -53,17 +54,17 @@ const fallbackMetadataProviderField: SelectFieldConfig = {
 const fallbackAudiobookMetadataProviderField: SelectFieldConfig = {
   type: 'SelectField',
   key: 'METADATA_PROVIDER_AUDIOBOOK',
-  label: 'Audiobook Metadata Provider',
-  description: 'Metadata provider for audiobook searches. Uses the book provider if not set.',
+  label: t('Audiobook Metadata Provider'),
+  description: t('Metadata provider for audiobook searches. Uses the book provider if not set.'),
   value: '',
-  options: [{ value: '', label: 'Use main provider' }],
+  options: [{ value: '', label: t('Use main provider') }],
 };
 
 const fallbackDefaultReleaseSourceField: SelectFieldConfig = {
   type: 'SelectField',
   key: 'DEFAULT_RELEASE_SOURCE',
-  label: 'Default Book Release Source',
-  description: 'The release source tab to open by default in the release modal for books.',
+  label: t('Default Book Release Source'),
+  description: t('The release source tab to open by default in the release modal for books.'),
   value: 'direct_download',
   options: [],
 };
@@ -71,18 +72,19 @@ const fallbackDefaultReleaseSourceField: SelectFieldConfig = {
 const fallbackDefaultAudiobookReleaseSourceField: SelectFieldConfig = {
   type: 'SelectField',
   key: 'DEFAULT_RELEASE_SOURCE_AUDIOBOOK',
-  label: 'Default Audiobook Release Source',
-  description:
+  label: t('Default Audiobook Release Source'),
+  description: t(
     'The release source tab to open by default in the release modal for audiobooks. Uses the book release source if not set.',
+  ),
   value: '',
-  options: [{ value: '', label: 'Use book release source' }],
+  options: [{ value: '', label: t('Use book release source') }],
 };
 
 const fallbackBookLanguageField: MultiSelectFieldConfig = {
   type: 'MultiSelectField',
   key: 'BOOK_LANGUAGE',
-  label: 'Default Book Languages',
-  description: 'Default language filter for searches.',
+  label: t('Default Book Languages'),
+  description: t('Default language filter for searches.'),
   value: [],
   options: [],
 };
@@ -90,9 +92,10 @@ const fallbackBookLanguageField: MultiSelectFieldConfig = {
 const searchHeading: HeadingFieldConfig = {
   type: 'HeadingField',
   key: 'search_preferences_heading',
-  title: 'Search Preferences',
-  description:
+  title: t('Search Preferences'),
+  description: t(
     'Personal search settings for this user. Reset to inherit global defaults from Search Mode.',
+  ),
 };
 
 const normalizeSearchMode = (value: unknown): 'direct' | 'universal' => {

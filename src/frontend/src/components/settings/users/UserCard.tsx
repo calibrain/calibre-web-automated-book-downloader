@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 
+import { t } from '../../../i18n';
 import type { AdminUser } from '../../../services/api';
 import type {
   PasswordFieldConfig,
@@ -22,13 +23,13 @@ const UserCardShell = ({ title, children }: { title: string; children: ReactNode
 );
 
 const CREATE_ROLE_OPTIONS: SelectOption[] = [
-  { value: 'user', label: 'User' },
-  { value: 'admin', label: 'Admin' },
+  { value: 'user', label: t('User') },
+  { value: 'admin', label: t('Admin') },
 ];
 
 const EDIT_ROLE_OPTIONS: SelectOption[] = [
-  { value: 'admin', label: 'Admin' },
-  { value: 'user', label: 'User' },
+  { value: 'admin', label: t('Admin') },
+  { value: 'user', label: t('User') },
 ];
 
 const createTextField = (
@@ -64,7 +65,7 @@ const createPasswordField = (
 const createRoleField = (value: string, options: SelectOption[]): SelectFieldConfig => ({
   type: 'SelectField',
   key: 'role',
-  label: 'Role',
+  label: t('Role'),
   value,
   options,
 });
@@ -103,7 +104,7 @@ const renderPasswordField = (
   </FieldWrapper>
 );
 
-const getRoleLabel = (role: string) => role.charAt(0).toUpperCase() + role.slice(1);
+const getRoleLabel = (role: string) => t(role.charAt(0).toUpperCase() + role.slice(1));
 
 const getRoleBadgeClassName = (role: string, disabled = false) =>
   `inline-flex items-center rounded-md px-2.5 py-1 text-xs font-medium leading-none ${
@@ -113,14 +114,16 @@ const getRoleBadgeClassName = (role: string, disabled = false) =>
 const getRoleDisabledReason = (user: AdminUser, oidcAdminGroup?: string): string => {
   if (user.edit_capabilities.authSource === 'oidc') {
     if (oidcAdminGroup) {
-      return `Role is managed by the ${oidcAdminGroup} group in your identity provider.`;
+      return t('Role is managed by the {group} group in your identity provider.', {
+        group: oidcAdminGroup,
+      });
     }
-    return 'Role is managed by OIDC group authorization.';
+    return t('Role is managed by OIDC group authorization.');
   }
   if (user.edit_capabilities.authSource === 'builtin') {
-    return 'Role can only be changed by admins.';
+    return t('Role can only be changed by admins.');
   }
-  return 'Role is managed by the external authentication source.';
+  return t('Role is managed by the external authentication source.');
 };
 
 interface UserRoleControlProps {
@@ -163,7 +166,10 @@ export const UserRoleControl = ({
 
   if (onUserChange && !user.edit_capabilities.canEditRole) {
     return (
-      <Tooltip content={roleDisabledReason || 'Role cannot be changed'} position={tooltipPosition}>
+      <Tooltip
+        content={roleDisabledReason || t('Role cannot be changed')}
+        position={tooltipPosition}
+      >
         <span className={getRoleBadgeClassName(user.role, true)}>{roleLabel}</span>
       </Tooltip>
     );
@@ -200,10 +206,10 @@ export const UserIdentityHeader = ({
           )}
           {showAuthSource && <UserAuthSourceBadge user={user} showInactive={false} />}
         </div>
-        <div className="truncate text-xs opacity-50">{user.email || 'No email'}</div>
+        <div className="truncate text-xs opacity-50">{user.email || t('No email')}</div>
         {showInactiveState && !active && (
           <div className="truncate text-[11px] opacity-60">
-            Inactive for current authentication mode
+            {t('Inactive for current authentication mode')}
           </div>
         )}
       </div>
@@ -247,7 +253,7 @@ export const UserEditActions = ({
           disabled={cancelDisabled}
           className="hover-action rounded-lg border border-(--border-muted) bg-(--bg-soft) px-4 py-2 text-sm font-medium shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Cancel
+          {t('Cancel')}
         </button>
         <button
           type="button"
@@ -273,10 +279,10 @@ export const UserEditActions = ({
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                 />
               </svg>
-              Saving...
+              {t('Saving...')}
             </>
           ) : (
-            'Save Changes'
+            t('Save Changes')
           )}
         </button>
       </div>
@@ -292,7 +298,7 @@ export const UserEditActions = ({
           disabled={saveDisabled}
           className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {saving ? 'Saving...' : 'Save Changes'}
+          {saving ? t('Saving...') : t('Save Changes')}
         </button>
         <button
           type="button"
@@ -300,7 +306,7 @@ export const UserEditActions = ({
           disabled={cancelDisabled}
           className="rounded-lg border border-(--border-muted) bg-(--bg) px-4 py-2 text-sm font-medium transition-colors hover:bg-(--hover-surface) disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Cancel
+          {t('Cancel')}
         </button>
       </div>
       {onDelete && (
@@ -313,7 +319,7 @@ export const UserEditActions = ({
                 disabled={deleting}
                 className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {deleting ? 'Deleting...' : 'Confirm Delete'}
+                {deleting ? t('Deleting...') : t('Confirm Delete')}
               </button>
               <button
                 type="button"
@@ -321,7 +327,7 @@ export const UserEditActions = ({
                 disabled={deleting}
                 className="rounded-lg border border-(--border-muted) bg-(--bg) px-4 py-2 text-sm font-medium transition-colors hover:bg-(--hover-surface) disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Cancel
+                {t('Cancel')}
               </button>
             </>
           ) : (
@@ -330,7 +336,7 @@ export const UserEditActions = ({
               onClick={onDelete}
               className="rounded-lg border border-red-500/40 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-500/10"
             >
-              Delete User
+              {t('Delete User')}
             </button>
           )}
         </div>
@@ -358,40 +364,46 @@ export const UserCreateCard = ({
   onSubmit,
   onCancel,
 }: UserCreateCardProps) => {
-  const usernameField = createTextField('username', 'Username', form.username, 'username', true);
+  const usernameField = createTextField(
+    'username',
+    t('Username'),
+    form.username,
+    t('username'),
+    true,
+  );
   const roleField = createRoleField(form.role, CREATE_ROLE_OPTIONS);
   const displayNameField = createTextField(
     'display_name',
-    'Display Name',
+    t('Display Name'),
     form.display_name,
-    'Display name',
+    t('Display name'),
   );
-  const emailField = createTextField('email', 'Email', form.email, 'user@example.com');
+  const emailField = createTextField('email', t('Email'), form.email, 'user@example.com');
   const passwordField = createPasswordField(
     'password',
-    'Password',
+    t('Password'),
     form.password,
-    'Min 4 characters',
+    t('Min 4 characters'),
     true,
   );
   const confirmPasswordField = createPasswordField(
     'confirm_password',
-    'Confirm Password',
+    t('Confirm Password'),
     form.password_confirm,
-    'Confirm password',
+    t('Confirm password'),
     true,
   );
 
   return (
-    <UserCardShell title="Create Local User">
+    <UserCardShell title={t('Create Local User')}>
       {isFirstUser && (
         <p className="text-xs text-zinc-500">
-          This will be the first account and will be created as admin.
+          {t('This will be the first account and will be created as admin.')}
         </p>
       )}
       {needsLocalAdmin && !isFirstUser && (
         <p className="text-xs text-zinc-500">
-          An admin account is required before OIDC can be enabled.
+          {t('An admin account is required before OIDC can be enabled.')}
         </p>
       )}
 
@@ -421,14 +433,14 @@ export const UserCreateCard = ({
           disabled={creating}
           className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {creating ? 'Creating...' : 'Create Local User'}
+          {creating ? t('Creating...') : t('Create Local User')}
         </button>
         <button
           type="button"
           onClick={onCancel}
           className="rounded-lg border border-(--border-muted) bg-(--bg) px-4 py-2 text-sm font-medium transition-colors hover:bg-(--hover-surface)"
         >
-          Cancel
+          {t('Cancel')}
         </button>
       </div>
     </UserCardShell>
@@ -480,42 +492,42 @@ const UserEditFields = ({
 
   const displayNameField = createTextField(
     'display_name',
-    'Display Name',
+    t('Display Name'),
     user.display_name || '',
-    'Display name',
+    t('Display name'),
   );
-  const emailField = createTextField('email', 'Email', user.email || '', 'user@example.com');
+  const emailField = createTextField('email', t('Email'), user.email || '', 'user@example.com');
   const currentPasswordField = createPasswordField(
     'current_password',
-    'Current Password',
+    t('Current Password'),
     editCurrentPassword,
-    'Required to set a new password',
+    t('Required to set a new password'),
     true,
   );
   const newPasswordField = createPasswordField(
     'new_password',
-    'New Password',
+    t('New Password'),
     editPassword,
-    'Leave empty to keep current',
+    t('Leave empty to keep current'),
   );
   const confirmPasswordField = createPasswordField(
     'confirm_password',
-    'Confirm Password',
+    t('Confirm Password'),
     editPasswordConfirm,
-    'Confirm new password',
+    t('Confirm new password'),
     true,
   );
 
   const displayNameDisabledReason = !canEditDisplayName
-    ? 'Display name is managed by the identity provider.'
+    ? t('Display name is managed by the identity provider.')
     : undefined;
 
   let emailDisabledReason: string | undefined;
   if (!canEditEmail) {
     emailDisabledReason =
       authSource === 'cwa'
-        ? 'Email is synced from Calibre-Web.'
-        : 'Email is managed by your identity provider.';
+        ? t('Email is synced from Calibre-Web.')
+        : t('Email is managed by your identity provider.');
   }
 
   return (
@@ -594,7 +606,7 @@ const renderPreferencesPanel = (panel: UserPreferencesPanelProps) => (
   <div className="space-y-3">
     {(!panel.hideTitle || panel.onAction) && (
       <div>
-        {!panel.hideTitle && <p className="text-sm font-medium">User Preferences</p>}
+        {!panel.hideTitle && <p className="text-sm font-medium">{t('User Preferences')}</p>}
         {!panel.hideTitle && panel.description && (
           <p className="mt-0.5 text-xs opacity-60">{panel.description}</p>
         )}
@@ -604,7 +616,7 @@ const renderPreferencesPanel = (panel: UserPreferencesPanelProps) => (
             onClick={panel.onAction}
             className="mt-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-sky-700"
           >
-            {panel.actionLabel || 'Open User Preferences'}
+            {panel.actionLabel || t('Open User Preferences')}
           </button>
         )}
       </div>

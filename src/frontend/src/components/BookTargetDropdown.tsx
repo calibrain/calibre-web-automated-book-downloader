@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useMemo, useState } from 'react';
 
 import { useMountEffect } from '../hooks/useMountEffect';
+import { t } from '../i18n';
 import { setBookTargetState, type BookTargetOption } from '../services/api';
 import { emitBookTargetChange, onBookTargetChange } from '../utils/bookTargetEvents';
 import { loadBookTargets } from '../utils/bookTargetLoader';
@@ -46,7 +47,7 @@ const renderSummary = (selectedOptions: DropdownListOption[]) => {
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
       <BookmarkIcon />
-      <span>Hardcover Lists{count > 0 ? ` (${count})` : ''}</span>
+      <span>{count > 0 ? t('Hardcover Lists ({count})', { count }) : t('Hardcover Lists')}</span>
     </span>
   );
 };
@@ -120,7 +121,8 @@ const BookTargetDropdownSession = ({
         setLoadError(null);
       } catch (error) {
         if (!isMounted) return;
-        const message = error instanceof Error ? error.message : 'Failed to load Hardcover lists';
+        const message =
+          error instanceof Error ? error.message : t('Failed to load Hardcover lists');
         setOptions([]);
         setLoadError(message);
       } finally {
@@ -155,7 +157,7 @@ const BookTargetDropdownSession = ({
 
   const dropdownOptions = useMemo<DropdownListOption[]>(() => {
     if (isLoading) {
-      return [{ value: '__loading', label: 'Loading…', disabled: true }];
+      return [{ value: '__loading', label: t('Loading…'), disabled: true }];
     }
 
     if (loadError) {
@@ -163,7 +165,7 @@ const BookTargetDropdownSession = ({
     }
 
     if (options.length === 0) {
-      return [{ value: '__empty', label: 'No writable Hardcover targets', disabled: true }];
+      return [{ value: '__empty', label: t('No writable Hardcover targets'), disabled: true }];
     }
 
     return options.map((option) => ({
@@ -223,13 +225,16 @@ const BookTargetDropdownSession = ({
                 selected: false,
               });
             }
-            const label = stripCountSuffix(toggledOption.label);
-            onShowToast?.(`${result.selected ? 'Added to' : 'Removed from'} ${label}`, 'success');
+            const list = stripCountSuffix(toggledOption.label);
+            onShowToast?.(
+              result.selected ? t('Added to {list}', { list }) : t('Removed from {list}', { list }),
+              'success',
+            );
           }
         } catch (error) {
           setOptions((prev) => updateOptionChecked(prev, toggledTarget, !selected));
           const message =
-            error instanceof Error ? error.message : 'Failed to update Hardcover list';
+            error instanceof Error ? error.message : t('Failed to update Hardcover list');
           onShowToast?.(message, 'error');
         } finally {
           setPendingTargets((prev) => {
@@ -254,16 +259,18 @@ const BookTargetDropdownSession = ({
           className={`inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-600 transition-colors hover:bg-emerald-100 focus:outline-hidden dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/40`}
         >
           <BookmarkIcon className="h-3 w-3" />
-          Hardcover Lists{count > 0 ? ` (${count})` : ''}
+          {count > 0 ? t('Hardcover Lists ({count})', { count }) : t('Hardcover Lists')}
         </button>
       );
     };
   } else if (variant === 'icon') {
     customTrigger = ({ toggle }: { isOpen: boolean; toggle: () => void }) => {
       const count = selectedValues.length;
-      let title = 'Hardcover Lists';
-      if (count > 0) {
-        title = `On ${count} Hardcover list${count > 1 ? 's' : ''}`;
+      let title = t('Hardcover Lists');
+      if (count === 1) {
+        title = t('On 1 Hardcover list');
+      } else if (count > 1) {
+        title = t('On {count} Hardcover lists', { count });
       }
 
       return (
@@ -274,7 +281,7 @@ const BookTargetDropdownSession = ({
             toggle();
           }}
           className={`flex items-center justify-center rounded-full transition-colors duration-200 focus:outline-hidden ${className ?? 'hover-action p-1.5 text-gray-600 sm:p-2 dark:text-gray-200'}`}
-          aria-label="Hardcover Lists"
+          aria-label={t('Hardcover Lists')}
           title={title}
         >
           <BookmarkIcon className={`h-4 w-4 sm:h-5 sm:w-5 ${count > 0 ? 'fill-current' : ''}`} />
@@ -288,7 +295,7 @@ const BookTargetDropdownSession = ({
       options={dropdownOptions}
       value={selectedValues}
       onChange={handleChange}
-      placeholder={isLoading ? 'Loading…' : 'Hardcover'}
+      placeholder={isLoading ? t('Loading…') : 'Hardcover'}
       widthClassName={variant !== 'default' ? 'w-auto' : widthClassName}
       buttonClassName={variant !== 'default' ? '' : 'py-1.5 leading-none'}
       panelClassName={variant !== 'default' ? 'w-56' : undefined}

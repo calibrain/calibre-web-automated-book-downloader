@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 // Direct download mode sort options
 export const SORT_OPTIONS = [
   { value: 'downloads', label: 'Most downloads' },
@@ -15,13 +17,13 @@ export const SORT_OPTIONS = [
 
 // Direct download mode content type options
 export const CONTENT_OPTIONS = [
-  { value: '', label: 'All' },
-  { value: 'book_nonfiction', label: 'Book (non-fiction)' },
-  { value: 'book_fiction', label: 'Book (fiction)' },
-  { value: 'book_unknown', label: 'Book (unknown)' },
-  { value: 'magazine', label: 'Magazine' },
-  { value: 'book_comic', label: 'Comic Book' },
-  { value: 'standards_document', label: 'Standards document' },
-  { value: 'other', label: 'Other' },
-  { value: 'musical_score', label: 'Musical score' },
+  { value: '', label: t('All') },
+  { value: 'book_nonfiction', label: t('Book (non-fiction)') },
+  { value: 'book_fiction', label: t('Book (fiction)') },
+  { value: 'book_unknown', label: t('Book (unknown)') },
+  { value: 'magazine', label: t('Magazine') },
+  { value: 'book_comic', label: t('Comic Book') },
+  { value: 'standards_document', label: t('Standards document') },
+  { value: 'other', label: t('Other') },
+  { value: 'musical_score', label: t('Musical score') },
 ];

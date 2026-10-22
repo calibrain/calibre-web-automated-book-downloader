@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { PackBook } from '../types';
 
 /** Return a copy of `books` with one entry patched; the input is not mutated. */
@@ -46,16 +47,19 @@ export function setBookIgnored(
   return next;
 }
 
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`;
-}
-
 /** "2 books · 3 files · 2 files ignored" */
 export function describePackPlan(books: PackBook[], ignored: string[]): string {
   const fileCount = books.reduce((sum, book) => sum + book.files.length, 0);
-  const parts = [plural(books.length, 'book'), plural(fileCount, 'file')];
+  const parts = [
+    books.length === 1 ? t('1 book') : t('{count} books', { count: books.length }),
+    fileCount === 1 ? t('1 file') : t('{count} files', { count: fileCount }),
+  ];
   if (ignored.length > 0) {
-    parts.push(`${plural(ignored.length, 'file')} ignored`);
+    parts.push(
+      ignored.length === 1
+        ? t('1 file ignored')
+        : t('{count} files ignored', { count: ignored.length }),
+    );
   }
   return parts.join(' · ');
 }

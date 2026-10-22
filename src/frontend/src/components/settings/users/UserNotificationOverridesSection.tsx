@@ -1,3 +1,4 @@
+import { t } from '../../../i18n';
 import type { DeliveryPreferencesResponse } from '../../../services/api';
 import type {
   ActionButtonConfig,
@@ -27,12 +28,12 @@ type NotificationSettingKey = 'USER_NOTIFICATION_ROUTES';
 
 const ROUTE_EVENT_ALL = 'all';
 const USER_ROUTE_EVENT_OPTIONS = [
-  { value: ROUTE_EVENT_ALL, label: 'All' },
-  { value: 'request_created', label: 'New request submitted' },
-  { value: 'request_fulfilled', label: 'Request approved' },
-  { value: 'request_rejected', label: 'Request rejected' },
-  { value: 'download_complete', label: 'Download complete' },
-  { value: 'download_failed', label: 'Download failed' },
+  { value: ROUTE_EVENT_ALL, label: t('All') },
+  { value: 'request_created', label: t('New request submitted') },
+  { value: 'request_fulfilled', label: t('Request approved') },
+  { value: 'request_rejected', label: t('Request rejected') },
+  { value: 'download_complete', label: t('Download complete') },
+  { value: 'download_failed', label: t('Download failed') },
 ];
 const ALLOWED_ROUTE_EVENTS = new Set(USER_ROUTE_EVENT_OPTIONS.map((option) => option.value));
 const ROUTE_EVENT_ORDER = new Map(
@@ -43,44 +44,44 @@ const fallbackRoutesField: TableFieldConfig = {
   type: 'TableField',
   key: 'USER_NOTIFICATION_ROUTES',
   label: '',
-  description:
-    'Create one route per URL. Start with All, then add event-specific routes ' +
-    'for targeted delivery. Need format examples? ' +
-    '[View Apprise URL formats](https://appriseit.com/services/).',
+  description: t(
+    'Create one route per URL. Start with All, then add event-specific routes for targeted delivery. Need format examples? [View Apprise URL formats](https://appriseit.com/services/).',
+  ),
   value: [{ event: [ROUTE_EVENT_ALL], url: '' }],
   columns: [
     {
       key: 'event',
-      label: 'Event',
+      label: t('Event'),
       type: 'multiselect',
       options: USER_ROUTE_EVENT_OPTIONS,
       defaultValue: [ROUTE_EVENT_ALL],
-      placeholder: 'Select events...',
+      placeholder: t('Select events...'),
     },
     {
       key: 'url',
-      label: 'Notification URL',
+      label: t('Notification URL'),
       type: 'text',
-      placeholder: 'e.g. ntfys://ntfy.sh/username-topic',
+      placeholder: t('e.g. ntfys://ntfy.sh/username-topic'),
     },
   ],
-  addLabel: 'Add Route',
-  emptyMessage: 'No routes configured.',
+  addLabel: t('Add Route'),
+  emptyMessage: t('No routes configured.'),
 };
 
 const notificationHeading: HeadingFieldConfig = {
   type: 'HeadingField',
   key: 'notification_preferences_heading',
-  title: 'Notifications',
-  description:
+  title: t('Notifications'),
+  description: t(
     'Personal notification preferences for this user. Reset to inherit global defaults from the Notifications tab.',
+  ),
 };
 
 const testNotificationActionField: ActionButtonConfig = {
   type: 'ActionButton',
   key: 'test_user_notification',
-  label: 'Test Notification',
-  description: 'Send a test notification to the configured personal route URLs.',
+  label: t('Test Notification'),
+  description: t('Send a test notification to the configured personal route URLs.'),
   style: 'primary',
 };
 

@@ -7,6 +7,7 @@ import { useReleaseSearchSession } from '../hooks/releaseModal/useReleaseSearchS
 import { useTabIndicator } from '../hooks/ui/useTabIndicator';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { t } from '../i18n';
 import { inspectRelease } from '../services/api';
 import type {
   Book,
@@ -53,6 +54,7 @@ import {
   FORMAT_SORT_KEY,
   sortReleasesByFormat,
 } from '../utils/releaseSort';
+import { buildSeriesLine } from '../utils/requestConfirmation';
 import { BookDownloadButton } from './BookDownloadButton';
 import { BookTargetDropdown } from './BookTargetDropdown';
 import { Dropdown } from './Dropdown';
@@ -93,18 +95,20 @@ function getCombinedDownloadLabel(
   const ebookIsRequest = ebookMode === 'request_release' || ebookMode === 'request_book';
   const audiobookIsRequest =
     audiobookMode === 'request_release' || audiobookMode === 'request_book';
-  if (ebookIsRequest && audiobookIsRequest) return 'Request Both';
-  if (ebookIsRequest || audiobookIsRequest) return 'Download & Request';
-  return 'Download Both';
+  if (ebookIsRequest && audiobookIsRequest) return t('Request Both');
+  if (ebookIsRequest || audiobookIsRequest) return t('Download & Request');
+  return t('Download Both');
 }
 
 function getSingleCombinedActionLabel(
   contentType: ContentType,
   mode: RequestPolicyMode | null | undefined,
 ): string {
-  const noun = contentType === 'ebook' ? 'Book' : 'Audiobook';
   const isRequest = mode === 'request_release' || mode === 'request_book';
-  return `${isRequest ? 'Request' : 'Download'} ${noun}`;
+  if (contentType === 'ebook') {
+    return isRequest ? t('Request Book') : t('Download Book');
+  }
+  return isRequest ? t('Request Audiobook') : t('Download Audiobook');
 }
 
 // Default column configuration (fallback when backend doesn't provide one)
@@ -191,7 +195,10 @@ function StarRating({ rating, maxRating = 5 }: { rating: number; maxRating?: num
   const normalizedRating = Math.min(Math.max(rating, 0), maxRating);
 
   return (
-    <div className="flex items-center gap-0.5" title={`${rating} out of ${maxRating}`}>
+    <div
+      className="flex items-center gap-0.5"
+      title={t('{rating} out of {max}', { rating, max: maxRating })}
+    >
       {STAR_POSITIONS.map((starPosition) => {
         const fillPercentage = Math.min(Math.max((normalizedRating - starPosition) * 100, 0), 100);
 
@@ -230,9 +237,9 @@ const ReleaseThumbnail = ({ preview, title }: { preview?: string; title?: string
     return (
       <div
         className="flex h-10 w-7 shrink-0 items-center justify-center rounded-sm bg-zinc-200 text-[7px] font-medium text-zinc-500 sm:h-12 sm:w-8 sm:text-[8px] dark:bg-zinc-700 dark:text-zinc-400"
-        aria-label="No cover available"
+        aria-label={t('No cover available')}
       >
-        No Cover
+        {t('No Cover')}
       </div>
     );
   }
@@ -244,7 +251,7 @@ const ReleaseThumbnail = ({ preview, title }: { preview?: string; title?: string
       )}
       <img
         src={preview}
-        alt={title || 'Book cover'}
+        alt={title || t('Book cover')}
         className="h-full w-full object-cover object-top"
         loading="lazy"
         onLoad={() => setImageLoaded(true)}
@@ -386,7 +393,7 @@ const PhaseChip = ({
         type="button"
         onClick={onClear}
         className={`group inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-900/20 dark:hover:text-red-300 ${phaseChipClassName}`}
-        aria-label={`Remove selected ${label.toLowerCase()}`}
+        aria-label={t('Remove selected {item}', { item: label.toLowerCase() })}
       >
         {chipContent}
       </button>
@@ -520,7 +527,7 @@ const ReleaseRow = ({
             onDownload={onDownload}
             variant="icon"
             size="sm"
-            ariaLabel={`${buttonState.text} ${release.title}`}
+            ariaLabel={`${t(buttonState.text)} ${release.title}`}
           />
         )}
       </div>
@@ -613,7 +620,7 @@ const ReleaseRow = ({
             onDownload={onDownload}
             variant="icon"
             size="sm"
-            ariaLabel={`${buttonState.text} ${release.title}`}
+            ariaLabel={`${t(buttonState.text)} ${release.title}`}
           />
         )}
       </div>
@@ -742,7 +749,7 @@ function ErrorState({ message }: { message: string }) {
         </svg>
       </div>
       <h4 className="mb-2 text-base font-semibold text-zinc-900 dark:text-zinc-100">
-        Error Loading Releases
+        {t('Error Loading Releases')}
       </h4>
       <p className="mx-auto max-w-xs text-sm text-zinc-500 dark:text-zinc-400">{message}</p>
     </div>
@@ -936,7 +943,7 @@ const ReleaseModalSession = ({
 
   // Build select options for format filter
   const formatOptions = useMemo(() => {
-    const options = [{ value: '', label: 'All Formats' }];
+    const options = [{ value: '', label: t('All Formats') }];
     availableFormats.forEach((fmt) => {
       options.push({ value: fmt, label: fmt.toUpperCase() });
     });
@@ -1348,7 +1355,7 @@ const ReleaseModalSession = ({
   const titleId = `release-modal-title-${book.id}`;
   const providerDisplay =
     book.provider_display_name ||
-    (book.provider ? book.provider.charAt(0).toUpperCase() + book.provider.slice(1) : 'Unknown');
+    (book.provider ? book.provider.charAt(0).toUpperCase() + book.provider.slice(1) : t('Unknown'));
   const showBookSourceLink =
     Boolean(book.source_url) && (isMetadataBook(book) || showReleaseSourceLinks);
 
@@ -1397,13 +1404,18 @@ const ReleaseModalSession = ({
     combinedPhase === 'ebook' ? hasCombinedAudiobookAction : hasCombinedEbookAction;
   const canCompleteCombinedAction =
     selectedRelease !== null || hasCombinedActionOutsideCurrentPhase;
-  const currentCombinedPhaseLabel = combinedPhase === 'ebook' ? 'Book' : 'Audiobook';
-  const nextCombinedPhaseLabel = combinedPhase === 'ebook' ? 'Audiobook' : 'Book';
-  let emptyStateMessage = 'No releases found for this book.';
+  let emptyStateMessage = t('No releases found for this book.');
   if (formatFilter) {
-    emptyStateMessage = `No ${formatFilter.toUpperCase()} releases found. Try a different format.`;
+    emptyStateMessage = t('No {format} releases found. Try a different format.', {
+      format: formatFilter.toUpperCase(),
+    });
   } else if (isCombinedMode) {
-    emptyStateMessage = `No ${currentCombinedPhaseLabel.toLowerCase()} releases found.`;
+    emptyStateMessage =
+      combinedPhase === 'ebook' ? t('No book releases found.') : t('No audiobook releases found.');
+  }
+  let combinedNextLabel = selectedRelease ? t('Select Book →') : t('Skip Audiobook →');
+  if (combinedPhase === 'ebook') {
+    combinedNextLabel = selectedRelease ? t('Select Audiobook →') : t('Skip Book →');
   }
   let modalAnimationClassName = '';
   if (isClosing) {
@@ -1440,7 +1452,7 @@ const ReleaseModalSession = ({
         type="button"
         className="absolute inset-0 border-0 bg-transparent p-0"
         onClick={handleClose}
-        aria-label="Close release modal"
+        aria-label={t('Close release modal')}
       />
       <div
         className={`details-container relative z-10 h-full w-full sm:h-auto ${modalAnimationClassName}`}
@@ -1476,7 +1488,7 @@ const ReleaseModalSession = ({
                       minWidth: book.cover_aspect === 'square' ? 68 : 46,
                     }}
                   >
-                    No cover
+                    {t('No cover')}
                   </div>
                 )}
               </div>
@@ -1516,7 +1528,7 @@ const ReleaseModalSession = ({
                         minWidth: book.cover_aspect === 'square' ? 68 : 46,
                       }}
                     >
-                      No cover
+                      {t('No cover')}
                     </div>
                   )}
                 </div>
@@ -1524,14 +1536,14 @@ const ReleaseModalSession = ({
             )}
             <div className="min-w-0 flex-1 space-y-1">
               <p className="text-xs tracking-wide text-zinc-500 uppercase dark:text-zinc-400">
-                {isCombinedMode ? combinedStepLabel : 'Find Releases'}
+                {isCombinedMode ? combinedStepLabel : t('Find Releases')}
               </p>
               <h3 id={titleId} className="truncate text-lg leading-snug font-semibold">
-                {book.provider === 'manual' ? 'Manual Query' : book.title || 'Untitled'}
+                {book.provider === 'manual' ? t('Manual Query') : book.title || t('Untitled')}
               </h3>
               {!isRequestMode && (
                 <p className="truncate text-sm text-zinc-600 dark:text-zinc-300">
-                  {book.author || 'Unknown author'}
+                  {book.author || t('Unknown author')}
                 </p>
               )}
             </div>
@@ -1540,7 +1552,7 @@ const ReleaseModalSession = ({
                 type="button"
                 onClick={handleClose}
                 className="hover-action rounded-full p-2 text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100"
-                aria-label="Close"
+                aria-label={t('Close')}
               >
                 <svg
                   className="h-5 w-5"
@@ -1566,14 +1578,14 @@ const ReleaseModalSession = ({
                 {book.preview ? (
                   <img
                     src={book.preview}
-                    alt="Book cover"
+                    alt={t('Book cover')}
                     className={`hidden shrink-0 rounded-lg object-cover shadow-md sm:block ${coverAspectClassName} ${coverSizeClassName}`}
                   />
                 ) : (
                   <div
                     className={`hidden shrink-0 items-center justify-center rounded-lg border border-dashed border-(--border-muted) bg-(--bg)/60 text-[10px] text-zinc-500 sm:flex ${coverSizeClassName}`}
                   >
-                    No cover
+                    {t('No cover')}
                   </div>
                 )}
                 <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -1606,11 +1618,11 @@ const ReleaseModalSession = ({
                             d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"
                           />
                         </svg>
-                        {displayFields.usersField.value} readers
+                        {t('{count} readers', { count: displayFields.usersField.value })}
                       </span>
                     )}
                     {displayFields?.pagesField && (
-                      <span>{displayFields.pagesField.value} pages</span>
+                      <span>{t('{count} pages', { count: displayFields.pagesField.value })}</span>
                     )}
                     {displayFields?.lengthField && (
                       <span className="flex items-center gap-1">
@@ -1654,18 +1666,13 @@ const ReleaseModalSession = ({
                   {book.series_name && (
                     <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
                       <span>
-                        {book.series_position != null ? (
-                          <>
-                            #
-                            {Number.isInteger(book.series_position)
-                              ? book.series_position
-                              : book.series_position}
-                            {book.series_count ? ` of ${book.series_count}` : ''} in{' '}
-                            {book.series_name}
-                          </>
-                        ) : (
-                          <>Part of {book.series_name}</>
-                        )}
+                        {book.series_position != null
+                          ? buildSeriesLine(
+                              book.series_name,
+                              book.series_position,
+                              book.series_count ?? null,
+                            )
+                          : t('Part of {series}', { series: book.series_name })}
                       </span>
                       {onSearchSeries && (
                         <button
@@ -1693,7 +1700,7 @@ const ReleaseModalSession = ({
                               d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
                             />
                           </svg>
-                          View series
+                          {t('View series')}
                         </button>
                       )}
                     </div>
@@ -1712,7 +1719,7 @@ const ReleaseModalSession = ({
                               onClick={() => setDescriptionExpanded(false)}
                               className="inline font-medium text-emerald-600 hover:underline dark:text-emerald-400"
                             >
-                              Show less
+                              {t('Show less')}
                             </button>
                           </>
                         )}
@@ -1723,7 +1730,7 @@ const ReleaseModalSession = ({
                           onClick={() => setDescriptionExpanded(true)}
                           className="absolute right-0 bottom-0 bg-linear-to-r from-transparent via-(--bg) to-(--bg) pl-8 font-medium text-emerald-600 hover:underline sm:via-(--bg-soft) sm:to-(--bg-soft) dark:text-emerald-400"
                         >
-                          more
+                          {t('more')}
                         </button>
                       )}
                     </div>
@@ -1743,7 +1750,7 @@ const ReleaseModalSession = ({
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-emerald-600 hover:underline dark:text-emerald-400"
                       >
-                        View on {providerDisplay}
+                        {t('View on {provider}', { provider: providerDisplay })}
                         <svg
                           className="h-3 w-3"
                           fill="none"
@@ -1783,7 +1790,7 @@ const ReleaseModalSession = ({
                                 d="M12 4.5v15m7.5-7.5h-15"
                               />
                             </svg>
-                            {isRequestingBook ? 'Adding...' : 'Add to requests'}
+                            {isRequestingBook ? t('Adding...') : t('Add to requests')}
                           </button>
                         )}
                         {bookSupportsTargets(book) && book.provider && book.provider_id && (
@@ -1810,7 +1817,7 @@ const ReleaseModalSession = ({
               )}
               {!sourcesLoading && allTabs.length === 0 && (
                 <div className="px-5 py-3 text-sm text-zinc-500 dark:text-zinc-400">
-                  {sourcesError || 'No release sources are available for this book.'}
+                  {sourcesError || t('No release sources are available for this book.')}
                 </div>
               )}
               {!sourcesLoading && allTabs.length > 0 && (
@@ -1840,7 +1847,7 @@ const ReleaseModalSession = ({
                               : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'
                           }`}
                         >
-                          {tab.displayName}
+                          {t(tab.displayName)}
                         </button>
                       ))}
                     </div>
@@ -1864,7 +1871,7 @@ const ReleaseModalSession = ({
                       if (totalCountNum === 1) {
                         return (
                           <span className="mx-2 shrink-0 text-xs whitespace-nowrap text-gray-500 dark:text-gray-400">
-                            Result 1 (1 Total)
+                            {t('Result 1 (1 Total)')}
                           </span>
                         );
                       }
@@ -1872,7 +1879,7 @@ const ReleaseModalSession = ({
                       const totalStr = isCapped ? '500+' : String(totalCountNum);
                       return (
                         <span className="mx-2 shrink-0 text-xs whitespace-nowrap text-gray-500 dark:text-gray-400">
-                          Results 1-{shownEnd} ({totalStr} Total)
+                          {t('Results 1-{end} ({total} Total)', { end: shownEnd, total: totalStr })}
                         </span>
                       );
                     })()}
@@ -1888,9 +1895,11 @@ const ReleaseModalSession = ({
                         className={`hover-surface relative rounded-full p-2.5 text-zinc-500 transition-colors dark:text-zinc-400 ${
                           multiBook ? 'text-emerald-600 dark:text-emerald-400' : ''
                         }`}
-                        aria-label="Multi-book pack"
+                        aria-label={t('Multi-book pack')}
                         aria-pressed={multiBook}
-                        title="Multi-book pack: file each subfolder (or each file) as a separate book. Only needed when a release can't be inspected before download."
+                        title={t(
+                          "Multi-book pack: file each subfolder (or each file) as a separate book. Only needed when a release can't be inspected before download.",
+                        )}
                       >
                         <svg
                           className="h-4 w-4"
@@ -1949,8 +1958,8 @@ const ReleaseModalSession = ({
                       className={`hover-surface rounded-full p-2.5 text-zinc-500 transition-colors dark:text-zinc-400 ${
                         manualQuery.trim() ? 'text-emerald-600 dark:text-emerald-400' : ''
                       }`}
-                      aria-label="Manual search query"
-                      title="Manual query"
+                      aria-label={t('Manual search query')}
+                      title={t('Manual query')}
                     >
                       <svg
                         className="h-4 w-4"
@@ -1980,7 +1989,7 @@ const ReleaseModalSession = ({
                             className={`hover-surface relative rounded-full p-2.5 text-zinc-500 transition-colors dark:text-zinc-400 ${
                               isOpen ? 'bg-(--hover-surface)' : ''
                             }`}
-                            aria-label="Sort releases"
+                            aria-label={t('Sort releases')}
                           >
                             <svg
                               className="h-4 w-4"
@@ -2017,7 +2026,7 @@ const ReleaseModalSession = ({
                                   : 'text-zinc-700 dark:text-zinc-300'
                               }`}
                             >
-                              <span>Best Match (Default)</span>
+                              <span>{t('Best Match (Default)')}</span>
                               {!currentSort && (
                                 <svg
                                   className="h-4 w-4"
@@ -2053,7 +2062,7 @@ const ReleaseModalSession = ({
                                       : 'text-zinc-700 dark:text-zinc-300'
                                   }`}
                                 >
-                                  <span>{opt.label}</span>
+                                  <span>{t(opt.label)}</span>
                                   {isSelected && direction && (
                                     <svg
                                       className="h-4 w-4"
@@ -2097,10 +2106,11 @@ const ReleaseModalSession = ({
                                   }`}
                                 >
                                   <span>
-                                    Format
                                     {currentSort?.key === FORMAT_SORT_KEY && currentSort.value
-                                      ? ` (${currentSort.value.toUpperCase()})`
-                                      : ''}
+                                      ? t('Format ({format})', {
+                                          format: currentSort.value.toUpperCase(),
+                                        })
+                                      : t('Format')}
                                   </span>
                                   <svg
                                     className={`h-4 w-4 transition-transform ${formatSortExpanded ? 'rotate-90' : ''}`}
@@ -2213,7 +2223,7 @@ const ReleaseModalSession = ({
                               className={`hover-surface relative rounded-full p-2.5 text-zinc-500 transition-colors dark:text-zinc-400 ${
                                 isOpen ? 'bg-(--hover-surface)' : ''
                               }`}
-                              aria-label="Filter releases"
+                              aria-label={t('Filter releases')}
                             >
                               <svg
                                 className="h-4 w-4"
@@ -2240,18 +2250,18 @@ const ReleaseModalSession = ({
                             {columnConfig.supported_filters?.includes('format') &&
                               availableFormats.length > 0 && (
                                 <DropdownList
-                                  label="Format"
+                                  label={t('Format')}
                                   options={formatOptions}
                                   value={formatFilter}
                                   onChange={(val) =>
                                     setFormatFilter(typeof val === 'string' ? val : (val[0] ?? ''))
                                   }
-                                  placeholder="All Formats"
+                                  placeholder={t('All Formats')}
                                 />
                               )}
                             {columnConfig.supported_filters?.includes('language') && (
                               <LanguageMultiSelect
-                                label="Language"
+                                label={t('Language')}
                                 options={bookLanguages}
                                 value={languageFilter}
                                 onChange={setLanguageFilter}
@@ -2261,7 +2271,7 @@ const ReleaseModalSession = ({
                             {columnConfig.supported_filters?.includes('indexer') &&
                               availableIndexers.length > 1 && (
                                 <DropdownList
-                                  label="Indexers"
+                                  label={t('Indexers')}
                                   options={availableIndexers.map((idx) => ({
                                     value: idx,
                                     label: idx,
@@ -2277,7 +2287,7 @@ const ReleaseModalSession = ({
                                     }
                                     setIndexerFilter(nextIndexerFilter);
                                   }}
-                                  placeholder="All Indexers"
+                                  placeholder={t('All Indexers')}
                                 />
                               )}
                             {/* Apply button - re-fetch when the source supports server-side filters */}
@@ -2291,7 +2301,7 @@ const ReleaseModalSession = ({
                                 }}
                                 className="w-full rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-700"
                               >
-                                Apply
+                                {t('Apply')}
                               </button>
                             )}
                           </div>
@@ -2317,8 +2327,8 @@ const ReleaseModalSession = ({
                     type="text"
                     value={manualQuery}
                     onChange={(e) => setManualQuery(e.target.value)}
-                    placeholder="Type a custom search query (overrides all sources)"
-                    aria-label="Custom search query"
+                    placeholder={t('Type a custom search query (overrides all sources)')}
+                    aria-label={t('Custom search query')}
                     className="w-full rounded-lg border border-(--border-muted) bg-(--bg) px-3 py-2 text-sm text-(--text)"
                   />
                   <button
@@ -2330,11 +2340,11 @@ const ReleaseModalSession = ({
                         : 'bg-emerald-600 hover:bg-emerald-700'
                     }`}
                   >
-                    {currentTabLoading ? 'Searching…' : 'Search'}
+                    {currentTabLoading ? t('Searching…') : t('Search')}
                   </button>
                 </form>
                 <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                  Manual query overrides ISBN/title/author/language expansion.
+                  {t('Manual query overrides ISBN/title/author/language expansion.')}
                 </p>
               </div>
             )}
@@ -2373,7 +2383,9 @@ const ReleaseModalSession = ({
                   return <ErrorState message={sourcesError} />;
                 }
                 if (!hasActiveTab) {
-                  return <EmptyState message="No release sources are available for this book." />;
+                  return (
+                    <EmptyState message={t('No release sources are available for this book.')} />
+                  );
                 }
                 if (isInitialLoading && filteredReleases.length === 0) {
                   return <ReleaseSkeleton />;
@@ -2401,7 +2413,7 @@ const ReleaseModalSession = ({
                             }}
                             className="hover-action rounded-full px-3 py-1.5 text-sm text-zinc-500 transition-all duration-200 dark:text-zinc-400"
                           >
-                            {columnConfig.action_button?.label ?? 'Expand search'}
+                            {t(columnConfig.action_button?.label ?? 'Expand search')}
                           </button>
                         </div>
                       )}
@@ -2459,7 +2471,7 @@ const ReleaseModalSession = ({
                             }}
                             className="hover-action rounded-full px-3 py-1.5 text-sm text-zinc-500 transition-all duration-200 dark:text-zinc-400"
                           >
-                            {columnConfig.action_button?.label ?? 'Expand search'}
+                            {t(columnConfig.action_button?.label ?? 'Expand search')}
                           </button>
                         </div>
                       )}
@@ -2477,7 +2489,7 @@ const ReleaseModalSession = ({
                   {searchStatus.phase !== 'complete' && searchStatus.phase !== 'error' && (
                     <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
                   )}
-                  {searchStatus.message}
+                  {t(searchStatus.message)}
                 </div>
               </div>
             )}
@@ -2492,7 +2504,7 @@ const ReleaseModalSession = ({
                   <PhaseChip
                     release={combinedPhase === 'ebook' ? selectedRelease : stagedEbookRelease}
                     isActive={combinedPhase === 'ebook'}
-                    label="Book"
+                    label={t('Book')}
                     onClear={clearEbookSelection}
                   />
                   <PhaseChip
@@ -2500,7 +2512,7 @@ const ReleaseModalSession = ({
                       combinedPhase === 'audiobook' ? selectedRelease : stagedAudiobookRelease
                     }
                     isActive={combinedPhase === 'audiobook'}
-                    label="Audiobook"
+                    label={t('Audiobook')}
                     onClear={clearAudiobookSelection}
                   />
                 </div>
@@ -2517,7 +2529,7 @@ const ReleaseModalSession = ({
                       }}
                       className="hover-surface rounded-lg px-3 py-1.5 text-sm font-medium text-(--text) transition-colors"
                     >
-                      &larr; Back
+                      &larr; {t('Back')}
                     </button>
                   )}
 
@@ -2536,9 +2548,7 @@ const ReleaseModalSession = ({
                       }}
                       className="rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {selectedRelease
-                        ? `Select ${nextCombinedPhaseLabel} →`
-                        : `Skip ${currentCombinedPhaseLabel} →`}
+                      {combinedNextLabel}
                     </button>
                   )}
 

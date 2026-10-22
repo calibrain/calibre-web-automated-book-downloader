@@ -3,6 +3,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useMountEffect } from '../hooks/useMountEffect';
+import { t } from '../i18n';
 import { getMetadataBookInfo } from '../services/api';
 import type { CreateRequestPayload } from '../types';
 import type { RequestConfirmationPreview } from '../utils/requestConfirmation';
@@ -205,7 +206,7 @@ function RequestConfirmationModalSession({
         className={`absolute inset-0 bg-black/60 transition-opacity duration-150 ${isClosing ? 'opacity-0' : 'opacity-100'}`}
         onClick={handleClose}
         tabIndex={-1}
-        aria-label="Close request confirmation"
+        aria-label={t('Close request confirmation')}
       />
 
       <div
@@ -217,13 +218,13 @@ function RequestConfirmationModalSession({
       >
         <header className="flex items-center justify-between border-b border-(--border-muted) px-6 py-4">
           <h3 id={titleId} className="text-lg font-semibold">
-            {extraPayloads.length > 0 ? 'Request Book & Audiobook' : 'Request Book'}
+            {extraPayloads.length > 0 ? t('Request Book & Audiobook') : t('Request Book')}
           </h3>
           <button
             type="button"
             onClick={handleClose}
             className="rounded-lg p-1.5 transition-colors hover:bg-(--hover-surface) disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Close request confirmation"
+            aria-label={t('Close request confirmation')}
             disabled={isSubmitting}
           >
             <svg
@@ -245,12 +246,12 @@ function RequestConfirmationModalSession({
                 {preview.preview ? (
                   <img
                     src={preview.preview}
-                    alt={`${preview.title} cover`}
+                    alt={t('{title} cover', { title: preview.title })}
                     className="h-full w-full object-cover object-top"
                   />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-[10px] opacity-60">
-                    No cover
+                    {t('No cover')}
                   </div>
                 )}
               </div>
@@ -275,7 +276,9 @@ function RequestConfirmationModalSession({
                       <p className="text-xs opacity-60">
                         {extraPreviewEntries.length > 0 && (
                           <span className="font-medium opacity-80">
-                            {payload.context.content_type === 'ebook' ? 'Book: ' : 'Audiobook: '}
+                            {payload.context.content_type === 'ebook'
+                              ? t('Book:')
+                              : t('Audiobook:')}{' '}
                           </span>
                         )}
                         {preview.releaseLine}
@@ -287,8 +290,8 @@ function RequestConfirmationModalSession({
                           <p key={key} className="text-xs opacity-60">
                             <span className="font-medium opacity-80">
                               {extraPayload.context.content_type === 'ebook'
-                                ? 'Book: '
-                                : 'Audiobook: '}
+                                ? t('Book:')
+                                : t('Audiobook:')}{' '}
                             </span>
                             {extraPreview.releaseLine}
                           </p>
@@ -303,17 +306,17 @@ function RequestConfirmationModalSession({
           {allowNotes && (
             <div className="space-y-1">
               <label htmlFor="request-note" className="text-sm font-medium">
-                Note (optional)
+                {t('Note (optional)')}
               </label>
               <textarea
                 id="request-note"
-                aria-label="Note (optional)"
+                aria-label={t('Note (optional)')}
                 value={note}
                 onChange={(event) => setNote(truncateRequestNote(event.target.value))}
                 maxLength={MAX_REQUEST_NOTE_LENGTH}
                 rows={4}
                 className="min-h-[96px] w-full resize-y rounded-lg border border-(--border-muted) bg-(--bg) px-3 py-2 text-sm focus:border-sky-500 focus:ring-2 focus:ring-sky-500/50 focus:outline-hidden"
-                placeholder="Add context for admins reviewing this request..."
+                placeholder={t('Add context for admins reviewing this request...')}
                 disabled={isSubmitting}
               />
               <p className="text-right text-xs opacity-60">
@@ -330,7 +333,7 @@ function RequestConfirmationModalSession({
             disabled={isSubmitting}
             className="rounded-lg border border-(--border-muted) bg-(--bg-soft) px-4 py-2 text-sm font-medium transition-colors hover:bg-(--hover-surface) disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Cancel
+            {t('Cancel')}
           </button>
           <button
             type="button"
@@ -358,10 +361,10 @@ function RequestConfirmationModalSession({
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                   />
                 </svg>
-                Requesting...
+                {t('Requesting...')}
               </>
             ) : (
-              'Request'
+              t('Request')
             )}
           </button>
         </footer>

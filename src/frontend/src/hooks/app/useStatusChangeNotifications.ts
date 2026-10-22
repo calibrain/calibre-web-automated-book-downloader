@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useRef } from 'react';
 
+import { t } from '../../i18n';
 import type { AppConfig, StatusData } from '../../types';
 import { withBasePath } from '../../utils/basePath';
 
@@ -38,7 +39,7 @@ export const useStatusChangeNotifications = ({
       Object.keys(currQueued).forEach((bookId) => {
         if (!prevQueued[bookId]) {
           const book = currQueued[bookId];
-          showToast(`${book.title || 'Book'} added to queue`, 'info');
+          showToast(t('{title} added to queue', { title: book.title || t('Book') }), 'info');
           if (config?.auto_open_downloads_sidebar !== false) {
             shouldOpenDownloadsSidebar = true;
           }
@@ -53,7 +54,7 @@ export const useStatusChangeNotifications = ({
       Object.keys(currDownloading).forEach((bookId) => {
         if (!prevDownloading[bookId]) {
           const book = currDownloading[bookId];
-          showToast(`${book.title || 'Book'} started downloading`, 'info');
+          showToast(t('{title} started downloading', { title: book.title || t('Book') }), 'info');
         }
       });
 
@@ -62,7 +63,7 @@ export const useStatusChangeNotifications = ({
       Object.keys(currComplete).forEach((bookId) => {
         if (!prevComplete[bookId]) {
           const book = currComplete[bookId];
-          showToast(`${book.title || 'Book'} completed`, 'success');
+          showToast(t('{title} completed', { title: book.title || t('Book') }), 'success');
 
           if (book.download_path && canAutoDownloadContentType(book.content_type)) {
             const link = document.createElement('a');
@@ -86,8 +87,8 @@ export const useStatusChangeNotifications = ({
       Object.keys(currError).forEach((bookId) => {
         if (!prevError[bookId]) {
           const book = currError[bookId];
-          const errorMsg = book.status_message || 'Download failed';
-          showToast(`${book.title || 'Book'}: ${errorMsg}`, 'error');
+          const errorMsg = t(book.status_message || 'Download failed');
+          showToast(`${book.title || t('Book')}: ${errorMsg}`, 'error');
         }
       });
     },

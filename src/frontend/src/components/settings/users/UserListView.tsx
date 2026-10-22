@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { t } from '../../../i18n';
 import type { AdminUser, DownloadDefaults } from '../../../services/api';
 import type { CreateUserFormState } from './types';
 import { canCreateLocalUsersForAuthMode } from './types';
@@ -96,7 +97,7 @@ export const UserListView = ({
         if (loadingUsers && users.length === 0) {
           return (
             <div className="space-y-2 py-8 text-center">
-              <p className="text-sm opacity-50">Loading users...</p>
+              <p className="text-sm opacity-50">{t('Loading users...')}</p>
             </div>
           );
         }
@@ -110,7 +111,7 @@ export const UserListView = ({
                 onClick={onRetryLoadUsers}
                 className="rounded-lg border border-(--border-muted) bg-(--bg-soft) px-4 py-2 text-sm font-medium transition-colors hover:bg-(--hover-surface)"
               >
-                Retry
+                {t('Retry')}
               </button>
             </div>
           );
@@ -119,9 +120,11 @@ export const UserListView = ({
         if (users.length === 0) {
           return (
             <div className="space-y-2 py-8 text-center">
-              <p className="text-sm opacity-50">No users yet.</p>
+              <p className="text-sm opacity-50">{t('No users yet.')}</p>
               <p className="text-xs opacity-40">
-                Create a local admin account before enabling OIDC to avoid getting locked out.
+                {t(
+                  'Create a local admin account before enabling OIDC to avoid getting locked out.',
+                )}
               </p>
             </div>
           );
@@ -157,7 +160,9 @@ export const UserListView = ({
                       aria-expanded={isEditingRow}
                       aria-controls={editorPanelId}
                       aria-label={
-                        isEditingRow ? 'Collapse user editor' : `Expand ${user.username} editor`
+                        isEditingRow
+                          ? t('Collapse user editor')
+                          : t('Expand {username} editor', { username: user.username })
                       }
                       className={`absolute inset-0 appearance-none border-0 bg-transparent p-0 focus-visible:ring-2 focus-visible:ring-sky-500/50 focus-visible:outline-hidden ${isEditingRow ? 'rounded-t-lg' : 'rounded-lg'}`}
                     />
@@ -223,13 +228,15 @@ export const UserListView = ({
                           isDeletePending={confirmDelete === user.id}
                           deleting={deletingUserId === user.id}
                           preferencesPanel={{
-                            description: 'Customise delivery and request settings for this user.',
-                            actionLabel: 'Open User Preferences',
+                            description: t(
+                              'Customise delivery and request settings for this user.',
+                            ),
+                            actionLabel: t('Open User Preferences'),
                             onAction: onOpenOverrides,
                           }}
                         />
                       ) : (
-                        <div className="text-sm opacity-60">Loading user details...</div>
+                        <div className="text-sm opacity-60">{t('Loading user details...')}</div>
                       )}
                     </div>
                   )}
@@ -258,7 +265,7 @@ export const UserListView = ({
               onClick={onCreate}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-sky-700"
             >
-              Create Local User
+              {t('Create Local User')}
             </button>
           )}
         </div>
@@ -274,7 +281,7 @@ export const UserListView = ({
             disabled={syncingCwa}
             className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {syncingCwa ? 'Syncing with CWA...' : 'Sync with CWA'}
+            {syncingCwa ? t('Syncing with CWA...') : t('Sync with CWA')}
           </button>
         </div>
       )}

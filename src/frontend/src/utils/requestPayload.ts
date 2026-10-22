@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { Book, ContentType, CreateRequestPayload, Release } from '../types';
 
 export const toContentType = (value: string): ContentType => {
@@ -9,7 +10,7 @@ export const getBrowseSource = (book: Book): string => {
   if (source) {
     return source;
   }
-  throw new Error(`Book ${book.id} is missing source context`);
+  throw new Error(t('Book {id} is missing source context', { id: book.id }));
 };
 
 export const isSourceBackedRequestPayload = (
@@ -150,6 +151,6 @@ export const getRequestSuccessMessage = (payload: CreateRequestPayload): string 
   const title =
     (typeof bookData.title === 'string' && bookData.title.trim()) ||
     (typeof releaseData.title === 'string' && releaseData.title.trim()) ||
-    'Untitled';
-  return `Request submitted: ${title}`;
+    t('Untitled');
+  return t('Request submitted: {title}', { title });
 };

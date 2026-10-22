@@ -4,7 +4,10 @@ import { BrowserRouter } from 'react-router-dom';
 
 import { App } from './App';
 import { SocketProvider } from './contexts/SocketContext';
+import { locale } from './i18n';
 import { getBasePath } from './utils/basePath';
+
+document.documentElement.lang = locale;
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element not found');
