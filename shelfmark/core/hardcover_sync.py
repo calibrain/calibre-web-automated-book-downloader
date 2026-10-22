@@ -97,10 +97,11 @@ def _book_to_book_data(book: BookMetadata, content_type: str) -> dict[str, Any]:
 
 
 def _existing_provider_ids(user_db: UserDB) -> set[str]:
+    """Hardcover ids already requested, in any status. Other providers' ids are not counted."""
     ids: set[str] = set()
     for row in user_db.list_requests():
         book_data = row.get("book_data") or {}
-        if isinstance(book_data, dict):
+        if isinstance(book_data, dict) and book_data.get("provider") == "hardcover":
             pid = book_data.get("provider_id") or book_data.get("id")
             if pid is not None:
                 ids.add(str(pid))
