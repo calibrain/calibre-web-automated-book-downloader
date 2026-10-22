@@ -111,9 +111,10 @@ def trigger_async(*, force: bool = True) -> bool:
 
 def _quick_retry_interval_seconds() -> float:
     """How often failed downloads are checked between cycles, 0 when switched off."""
+    raw = app_config.get("AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES", 0)
     try:
-        minutes = float(app_config.get("AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES", 0) or 0)
-    except TypeError, ValueError:
+        minutes = float(raw) if isinstance(raw, (int, float, str)) else 0.0
+    except ValueError:
         return 0.0
     return max(minutes * 60.0, _MIN_INTERVAL_SECONDS) if minutes > 0 else 0.0
 
