@@ -83,6 +83,10 @@ volumes:
 - Mounted paths must already be writable by `1000:1000`.
 - `USING_TOR=true` requires root startup.
 
+## ☁️ One-Click Deploy
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Shelfmark/)
+
 ## ⚙️ Configuration
 
 ### Search Modes
