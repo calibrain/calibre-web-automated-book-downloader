@@ -145,8 +145,10 @@ def test_existing_provider_ids_reads_provider_id_or_id(user_db):
     user = user_db.create_user(username="reader", role="user")
     for book_data in (
         {"title": "A", "author": "X", "provider": "hardcover", "provider_id": 11},
-        {"title": "B", "author": "X", "provider": "openlibrary", "id": "OL22W"},
-        {"title": "C", "author": "X", "provider": "manual"},
+        {"title": "B", "author": "X", "provider": "hardcover", "id": "22"},
+        {"title": "C", "author": "X", "provider": "openlibrary", "id": "OL22W"},
+        {"title": "D", "author": "X", "provider": "googlebooks", "provider_id": 33},
+        {"title": "E", "author": "X", "provider": "manual"},
     ):
         user_db.create_request(
             user_id=user["id"],
@@ -156,7 +158,7 @@ def test_existing_provider_ids_reads_provider_id_or_id(user_db):
             book_data=book_data,
         )
 
-    assert hardcover_sync._existing_provider_ids(user_db) == {"11", "OL22W"}
+    assert hardcover_sync._existing_provider_ids(user_db) == {"11", "22"}
 
 
 def test_already_downloaded_matches_history_case_insensitively(user_db, db_path):
