@@ -894,6 +894,35 @@ def test_sync_delivery_states_a_failure_alone_still_reopens(user_db):
     assert user_db.get_request(request["id"])["status"] == "pending"
 
 
+@pytest.mark.parametrize(
+    "queue_status",
+    [{}, {"queued": {}, "downloading": {}, "complete": {}, "error": {}}],
+)
+def test_sync_delivery_states_an_empty_queue_skips_the_request_history(
+    user_db, monkeypatch, queue_status
+):
+    user = user_db.create_user(username="alice")
+    _fulfilled_with_release(user_db, user["id"], "idle")
+    calls = []
+    real_list_requests = user_db.list_requests
+
+    def counting_list_requests(**kwargs):
+        calls.append(kwargs)
+        return real_list_requests(**kwargs)
+
+    monkeypatch.setattr(user_db, "list_requests", counting_list_requests)
+
+    assert sync_delivery_states_from_queue_status(user_db, queue_status=queue_status) == []
+    assert calls == []
+
+    # A task in the queue still reads the history and syncs as before.
+    updated = sync_delivery_states_from_queue_status(
+        user_db, queue_status={"downloading": {"idle": {"id": "idle"}}}
+    )
+    assert len(calls) == 1
+    assert [row["delivery_state"] for row in updated] == ["downloading"]
+
+
 def test_create_request_rejects_non_dict_book_data(user_db):
     user = user_db.create_user(username="alice")
     with pytest.raises(RequestServiceError, match="book_data must be an object"):
