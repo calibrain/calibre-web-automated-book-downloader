@@ -7,7 +7,12 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from shelfmark.core.config import config as app_config
-from shelfmark.core.notifications import NotificationEvent, send_test_notification
+from shelfmark.core.notifications import (
+    NotificationEvent,
+    expand_user_route_placeholders,
+    send_test_notification,
+    user_route_url_problem,
+)
 from shelfmark.core.settings_registry import (
     ActionButton,
     HeadingField,
@@ -142,8 +147,19 @@ def _extract_unique_route_urls(routes: list[dict[str, Any]]) -> list[str]:
     return urls
 
 
-def build_notification_test_result(routes_input: Any, *, scope_label: str) -> dict[str, Any]:
-    """Validate routes and return a test-notification result payload."""
+def build_notification_test_result(
+    routes_input: Any,
+    *,
+    scope_label: str,
+    user_scope: bool = False,
+    user_id: int | None = None,
+) -> dict[str, Any]:
+    """Validate routes and return a test-notification result payload.
+
+    ``user_scope`` is for a user's own routes, which may only use the services and public hosts
+    that ``user_route_url_problem`` allows. ``user_id`` fills in ``{User}``/``{Email}`` first, so
+    the check sees the URL that would actually be sent.
+    """
     invalid_event_count = _count_invalid_route_events(routes_input)
     if invalid_event_count:
         return {
@@ -171,6 +187,26 @@ def build_notification_test_result(routes_input: Any, *, scope_label: str) -> di
             "success": False,
             "message": f"Add at least one {scope_label} notification URL route first.",
         }
+
+    if user_id is not None:
+        urls = expand_user_route_placeholders(urls, user_id)
+        if not urls:
+            return {
+                "success": False,
+                "message": (
+                    "Every route was skipped while filling in {User}/{Email}: the account has "
+                    "no value for it, or a placeholder is in the host part of the URL."
+                ),
+            }
+
+    if user_scope:
+        for url in urls:
+            problem = user_route_url_problem(url)
+            if problem is not None:
+                return {
+                    "success": False,
+                    "message": f"Personal notification route refused: {problem}.",
+                }
 
     return send_test_notification(urls)
 
@@ -313,7 +349,9 @@ def notifications_settings() -> list[SettingsField]:
             label="",
             description=(
                 "Create one route per URL. Start with All, then add event-specific routes "
-                "for targeted delivery. Need format examples? "
+                "for targeted delivery. Use {User} or {Email} in the path or query to fill in "
+                "each user's account details, e.g. ntfys://ntfy.sh/shelfmark-{User}, or "
+                "mailtos://...?to={Email} in the admin default. Need format examples? "
                 "[View Apprise URL formats](https://appriseit.com/services/)."
             ),
             columns=[

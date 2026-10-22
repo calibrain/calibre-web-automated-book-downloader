@@ -309,6 +309,126 @@ def test_wait_for_completed_path_allows_delayed_remapped_file(monkeypatch, tmp_p
     assert ("locating", "Waiting for completed files...") in recorder.status_updates
 
 
+def test_waits_for_supported_file_to_stop_growing_in_remapped_directory(monkeypatch, tmp_path):
+    import shelfmark.download.clients.base_handler as base_handler
+
+    local_dir = tmp_path / "local" / "downloads" / "book"
+    local_dir.mkdir(parents=True)
+    (local_dir / "book.cue").write_text("cue")
+    (local_dir / "cover.jpg").write_text("cover")
+
+    mock_client = MagicMock()
+    mock_client.name = "qbittorrent"
+    mock_client.get_download_path.return_value = "/remote/downloads/book"
+
+    def config_get(key: str, default=""):
+        if key == "PROWLARR_REMOTE_PATH_MAPPINGS":
+            return [
+                {
+                    "host": "qbittorrent",
+                    "remotePath": "/remote/downloads",
+                    "localPath": str(local_dir.parent),
+                }
+            ]
+        if key == "DOWNLOAD_CLIENT_COMPLETED_PATH_TIMEOUT":
+            return 1
+        return default
+
+    media_file = local_dir / "book.m4b"
+    sleep_calls = 0
+
+    def advance_sync(_seconds: float) -> None:
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls == 1:
+            media_file.write_bytes(b"a")
+        elif sleep_calls == 2:
+            media_file.write_bytes(b"audio")
+
+    handler = ProwlarrHandler()
+    recorder = ProgressRecorder()
+    monkeypatch.setattr(base_handler.config, "get", config_get)
+    monkeypatch.setattr(handler, "_completed_path_retry_interval", lambda: 0.01)
+    monkeypatch.setattr(base_handler.time, "sleep", advance_sync)
+
+    resolved_path, error = handler._wait_for_completed_path(
+        mock_client,
+        "download_id",
+        cancel_flag=None,
+        status_callback=recorder.status_callback,
+        content_type="audiobook",
+    )
+
+    assert resolved_path == local_dir
+    assert error is None
+    assert sleep_calls == 3
+    assert recorder.status_updates.count(("locating", "Waiting for completed files...")) == 3
+
+
+def _wait_for_local_directory(monkeypatch, directory: Path, *, timeout: object):
+    import shelfmark.download.clients.base_handler as base_handler
+
+    mock_client = MagicMock()
+    mock_client.name = "qbittorrent"
+    mock_client.get_download_path.return_value = str(directory)
+
+    def config_get(key: str, default=""):
+        if key == "PROWLARR_REMOTE_PATH_MAPPINGS":
+            return []
+        if key == "DOWNLOAD_CLIENT_COMPLETED_PATH_TIMEOUT":
+            return timeout
+        return default
+
+    handler = ProwlarrHandler()
+    monkeypatch.setattr(base_handler.config, "get", config_get)
+    monkeypatch.setattr(handler, "_completed_path_retry_interval", lambda: 0.01)
+    monkeypatch.setattr(base_handler.time, "sleep", lambda _seconds: None)
+    return handler._wait_for_completed_path(
+        mock_client,
+        "download_id",
+        cancel_flag=None,
+        status_callback=ProgressRecorder().status_callback,
+    )
+
+
+def test_a_directory_holding_only_an_archive_is_returned_for_extraction(monkeypatch, tmp_path):
+    # A scene release: the book is inside the .rar, which post-processing extracts.
+    release = tmp_path / "Book.Title-GROUP"
+    release.mkdir()
+    (release / "book.rar").write_bytes(b"Rar!archive")
+    (release / "book.nfo").write_text("nfo")
+    (release / "book.sfv").write_text("sfv")
+
+    resolved_path, error = _wait_for_local_directory(monkeypatch, release, timeout=1)
+
+    assert resolved_path == release
+    assert error is None
+
+
+def test_a_completed_directory_is_returned_when_no_wait_is_configured(monkeypatch, tmp_path):
+    release = tmp_path / "Book"
+    release.mkdir()
+    (release / "book.epub").write_bytes(b"epub")
+
+    resolved_path, error = _wait_for_local_directory(monkeypatch, release, timeout=0)
+
+    assert resolved_path == release
+    assert error is None
+
+
+def test_a_directory_without_book_files_still_fails_when_no_wait_is_configured(
+    monkeypatch, tmp_path
+):
+    release = tmp_path / "Book"
+    release.mkdir()
+    (release / "cover.jpg").write_bytes(b"jpg")
+
+    resolved_path, error = _wait_for_local_directory(monkeypatch, release, timeout=0)
+
+    assert resolved_path is None
+    assert error == "Completed download has no stable supported files yet."
+
+
 def test_wait_for_completed_path_fails_fast_for_unsafe_mapping(monkeypatch, tmp_path):
     import shelfmark.download.clients.base_handler as base_handler
 

@@ -61,6 +61,8 @@ Override how a user searches, on top of the global search defaults:
 
 Users can configure personal notification routes, separate from the global notification settings. Each route targets a URL (e.g. an Apprise-compatible endpoint) and can be scoped to specific event types or all events.
 
+Route URLs can use `{User}` and `{Email}` in their path or query, filled in from each user's account when a notification is sent. A route is skipped for users without the value it needs, or whose value contains spaces or any of `, ; / \ "` (or is only dots, such as `..`), since those would split it into several targets or change the URL path. The admin-set default routes apply to every user who hasn't set routes of their own and can use any service, so one default such as `mailtos://user:pass@smtp.example.com?to={Email}` reaches each user at their own address. The service a default points to then receives each user's email address, so only use one you trust with it. Routes a user sets themselves stay limited to the personal-route services, e.g. `ntfys://ntfy.sh/shelfmark-{User}`.
+
 ### Request Policy (admin-only)
 
 Admins can override the default ebook/audiobook modes and request rules for individual users. See [Per-User Overrides](#per-user-overrides) below.
@@ -111,3 +113,4 @@ Admins can override the default ebook/audiobook modes and request rules for indi
 4. For fulfilled requests, delivery state is tracked through the download pipeline
 5. If delivery fails, an admin can reopen the request to try a different release
 6. Users can cancel their own pending requests
+7. An admin can **reopen** a rejected request, from the Requests tab or from History. It goes back to pending with what the user originally asked for, and shows in the activity list again even if the user had dismissed it.

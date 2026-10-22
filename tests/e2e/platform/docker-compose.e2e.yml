@@ -112,11 +112,10 @@ services:
     container_name: e2e-mock-aa
     environment:
       MOCK_ROLE: origin-aa
-      # When set (the `full` profile sets it to the CF gate), AA slow-download
-      # links point through Cloudflare so a real download forces the internal
-      # Chrome bypasser to solve the challenge. Empty -> same-origin (no CF).
-      SLOW_DOWNLOAD_BASE: "${SM_SLOW_DOWNLOAD_BASE:-}"
-      AA_FILE_BASE: "http://mock-aa"
+      # Host of the final file link on the slow-download page. The `full` profile
+      # points it at the CF gate, its only AA mirror: shelfmark refuses
+      # unconfigured hosts on private addresses.
+      AA_FILE_BASE: "${SM_AA_FILE_BASE:-http://mock-aa}"
     networks:
       e2e:
         ipv4_address: 172.30.0.10
@@ -129,9 +128,9 @@ services:
       retries: 10
 
   # ----- Cloudflare gate (profiles: bypasser-external, full) -------------- #
-  # `full` puts AA's slow-download behind this gate so the real Chrome bypasser
-  # must solve it; `bypasser-external` puts AA search behind it for the
-  # FlareSolverr negative/positive controls.
+  # `full` uses it as the AA mirror but gates only the slow-download so the real
+  # Chrome bypasser must solve it; `bypasser-external` puts AA search behind it
+  # for the FlareSolverr negative/positive controls.
   mock-cf:
     <<: *mock-build
     container_name: e2e-mock-cf
@@ -139,6 +138,8 @@ services:
     environment:
       MOCK_ROLE: cloudflare
       ORIGIN_INTERNAL_URL: http://mock-aa
+      # Path prefixes to challenge; empty gates every path.
+      CF_GATED_PATHS: "${SM_CF_GATED_PATHS:-}"
     networks:
       e2e:
         ipv4_address: 172.30.0.11

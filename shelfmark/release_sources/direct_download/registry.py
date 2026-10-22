@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from shelfmark.core.config import config
 from shelfmark.release_sources.direct_download.annas_archive import AnnasArchiveProvider
+from shelfmark.release_sources.direct_download.oceanofpdf import OceanofPDFProvider
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -13,7 +14,7 @@ if TYPE_CHECKING:
     from shelfmark.release_sources.direct_download.common import DirectDownloadProvider
 
 
-PROVIDER_TYPES = (AnnasArchiveProvider,)
+PROVIDER_TYPES = (AnnasArchiveProvider, OceanofPDFProvider)
 _AA_MD5_PATTERN = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
 
 
@@ -38,8 +39,9 @@ def get_unavailable_reason(
         return "Direct Download is disabled. Enable the source in Settings."
     if not enabled_providers(providers):
         return (
-            "Direct Download is not configured. Enable and configure at least one "
-            "download provider in Settings."
+            "Direct Download is not configured. Add at least one Anna's Archive or OceanofPDF mirror URL in "
+            "Settings. Z-Library, LibGen and Welib mirrors only download results found through "
+            "Anna's Archive."
         )
     return None
 

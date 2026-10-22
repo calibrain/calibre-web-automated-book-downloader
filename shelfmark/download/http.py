@@ -518,6 +518,11 @@ def html_get_page(
     )
     original_url = url
     current_url = selector.rewrite(original_url)
+    try:
+        network.ensure_public_destination(current_url)
+    except network.UnsafeDestinationError as e:
+        logger.warning("Blocked page fetch: %s", e)
+        return _fail("The page address is not a public host.", current_url)
     use_bypasser_now = use_bypasser
     # Survives across attempts so a cookie won once is still presented on later retries.
     handshake_cookies: dict[str, str] = {}
@@ -572,6 +577,7 @@ def html_get_page(
                     headers=headers,
                     allow_redirects=allow_redirects,
                     verify=get_ssl_verify(current_url),
+                    hooks=network.REDIRECT_GUARD_HOOKS,
                 )
 
                 # Z-Library gates the first hit with a 503 that carries nothing but a
@@ -879,6 +885,11 @@ def download_url(
     """Download content from URL with automatic retry and resume support."""
     selector = _selector or network.AAMirrorSelector()
     current_url = selector.rewrite(link)
+    try:
+        network.ensure_public_destination(current_url)
+    except network.UnsafeDestinationError as e:
+        logger.warning("Blocked download: %s", e)
+        return None
 
     # Build headers with optional referer
     headers = DOWNLOAD_HEADERS.copy()
@@ -914,6 +925,7 @@ def download_url(
                 cookies=cookies,
                 headers=headers,
                 verify=get_ssl_verify(current_url),
+                hooks=network.REDIRECT_GUARD_HOOKS,
             )
             response.raise_for_status()
 
@@ -1077,6 +1089,7 @@ def _try_resume(
                 headers=resume_headers,
                 cookies=cookies,
                 verify=get_ssl_verify(url),
+                hooks=network.REDIRECT_GUARD_HOOKS,
             )
 
             # Check resume support

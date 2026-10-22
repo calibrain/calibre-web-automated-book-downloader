@@ -3,6 +3,7 @@
 import re
 import threading
 import time
+import unicodedata
 from collections import deque
 from http import HTTPStatus
 from typing import Any, ClassVar
@@ -10,6 +11,7 @@ from typing import Any, ClassVar
 import requests
 
 from shelfmark.core.cache import cacheable
+from shelfmark.core.languages import normalize_language
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.settings_registry import (
     ActionButton,
@@ -19,7 +21,8 @@ from shelfmark.core.settings_registry import (
     SettingsField,
     register_settings,
 )
-from shelfmark.download.network import get_ssl_verify
+from shelfmark.core.text_match import STOPWORDS
+from shelfmark.download.network import get_proxies, get_ssl_verify
 from shelfmark.metadata_providers import (
     BookMetadata,
     DisplayField,
@@ -103,6 +106,41 @@ SORT_MAPPING: dict[str, str | None] = {
 }
 
 
+def _title_words(text: str) -> set[str]:
+    """Return the significant words of a title, folded for comparison."""
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    folded = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return {word for word in re.findall(r"\w+", folded) if len(word) >= 2} - STOPWORDS
+
+
+def _is_translation_match(work_title: str, edition: dict, query: str) -> bool:
+    """Return whether a search's matched edition is a translation of the work.
+
+    Open Library shows the English edition of a work whenever one satisfies the
+    query, so an English edition says nothing about which edition the user meant:
+    searching "Mistborn" picks the 2023 "Mistborn" reissue of "The Final Empire",
+    and "Children of Dune" may pick "Children of Dune (Dune Chronicles, Book 3)".
+    An edition in another language comes back when only that language's edition
+    matched, which is what searching a translated title looks like. A `lang`
+    preference also brings one back for a search that names the work itself
+    ("Dune-Zyklus" for "Children of Dune"), so such a search keeps the work.
+    """
+    edition_title = edition.get("title")
+    if not edition_title or _title_words(edition_title) == _title_words(work_title):
+        return False
+
+    edition_languages = {normalize_language(code) for code in edition.get("language") or []}
+    if not edition_languages - {None} or "en" in edition_languages:
+        return False
+
+    query_words = _title_words(query)
+    work_words = _title_words(work_title)
+    names_work = bool(query_words and work_words) and (
+        work_words <= query_words or query_words <= work_words
+    )
+    return not names_work
+
+
 @register_provider("openlibrary")
 class OpenLibraryProvider(MetadataProvider):
     """Open Library metadata provider using REST API."""
@@ -159,7 +197,12 @@ class OpenLibraryProvider(MetadataProvider):
         params: dict[str, Any] = {
             "limit": options.limit,
             "page": options.page,
-            "fields": "key,title,author_name,first_publish_year,cover_i,isbn,publisher,language,subject,ratings_average,ratings_count",
+            "fields": (
+                "key,title,author_name,first_publish_year,cover_i,isbn,publisher,"
+                "language,subject,ratings_average,ratings_count,"
+                "editions,editions.key,editions.title,editions.language,"
+                "editions.isbn,editions.cover_i,editions.publish_year"
+            ),
         }
 
         # Field-first search: use custom field values when provided
@@ -198,13 +241,14 @@ class OpenLibraryProvider(MetadataProvider):
                 f"{OPENLIBRARY_BASE_URL}/search.json",
                 params=params,
                 timeout=15,
+                proxies=get_proxies(OPENLIBRARY_BASE_URL),
                 verify=get_ssl_verify(OPENLIBRARY_BASE_URL),
             )
             response.raise_for_status()
             data = response.json()
 
             for doc in data.get("docs", []):
-                book = self._parse_search_doc(doc)
+                book = self._parse_search_doc(doc, title_value or options.query)
                 if book:
                     books.append(book)
 
@@ -242,6 +286,7 @@ class OpenLibraryProvider(MetadataProvider):
             response = self.session.get(
                 f"{OPENLIBRARY_BASE_URL}/works/{book_id}.json",
                 timeout=15,
+                proxies=get_proxies(OPENLIBRARY_BASE_URL),
                 verify=get_ssl_verify(OPENLIBRARY_BASE_URL),
             )
             response.raise_for_status()
@@ -278,6 +323,7 @@ class OpenLibraryProvider(MetadataProvider):
             response = self.session.get(
                 f"{OPENLIBRARY_BASE_URL}/isbn/{clean_isbn}.json",
                 timeout=15,
+                proxies=get_proxies(OPENLIBRARY_BASE_URL),
                 verify=get_ssl_verify(OPENLIBRARY_BASE_URL),
             )
             response.raise_for_status()
@@ -326,8 +372,12 @@ class OpenLibraryProvider(MetadataProvider):
             logger.exception("Open Library ISBN search parsing error")
             return None
 
-    def _parse_search_doc(self, doc: dict) -> BookMetadata | None:
-        """Parse a search document into BookMetadata."""
+    def _parse_search_doc(self, doc: dict, query: str = "") -> BookMetadata | None:
+        """Parse a search document into BookMetadata.
+
+        ``query`` is what the user searched for (the title field when given), used
+        to tell a search for a translated title apart from one for the work itself.
+        """
         try:
             # Extract work ID from key
             key = doc.get("key", "")
@@ -348,7 +398,6 @@ class OpenLibraryProvider(MetadataProvider):
 
             # Get cover URL
             cover_id = doc.get("cover_i")
-            cover_url = f"{COVERS_BASE_URL}/b/id/{cover_id}-L.jpg" if cover_id else None
 
             # Get publishers (take first one)
             publishers = doc.get("publisher", [])
@@ -361,6 +410,47 @@ class OpenLibraryProvider(MetadataProvider):
             # Get subjects as genres (take first 5)
             subjects = doc.get("subject", [])
             genres = subjects[:5] if subjects else []
+
+            # `title`/`isbn`/`cover_i`/`language` above describe the *work*, which
+            # Open Library reports with one canonical title - usually the original-
+            # language edition - regardless of which translation's text actually
+            # matched the search query (e.g. querying "Der Weg der Könige" matches
+            # the German edition of "The Way of Kings", but the work's title field
+            # still says "The Way of Kings"). The nested `editions` block, requested
+            # above, holds the edition Open Library picked to show for the query.
+            # When that edition is a translation, prefer its title/isbn/cover/
+            # language - otherwise both the result shown to the user and the
+            # release search query (which uses `search_title` or else falls back to
+            # `title`, see search_plan._pick_search_title) end up in the wrong
+            # language even though the user searched for a specific translation by
+            # name. Any other edition keeps the work's own title and first year.
+            title = doc["title"]
+            search_title = None
+            publish_year = doc.get("first_publish_year")
+            matched_edition = next(iter(doc.get("editions", {}).get("docs", [])), None)
+            if matched_edition and _is_translation_match(title, matched_edition, query):
+                search_title = matched_edition["title"]
+                title = search_title
+
+                edition_isbns = matched_edition.get("isbn", [])
+                edition_isbn_10 = next((i for i in edition_isbns if len(i) == ISBN_10_LENGTH), None)
+                edition_isbn_13 = next((i for i in edition_isbns if len(i) == ISBN_13_LENGTH), None)
+                isbn_10 = edition_isbn_10 or isbn_10
+                isbn_13 = edition_isbn_13 or isbn_13
+
+                cover_id = matched_edition.get("cover_i") or cover_id
+
+                edition_languages = matched_edition.get("language") or []
+                if edition_languages:
+                    language = edition_languages[0]
+
+                # A translation is published later than the work it translates,
+                # e.g. 2015 for "Der Weg der Könige" against 2010 for the work.
+                edition_years = matched_edition.get("publish_year") or []
+                if edition_years:
+                    publish_year = min(edition_years)
+
+            cover_url = f"{COVERS_BASE_URL}/b/id/{cover_id}-L.jpg" if cover_id else None
 
             # Build display fields from Open Library-specific data
             display_fields = []
@@ -377,14 +467,15 @@ class OpenLibraryProvider(MetadataProvider):
             return BookMetadata(
                 provider="openlibrary",
                 provider_id=work_id,
-                title=doc["title"],
+                title=title,
+                search_title=search_title,
                 provider_display_name="Open Library",
                 authors=authors,
                 isbn_10=isbn_10,
                 isbn_13=isbn_13,
                 cover_url=cover_url,
                 publisher=publisher,
-                publish_year=doc.get("first_publish_year"),
+                publish_year=publish_year,
                 language=language,
                 genres=genres,
                 source_url=f"{OPENLIBRARY_BASE_URL}/works/{work_id}",
@@ -507,6 +598,7 @@ class OpenLibraryProvider(MetadataProvider):
             response = self.session.get(
                 f"{OPENLIBRARY_BASE_URL}{author_key}.json",
                 timeout=10,
+                proxies=get_proxies(OPENLIBRARY_BASE_URL),
                 verify=get_ssl_verify(OPENLIBRARY_BASE_URL),
             )
             response.raise_for_status()
@@ -528,6 +620,7 @@ def _test_openlibrary_connection() -> dict[str, Any]:
             f"{OPENLIBRARY_BASE_URL}/search.json",
             params={"q": "test", "limit": 1},
             timeout=10,
+            proxies=get_proxies(OPENLIBRARY_BASE_URL),
             verify=get_ssl_verify(OPENLIBRARY_BASE_URL),
         )
         response.raise_for_status()

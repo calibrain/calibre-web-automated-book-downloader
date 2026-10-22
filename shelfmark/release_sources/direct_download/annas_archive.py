@@ -421,9 +421,10 @@ def _get_source_priority() -> list[SourcePriorityEntry]:
         ):
             source["enabled"] = False
 
+    # OceanofPDF shares the list for its toggle but is its own provider, not an MD5 mirror.
     slow_sources = _parse_source_priority_entries(
         config.get("SOURCE_PRIORITY"),
-        excluded_ids={"aa-fast", "libgen"},
+        excluded_ids={"aa-fast", "libgen", "oceanofpdf"},
     )
     for source in slow_sources:
         if not mirrors.has_download_source_mirror_configuration(source["id"]):
@@ -722,11 +723,17 @@ def search_books(query: str, filters: SearchFilters) -> tuple[list[BrowseRecord]
         Exception: If parsing fails
 
     """
-    query_html = quote(query)
-
+    # isbn13:/isbn10: boolean syntax 404s; search the bare ISBN strings instead.
     if filters.isbn:
-        isbns = " || ".join([f"('isbn13:{isbn}' || 'isbn10:{isbn}')" for isbn in filters.isbn])
-        query_html = quote(f"({isbns}) {query}")
+        tokens: list[str] = []
+        for isbn in filters.isbn:
+            if isbn not in tokens:
+                tokens.append(isbn)
+        if query not in tokens:
+            tokens.append(query)
+        query_html = quote(" ".join(tokens))
+    else:
+        query_html = quote(query)
 
     filters_query = ""
 
@@ -1635,6 +1642,18 @@ def _get_download_url(
         ) or _find_first_anchor_with_text(soup, "Download", href_contains=md5)
         if get_btn:
             url = get_attr(get_btn, "href") or ""
+            # Welib's "Download" leads to a slow_download page with the same countdown
+            # as AA's, not to the file. Resolve it like an AA slow link, or the countdown
+            # HTML is what gets downloaded (#1447).
+            if "/slow_download/" in url:
+                return _get_download_url(
+                    downloader.get_absolute_url(link, url),
+                    title,
+                    cancel_flag,
+                    status_callback,
+                    sel,
+                    source_context,
+                )
         elif md5:
             logger.info("No download link for md5 %s on %s", md5, link)
         else:

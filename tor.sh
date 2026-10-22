@@ -64,12 +64,22 @@ echo "Release version: $RELEASE_VERSION"
 echo "[*] Installing Tor and dependencies..."
 echo "[*] Writing Tor transparent proxy config..."
 
+TOR_NOTICES_LOG=/var/log/tor/notices.log
+# The account Tor drops to once its listeners are bound (DNSPort 53 needs root).
+# The NAT rules below exempt this account's traffic from the transparent
+# redirect. Tor used to stay root, which the exemption never matched, so every
+# relay connection Tor opened after the rules went live was redirected back
+# into its own TransPort.
+TOR_USER=debian-tor
+
 cat <<EOF > /etc/tor/torrc
+User ${TOR_USER}
+DataDirectory /var/lib/tor
 VirtualAddrNetworkIPv4 10.192.0.0/10
 AutomapHostsOnResolve 1
 TransPort 9040
 DNSPort 53
-Log notice file /var/log/tor/notices.log
+Log notice file ${TOR_NOTICES_LOG}
 
 # Circuit management to prevent stale circuits after inactivity
 MaxCircuitDirtiness 600
@@ -203,6 +213,21 @@ done
 HC
 chmod +x /app/tor_healthcheck.sh
 
+# Tor appends to its notices log, and the container filesystem survives a
+# restart (docker restart, a Docker daemon restart, a host reboot). The
+# "Bootstrapped 100%" line left by the previous boot made the wait below, and
+# the watchdog, treat a Tor that had not connected to anything yet as ready. The
+# NAT rules then went live too early and the connectivity check failed on every
+# boot from then on (#1502). Start each boot with an empty log and keep the
+# previous one.
+if [ -f "$TOR_NOTICES_LOG" ]; then
+    mv -f "$TOR_NOTICES_LOG" "${TOR_NOTICES_LOG}.prev" || true
+fi
+# Tor opens the log after it has dropped to TOR_USER, and refuses to start at
+# all if it cannot.
+: > "$TOR_NOTICES_LOG"
+chown "$TOR_USER" "$TOR_NOTICES_LOG"
+
 echo "[*] Starting Tor via Supervisor..."
 /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
 
@@ -211,7 +236,7 @@ echo "[*] Waiting for Tor to finish bootstrapping... (up to 5 minutes)"
 BOOTSTRAP_TIMEOUT=300
 BOOTSTRAP_START=$(date +%s)
 while true; do
-    if grep -q "Bootstrapped 100%" /var/log/tor/notices.log 2>/dev/null; then
+    if grep -q "Bootstrapped 100%" "$TOR_NOTICES_LOG" 2>/dev/null; then
         echo ""
         echo "[✓] Tor bootstrap complete."
         break
@@ -224,7 +249,7 @@ while true; do
         exit 1
     fi
 
-    CURRENT_LOG=$(tail -n 1 /var/log/tor/notices.log 2>/dev/null || true)
+    CURRENT_LOG=$(tail -n 1 "$TOR_NOTICES_LOG" 2>/dev/null || true)
     printf "\r\033[K[%ds] %s" "$ELAPSED" "$CURRENT_LOG"
     sleep 1
 done
@@ -235,7 +260,7 @@ echo "[*] Setting up iptables rules..."
 
 iptables -F
 iptables -t nat -F
-TOR_UID=$(id -u debian-tor)
+TOR_UID=$(id -u "$TOR_USER")
 
 # Allow loopback
 iptables -t nat -A OUTPUT -o lo -j RETURN
@@ -278,10 +303,29 @@ echo "[✓] Transparent Tor routing enabled."
 sleep 5
 # Check if outgoing IP is using Tor
 echo "[*] Verifying Tor connectivity..."
-RESULT=$(curl -s https://check.torproject.org/api/ip)
+# A fresh circuit can fail its first lookup, so retry before giving up. Never
+# let a failed curl or an unparseable reply end the script on its own: under
+# `set -e` that stopped the container with no message, leaving only curl's
+# exit code in `docker inspect` (#1502).
+VERIFY_ATTEMPTS=3
+RESULT=""
+for ((attempt = 1; attempt <= VERIFY_ATTEMPTS; attempt++)); do
+    RESULT=$(curl -sS --max-time 30 https://check.torproject.org/api/ip 2>&1) && break
+    CURL_STATUS=$?
+    echo "[!] Tor connectivity check ${attempt}/${VERIFY_ATTEMPTS} failed (curl exit ${CURL_STATUS}): ${RESULT}"
+    RESULT=""
+    if [ "$attempt" -lt "$VERIFY_ATTEMPTS" ]; then
+        sleep 10
+    fi
+done
+if [ -z "$RESULT" ]; then
+    echo "[✗] Could not reach check.torproject.org through Tor. Last Tor log lines:"
+    tail -n 20 "$TOR_NOTICES_LOG" 2>/dev/null || true
+    exit 1
+fi
 echo "RESULT: $RESULT"
-IS_TOR=$(echo "$RESULT" | grep -oP '"IsTor":\s*\K(true|false)')
-IP=$(echo "$RESULT" | grep -oP '"IP":\s*"\K[^"]+')
+IS_TOR=$(echo "$RESULT" | grep -oP '"IsTor":\s*\K(true|false)' || true)
+IP=$(echo "$RESULT" | grep -oP '"IP":\s*"\K[^"]+' || true)
 if [[ "$IS_TOR" == "true" ]]; then
     echo "[✓] Success! Traffic is routed through Tor. Current IP: $IP"
 else

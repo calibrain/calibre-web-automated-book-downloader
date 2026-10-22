@@ -1,0 +1,27 @@
+name: Jules PR Review
+# Reviews PRs whose branch lives in this repo. Fork PRs get no secrets under
+# pull_request and Dependabot runs get only Dependabot secrets, so
+# JULES_API_KEY would be empty for both; jules-pr-reviewer-forks.yml reviews
+# fork PRs instead.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions: {}
+
+concurrency:
+  group: jules-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+      checks: write
+    steps:
+      - uses: calibrain/jules-pr-reviewer@v0.0.3
+        with:
+          jules_api_key: ${{ secrets.JULES_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}

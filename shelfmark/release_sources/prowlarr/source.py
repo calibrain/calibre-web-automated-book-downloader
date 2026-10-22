@@ -17,10 +17,10 @@ from shelfmark.core.author_match import AUTHOR_UNKNOWN, author_affinity
 from shelfmark.core.config import config
 from shelfmark.core.languages import normalize_language
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.request_helpers import normalize_optional_text
+from shelfmark.core.request_helpers import coerce_int, normalize_optional_text
 from shelfmark.core.search_plan import ReleaseSearchVariant
 from shelfmark.core.utils import AUDIOBOOK_FORMATS as CORE_AUDIOBOOK_FORMATS
-from shelfmark.core.utils import normalize_http_url
+from shelfmark.core.utils import DEFAULT_EBOOK_FORMATS, normalize_format_list, normalize_http_url
 from shelfmark.release_sources import (
     ColumnAlign,
     ColumnColorHint,
@@ -291,6 +291,22 @@ def _collapse_duplicate_indexer_results(
     return kept
 
 
+def _max_release_bytes(content_type: str) -> int | None:
+    """The size above which an ebook result is hidden, or None when no limit is set."""
+    if content_type == "audiobook":
+        return None
+    megabytes = coerce_int(config.get("PROWLARR_EBOOK_MAX_SIZE_MB", 0), 0)
+    return megabytes * _SIZE_UNIT_BASE * _SIZE_UNIT_BASE if megabytes > 0 else None
+
+
+def _is_over_size(result: dict, max_bytes: int | None) -> bool:
+    """Whether a raw result reports a size above the limit. An unknown size is never over."""
+    if max_bytes is None:
+        return False
+    size = coerce_int(result.get("size"), 0)
+    return size > max_bytes
+
+
 def _parse_size(size_bytes: int | None) -> str | None:
     """Convert bytes to human-readable size string."""
     if size_bytes is None or size_bytes <= 0:
@@ -331,6 +347,56 @@ AUDIOBOOK_FORMATS = list(CORE_AUDIOBOOK_FORMATS)
 
 # Combined list for format detection (audiobook formats first for priority)
 ALL_BOOK_FORMATS = AUDIOBOOK_FORMATS + EBOOK_FORMATS
+
+# A trailing file extension on a release title, e.g. "Author - Title.doc".
+_TITLE_EXTENSION_PATTERN = re.compile(r"\.([a-z][a-z0-9]{1,4})\s*$")
+
+# Extensions that are known to be files. Only these are hidden, so dotted titles
+# like "Jane.Eyre.by.Bronte" are not read as a ".bronte" file, and archive
+# containers (zip, rar, 7z) are never hidden.
+_KNOWN_FILE_EXTENSIONS = frozenset(ALL_BOOK_FORMATS) | {
+    "azw4",
+    "chm",
+    "djv",
+    "doc",
+    "docx",
+    "htm",
+    "html",
+    "kfx",
+    "lrf",
+    "lrx",
+    "md",
+    "odt",
+    "oxps",
+    "prc",
+    "rtf",
+    "snb",
+    "tcr",
+    "tpz",
+    "wps",
+    "xps",
+}
+
+
+def _unsupported_title_extension(title: str, content_type: str) -> str | None:
+    """Return the trailing extension of a title when it is a format the user did not enable.
+
+    Indexers that are not enriched return plain titles, so a single-file release
+    such as "Author - Title.doc" is only recognisable by its extension. Picking it
+    would download a file that post-processing then discards.
+    """
+    if content_type == "audiobook":
+        return None
+    match = _TITLE_EXTENSION_PATTERN.search(str(title or "").lower())
+    if not match:
+        return None
+    extension = match.group(1)
+    if extension not in _KNOWN_FILE_EXTENSIONS:
+        return None
+    supported = normalize_format_list(config.get("SUPPORTED_FORMATS", None), DEFAULT_EBOOK_FORMATS)
+    if extension in supported:
+        return None
+    return extension
 
 
 # Backend safeguard: cap total Prowlarr search time per request.
@@ -1282,8 +1348,15 @@ class ProwlarrSource(ReleaseSource):
             # A manual query is the user's own words; ranking it against the
             # metadata author would second-guess what they typed.
             wanted_author = "" if plan.manual_query else plan.author
+            hide_unsupported_formats = config.get("PROWLARR_HIDE_UNSUPPORTED_FORMATS", True)
+            hidden_unsupported = 0
 
+            max_bytes = _max_release_bytes(content_type)
+            oversized = 0
             for raw_result in all_results:
+                if _is_over_size(raw_result, max_bytes):
+                    oversized += 1
+                    continue
                 result_with_seed_settings = _apply_indexer_seed_settings(
                     raw_result, indexer_seed_settings
                 )
@@ -1298,6 +1371,18 @@ class ProwlarrSource(ReleaseSource):
                     content_type,
                     enable_format_detection=is_enriched,
                 )
+                if hide_unsupported_formats:
+                    unsupported_extension = _unsupported_title_extension(
+                        release.title, content_type
+                    )
+                    if unsupported_extension:
+                        hidden_unsupported += 1
+                        logger.debug(
+                            "Prowlarr: hiding '%s', .%s is not a supported format",
+                            release.title,
+                            unsupported_extension,
+                        )
+                        continue
                 if idx_id_int is not None and idx_id_int in indexer_priority:
                     release.extra["indexer_priority"] = indexer_priority[idx_id_int]
                 results.append(release)
@@ -1310,6 +1395,14 @@ class ProwlarrSource(ReleaseSource):
                 if idx_id_int in mam_indexers:
                     mam_releases.append(release)
                     mam_indexer = mam_indexer or mam_indexers[idx_id_int]
+
+            if hidden_unsupported:
+                logger.info(
+                    "Prowlarr: hid %s result(s) in a format that is not enabled",
+                    hidden_unsupported,
+                )
+            if oversized:
+                logger.debug("Prowlarr: hid %s result(s) over the ebook size limit", oversized)
 
             mam_session_id = _get_mam_session_id()
             if mam_session_id and mam_releases:

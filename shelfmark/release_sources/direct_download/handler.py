@@ -6,7 +6,12 @@ from typing import TYPE_CHECKING
 from shelfmark.config.env import TMP_DIR
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.models import DownloadTask, build_filename
+from shelfmark.core.models import (
+    DownloadTask,
+    build_filename,
+    normalize_format,
+    resolve_staged_path,
+)
 from shelfmark.download import network
 from shelfmark.release_sources import (
     BrowseRecord,
@@ -114,7 +119,7 @@ class DirectDownloadHandler(DownloadHandler):
             # based on FILE_ORGANIZATION setting
             file_org = config.get("FILE_ORGANIZATION", "rename")
             if file_org == "none":
-                book_name = f"{book_info.id}.{book_info.format or 'bin'}"
+                book_name = f"{book_info.id}.{normalize_format(book_info.format) or 'bin'}"
             else:
                 book_name = build_filename(
                     book_info.title,
@@ -122,7 +127,7 @@ class DirectDownloadHandler(DownloadHandler):
                     book_info.year,
                     book_info.format,
                 )
-            book_path = TMP_DIR / book_name
+            book_path = resolve_staged_path(TMP_DIR, book_name)
 
             # Check cancellation before download
             if cancel_flag.is_set():

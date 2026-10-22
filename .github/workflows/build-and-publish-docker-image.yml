@@ -78,9 +78,10 @@ jobs:
           annotations: ${{ steps.meta.outputs.annotations }}
           # Runners are ephemeral, so without this every layer is rebuilt on every
           # run: the pinned Chromium install, the dependency syncs, the driver
-          # setup. Scoped per target so the two images do not evict each other.
+          # setup. Scoped per target so the two images do not evict each other. A cache
+          # export error (ignore-error defaults to false) should not fail a finished publish.
           cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,scope=${{ matrix.target }},ignore-error=true
 
       - name: Generate artifact attestation for ${{ matrix.target }} image
         if: github.event_name != 'pull_request'

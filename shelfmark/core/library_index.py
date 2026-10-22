@@ -37,6 +37,9 @@ if TYPE_CHECKING:
 logger = setup_logger(__name__)
 
 _CACHE_TTL_SECONDS = 600  # Re-index a library at most every 10 minutes unless it changed.
+# After a failed index, answer from the stale cache for this long before trying again, so a
+# search page with dozens of results costs one failed attempt and one warning, not one each.
+_FAILURE_BACKOFF_SECONDS = 60
 
 
 @dataclass
@@ -44,6 +47,7 @@ class _CacheSlot:
     entries: list[LibraryEntry] | None = None
     fetched_at: float = 0.0
     fingerprint: object | None = None
+    failed_at: float | None = None
 
 
 _lock = threading.Lock()
@@ -61,11 +65,17 @@ def _store(provider_name: str, entries: list[LibraryEntry], fingerprint: object 
         slot.entries = entries
         slot.fetched_at = time.monotonic()
         slot.fingerprint = fingerprint
+        slot.failed_at = None
 
 
 def _entries_for(provider: LibraryProvider) -> list[LibraryEntry]:
     """Cached entries for one provider, re-indexed past the TTL or when the library changed."""
     slot = _slot(provider.name)
+    with _lock:
+        if slot.failed_at is not None and time.monotonic() - slot.failed_at < (
+            _FAILURE_BACKOFF_SECONDS
+        ):
+            return slot.entries or []
     try:
         fingerprint = provider.fingerprint()
         with _lock:
@@ -78,6 +88,7 @@ def _entries_for(provider: LibraryProvider) -> list[LibraryEntry]:
     except Exception as exc:  # noqa: BLE001 - any failure must fail open
         logger.warning("library check: %s unavailable (%s); failing open", provider.describe(), exc)
         with _lock:
+            slot.failed_at = time.monotonic()
             return slot.entries or []  # Use the stale cache if we have one.
 
     _store(provider.name, entries, fingerprint)

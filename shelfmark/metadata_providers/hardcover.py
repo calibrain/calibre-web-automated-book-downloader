@@ -1,12 +1,15 @@
 """Hardcover.app metadata provider. Requires API key."""
 
+import math
+import random
 import re
+import threading
 import time
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from http import HTTPStatus
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlparse
 
 import requests
@@ -42,6 +45,9 @@ from shelfmark.metadata_providers import (
 )
 
 logger = setup_logger(__name__)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 HARDCOVER_API_URL = "https://api.hardcover.app/v1/graphql"
 HARDCOVER_PAGE_SIZE = 25  # Hardcover API returns max 25 results per page
@@ -507,6 +513,83 @@ class HardcoverGraphQLError(ValueError):
     """GraphQL request was rejected by Hardcover."""
 
 
+class HardcoverRateLimitError(RuntimeError):
+    """Hardcover kept answering 429 after the retries, or asked for a wait too long to sit out."""
+
+
+# Hardcover's documented limits (docs.hardcover.app, Getting Started > Rate Limits): a token
+# bucket of 10 (Free) that refills at 60 per minute, 5,000 requests a day. The per-user limit
+# is shared with every other app and session on the same account, so pace below it.
+HARDCOVER_RATE_BURST = 5
+HARDCOVER_RATE_PER_SECOND = 0.8
+HARDCOVER_RATE_LIMIT_ATTEMPTS = 3  # the first try plus two retries
+HARDCOVER_RETRY_AFTER_CAP_SECONDS = 30.0  # longer than this (spent daily quota): give up
+
+
+class _TokenBucket:
+    """Thread-safe token bucket. ``acquire`` blocks until a request may go out.
+
+    The clock and sleep are injectable so tests never wait for real.
+    """
+
+    def __init__(
+        self,
+        capacity: int,
+        per_second: float,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self._capacity = float(capacity)
+        self._per_second = per_second
+        self._clock = clock
+        self._sleep = sleep
+        self._lock = threading.Lock()
+        self._tokens = float(capacity)
+        self._updated = clock()
+
+    def _take_or_wait(self) -> float:
+        """Take a token and return 0, or return how long to wait before trying again."""
+        with self._lock:
+            now = self._clock()
+            if now > self._updated:
+                gained = (now - self._updated) * self._per_second
+                self._tokens = min(self._capacity, self._tokens + gained)
+                self._updated = now
+            if self._tokens >= 1.0:
+                self._tokens -= 1.0
+                return 0.0
+            # _updated can sit in the future after penalize(): nothing refills before then.
+            return (self._updated - now) + (1.0 - self._tokens) / self._per_second
+
+    def acquire(self) -> None:
+        while (wait := self._take_or_wait()) > 0.0:
+            self._sleep(wait)
+
+    def penalize(self, seconds: float) -> None:
+        """Empty the bucket and hold every caller back for ``seconds``."""
+        with self._lock:
+            self._tokens = 0.0
+            self._updated = max(self._updated, self._clock() + seconds)
+
+
+_rate_limiter = _TokenBucket(HARDCOVER_RATE_BURST, HARDCOVER_RATE_PER_SECOND)
+
+
+def _retry_jitter() -> float:
+    return random.uniform(0.0, 1.0)  # noqa: S311 - spreading retries, not security
+
+
+def _throttle_wait_seconds(response: requests.Response, attempt: int) -> float:
+    """Seconds to wait after a 429: Retry-After when sent, else exponential backoff."""
+    raw = response.headers.get("Retry-After")
+    if raw is not None:
+        with suppress(ValueError):
+            seconds = float(raw)
+            if math.isfinite(seconds) and seconds >= 0:
+                return seconds
+    return float(2**attempt) + _retry_jitter()
+
+
 class HardcoverTargetPayloadError(RuntimeError):
     """Hardcover returned an invalid payload while loading book targets."""
 
@@ -688,6 +771,33 @@ def _unwrap_hit_document(hit: Any) -> dict[str, Any] | None:
         return None
     item = hit.get("document", hit)
     return item if isinstance(item, dict) else None
+
+
+def _matched_alternative_title(hit: Any, item: dict[str, Any]) -> str | None:
+    """Return the alternative title a search hit matched on, unless its title matched too.
+
+    Hardcover keeps one book per work, titled after the original, and lists its
+    translations' titles in `alternative_titles`. A search for "Der Weg der Könige"
+    matches only that alternative title of "The Way of Kings, Part 1"; the hit's
+    `highlights` name the field and the matching entries, best first.
+    """
+    if not isinstance(hit, dict):
+        return None
+    highlights = hit.get("highlights")
+    if not isinstance(highlights, list):
+        return None
+    fields = {h.get("field"): h for h in highlights if isinstance(h, dict)}
+    if "title" in fields:
+        return None
+    indices = (fields.get("alternative_titles") or {}).get("indices") or []
+    alternative_titles = item.get("alternative_titles")
+    if not indices or not isinstance(alternative_titles, list):
+        return None
+    index = indices[0]
+    if not isinstance(index, int) or not 0 <= index < len(alternative_titles):
+        return None
+    matched = alternative_titles[index]
+    return matched if isinstance(matched, str) and matched.strip() else None
 
 
 def _search_tokens(value: str) -> list[str]:
@@ -987,6 +1097,7 @@ class HardcoverProvider(MetadataProvider):
             sort=SortOrder.SERIES_ORDER,
         ),
     )
+    account_search_fields: ClassVar[frozenset[str]] = frozenset({"hardcover_list"})
     search_fields: ClassVar[tuple[SearchField, ...]] = (
         TextSearchField(
             key="author",
@@ -2473,7 +2584,9 @@ class HardcoverProvider(MetadataProvider):
                     release_year = item.get("release_year")
                     if release_year is not None and release_year > current_year:
                         continue
-                book = self._parse_search_result(item)
+                book = self._parse_search_result(
+                    item, matched_title=_matched_alternative_title(hit, item)
+                )
                 if book:
                     books.append(book)
 
@@ -2557,7 +2670,9 @@ class HardcoverProvider(MetadataProvider):
 
         try:
             book_id_int = int(book_id)
-            result = self._execute_query(graphql_query, {"id": book_id_int})
+            # A failed lookup is not "no such book": let throttling and outages reach the
+            # caller instead of coming back as None.
+            result = self._execute_query(graphql_query, {"id": book_id_int}, raise_on_error=True)
             if not result:
                 return None
 
@@ -2567,6 +2682,9 @@ class HardcoverProvider(MetadataProvider):
 
             return self._parse_book(books[0])
 
+        except HardcoverGraphQLError:
+            logger.exception("Hardcover rejected the book lookup for %s", book_id)
+            return None
         except ValueError:
             logger.exception("Invalid book ID: %s", book_id)
             return None
@@ -2645,6 +2763,40 @@ class HardcoverProvider(MetadataProvider):
             logger.exception("Hardcover ISBN search error")
             return None
 
+    def _post_with_backoff(self, payload: dict[str, Any]) -> requests.Response:
+        """POST one GraphQL request, paced by the shared limiter, retrying a 429.
+
+        Raises HardcoverRateLimitError when the retries run out or Hardcover asks for a
+        wait longer than HARDCOVER_RETRY_AFTER_CAP_SECONDS.
+        """
+        for attempt in range(1, HARDCOVER_RATE_LIMIT_ATTEMPTS + 1):
+            _rate_limiter.acquire()
+            response = self.session.post(
+                HARDCOVER_API_URL,
+                json=payload,
+                timeout=15,
+                verify=get_ssl_verify(HARDCOVER_API_URL),
+            )
+            if response.status_code != HTTPStatus.TOO_MANY_REQUESTS:
+                return response
+
+            wait = _throttle_wait_seconds(response, attempt)
+            if wait > HARDCOVER_RETRY_AFTER_CAP_SECONDS:
+                msg = f"Hardcover rate limit reached; it asked for a {wait:.0f}s wait"
+                raise HardcoverRateLimitError(msg)
+            if attempt == HARDCOVER_RATE_LIMIT_ATTEMPTS:
+                msg = f"Hardcover rate limit still hit after {attempt} attempts"
+                raise HardcoverRateLimitError(msg)
+            logger.warning(
+                "Hardcover rate limited (429); retrying in %.0fs (attempt %d/%d)",
+                wait,
+                attempt,
+                HARDCOVER_RATE_LIMIT_ATTEMPTS,
+            )
+            _rate_limiter.penalize(wait)
+        msg = "unreachable"  # the loop always returns or raises
+        raise AssertionError(msg)
+
     def _execute_query(
         self,
         query: str,
@@ -2658,12 +2810,7 @@ class HardcoverProvider(MetadataProvider):
             raise HardcoverGraphQLError(message)
 
         try:
-            response = self.session.post(
-                HARDCOVER_API_URL,
-                json={"query": query, "variables": variables},
-                timeout=15,
-                verify=get_ssl_verify(HARDCOVER_API_URL),
-            )
+            response = self._post_with_backoff({"query": query, "variables": variables})
             response.raise_for_status()
 
             data = response.json()
@@ -2699,6 +2846,11 @@ class HardcoverProvider(MetadataProvider):
             return None
         except HardcoverGraphQLError:
             raise
+        except HardcoverRateLimitError as e:
+            logger.warning("Hardcover API: %s", e)
+            if raise_on_error:
+                raise
+            return None
         except ValueError as e:
             logger.exception("Hardcover API returned invalid JSON")
             if raise_on_error:
@@ -2760,8 +2912,15 @@ class HardcoverProvider(MetadataProvider):
         _sort_fallback_until = time.monotonic() + SORT_FALLBACK_TTL
         return retry
 
-    def _parse_search_result(self, item: dict) -> BookMetadata | None:
-        """Parse a search result item into BookMetadata."""
+    def _parse_search_result(
+        self, item: dict, matched_title: str | None = None
+    ) -> BookMetadata | None:
+        """Parse a search result item into BookMetadata.
+
+        ``matched_title`` is the alternative (usually translated) title the search
+        matched; when given, it replaces the work's original title, so a search for a
+        translation by name stays in that translation's language.
+        """
         try:
             book_id = item.get("id") or item.get("document", {}).get("id")
             title = item.get("title") or item.get("document", {}).get("title")
@@ -2822,13 +2981,18 @@ class HardcoverProvider(MetadataProvider):
 
             # Extract subtitle if available in search results
             subtitle = item.get("subtitle")
+            search_title = _compute_search_title(title, subtitle)
+
+            if matched_title and matched_title != title:
+                # The subtitle belongs to the original title, not to the translation.
+                title, subtitle, search_title = matched_title, None, matched_title
 
             return BookMetadata(
                 provider="hardcover",
                 provider_id=str(book_id),
                 title=title,
                 subtitle=subtitle,
-                search_title=_compute_search_title(title, subtitle),
+                search_title=search_title,
                 search_author=search_author,
                 provider_display_name="Hardcover",
                 authors=authors,

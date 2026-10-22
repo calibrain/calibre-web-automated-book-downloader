@@ -16,8 +16,14 @@ from shelfmark.config.users_settings import (
     validate_search_preference_value,
 )
 from shelfmark.core.config import config as app_config
+from shelfmark.core.request_helpers import coerce_int, is_plain_email_address
 from shelfmark.core.request_policy import parse_policy_mode, validate_policy_rules
-from shelfmark.core.settings_registry import load_config_file
+from shelfmark.core.settings_registry import (
+    FieldBase,
+    SelectField,
+    TextField,
+    load_config_file,
+)
 from shelfmark.core.user_settings_overrides import (
     build_user_preferences_payload as _build_user_preferences_payload,
 )
@@ -27,35 +33,116 @@ from shelfmark.core.user_settings_overrides import (
 from shelfmark.core.user_settings_overrides import (
     get_settings_registry as _get_settings_registry,
 )
+from shelfmark.core.utils import get_global_destination, resolve_user_destination_override
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from flask.typing import ResponseReturnValue
 
     from shelfmark.core.user_db import UserDB
 
 
+_USER_DESTINATION_KEYS = {"DESTINATION", "DESTINATION_AUDIOBOOK"}
+_BOOKLORE_ID_KEYS = {"BOOKLORE_LIBRARY_ID", "BOOKLORE_PATH_ID"}
+
+
+def _validate_self_service_value(
+    key: str,
+    value: Any,
+    field: FieldBase,
+    user: Mapping[str, Any],
+) -> tuple[Any, str | None]:
+    """Check a value a user saves for themselves; admins are not limited this way.
+
+    Returns (normalized_value, error). The value is returned unchanged when no
+    rule applies to the field.
+    """
+    if key in _USER_DESTINATION_KEYS:
+        if not isinstance(value, str):
+            return None, f"Invalid value for {key}: must be a string"
+        if not value.strip():
+            return value, None
+        base = get_global_destination(is_audiobook=key == "DESTINATION_AUDIOBOOK")
+        raw_user_id = user.get("id")
+        resolved = resolve_user_destination_override(
+            value,
+            base,
+            user_id=raw_user_id if isinstance(raw_user_id, int) else None,
+            username=str(user.get("username") or ""),
+        )
+        if resolved is None:
+            return None, f"Invalid value for {key}: must be a folder inside {base}"
+        return value, None
+
+    if key in _BOOKLORE_ID_KEYS:
+        parsed = coerce_int(value, -1)
+        if parsed < 0 or str(parsed) != str(value).strip():
+            return None, f"Invalid value for {key}: must be a non-negative integer"
+        return value, None
+
+    if key == "EMAIL_RECIPIENT":
+        if not isinstance(value, str):
+            return None, f"Invalid value for {key}: must be a string"
+        recipient = value.strip()
+        if recipient and not is_plain_email_address(recipient):
+            return None, f"Invalid value for {key}: must be a plain email address"
+        return recipient, None
+
+    # Search preferences have their own validator (case-insensitive values).
+    if (
+        isinstance(field, SelectField)
+        and key not in SEARCH_PREFERENCE_VALIDATABLE_KEYS
+        and not callable(field.options)
+    ):
+        options = field.options if isinstance(field.options, list) else []
+        allowed = {option.get("value") for option in options if isinstance(option, dict)}
+        if not isinstance(value, str) or value not in allowed:
+            return None, f"Invalid value for {key}: {value!r} is not one of the options"
+        return value, None
+
+    if isinstance(field, TextField) and not isinstance(value, str):
+        return None, f"Invalid value for {key}: must be a string"
+
+    return value, None
+
+
 def validate_user_settings(
     settings: dict[str, Any],
+    *,
+    self_service_user: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
-    """Validate and normalize per-user settings overrides."""
+    """Validate and normalize per-user settings overrides.
+
+    ``self_service_user`` is the account saving its own settings; its values are
+    held to the user-scope rules (destinations inside the global one, option
+    lists, plain email). Admin saves on a user's behalf pass None.
+    """
     settings_registry = _get_settings_registry()
     field_map = settings_registry.get_settings_field_map()
     overridable_map = settings_registry.get_user_overridable_fields()
 
     valid: dict[str, Any] = {}
     errors: list[str] = []
-    for key, value in settings.items():
+    for key, raw_value in settings.items():
         if key not in field_map:
             errors.append(f"Unknown setting: {key}")
         elif key not in overridable_map:
             errors.append(f"Setting not user-overridable: {key}")
         else:
             # null means "clear the per-user override; use global default"
-            if value is None:
+            if raw_value is None:
                 valid[key] = None
                 continue
+
+            value = raw_value
+            if self_service_user is not None:
+                value, self_service_error = _validate_self_service_value(
+                    key, raw_value, overridable_map[key][0], self_service_user
+                )
+                if self_service_error:
+                    errors.append(self_service_error)
+                    continue
 
             if (
                 key in {"REQUEST_POLICY_DEFAULT_EBOOK", "REQUEST_POLICY_DEFAULT_AUDIOBOOK"}
@@ -139,14 +226,26 @@ def build_user_notification_test_response(
     """Build a notification test response using effective per-user routes."""
     from shelfmark.core.config import config as app_config
 
-    routes_input = app_config.get("USER_NOTIFICATION_ROUTES", [], user_id=user_id)
+    effective_routes, is_own = app_config.get_for_user(
+        "USER_NOTIFICATION_ROUTES", [], user_id=user_id
+    )
+    routes_input = effective_routes
     if isinstance(payload, dict):
         if "USER_NOTIFICATION_ROUTES" in payload:
             routes_input = payload.get("USER_NOTIFICATION_ROUTES")
         elif "routes" in payload:
             routes_input = payload.get("routes")
 
-    result = build_notification_test_result(routes_input, scope_label="personal")
+    # The settings screens always post the routes they show, which for a user without their own
+    # is the inherited admin default. Trust it like at send time only when it is exactly that;
+    # anything else would become the user's own routes once saved, so it is checked.
+    user_scope = is_own or normalize_notification_routes(
+        routes_input
+    ) != normalize_notification_routes(effective_routes)
+
+    result = build_notification_test_result(
+        routes_input, scope_label="personal", user_scope=user_scope, user_id=user_id
+    )
     status_code = 200 if result.get("success", False) else 400
     return result, status_code
 

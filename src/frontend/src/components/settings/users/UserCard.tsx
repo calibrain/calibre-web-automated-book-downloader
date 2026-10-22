@@ -446,6 +446,9 @@ interface UserEditFieldsProps {
   onEditPasswordChange: (value: string) => void;
   editPasswordConfirm: string;
   onEditPasswordConfirmChange: (value: string) => void;
+  /** Self-service only: the current password, asked for when a new one is typed. */
+  editCurrentPassword?: string;
+  onEditCurrentPasswordChange?: (value: string) => void;
   onDelete?: () => void;
   onConfirmDelete?: () => void;
   onCancelDelete?: () => void;
@@ -464,6 +467,8 @@ const UserEditFields = ({
   onEditPasswordChange,
   editPasswordConfirm,
   onEditPasswordConfirmChange,
+  editCurrentPassword = '',
+  onEditCurrentPasswordChange,
   onDelete,
   onConfirmDelete,
   onCancelDelete,
@@ -480,6 +485,13 @@ const UserEditFields = ({
     'Display name',
   );
   const emailField = createTextField('email', 'Email', user.email || '', 'user@example.com');
+  const currentPasswordField = createPasswordField(
+    'current_password',
+    'Current Password',
+    editCurrentPassword,
+    'Required to set a new password',
+    true,
+  );
   const newPasswordField = createPasswordField(
     'new_password',
     'New Password',
@@ -529,6 +541,14 @@ const UserEditFields = ({
       {canSetPassword && (
         <>
           {renderPasswordField(newPasswordField, editPassword, onEditPasswordChange)}
+
+          {editPassword &&
+            onEditCurrentPasswordChange &&
+            renderPasswordField(
+              currentPasswordField,
+              editCurrentPassword,
+              onEditCurrentPasswordChange,
+            )}
 
           {editPassword &&
             renderPasswordField(
@@ -604,6 +624,8 @@ export const UserAccountCardContent = ({
   onEditPasswordChange,
   editPasswordConfirm,
   onEditPasswordConfirmChange,
+  editCurrentPassword,
+  onEditCurrentPasswordChange,
   onDelete,
   onConfirmDelete,
   onCancelDelete,
@@ -634,6 +656,8 @@ export const UserAccountCardContent = ({
         onEditPasswordChange={onEditPasswordChange}
         editPasswordConfirm={editPasswordConfirm}
         onEditPasswordConfirmChange={onEditPasswordConfirmChange}
+        editCurrentPassword={editCurrentPassword}
+        onEditCurrentPasswordChange={onEditCurrentPasswordChange}
         onDelete={onDelete}
         onConfirmDelete={onConfirmDelete}
         onCancelDelete={onCancelDelete}

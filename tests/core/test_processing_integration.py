@@ -343,6 +343,9 @@ def test_multifile_rename_ignores_template_even_with_original_name(tmp_path):
     files = sorted(path.name for path in ingest.glob("*.mp3"))
     assert files == ["Part 1 of 2.mp3", "Part 2 of 2.mp3"]
     assert all("RENAMED" not in name for name in files)
+    # Browser download serves all of these, not just the returned first file.
+    assert result in task.download_paths
+    assert sorted(Path(path).name for path in task.download_paths) == files
 
 
 def test_torrent_hardlink_enabled_copy_fallback_does_not_extract_archives(tmp_path):

@@ -36,7 +36,7 @@ from shelfmark.core.settings_registry import (
     register_on_save,
     register_settings,
 )
-from shelfmark.core.utils import ARCHIVE_FORMATS, AUDIOBOOK_FORMATS
+from shelfmark.core.utils import ARCHIVE_FORMATS, AUDIOBOOK_FORMATS, DEFAULT_EBOOK_FORMATS
 
 _DOWNLOAD_CLIENT_COMPLETED_PATH_TIMEOUT_DEFAULT = 60
 _DOWNLOAD_CLIENT_COMPLETED_PATH_TIMEOUT_MAX = 3600
@@ -454,7 +454,7 @@ def general_settings() -> list[SettingsField]:
             label="Supported Book Formats",
             description="Book formats to include in search results. ZIP/RAR archives are extracted automatically and book files are used if found.",
             options=_FORMAT_OPTIONS,
-            default=["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"],
+            default=list(DEFAULT_EBOOK_FORMATS),
         ),
         MultiSelectField(
             key="SUPPORTED_AUDIOBOOK_FORMATS",
@@ -772,7 +772,7 @@ def network_settings() -> list[SettingsField]:
         TextField(
             key="HTTP_PROXY",
             label="HTTP Proxy",
-            description="HTTP proxy URL (e.g., http://proxy:8080)",
+            description="HTTP proxy URL. Supports auth: http://user:pass@host:port",
             placeholder="http://proxy:8080",
             disabled=tor_overrides_network,
             disabled_reason="Proxy settings are not used when Tor routing is enabled.",
@@ -781,7 +781,7 @@ def network_settings() -> list[SettingsField]:
         TextField(
             key="HTTPS_PROXY",
             label="HTTPS Proxy",
-            description="HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS)",
+            description="HTTPS proxy URL (leave empty to use HTTP proxy for HTTPS). Supports auth: http://user:pass@host:port",
             placeholder="http://proxy:8080",
             disabled=tor_overrides_network,
             disabled_reason="Proxy settings are not used when Tor routing is enabled.",
@@ -878,15 +878,13 @@ def _on_save_downloads(values: dict[str, Any]) -> dict[str, Any]:
     if books_output_mode == "email":
         from email.utils import parseaddr
 
-        def _is_plain_email_address(addr: str) -> bool:
-            parsed = parseaddr(addr or "")[1]
-            return bool(parsed) and "@" in parsed and parsed == addr
+        from shelfmark.core.request_helpers import is_plain_email_address
 
         # Preferred model: single recipient for global default and per-user override.
         raw_recipient = str(effective.get("EMAIL_RECIPIENT", "") or "").strip()
 
         # Optional global fallback: validate only when a default recipient is provided.
-        if raw_recipient and not _is_plain_email_address(raw_recipient):
+        if raw_recipient and not is_plain_email_address(raw_recipient):
             return {
                 "error": True,
                 "message": "Email recipient must be a valid plain email address.",
@@ -1138,7 +1136,7 @@ def download_settings() -> list[SettingsField]:
             key="TEMPLATE_RENAME",
             label="Naming Template",
             description=(
-                "Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, {OriginalName} "
+                "Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, {OriginalName} "
                 "(source filename without extension). Universal adds: {Series}, "
                 "{SeriesPosition}, {Subtitle}, {PrimaryTitle}. Use arbitrary prefix/suffix: "
                 "{Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. "
@@ -1157,7 +1155,7 @@ def download_settings() -> list[SettingsField]:
             key="TEMPLATE_ORGANIZE",
             label="Path Template",
             description=(
-                "Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, "
+                "Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, "
                 "{OriginalName} (source filename without extension). Universal adds: {Series}, "
                 "{SeriesPosition}, {Subtitle}, {PrimaryTitle}. Use arbitrary prefix/suffix: "
                 "{Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty."
@@ -1425,7 +1423,7 @@ def download_settings() -> list[SettingsField]:
             key="TEMPLATE_AUDIOBOOK_RENAME",
             label="Naming Template",
             description=(
-                "Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, {OriginalName} "
+                "Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, {OriginalName} "
                 "(source filename without extension), {Series}, {SeriesPosition}, {Subtitle}, "
                 "{PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: "
                 "{Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. "
@@ -1445,7 +1443,7 @@ def download_settings() -> list[SettingsField]:
             key="TEMPLATE_AUDIOBOOK_ORGANIZE",
             label="Path Template",
             description=(
-                "Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {Title}, {Year}, {Language}, {User}, "
+                "Use / to create folders. Variables: {Author}, {FirstAuthor} (first of several authors), {AuthorSort} (first author, surname first), {Title}, {Year}, {Language}, {User}, "
                 "{OriginalName} (source filename without extension), {Series}, {SeriesPosition}, "
                 "{Subtitle}, {PrimaryTitle}, {PartNumber}, {Narrator}. Use arbitrary prefix/suffix: "
                 "{Vol. SeriesPosition - } outputs 'Vol. 2 - ' when set, nothing when empty. "
@@ -1491,6 +1489,20 @@ def download_settings() -> list[SettingsField]:
             description="Maximum number of simultaneous downloads.",
             default=3,
             min_value=1,
+            max_value=10,
+            requires_restart=True,
+        ),
+        NumberField(
+            key="MAX_CONCURRENT_DOWNLOADS_PER_SOURCE",
+            label="Max Concurrent Downloads Per Source",
+            description=(
+                "Simultaneous downloads allowed from each source (Soulseek, AudiobookBay, "
+                "Direct Download and so on). A source at its limit does not hold the others "
+                "back, so a Soulseek download waiting in a peer's queue cannot stop a torrent "
+                "from starting. 0 uses the single limit above for all sources together."
+            ),
+            default=0,
+            min_value=0,
             max_value=10,
             requires_restart=True,
         ),
@@ -1592,6 +1604,13 @@ def _get_slow_source_options() -> list[dict[str, str | bool | None]]:
             "isLocked": _get_reason("zlib") is not None,
             "disabledReason": _get_reason("zlib"),
         },
+        {
+            "id": "oceanofpdf",
+            "label": "OceanofPDF",
+            "description": "Searches and downloads on its own, so its position does not matter",
+            "isLocked": _get_reason("oceanofpdf") is not None,
+            "disabledReason": _get_reason("oceanofpdf"),
+        },
     ]
 
 
@@ -1604,6 +1623,7 @@ def _get_slow_source_defaults() -> list[dict[str, str | bool]]:
         {"id": "aa-slow-wait", "enabled": True},
         {"id": "welib", "enabled": _LEGACY_ALLOW_USE_WELIB},
         {"id": "zlib", "enabled": True},
+        {"id": "oceanofpdf", "enabled": True},
     ]
 
 
@@ -1833,6 +1853,7 @@ def _on_save_mirrors(values: dict[str, Any]) -> dict[str, Any]:
         "LIBGEN_MIRROR_URLS",
         "ZLIB_MIRROR_URLS",
         "WELIB_MIRROR_URLS",
+        "OCEANOFPDF_MIRROR_URLS",
     }
 
     for key in mirror_list_keys:
@@ -1917,6 +1938,17 @@ def mirror_settings() -> list[SettingsField]:
             label="Welib",
             description="Only the first mirror in the list is used.",
             placeholder="https://your-welib-mirror.example",
+        ),
+        # === OCEANOFPDF ===
+        TagListField(
+            key="OCEANOFPDF_MIRROR_URLS",
+            label="OceanofPDF",
+            description=(
+                "Searches and downloads directly, without Anna's Archive. Only the first "
+                "mirror in the list is used. The site is behind Cloudflare, so the bypass "
+                "must be enabled."
+            ),
+            placeholder="https://oceanofpdf.com",
         ),
     ]
 
@@ -2036,6 +2068,7 @@ def advanced_settings() -> list[SettingsField]:
                         {"value": "rtorrent", "label": "rTorrent"},
                         {"value": "nzbget", "label": "NZBGet"},
                         {"value": "sabnzbd", "label": "SABnzbd"},
+                        {"value": "slskd", "label": "slskd"},
                     ],
                     "defaultValue": "qbittorrent",
                 },

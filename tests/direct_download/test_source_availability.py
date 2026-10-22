@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from shelfmark.core import mirrors
 from shelfmark.core.config import config
 from shelfmark.release_sources.direct_download import DirectDownloadSource, SearchUnavailableError
 from shelfmark.release_sources.direct_download import annas_archive as aa
@@ -39,6 +40,26 @@ def test_direct_download_source_is_unavailable_without_aa_mirrors(monkeypatch):
 
     with pytest.raises(SearchUnavailableError, match="not configured"):
         source.get_record("md5-abc")
+
+
+def test_direct_download_explains_aa_requirement_when_only_zlib_is_configured(monkeypatch):
+    monkeypatch.setattr(config, "get", _fake_config_get({"DIRECT_DOWNLOAD_ENABLED": True}))
+    monkeypatch.setattr(
+        mirrors,
+        "_get_config",
+        lambda: {"AA_BASE_URL": "auto", "ZLIB_MIRROR_URLS": ["https://z-library.sk"]},
+    )
+
+    assert mirrors.has_zlib_mirror_configuration() is True
+    assert mirrors.has_aa_mirror_configuration() is False
+
+    source = DirectDownloadSource()
+
+    with pytest.raises(
+        SearchUnavailableError,
+        match="Anna's Archive or OceanofPDF mirror URL.*only download results found through",
+    ):
+        source.search(SimpleNamespace(), SimpleNamespace())
 
 
 def test_direct_download_source_is_available_when_enabled_and_configured(monkeypatch):

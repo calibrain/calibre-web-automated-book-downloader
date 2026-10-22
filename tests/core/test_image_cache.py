@@ -54,7 +54,7 @@ def test_fetch_and_cache_blocks_unsafe_redirect(tmp_path, monkeypatch) -> None:
         calls.append(url)
         return RedirectResponse()
 
-    monkeypatch.setattr("shelfmark.core.image_cache.socket.getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr("shelfmark.download.network.socket.getaddrinfo", fake_getaddrinfo)
     monkeypatch.setattr("shelfmark.core.image_cache.requests.get", fake_get)
 
     assert cache.fetch_and_cache("cover-redirect", "https://example.com/cover.jpg") is None
@@ -72,3 +72,15 @@ def test_fetch_and_cache_returns_none_on_request_exception(tmp_path, monkeypatch
 
     assert cache.fetch_and_cache("cover-1", "https://example.com/cover.jpg") is None
     assert "cover-1" not in cache._index
+
+
+def test_cover_cache_key_depends_on_the_url_only() -> None:
+    from shelfmark.core.image_cache import cover_cache_key
+
+    key = cover_cache_key("https://example.com/cover.jpg")
+
+    assert key == cover_cache_key("  https://example.com/cover.jpg \n")
+    assert key != cover_cache_key("https://example.com/other.jpg")
+    assert key != cover_cache_key("https://example.com/cover.jpg?size=large")
+    assert key.isalnum() and key == key.lower()
+    assert "/" not in key and "." not in key

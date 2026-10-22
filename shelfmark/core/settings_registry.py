@@ -897,6 +897,7 @@ def _get_env_value_for_field(field: FieldBase) -> tuple[bool, object | None]:
             "LIBGEN_MIRROR_URLS",
             "ZLIB_MIRROR_URLS",
             "WELIB_MIRROR_URLS",
+            "OCEANOFPDF_MIRROR_URLS",
         } and isinstance(parsed, list):
             parsed = _normalize_mirror_env_urls(parsed)
         if field.key == "LOG_LEVEL" and isinstance(parsed, str):

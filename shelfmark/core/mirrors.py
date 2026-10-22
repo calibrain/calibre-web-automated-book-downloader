@@ -36,6 +36,7 @@ _DOWNLOAD_SOURCE_MIRROR_LABELS = {
     "libgen": "LibGen",
     "zlib": "Z-Library",
     "welib": "Welib",
+    "oceanofpdf": "OceanofPDF",
 }
 
 
@@ -106,17 +107,24 @@ def get_aa_mirrors() -> list[str]:
     return _normalize_configured_urls(config.get("AA_ADDITIONAL_URLS", ""))
 
 
-def has_aa_mirror_configuration() -> bool:
-    """Return True when direct-download search has at least one AA base URL to use."""
-    if get_aa_mirrors():
-        return True
+def get_pinned_aa_base_url() -> str | None:
+    """Return the AA URL the Primary Mirror setting pins, or None when it is Auto.
 
+    The pinned URL need not be in the mirror list.
+    """
     configured_base_url = normalize_http_url(
         _string_config_value(_get_config().get("AA_BASE_URL", "auto")),
         default_scheme="https",
         allow_special=("auto",),
     )
-    return bool(configured_base_url and configured_base_url != "auto")
+    if configured_base_url and configured_base_url != "auto":
+        return configured_base_url
+    return None
+
+
+def has_aa_mirror_configuration() -> bool:
+    """Return True when direct-download search has at least one AA base URL to use."""
+    return bool(get_aa_mirrors()) or get_pinned_aa_base_url() is not None
 
 
 def get_libgen_mirrors() -> list[str]:
@@ -198,6 +206,22 @@ def has_welib_mirror_configuration() -> bool:
     return bool(get_welib_mirrors())
 
 
+def get_oceanofpdf_mirrors() -> list[str]:
+    """Get user-configured OceanofPDF mirrors, in the order they were entered."""
+    return _normalize_configured_urls(_get_config().get("OCEANOFPDF_MIRROR_URLS", None))
+
+
+def get_oceanofpdf_base_url() -> str | None:
+    """Get the OceanofPDF mirror in use. Only the first configured one is used."""
+    mirrors = get_oceanofpdf_mirrors()
+    return mirrors[0] if mirrors else None
+
+
+def has_oceanofpdf_mirror_configuration() -> bool:
+    """Return True when at least one OceanofPDF mirror URL is configured."""
+    return bool(get_oceanofpdf_mirrors())
+
+
 def has_download_source_mirror_configuration(source_id: str) -> bool:
     """Return True when the requested direct-download source has mirror config."""
     if source_id in {"aa-fast", "aa-slow", "aa-slow-nowait", "aa-slow-wait"}:
@@ -208,6 +232,8 @@ def has_download_source_mirror_configuration(source_id: str) -> bool:
         return has_zlib_mirror_configuration()
     if source_id == "welib":
         return has_welib_mirror_configuration()
+    if source_id == "oceanofpdf":
+        return has_oceanofpdf_mirror_configuration()
     return False
 
 

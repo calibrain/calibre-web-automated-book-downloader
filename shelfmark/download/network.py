@@ -549,6 +549,93 @@ def _is_local_address(host_str: str) -> bool:
         return addr.is_private or addr.is_loopback or addr.is_link_local
 
 
+class UnsafeDestinationError(requests.exceptions.InvalidURL):
+    """A request target resolves to a loopback, private or otherwise non-public address."""
+
+
+def _address_is_public(address: str) -> bool:
+    ip = ipaddress.ip_address(address.split("%", 1)[0])
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_global
+
+
+def _system_getaddrinfo(hostname: str, port: None) -> list[Any]:
+    return original_getaddrinfo(hostname, port)
+
+
+def hostname_resolves_publicly(
+    hostname: str, *, allow_unresolved: bool = False, use_custom_dns: bool = False
+) -> bool:
+    """Return True when every address ``hostname`` resolves to is globally routable.
+
+    A name that does not resolve counts as public only with ``allow_unresolved``, so the
+    caller's own request fails on it the way it always did. The check asks the system
+    resolver unless ``use_custom_dns`` is set: a failed lookup through the patched
+    resolver switches the DNS provider, and a pre-flight check must not do that.
+    """
+    resolver = socket.getaddrinfo if use_custom_dns else _system_getaddrinfo
+    try:
+        return _address_is_public(hostname)
+    except ValueError:
+        pass  # not an IP literal, resolve it
+    try:
+        resolved = resolver(hostname, None)
+        return all(_address_is_public(str(sockaddr[0])) for *_, sockaddr in resolved)
+    except socket.gaierror:
+        return allow_unresolved
+    except ValueError:
+        return False
+
+
+def _configured_mirror_hosts() -> set[str]:
+    """Hostnames of every mirror the operator configured, which are trusted as given."""
+    from shelfmark.core import mirrors
+
+    pinned_aa_url = mirrors.get_pinned_aa_base_url()
+    urls = [
+        *mirrors.get_aa_mirrors(),
+        *([pinned_aa_url] if pinned_aa_url else []),
+        *mirrors.get_libgen_mirrors(),
+        *mirrors.get_zlib_mirrors(),
+        *mirrors.get_welib_mirrors(),
+        *mirrors.get_oceanofpdf_mirrors(),
+    ]
+    return {(urllib.parse.urlparse(url).hostname or "").lower() for url in urls}
+
+
+def ensure_public_destination(url: str) -> None:
+    """Refuse a URL whose host resolves to a non-public address.
+
+    Direct-download pages and file links come from remote sites or from API callers, so a
+    hostile value could otherwise aim the server at loopback, the LAN or a sibling
+    container. A host the operator configured as a mirror is allowed as written, and so is
+    a name that does not resolve (the request fails on it normally).
+    """
+    parsed = urllib.parse.urlparse(url)
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme not in ("http", "https") or not hostname:
+        msg = f"Refusing to request {url!r}: not an http(s) URL with a host"
+        raise UnsafeDestinationError(msg)
+    if hostname in _configured_mirror_hosts():
+        return
+    if not hostname_resolves_publicly(hostname, allow_unresolved=True):
+        msg = f"Refusing to request {hostname!r}: it resolves to a non-public address"
+        raise UnsafeDestinationError(msg)
+
+
+def _guard_redirect_hop(response: requests.Response, *_args: object, **_kwargs: object) -> None:
+    """Response hook: check where a redirect points before requests follows it."""
+    if response.is_redirect:
+        location = response.headers.get("Location", "")
+        if location:
+            ensure_public_destination(urllib.parse.urljoin(response.url, location))
+
+
+# Pass as ``hooks=`` so every redirect hop of a request is checked, not just its first URL.
+REDIRECT_GUARD_HOOKS: dict[str, Any] = {"response": [_guard_redirect_hop]}
+
+
 def _is_ip_address(host_str: str) -> bool:
     """Check if a string is a valid IP address (IPv4 or IPv6)."""
     try:

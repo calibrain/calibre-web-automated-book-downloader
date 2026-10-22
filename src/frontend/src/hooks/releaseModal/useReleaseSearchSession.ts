@@ -202,6 +202,18 @@ export function useReleaseSearchSession(
     [],
   );
 
+  // Editions of one work can share `provider_id`; the cache tells them apart by title
+  // and language (see releaseCache).
+  const cacheBook = useMemo(
+    () => ({
+      provider: book.provider,
+      provider_id: book.provider_id,
+      title: book.title,
+      language: book.language,
+    }),
+    [book.language, book.provider, book.provider_id, book.title],
+  );
+
   const fetchReleaseResults = useCallback(
     async (
       tabName: string,
@@ -245,7 +257,7 @@ export function useReleaseSearchSession(
         useFilters && supportsIndexerFilter && indexerFilter.length > 0 ? indexerFilter : undefined;
 
       if (!expandSearch) {
-        const cached = getCachedReleases(provider, bookId, tabName, contentType);
+        const cached = getCachedReleases(cacheBook, tabName, contentType);
         if (cached) {
           setReleasesBySource((prev) => ({ ...prev, [tabName]: cached }));
           initializeIndexerFilterForTab(tabName, cached);
@@ -293,7 +305,7 @@ export function useReleaseSearchSession(
             };
           });
         } else {
-          setCachedReleases(provider, bookId, tabName, contentType, response);
+          setCachedReleases(cacheBook, tabName, contentType, response);
           setReleasesBySource((prev) => ({ ...prev, [tabName]: response }));
         }
 
@@ -312,6 +324,7 @@ export function useReleaseSearchSession(
       book.provider_id,
       book.title,
       bookLanguages,
+      cacheBook,
       clearSearchStatusForTab,
       contentType,
       defaultLanguages,
@@ -494,7 +507,7 @@ export function useReleaseSearchSession(
     const supportsIndexerFilter =
       releasesBySource[activeTab]?.column_config?.supported_filters?.includes('indexer') ?? false;
 
-    invalidateCachedReleases(book.provider, book.provider_id, activeTab, contentType);
+    invalidateCachedReleases(cacheBook, activeTab, contentType);
     setExpandedBySource((prev) => {
       const next = { ...prev };
       delete next[activeTab];
@@ -520,6 +533,7 @@ export function useReleaseSearchSession(
     activeTab,
     book.provider,
     book.provider_id,
+    cacheBook,
     contentType,
     fetchReleaseResults,
     releasesBySource,
@@ -536,7 +550,7 @@ export function useReleaseSearchSession(
     }
 
     for (const tab of allTabs) {
-      invalidateCachedReleases(book.provider, book.provider_id, tab.name, contentType);
+      invalidateCachedReleases(cacheBook, tab.name, contentType);
     }
 
     setExpandedBySource({});
@@ -552,6 +566,7 @@ export function useReleaseSearchSession(
     allTabs,
     book.provider,
     book.provider_id,
+    cacheBook,
     contentType,
     fetchReleaseResults,
     manualQuery,

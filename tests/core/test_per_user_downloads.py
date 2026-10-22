@@ -5,7 +5,10 @@ Tests that DownloadTask has a user_id field and that the queue
 can be filtered by user.
 """
 
+import logging
 import sqlite3
+
+import pytest
 
 from shelfmark.core.models import DownloadTask, QueueStatus
 from shelfmark.core.queue import BookQueue
@@ -372,3 +375,143 @@ class TestTaskToDictUsername:
 
         result = _task_to_dict(task, current_status=QueueStatus.COMPLETE)
         assert result["status"] == QueueStatus.COMPLETE.value
+
+
+@pytest.fixture
+def destination_warnings():
+    """Collect warnings from the utils logger.
+
+    setup_logger builds its loggers outside the standard hierarchy, so caplog's root
+    handler never sees them.
+    """
+    from shelfmark.core import utils
+
+    messages: list[str] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if record.levelno >= logging.WARNING:
+                messages.append(record.getMessage())
+
+    handler = _Capture()
+    utils.logger.addHandler(handler)
+    try:
+        yield messages
+    finally:
+        utils.logger.removeHandler(handler)
+
+
+class TestUserDestinationContainment:
+    """A stored per-user destination only applies while it stays inside the global one."""
+
+    @staticmethod
+    def _config_get(global_values: dict, user_values: dict):
+        def fake_config_get(key, default=None, user_id=None):
+            if user_id is not None and key in user_values:
+                return user_values[key]
+            return global_values.get(key, default)
+
+        return fake_config_get
+
+    @pytest.mark.parametrize(
+        "override",
+        ["/config", "/books/../config", "/books/{User}/../../etc", "/booksmark", "../x"],
+    )
+    def test_override_outside_global_is_ignored_with_warning(
+        self, monkeypatch, destination_warnings, override
+    ):
+        from pathlib import Path
+
+        from shelfmark.core.config import config
+        from shelfmark.core.utils import get_destination
+
+        monkeypatch.setattr(
+            config,
+            "get",
+            self._config_get({"DESTINATION": "/books"}, {"DESTINATION": override}),
+        )
+
+        result = get_destination(is_audiobook=False, user_id=42, username="alice")
+
+        assert result == Path("/books")
+        assert any("DESTINATION" in message for message in destination_warnings)
+
+    @pytest.mark.parametrize(
+        ("global_destination", "override", "expected"),
+        [
+            ("/books", "/books/alice", "/books/alice"),
+            ("/books", "/books/{User}/fiction", "/books/alice/fiction"),
+            ("/books", "fiction", "/books/fiction"),
+            ("/books/{User}", "/books/alice/fiction", "/books/alice/fiction"),
+            ("/books/{User}", "/books/{User}", "/books/alice"),
+        ],
+    )
+    def test_override_inside_global_is_used(
+        self, monkeypatch, global_destination, override, expected
+    ):
+        from pathlib import Path
+
+        from shelfmark.core.config import config
+        from shelfmark.core.utils import get_destination
+
+        monkeypatch.setattr(
+            config,
+            "get",
+            self._config_get({"DESTINATION": global_destination}, {"DESTINATION": override}),
+        )
+
+        result = get_destination(is_audiobook=False, user_id=42, username="alice")
+        assert result == Path(expected)
+
+    def test_audiobook_override_is_checked_against_books_destination(self, monkeypatch):
+        from pathlib import Path
+
+        from shelfmark.core.config import config
+        from shelfmark.core.utils import get_destination
+
+        monkeypatch.setattr(
+            config,
+            "get",
+            self._config_get(
+                {"DESTINATION": "/books", "DESTINATION_AUDIOBOOK": ""},
+                {"DESTINATION_AUDIOBOOK": "/audio/alice"},
+            ),
+        )
+
+        result = get_destination(is_audiobook=True, user_id=42, username="alice")
+        assert result == Path("/books")
+
+    def test_audiobook_override_inside_global_audiobook_destination(self, monkeypatch):
+        from pathlib import Path
+
+        from shelfmark.core.config import config
+        from shelfmark.core.utils import get_destination
+
+        monkeypatch.setattr(
+            config,
+            "get",
+            self._config_get(
+                {"DESTINATION": "/books", "DESTINATION_AUDIOBOOK": "/audio"},
+                {"DESTINATION_AUDIOBOOK": "/audio/alice"},
+            ),
+        )
+
+        result = get_destination(is_audiobook=True, user_id=42, username="alice")
+        assert result == Path("/audio/alice")
+
+    def test_empty_override_uses_global(self, monkeypatch, destination_warnings):
+        from pathlib import Path
+
+        from shelfmark.core.config import config
+        from shelfmark.core.utils import get_destination
+
+        monkeypatch.setattr(
+            config,
+            "get",
+            self._config_get({"DESTINATION": "/books"}, {"DESTINATION": ""}),
+        )
+
+        result = get_destination(is_audiobook=False, user_id=42, username="alice")
+
+        assert result == Path("/books")
+        assert destination_warnings == []

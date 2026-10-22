@@ -64,6 +64,14 @@ class IRCError(Exception):
     """Base IRC error."""
 
 
+def has_control_characters(value: str) -> bool:
+    """True if value holds CR, LF, NUL or another control character.
+
+    The CTCP delimiter (0x01) is allowed because CTCP replies are framed with it.
+    """
+    return any((ord(char) < 0x20 and char != "\x01") or ord(char) == 0x7F for char in value)
+
+
 class IRCConnectionError(IRCError):
     """Connection failed."""
 
@@ -123,6 +131,8 @@ class IRCClient:
             # Wrap with TLS if needed
             if self.use_tls:
                 context = ssl.create_default_context()
+                # Python already defaults to TLS 1.2; pin it so an OpenSSL config cannot lower it
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
                 # Skip verification for self-signed certs common on IRC servers
                 context.check_hostname = False
                 context.verify_mode = ssl.CERT_NONE
@@ -304,6 +314,11 @@ class IRCClient:
         """Send raw IRC message."""
         if not self._socket:
             msg = "Not connected"
+            raise IRCError(msg)
+
+        # One write must be one command: a line break would smuggle in a second one
+        if has_control_characters(message):
+            msg = "Refusing to send IRC line containing control characters"
             raise IRCError(msg)
 
         data = f"{message}\r\n".encode()

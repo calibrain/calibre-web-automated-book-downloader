@@ -2,8 +2,10 @@ import { useState } from 'react';
 
 import type { PackBook, PackPlan, Release } from '../types';
 import {
+  applyIgnoredFiles,
   describePackPlan,
   parseSeriesPositionInput,
+  setBookIgnored,
   toBookPlanPayload,
   updateReviewBook,
 } from '../utils/packReview';
@@ -16,7 +18,7 @@ interface PackReviewPanelProps {
   onChange: (books: PackBook[]) => void;
   onBack: () => void;
   /** `null` means "treat the whole release as one book". */
-  onConfirm: (books: PackBook[] | null) => Promise<void>;
+  onConfirm: (books: PackBook[] | null, ignoredFiles?: string[]) => Promise<void>;
   isSubmitting: boolean;
 }
 
@@ -35,8 +37,18 @@ export const PackReviewPanel = ({
   const [singleBook, setSingleBook] = useState(false);
   const [expandedFiles, setExpandedFiles] = useState<number | null>(null);
   const [showIgnored, setShowIgnored] = useState(false);
+  const [userIgnored, setUserIgnored] = useState<ReadonlySet<string>>(new Set());
 
-  const payloadBooks = toBookPlanPayload(books);
+  const toggleFile = (file: string) => {
+    setUserIgnored((prev) => {
+      const next = new Set(prev);
+      if (next.has(file)) next.delete(file);
+      else next.add(file);
+      return next;
+    });
+  };
+
+  const payloadBooks = toBookPlanPayload(applyIgnoredFiles(books, userIgnored));
   const canConfirm = !isSubmitting && (singleBook || payloadBooks.length > 0);
   const confirmLabel = singleBook
     ? 'Download as one book'
@@ -50,7 +62,10 @@ export const PackReviewPanel = ({
         </h3>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
           <span className="font-medium text-(--text)">{release.title}</span> ·{' '}
-          {describePackPlan(books, plan.ignored)}
+          {describePackPlan(applyIgnoredFiles(books, userIgnored), [
+            ...plan.ignored,
+            ...userIgnored,
+          ])}
         </p>
         <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
           Each book below is filed separately with its own title. Fix any titles before downloading
@@ -85,68 +100,110 @@ export const PackReviewPanel = ({
           <span>Year</span>
           <span className="text-right">Files</span>
         </div>
-        {books.map((book, index) => (
-          <div key={book.files[0] ?? index} className="py-2">
-            <div className="grid grid-cols-[minmax(0,1fr)_72px_72px_80px] items-center gap-2">
-              <input
-                type="text"
-                value={book.title}
-                onChange={(e) =>
-                  onChange(updateReviewBook(books, index, { title: e.target.value }))
-                }
-                aria-label={`Title for book ${index + 1}`}
-                className={inputClassName}
-                disabled={isSubmitting}
-              />
-              <input
-                type="text"
-                inputMode="decimal"
-                value={book.series_position ?? ''}
-                onChange={(e) =>
-                  onChange(
-                    updateReviewBook(books, index, {
-                      series_position: parseSeriesPositionInput(e.target.value),
-                    }),
-                  )
-                }
-                aria-label={`Series position for book ${index + 1}`}
-                className={inputClassName}
-                disabled={isSubmitting}
-              />
-              <input
-                type="text"
-                inputMode="numeric"
-                value={book.year ?? ''}
-                onChange={(e) => {
-                  const parsed = parseSeriesPositionInput(e.target.value);
-                  onChange(
-                    updateReviewBook(books, index, {
-                      year: parsed === null ? null : Math.trunc(parsed),
-                    }),
-                  );
-                }}
-                aria-label={`Year for book ${index + 1}`}
-                className={inputClassName}
-                disabled={isSubmitting}
-              />
-              <button
-                type="button"
-                onClick={() => setExpandedFiles(expandedFiles === index ? null : index)}
-                className="hover-surface rounded-md px-2 py-1 text-right text-sm text-zinc-500 transition-colors dark:text-zinc-400"
-                aria-expanded={expandedFiles === index}
-              >
-                {book.files.length} {book.files.length === 1 ? 'file' : 'files'}
-              </button>
+        {books.map((book, index) => {
+          const skipped = book.files.every((file) => userIgnored.has(file));
+          const ignoredCount = book.files.filter((file) => userIgnored.has(file)).length;
+          const partiallyIgnored = !skipped && ignoredCount > 0;
+          const fileNoun = book.files.length === 1 ? 'file' : 'files';
+          return (
+            <div
+              key={book.files[0] ?? index}
+              className={`py-2 ${skipped ? 'opacity-50' : ''}`}
+              data-skipped={skipped}
+            >
+              <div className="grid grid-cols-[minmax(0,1fr)_72px_72px_80px] items-center gap-2">
+                <input
+                  type="text"
+                  value={book.title}
+                  onChange={(e) =>
+                    onChange(updateReviewBook(books, index, { title: e.target.value }))
+                  }
+                  aria-label={`Title for book ${index + 1}`}
+                  className={inputClassName}
+                  disabled={isSubmitting}
+                />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={book.series_position ?? ''}
+                  onChange={(e) =>
+                    onChange(
+                      updateReviewBook(books, index, {
+                        series_position: parseSeriesPositionInput(e.target.value),
+                      }),
+                    )
+                  }
+                  aria-label={`Series position for book ${index + 1}`}
+                  className={inputClassName}
+                  disabled={isSubmitting}
+                />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={book.year ?? ''}
+                  onChange={(e) => {
+                    const parsed = parseSeriesPositionInput(e.target.value);
+                    onChange(
+                      updateReviewBook(books, index, {
+                        year: parsed === null ? null : Math.trunc(parsed),
+                      }),
+                    );
+                  }}
+                  aria-label={`Year for book ${index + 1}`}
+                  className={inputClassName}
+                  disabled={isSubmitting}
+                />
+                <button
+                  type="button"
+                  onClick={() => setExpandedFiles(expandedFiles === index ? null : index)}
+                  className="hover-surface rounded-md px-2 py-1 text-right text-sm text-zinc-500 transition-colors dark:text-zinc-400"
+                  aria-expanded={expandedFiles === index}
+                >
+                  {partiallyIgnored ? (
+                    <span
+                      className="text-amber-600 dark:text-amber-400"
+                      title={`${ignoredCount} of ${book.files.length} ${fileNoun} skipped`}
+                    >
+                      {book.files.length - ignoredCount} of {book.files.length} {fileNoun}
+                    </span>
+                  ) : (
+                    `${book.files.length} ${fileNoun}`
+                  )}
+                </button>
+              </div>
+              <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                <ToggleSwitch
+                  checked={skipped}
+                  onChange={(checked) => setUserIgnored(setBookIgnored(userIgnored, book, checked))}
+                  color="emerald"
+                  ariaLabel={`Skip book ${index + 1}`}
+                  disabled={isSubmitting}
+                />
+                Skip this book
+              </div>
+              {expandedFiles === index && (
+                <ul className="mt-2 max-h-40 overflow-y-auto rounded-md bg-(--bg-soft) px-3 py-2 font-mono text-xs break-all text-zinc-600 dark:text-zinc-300">
+                  {book.files.map((file) => (
+                    <li key={file}>
+                      <div className="flex items-center gap-2 py-0.5">
+                        <ToggleSwitch
+                          checked={!userIgnored.has(file)}
+                          onChange={() => toggleFile(file)}
+                          color="emerald"
+                          ariaLabel={`Include ${file}`}
+                          disabled={isSubmitting}
+                        />
+                        <span className={userIgnored.has(file) ? 'line-through opacity-60' : ''}>
+                          {file}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-            {expandedFiles === index && (
-              <ul className="mt-2 max-h-40 overflow-y-auto rounded-md bg-(--bg-soft) px-3 py-2 font-mono text-xs break-all text-zinc-600 dark:text-zinc-300">
-                {book.files.map((file) => (
-                  <li key={file}>{file}</li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {plan.ignored.length > 0 && (
@@ -181,7 +238,7 @@ export const PackReviewPanel = ({
         </button>
         <button
           type="button"
-          onClick={() => void onConfirm(singleBook ? null : payloadBooks)}
+          onClick={() => void onConfirm(singleBook ? null : payloadBooks, [...userIgnored])}
           disabled={!canConfirm}
           className="rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
         >

@@ -54,8 +54,8 @@ def test_unknown_source_returns_error_tuple(monkeypatch: pytest.MonkeyPatch) -> 
 
 @pytest.mark.parametrize(
     "exc",
-    [SourceUnavailableError("down"), OSError("boom"), RuntimeError("bad")],
-    ids=["unavailable", "oserror", "runtime"],
+    [SourceUnavailableError("down"), OSError("boom"), RuntimeError("bad"), ValueError("odd")],
+    ids=["unavailable", "oserror", "runtime", "valueerror"],
 )
 def test_source_failures_become_messages(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
     src = _Source(error=exc)

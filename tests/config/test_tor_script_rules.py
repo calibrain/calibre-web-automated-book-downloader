@@ -71,7 +71,7 @@ echo "$*" >> "$FAKE_IPTABLES_LOG"
 exit 0
 """
 
-# tor.sh resolves the Tor uid with `id -u debian-tor`; that account only exists
+# tor.sh resolves the Tor uid with `id -u "$TOR_USER"`; that account only exists
 # inside the image, so stub it out with the uid the Debian tor package uses.
 ID_STUB = """#!/bin/bash
 echo 107
@@ -99,6 +99,7 @@ def _run_tor_iptables_block(tmp_path: Path, *, owner_match_supported: bool):
         text=True,
         env={
             "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "TOR_USER": "debian-tor",
             "FAKE_IPTABLES_LOG": str(applied_rules_log),
             "FAKE_OWNER_MATCH_SUPPORTED": "1" if owner_match_supported else "0",
         },
@@ -225,6 +226,146 @@ def _run_tor_watchdog(
         stdout = watchdog.communicate()[0] or ""
 
     return reset_signal, stdout
+
+
+BOOTSTRAP_BLOCK_START = 'if [ -f "$TOR_NOTICES_LOG" ]; then'
+BOOTSTRAP_BLOCK_END = 'echo "[✓] Tor is ready."'
+
+SUPERVISORD_STUB = """#!/bin/bash
+# Emulates supervisord launching Tor, which appends this boot's progress to the
+# notices log.
+echo "supervisord" >> "$FAKE_CALLS_LOG"
+printf '%s\\n' "$FAKE_TOR_BOOT_LINE" >> "$TOR_NOTICES_LOG"
+"""
+
+# The Tor account only exists inside the image, so record the call instead.
+CHOWN_STUB = """#!/bin/bash
+echo "chown $*" >> "$FAKE_CALLS_LOG"
+"""
+
+
+def _tor_bootstrap_block(timeout_seconds: int) -> str:
+    """Extract tor.sh from the notices-log reset through the bootstrap wait."""
+    script = TOR_SCRIPT_PATH.read_text()
+    block = script[script.index(BOOTSTRAP_BLOCK_START) : script.index(BOOTSTRAP_BLOCK_END)]
+    for original, replacement in (
+        ("/usr/bin/supervisord", "supervisord"),
+        ("BOOTSTRAP_TIMEOUT=300", f"BOOTSTRAP_TIMEOUT={timeout_seconds}"),
+    ):
+        assert original in block
+        block = block.replace(original, replacement)
+    return block
+
+
+def _run_tor_bootstrap_wait(tmp_path: Path, *, previous_log: str | None, boot_line: str):
+    """Run tor.sh's bootstrap wait against a fake Tor that logs ``boot_line``.
+
+    ``previous_log`` is what the last boot of the same container left in the
+    notices log, or ``None`` for a container's first boot. Returns the completed
+    process, the notices log, and the calls made to supervisord and chown in
+    order.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, source in (("supervisord", SUPERVISORD_STUB), ("chown", CHOWN_STUB)):
+        stub = bin_dir / name
+        stub.write_text(source)
+        stub.chmod(0o755)
+
+    notices_log = tmp_path / "notices.log"
+    if previous_log is not None:
+        notices_log.write_text(previous_log)
+    calls_log = tmp_path / "calls.log"
+
+    result = subprocess.run(
+        ["bash", "-c", "set -e\n" + _tor_bootstrap_block(timeout_seconds=1)],
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "TOR_NOTICES_LOG": str(notices_log),
+            "TOR_USER": "debian-tor",
+            "FAKE_TOR_BOOT_LINE": boot_line,
+            "FAKE_CALLS_LOG": str(calls_log),
+        },
+        timeout=30,
+    )
+    calls = calls_log.read_text().splitlines() if calls_log.exists() else []
+    return result, notices_log, calls
+
+
+VERIFY_BLOCK_START = 'echo "[*] Verifying Tor connectivity..."'
+VERIFY_BLOCK_END = "# Set correct timezone"
+
+CURL_STUB = """#!/bin/bash
+# Emulates curl against check.torproject.org: the first FAKE_CURL_FAILURES calls
+# fail the way curl does when Tor cannot resolve the host yet, later calls print
+# FAKE_CURL_BODY.
+calls=$(cat "$FAKE_CURL_CALLS" 2>/dev/null || echo 0)
+echo $((calls + 1)) > "$FAKE_CURL_CALLS"
+if [ "$calls" -lt "$FAKE_CURL_FAILURES" ]; then
+    echo "curl: (6) Could not resolve host: check.torproject.org" >&2
+    exit 6
+fi
+printf '%s' "$FAKE_CURL_BODY"
+"""
+
+# The retry delay is real wall-clock time, so skip it.
+SLEEP_STUB = """#!/bin/bash
+exit 0
+"""
+
+
+def _grep_supports_pcre() -> bool:
+    grep = shutil.which("grep")
+    if grep is None:
+        return False
+    result = subprocess.run([grep, "-qP", "x"], input="x", capture_output=True, text=True)
+    return result.returncode == 0
+
+
+# tor.sh parses the check.torproject.org reply with `grep -P`, which the BSD grep
+# on stock macOS does not have.
+requires_grep_pcre = pytest.mark.skipif(
+    not _grep_supports_pcre(), reason="grep with -P (PCRE) support is required"
+)
+
+
+def _run_tor_connectivity_check(tmp_path: Path, *, curl_failures: int, curl_body: str = ""):
+    """Run tor.sh's connectivity check against a fake curl.
+
+    Returns the completed process plus how many times curl was called.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name, source in (("curl", CURL_STUB), ("sleep", SLEEP_STUB)):
+        stub = bin_dir / name
+        stub.write_text(source)
+        stub.chmod(0o755)
+
+    notices_log = tmp_path / "notices.log"
+    notices_log.write_text("[warn] Failed to resolve check.torproject.org: no exit available\n")
+    curl_calls = tmp_path / "curl-calls"
+
+    grep = shutil.which("grep")
+    grep_dir = f"{Path(grep).parent}:" if grep else ""
+    script = TOR_SCRIPT_PATH.read_text()
+    block = script[script.index(VERIFY_BLOCK_START) : script.index(VERIFY_BLOCK_END)]
+    result = subprocess.run(
+        ["bash", "-c", "set -e\n" + block],
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": f"{bin_dir}:{grep_dir}/usr/bin:/bin",
+            "TOR_NOTICES_LOG": str(notices_log),
+            "FAKE_CURL_CALLS": str(curl_calls),
+            "FAKE_CURL_FAILURES": str(curl_failures),
+            "FAKE_CURL_BODY": curl_body,
+        },
+        timeout=30,
+    )
+    calls = int(curl_calls.read_text()) if curl_calls.exists() else 0
+    return result, calls
 
 
 def test_tor_nat_rules_bypass_private_networks_before_tcp_redirect():
@@ -381,3 +522,139 @@ def test_tor_watchdog_escalates_to_container_reset_not_in_place_restart():
 
     assert "kill -TERM" in healthcheck_script
     assert "supervisorctl restart" not in healthcheck_script
+
+
+PREVIOUS_BOOT_LOG = (
+    "Oct 20 16:40:02.000 [notice] Bootstrapped 100% (done): Done\n"
+    "Oct 20 17:01:08.000 [notice] Catching signal TERM, exiting cleanly.\n"
+)
+
+
+@requires_bash
+def test_tor_bootstrap_wait_ignores_previous_boot_log(tmp_path):
+    """Regression test for issue #1502.
+
+    The container filesystem survives a restart, and Tor appends to its notices
+    log. The previous boot's "Bootstrapped 100%" line must not pass for this
+    boot's, or the NAT rules go live before Tor has connected to anything and
+    the container fails its connectivity check on every boot from then on.
+    """
+    result, _, _ = _run_tor_bootstrap_wait(
+        tmp_path,
+        previous_log=PREVIOUS_BOOT_LOG,
+        boot_line="Oct 20 17:01:30.000 [notice] Bootstrapped 5% (conn): Connecting to a relay",
+    )
+
+    assert "Tor bootstrap complete" not in result.stdout
+    assert "Tor bootstrap timed out" in result.stdout
+    assert result.returncode == 1
+
+
+@requires_bash
+def test_tor_keeps_previous_boot_log(tmp_path):
+    """Starting the new log must not throw away the previous boot's history."""
+    boot_line = "Oct 20 17:01:31.000 [notice] Bootstrapped 100% (done): Done"
+    result, notices_log, _ = _run_tor_bootstrap_wait(
+        tmp_path, previous_log=PREVIOUS_BOOT_LOG, boot_line=boot_line
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "notices.log.prev").read_text() == PREVIOUS_BOOT_LOG
+    assert notices_log.read_text() == boot_line + "\n"
+
+
+@requires_bash
+def test_tor_hands_its_log_to_the_tor_account_before_starting_it(tmp_path):
+    """Tor opens its log after dropping root and refuses to start if it can't."""
+    result, notices_log, calls = _run_tor_bootstrap_wait(
+        tmp_path,
+        previous_log=PREVIOUS_BOOT_LOG,
+        boot_line="Oct 20 17:01:31.000 [notice] Bootstrapped 100% (done): Done",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls == [f"chown debian-tor {notices_log}", "supervisord"]
+
+
+def test_tor_drops_to_the_account_the_owner_exemption_matches():
+    """As root, Tor's own relay traffic was redirected back into its TransPort.
+
+    The NAT rules only exempt the Tor account's traffic, so Tor has to drop to
+    that same account, with a data directory that account owns.
+    """
+    script = TOR_SCRIPT_PATH.read_text()
+    torrc = script[script.index("cat <<EOF > /etc/tor/torrc") : script.index("\nEOF\n")]
+
+    assert "TOR_USER=debian-tor\n" in script
+    assert "User ${TOR_USER}\n" in torrc
+    assert "DataDirectory /var/lib/tor\n" in torrc
+    assert 'TOR_UID=$(id -u "$TOR_USER")' in _tor_iptables_block()
+
+
+@requires_bash
+def test_tor_bootstrap_wait_completes_on_first_boot(tmp_path):
+    """A container's first boot has no previous log to set aside."""
+    result, _, _ = _run_tor_bootstrap_wait(
+        tmp_path,
+        previous_log=None,
+        boot_line="Oct 20 16:40:02.000 [notice] Bootstrapped 100% (done): Done",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Tor bootstrap complete" in result.stdout
+    assert not (tmp_path / "notices.log.prev").exists()
+
+
+@requires_bash
+def test_tor_connectivity_check_failure_is_reported(tmp_path):
+    """Issue #1502: a failed check stopped the container without a word.
+
+    Under `set -e` curl's exit status (6, could not resolve host) ended tor.sh
+    before anything was logged. The failure, its cause and Tor's own view of it
+    have to reach the log.
+    """
+    result, curl_calls = _run_tor_connectivity_check(tmp_path, curl_failures=99)
+
+    assert result.returncode == 1
+    assert curl_calls == 3
+    assert "curl exit 6" in result.stdout
+    assert "Could not resolve host: check.torproject.org" in result.stdout
+    assert "Could not reach check.torproject.org through Tor" in result.stdout
+    assert "Failed to resolve check.torproject.org: no exit available" in result.stdout
+
+
+@requires_bash
+@requires_grep_pcre
+def test_tor_connectivity_check_retries_transient_failure(tmp_path):
+    """A fresh circuit failing its first lookup must not restart the container."""
+    result, curl_calls = _run_tor_connectivity_check(
+        tmp_path, curl_failures=1, curl_body='{"IsTor":true,"IP":"185.220.100.240"}'
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert curl_calls == 2
+    assert "Success! Traffic is routed through Tor. Current IP: 185.220.100.240" in result.stdout
+
+
+@requires_bash
+@requires_grep_pcre
+def test_tor_connectivity_check_reports_unexpected_reply(tmp_path):
+    """A reply that is not the expected JSON must still say why tor.sh stopped."""
+    result, _ = _run_tor_connectivity_check(
+        tmp_path, curl_failures=0, curl_body="<html>Too Many Requests</html>"
+    )
+
+    assert result.returncode == 1
+    assert "Traffic is NOT using Tor" in result.stdout
+
+
+@requires_bash
+@requires_grep_pcre
+def test_tor_connectivity_check_still_fails_closed_on_clear_net(tmp_path):
+    """Traffic leaving outside Tor must still stop the container."""
+    result, _ = _run_tor_connectivity_check(
+        tmp_path, curl_failures=0, curl_body='{"IsTor":false,"IP":"203.0.113.7"}'
+    )
+
+    assert result.returncode == 1
+    assert "Traffic is NOT using Tor. Current IP: 203.0.113.7" in result.stdout

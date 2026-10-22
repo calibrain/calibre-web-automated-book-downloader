@@ -19,32 +19,32 @@ dependencies = [
     "psutil",
     "emoji",
     "rarfile",
-    "qbittorrent-api>=2026.8.1",
+    "qbittorrent-api>=2026.10.0",
     "transmission-rpc",
-    "authlib>=1.8.0,<1.9",
-    "apprise>=1.13.1",
+    "authlib>=1.9.1,<1.10",
+    "apprise>=2.0.1",
     # HTTP/2 client for RFC 8484 DoH: quad9 rejects HTTP/1.1 outright (505), which
     # requests cannot speak. See shelfmark/download/doh_wireformat.py.
     "httpx[http2]>=0.28.1",
-    "publicsuffixlist>=1.0.2.20260925",
+    "publicsuffixlist>=1.1.0.20261018",
 ]
 
 [project.optional-dependencies]
 browser = [
     "pyvirtualdisplay",
     "pyautogui",
-    "seleniumbase==4.54.12",
+    "seleniumbase==4.56.2",
     "python-xlib",
 ]
 
 [dependency-groups]
 dev = [
-    "basedpyright>=1.40.1",
+    "basedpyright>=1.40.2",
     "prek",
     "pytest",
     "pytest-cov",
     "pytest-xdist>=3.8.0",
-    "ruff==0.16.9",
+    "ruff==0.17.1",
     "vulture>=2.14",
 ]
 

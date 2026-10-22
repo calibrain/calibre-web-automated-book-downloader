@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from shelfmark.config.env import TMP_DIR
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.models import build_filename
+from shelfmark.core.models import build_filename, normalize_format, resolve_staged_path
 from shelfmark.download import http as downloader
 from shelfmark.release_sources import DownloadHandler, register_handler
 from shelfmark.release_sources.libgen import scraper
@@ -57,10 +57,10 @@ class LibgenHandler(DownloadHandler):
             md5 = task.task_id.split(":", 1)[-1].lower()
 
             if config.get("FILE_ORGANIZATION", "rename") == "none":
-                book_name = f"{md5}.{task.format or 'bin'}"
+                book_name = f"{md5}.{normalize_format(task.format) or 'bin'}"
             else:
                 book_name = build_filename(task.title, task.author, task.year, task.format)
-            book_path = TMP_DIR / book_name
+            book_path = resolve_staged_path(TMP_DIR, book_name)
 
             for base in mirrors.get_libgen_mirrors():
                 if cancel_flag.is_set():

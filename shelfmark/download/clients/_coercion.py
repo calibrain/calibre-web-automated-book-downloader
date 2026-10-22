@@ -1,6 +1,6 @@
 """Shared coercion helpers for download client config and option values."""
 
-from shelfmark.core.utils import normalize_http_url
+from shelfmark.core.utils import is_audiobook, normalize_http_url
 
 
 def config_text(value: object, default: str = "") -> str:
@@ -10,6 +10,22 @@ def config_text(value: object, default: str = "") -> str:
     if isinstance(value, str):
         return value
     return str(value)
+
+
+def resolve_download_dir(
+    *,
+    separate: bool,
+    shared_dir: str,
+    book_dir: str,
+    audiobook_dir: str,
+    content_type: object,
+) -> str:
+    """Pick the client save directory; empty means use the client's own default."""
+    if not separate:
+        return shared_dir
+    if is_audiobook(content_type if isinstance(content_type, str) else None):
+        return audiobook_dir
+    return book_dir
 
 
 def normalize_http_config_url(value: object, *, require_string: bool = False) -> str:

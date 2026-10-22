@@ -26,6 +26,7 @@ from shelfmark.release_sources.prowlarr.source import (
     _release_identity,
     _result_dedup_key,
     _search_budget_seconds,
+    _unsupported_title_extension,
 )
 from shelfmark.release_sources.prowlarr.utils import (
     build_source_id,
@@ -1535,3 +1536,158 @@ class TestProwlarrStaleIndexerSelection:
         fake_client = self._search_with_selection(monkeypatch, [98, 99])
 
         assert fake_client.searched_indexer_ids == []
+
+
+class TestHideUnsupportedFormats:
+    """Plain indexer titles that end in a format the user did not enable are hidden."""
+
+    SUPPORTED = ["epub", "mobi", "azw3"]
+
+    def _patch_config(self, monkeypatch, overrides=None):
+        import shelfmark.release_sources.prowlarr.source as prowlarr_source
+
+        values = {
+            "PROWLARR_INDEXERS": "",
+            "PROWLARR_AUTO_EXPAND": False,
+            "SUPPORTED_FORMATS": self.SUPPORTED,
+            **(overrides or {}),
+        }
+        monkeypatch.setattr(
+            prowlarr_source.config, "get", lambda key, default=None: values.get(key, default)
+        )
+
+    @pytest.mark.parametrize(
+        ("title", "expected"),
+        [
+            ("Иван Вазов - Под игото.doc", "doc"),
+            ("Author - Title.RTF", "rtf"),
+            ("Author - Title.pdf ", "pdf"),
+            ("Author - Title.epub", None),
+            ("Author - Title [EPUB]", None),
+            ("Jane.Eyre.by.Bronte", None),
+            ("Author - Title.rar", None),
+            ("Author - Title.zip", None),
+            ("Author - Title", None),
+            ("", None),
+        ],
+    )
+    def test_unsupported_title_extension(self, monkeypatch, title, expected):
+        self._patch_config(monkeypatch)
+        assert _unsupported_title_extension(title, "ebook") == expected
+
+    def test_audiobook_searches_are_not_filtered(self, monkeypatch):
+        self._patch_config(monkeypatch)
+        assert _unsupported_title_extension("Author - Title.doc", "audiobook") is None
+
+    def test_comma_separated_supported_formats(self, monkeypatch):
+        self._patch_config(monkeypatch, {"SUPPORTED_FORMATS": "epub, doc"})
+        assert _unsupported_title_extension("Author - Title.doc", "ebook") is None
+        assert _unsupported_title_extension("Author - Title.rtf", "ebook") == "rtf"
+
+    def _search(self, monkeypatch, overrides=None):
+        self._patch_config(monkeypatch, overrides)
+        fake_client = FakeTorznabClient(
+            search_results=[
+                {
+                    "guid": f"result-{index}",
+                    "protocol": "torrent",
+                    "title": title,
+                    "magnetUrl": f"magnet:?xt=urn:btih:abc{index}",
+                    "indexerId": 1,
+                    "indexer": "Zamunda",
+                }
+                for index, title in enumerate(
+                    ["Иван Вазов - Под игото.epub", "Иван Вазов - Под игото.doc"]
+                )
+            ]
+        )
+        source = ProwlarrSource()
+        monkeypatch.setattr(source, "_get_client", lambda: fake_client)
+        book = BookMetadata(
+            provider="hardcover", provider_id="123", title="Под игото", authors=["Иван Вазов"]
+        )
+
+        from shelfmark.core.search_plan import build_release_search_plan
+
+        plan = build_release_search_plan(book, languages=["bg"])
+        return source.search(book, plan, content_type="ebook")
+
+    def test_search_hides_unsupported_format(self, monkeypatch):
+        releases = self._search(monkeypatch)
+        assert [release.title for release in releases] == ["Иван Вазов - Под игото.epub"]
+
+    def test_search_keeps_unsupported_format_when_disabled(self, monkeypatch):
+        releases = self._search(monkeypatch, {"PROWLARR_HIDE_UNSUPPORTED_FORMATS": False})
+        assert len(releases) == 2
+
+
+class TestEbookMaxSize:
+    """PROWLARR_EBOOK_MAX_SIZE_MB hides oversized ebook results and nothing else (#844)."""
+
+    INDEXER = 10
+    MB = 1024 * 1024
+
+    def _results(self, *sizes):
+        return {
+            self.INDEXER: [
+                {**_mam_result(self.INDEXER, "Indexer", f"guid-{n}"), "size": size}
+                for n, size in enumerate(sizes)
+            ]
+        }
+
+    def _search(self, monkeypatch, sizes, *, limit=None, content_type="ebook"):
+        import shelfmark.release_sources.prowlarr.source as prowlarr_source
+        from shelfmark.core.search_plan import build_release_search_plan
+
+        values = {"PROWLARR_INDEXERS": "", "PROWLARR_AUTO_EXPAND": False}
+        if limit is not None:
+            values["PROWLARR_EBOOK_MAX_SIZE_MB"] = limit
+        monkeypatch.setattr(
+            prowlarr_source.config, "get", lambda key, default=None: values.get(key, default)
+        )
+        source = ProwlarrSource()
+        monkeypatch.setattr(
+            source, "_get_client", lambda: _MultiIndexerClient(self._results(*sizes), None)
+        )
+        book = BookMetadata(
+            provider="hardcover", provider_id="123", title="Dune", authors=["Frank Herbert"]
+        )
+        plan = build_release_search_plan(book, languages=["en"])
+        return source.search(book, plan, content_type=content_type)
+
+    def test_no_limit_shows_everything(self, monkeypatch):
+        releases = self._search(monkeypatch, [5 * self.MB, 4000 * self.MB])
+
+        assert len(releases) == 2
+
+    def test_zero_is_no_limit(self, monkeypatch):
+        releases = self._search(monkeypatch, [5 * self.MB, 4000 * self.MB], limit=0)
+
+        assert len(releases) == 2
+
+    def test_a_result_over_the_limit_is_hidden(self, monkeypatch):
+        releases = self._search(monkeypatch, [5 * self.MB, 4000 * self.MB], limit=100)
+
+        assert [r.size_bytes for r in releases] == [5 * self.MB]
+
+    def test_a_result_exactly_at_the_limit_stays(self, monkeypatch):
+        releases = self._search(monkeypatch, [100 * self.MB, 100 * self.MB + 1], limit=100)
+
+        assert [r.size_bytes for r in releases] == [100 * self.MB]
+
+    def test_a_result_with_no_size_stays(self, monkeypatch):
+        releases = self._search(monkeypatch, [None, 0, 4000 * self.MB], limit=100)
+
+        assert len(releases) == 2
+
+    def test_audiobook_searches_are_not_limited(self, monkeypatch):
+        releases = self._search(
+            monkeypatch, [5 * self.MB, 4000 * self.MB], limit=100, content_type="audiobook"
+        )
+
+        assert len(releases) == 2
+
+    def test_a_bad_setting_is_no_limit(self, monkeypatch):
+        releases = self._search(monkeypatch, [5 * self.MB, 4000 * self.MB], limit="lots")
+
+        assert len(releases) == 2

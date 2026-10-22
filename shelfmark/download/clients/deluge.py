@@ -30,6 +30,7 @@ from shelfmark.download.clients._coercion import (
     coerce_optional_float,
     coerce_optional_int,
     config_text,
+    resolve_download_dir,
 )
 from shelfmark.download.clients.torrent_utils import (
     extract_torrent_info,
@@ -131,6 +132,9 @@ class DelugeClient(DownloadClient):
 
         self._category = config_text(config.get("DELUGE_CATEGORY", "books"), "books")
         self._download_dir = config_text(config.get("DELUGE_DOWNLOAD_DIR", ""))
+        self._separate_download_dirs = bool(config.get("DELUGE_SEPARATE_DOWNLOAD_DIRS", False))
+        self._download_dir_book = config_text(config.get("DELUGE_DOWNLOAD_DIR_BOOK", ""))
+        self._download_dir_audiobook = config_text(config.get("DELUGE_DOWNLOAD_DIR_AUDIOBOOK", ""))
 
     def _next_rpc_id(self) -> int:
         self._rpc_id += 1
@@ -286,8 +290,15 @@ class DelugeClient(DownloadClient):
                 _raise_runtime_error(message)
 
             options: dict[str, Any] = {}
-            if self._download_dir:
-                options["download_location"] = self._download_dir
+            download_dir = resolve_download_dir(
+                separate=self._separate_download_dirs,
+                shared_dir=self._download_dir,
+                book_dir=self._download_dir_book,
+                audiobook_dir=self._download_dir_audiobook,
+                content_type=kwargs.get("content_type"),
+            )
+            if download_dir:
+                options["download_location"] = download_dir
 
             # Per-torrent seeding limits from indexer
             seeding_time_limit = coerce_optional_int(kwargs.get("seeding_time_limit"))

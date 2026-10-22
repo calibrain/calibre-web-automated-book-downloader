@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Protocol, TypeGuard
 
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.request_helpers import normalize_optional_text
+from shelfmark.core.request_helpers import coerce_int, normalize_optional_text
 from shelfmark.core.utils import is_audiobook
 from shelfmark.download.activity import release_activity_grace, request_activity_grace
 from shelfmark.download.clients import (
@@ -22,6 +22,12 @@ from shelfmark.download.clients import (
     DownloadStatus,
     get_client,
     list_configured_clients,
+)
+from shelfmark.download.clients.settings import (
+    STALL_TIMEOUT_DEFAULT_MINUTES,
+    STALL_TIMEOUT_MAX_MINUTES,
+    STALL_TIMEOUT_MIN_MINUTES,
+    STALL_TIMEOUT_SETTING,
 )
 from shelfmark.download.fs import run_blocking_io
 from shelfmark.download.permissions_debug import log_path_permission_context
@@ -53,18 +59,30 @@ def _is_sabnzbd_like_client(candidate: DownloadClient) -> TypeGuard[_SabnzbdLike
 POLL_INTERVAL = 2
 # A torrent the client has queued is waiting for a free slot, not stalled. Its status never
 # changes while it waits, so the orchestrator's stall timer would cancel it after
-# STALL_TIMEOUT. Ask for a grace instead (the orchestrator caps one grace at 16 minutes),
+# STALL_TIMEOUT. Ask for a grace instead (the orchestrator caps one grace at an hour),
 # renew it while the torrent is still queued, and stop at a hard ceiling so a queue that
 # never moves still ends.
 QUEUE_GRACE_SECONDS = 900.0
 QUEUE_GRACE_RENEW_SECONDS = 600.0
 QUEUE_MAX_WAIT_SECONDS = 7200.0
+# States in which a torrent at 0% has not started: waiting for a slot, stopped before its
+# first piece, or fetching metadata and peers. Checking and error states are left out
+# because they also report 0% for a torrent whose data is on disk.
+_UNSTARTED_TORRENT_STATES = frozenset(
+    {DownloadState.QUEUED, DownloadState.PAUSED, DownloadState.DOWNLOADING}
+)
 # Torrents are jerky: a swarm with one seed can sit still for several minutes and then carry
-# on. The orchestrator's default window (STALL_TIMEOUT) is five minutes of no change. A torrent
-# that has already moved gets this longer window, restarted every time its progress goes up,
-# so a dead one still ends 15 minutes after its last movement. One that never moved (a magnet
-# that cannot fetch metadata) keeps the short window and is cleaned up quickly.
-MOVING_STALL_SECONDS = 900.0
+# on, and a magnet can take a while to fetch metadata or find a first peer. The orchestrator
+# ends a download after STALL_TIMEOUT (five minutes) without a change. This setting is the
+# time a torrent may sit without progress before it is cancelled, given once when the
+# torrent starts and restarted every time its progress goes up. The default is 15 minutes;
+# five is the shortest, which is the orchestrator's own timeout and so adds nothing.
+# A torrent that is not moving and has fewer seeds than this is given up on after the wait
+# below (TORRENT_NO_SEEDERS_WAIT, minutes, 0 turns it off). The client's own seed counts decide.
+NO_SEEDERS_WAIT_SETTING = "TORRENT_NO_SEEDERS_WAIT"
+MIN_SEEDERS_SETTING = "TORRENT_MIN_SEEDERS"
+NO_SEEDERS_WAIT_DEFAULT_MINUTES = 0.0
+MIN_SEEDERS_DEFAULT = 1
 WINDOWS_DRIVE_PREFIX_LENGTH = 2
 SECONDS_PER_MINUTE = 60
 SECONDS_PER_HOUR = 3600
@@ -188,14 +206,59 @@ def _probe_completed_path(path: Path) -> tuple[bool, OSError | None]:
     return True, None
 
 
+def _completed_file_signature(
+    path: Path, content_type: str | None
+) -> tuple[tuple[str, int, int], ...] | None:
+    """Return sizes and mtimes for supported files and archives in a completed path.
+
+    Archives count because post-processing extracts them: a scene release can hold
+    nothing but `book.rar` and its `.nfo`/`.sfv`.
+    """
+    from shelfmark.download.archive import is_archive
+    from shelfmark.download.postprocess.policy import (
+        get_supported_audiobook_formats,
+        get_supported_formats,
+    )
+
+    formats = (
+        get_supported_audiobook_formats() if is_audiobook(content_type) else get_supported_formats()
+    )
+    supported_suffixes = {f".{fmt.lstrip('.').lower()}" for fmt in formats}
+
+    try:
+        if path.is_file():
+            candidates = (path,)
+        elif path.is_dir():
+            candidates = path.rglob("*")
+        else:
+            return None
+
+        signature = []
+        for candidate in candidates:
+            if candidate.suffix.lower() not in supported_suffixes and not is_archive(candidate):
+                continue
+            try:
+                stat = candidate.stat()
+            except OSError:
+                continue
+            if not candidate.is_file() or stat.st_size <= 0:
+                continue
+            name = candidate.relative_to(path).as_posix() if path.is_dir() else candidate.name
+            signature.append((name, stat.st_size, stat.st_mtime_ns))
+    except OSError:
+        return None
+
+    return tuple(sorted(signature)) or None
+
+
 class ExternalClientHandler(DownloadHandler, ABC):
     """Shared lifecycle handler for sources that hand off to torrent/usenet clients."""
 
     def __init__(self) -> None:
         """Initialize cleanup tracking for client-managed downloads."""
         # Track downloads that may need client-side cleanup after Shelfmark completes import.
-        # task_id -> (client, download_id, protocol)
-        self._cleanup_refs: dict[str, tuple[DownloadClient, str, str]] = {}
+        # task_id -> (client, download_id, protocol, added_by_shelfmark)
+        self._cleanup_refs: dict[str, tuple[DownloadClient, str, str, bool]] = {}
 
     @abstractmethod
     def _resolve_download(
@@ -217,9 +280,45 @@ class ExternalClientHandler(DownloadHandler, ABC):
         """List protocols with configured clients."""
         return list_configured_clients()
 
+    @staticmethod
+    def _stall_window_seconds() -> float:
+        """How long a torrent may go without progress, from the user's setting (seconds)."""
+        raw = config.get(STALL_TIMEOUT_SETTING, STALL_TIMEOUT_DEFAULT_MINUTES)
+        minutes = float(STALL_TIMEOUT_DEFAULT_MINUTES)
+        if isinstance(raw, (int, float, str)):
+            try:
+                minutes = float(raw)
+            except ValueError:
+                minutes = float(STALL_TIMEOUT_DEFAULT_MINUTES)
+        if not math.isfinite(minutes):
+            minutes = float(STALL_TIMEOUT_DEFAULT_MINUTES)
+        minutes = min(max(minutes, STALL_TIMEOUT_MIN_MINUTES), STALL_TIMEOUT_MAX_MINUTES)
+        return minutes * SECONDS_PER_MINUTE
+
     def _poll_interval(self) -> float:
         """Return the polling interval for status checks."""
         return POLL_INTERVAL
+
+    def _no_seeders_wait_seconds(self) -> float:
+        """How long a motionless torrent with too few seeds is kept (seconds, 0 = never give up)."""
+        configured = config.get(NO_SEEDERS_WAIT_SETTING, NO_SEEDERS_WAIT_DEFAULT_MINUTES)
+        if not isinstance(configured, (int, float, str)):
+            return 0.0
+        try:
+            minutes = float(configured)
+        except ValueError:
+            return 0.0
+        return minutes * SECONDS_PER_MINUTE if minutes > 0 else 0.0
+
+    def _min_seeders(self) -> int:
+        configured = config.get(MIN_SEEDERS_SETTING, MIN_SEEDERS_DEFAULT)
+        return max(coerce_int(configured, MIN_SEEDERS_DEFAULT), 0)
+
+    @staticmethod
+    def _seed_count(status: DownloadStatus) -> int | None:
+        """The most seeds the client can see, connected or reported by the tracker; None if it says nothing."""
+        counts = [c for c in (status.seeders, status.swarm_seeders) if c is not None]
+        return max(counts) if counts else None
 
     def _completed_path_retry_interval(self) -> float:
         """Retry interval while waiting for completed files (seconds)."""
@@ -281,7 +380,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
         if client_ref is None:
             return
 
-        client, download_id, protocol = client_ref
+        client, download_id, protocol, added_by_shelfmark = client_ref
 
         if protocol == "usenet":
             # "Move" means copy into ingest then let the usenet client delete its own files.
@@ -301,12 +400,18 @@ class ExternalClientHandler(DownloadHandler, ABC):
         elif protocol == "torrent":
             torrent_action = config.get("PROWLARR_TORRENT_ACTION", "keep")
             if torrent_action in ("remove", "remove_and_delete"):
-                # Import succeeded; the client handles its own download data.
-                try:
-                    removed = client.remove(
+                # Import succeeded; the client handles its own download data. Only data this
+                # task downloaded is Shelfmark's to delete: a torrent the client already had
+                # may be the user's own seed, so it is removed but keeps its files.
+                delete_files = torrent_action == "remove_and_delete" and added_by_shelfmark
+                if torrent_action == "remove_and_delete" and not delete_files:
+                    logger.info(
+                        "Keeping files of torrent %s in %s: Shelfmark did not add it",
                         download_id,
-                        delete_files=torrent_action == "remove_and_delete",
+                        getattr(client, "name", "client"),
                     )
+                try:
+                    removed = client.remove(download_id, delete_files=delete_files)
                     if not removed:
                         logger.warning(
                             "Failed to remove torrent %s from %s",
@@ -506,18 +611,42 @@ class ExternalClientHandler(DownloadHandler, ABC):
             )
         status_callback("cancelled", "Cancelled")
 
+    def _remove_dead_torrent(self, client: DownloadClient, download_id: str) -> bool:
+        """Remove a torrent Shelfmark added and has given up on for want of seeders, with its data.
+
+        Unlike a cancel, it is removed at any progress: with no seed it cannot finish, and
+        left in the client it would hold a slot and a partial copy for a release that is
+        remembered as failed.
+        """
+        try:
+            return bool(client.remove(download_id, delete_files=True))
+        except _CLIENT_CLEANUP_ERRORS as e:
+            logger.warning(
+                "Could not remove dead torrent %s from %s: %s", download_id, client.name, e
+            )
+            return False
+
     def _remove_unstarted_torrent(self, client: DownloadClient, download_id: str) -> bool:
         """Remove a torrent that downloaded nothing; True if it was removed.
 
         Torrents are normally left in the client after a cancel so an already-downloaded one
         can keep seeding. One at 0% has nothing to seed and nothing to resume, and leaving it
         queued only holds a download slot and piles up dead entries.
+
+        Progress alone does not prove that: an error status (a failed lookup, say) and a
+        client re-checking existing data both report 0%. Only a torrent that is queued,
+        paused or fetching its first pieces counts as unstarted.
         """
         try:
             status = client.get_status(download_id)
             if status.progress > 0:  # it has data, so it may be seeding or resumable
                 return False
-            return bool(client.remove(download_id, delete_files=True))
+            if status.state not in _UNSTARTED_TORRENT_STATES:
+                return False
+            # rTorrent refuses to remove a torrent with its files, and one that never
+            # started has none worth deleting.
+            delete_files = client.can_delete_files is not False
+            return bool(client.remove(download_id, delete_files=delete_files))
         except _CLIENT_CLEANUP_ERRORS as e:
             logger.warning(
                 "Could not remove unstarted torrent %s from %s: %s", download_id, client.name, e
@@ -733,9 +862,11 @@ class ExternalClientHandler(DownloadHandler, ABC):
         *,
         cancel_flag: Event | None,
         status_callback: Callable[[str, str | None], None],
+        content_type: str | None = None,
     ) -> tuple[Path | None, str | None]:
-        """Wait briefly for completed files to appear on disk."""
+        """Wait for supported files to appear and stop changing on disk."""
         last_error: str | None = None
+        previous_signature: tuple[tuple[str, int, int], ...] | None = None
         retry_interval = self._completed_path_retry_interval()
         timeout_seconds = self._completed_path_timeout_seconds()
         if retry_interval <= 0 or timeout_seconds <= 0:
@@ -754,7 +885,33 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 log_details=log_details,
             )
             if result.path:
-                return result.path, None
+                if run_blocking_io(result.path.is_file):
+                    return result.path, None
+                signature = run_blocking_io(
+                    _completed_file_signature,
+                    result.path,
+                    content_type,
+                )
+                # With no wait configured there is no second sample to compare against.
+                if signature is not None and (signature == previous_signature or max_attempts == 1):
+                    return result.path, None
+                previous_signature = signature
+                last_error = "Completed download has no stable supported files yet."
+                if attempt < max_attempts:
+                    status_callback("locating", "Waiting for completed files...")
+                    logger.debug(
+                        "Supported files are missing or still changing for %s (%s) (attempt %d/%d)",
+                        client.name,
+                        download_id,
+                        attempt,
+                        max_attempts,
+                    )
+                    if cancel_flag:
+                        if cancel_flag.wait(timeout=retry_interval):
+                            return None, last_error
+                    else:
+                        time.sleep(retry_interval)
+                continue
 
             last_error = result.error
 
@@ -785,6 +942,17 @@ class ExternalClientHandler(DownloadHandler, ABC):
                     time.sleep(retry_interval)
 
         return None, last_error
+
+    @staticmethod
+    def _seed_note(seeds: int | None, give_up_in: float | None) -> str:
+        """What the card shows beside progress so nobody has to open the client to see the swarm."""
+        if seeds is None:
+            return ""
+        note = f" · {seeds} seed{'s' if seeds != 1 else ''}"
+        if give_up_in is not None and give_up_in > 0:
+            minutes_left = max(math.ceil(give_up_in / SECONDS_PER_MINUTE), 1)
+            note += f", giving up in {minutes_left}m"
+        return note
 
     def _build_progress_message(self, status: DownloadStatus) -> str:
         """Build a progress message from download status."""
@@ -855,6 +1023,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
                         download_id=download_id,
                         cancel_flag=cancel_flag,
                         status_callback=status_callback,
+                        content_type=task.content_type,
                     )
                     if not source_path_obj:
                         if cancel_flag.is_set():
@@ -875,7 +1044,12 @@ class ExternalClientHandler(DownloadHandler, ABC):
 
                     if result:
                         self._on_download_complete(task)
-                        self._cleanup_refs[task.task_id] = (client, download_id, request.protocol)
+                        self._cleanup_refs[task.task_id] = (
+                            client,
+                            download_id,
+                            request.protocol,
+                            False,  # added_by_shelfmark: the client already had it
+                        )
                     return result
 
                 # Existing but still downloading - join the progress polling
@@ -982,13 +1156,24 @@ class ExternalClientHandler(DownloadHandler, ABC):
         """Poll the download client for progress and handle completion.
 
         ``added_by_shelfmark`` is False when the task joined a torrent the client already had;
-        such a torrent is never removed on cancel.
+        such a torrent is never removed on cancel, and its files are never deleted.
         """
         poll_interval = self._poll_interval()
         queued_since: float | None = None
-        grace_requested_at = 0.0
+        # None, not 0.0: time.monotonic() can be below the renew interval on a host that
+        # booted recently, which would skip the first request.
+        grace_requested_at: float | None = None
         last_progress = 0.0
         start_window_given = False
+        # The setting is for torrents. Usenet keeps the orchestrator's own timeout, which is
+        # the floor of the setting, so no window is requested for it.
+        stall_window = (
+            self._stall_window_seconds()
+            if protocol == "torrent"
+            else float(STALL_TIMEOUT_MIN_MINUTES * SECONDS_PER_MINUTE)
+        )
+        no_seeders_since: float | None = None
+        zero_seeds_since: float | None = None
         # Track consecutive "not found" errors - torrents may take time to appear in client
         not_found_count = 0
         max_not_found_retries = 15  # 15 retries * poll interval ~= 30s grace period
@@ -999,6 +1184,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
             while not cancel_flag.is_set():
                 status = client.get_status(download_id)
                 progress_callback(status.progress)
+                task.client_queued = status.state == DownloadState.QUEUED
 
                 # Check for completion
                 if status.complete:
@@ -1074,33 +1260,103 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 # Reset not-found counter on successful status check
                 not_found_count = 0
 
+                # The orchestrator keeps one grace deadline and a new request replaces it, so
+                # a movement window must not cut short a longer queue grace still running.
+                queue_grace_left = 0.0
                 if status.state == DownloadState.QUEUED:
                     now = time.monotonic()
                     if queued_since is None:
                         queued_since = now
-                    if (
-                        now - queued_since < QUEUE_MAX_WAIT_SECONDS
-                        and now - grace_requested_at >= QUEUE_GRACE_RENEW_SECONDS
+                    if now - queued_since < QUEUE_MAX_WAIT_SECONDS and (
+                        grace_requested_at is None
+                        or now - grace_requested_at >= QUEUE_GRACE_RENEW_SECONDS
                     ):
                         request_activity_grace(status_callback, QUEUE_GRACE_SECONDS)
                         grace_requested_at = now
+                    if grace_requested_at is not None:
+                        queue_grace_left = grace_requested_at + QUEUE_GRACE_SECONDS - now
                 elif queued_since is not None:
                     release_activity_grace(status_callback)
                     queued_since = None
-                    grace_requested_at = 0.0
+                    grace_requested_at = None
+                    # The release drops the stall deadline back to the orchestrator's own
+                    # timeout, so the torrent needs a fresh window even if it had one before.
+                    start_window_given = False
+
+                no_seeders_left: float | None = None
+                no_seeders_wait = self._no_seeders_wait_seconds()
+                min_seeders = self._min_seeders()
+                seeds = self._seed_count(status)
+                judged = (
+                    no_seeders_wait > 0
+                    and min_seeders > 0
+                    and status.state == DownloadState.DOWNLOADING
+                    and seeds is not None
+                )
+                # Two ways to be given up on, each with its own clock. Too few seeds and not
+                # moving; or no seed at all, moving or not: a torrent running on the pieces
+                # its peers happen to hold stops when they run out.
+                too_few_idle = (
+                    judged
+                    and seeds is not None
+                    and seeds < min_seeders
+                    and status.progress <= last_progress
+                )
+                no_seed_at_all = judged and seeds == 0
+                now = time.monotonic() if too_few_idle or no_seed_at_all else 0.0
+                if too_few_idle:
+                    if no_seeders_since is None:
+                        no_seeders_since = now
+                else:
+                    no_seeders_since = None
+                if no_seed_at_all:
+                    if zero_seeds_since is None:
+                        zero_seeds_since = now
+                else:
+                    zero_seeds_since = None
+                lefts = [
+                    no_seeders_wait - (now - since)
+                    for since in (no_seeders_since, zero_seeds_since)
+                    if since is not None
+                ]
+                if lefts:
+                    no_seeders_left = min(lefts)
+                    if no_seeders_left <= 0:
+                        minutes = no_seeders_wait / SECONDS_PER_MINUTE
+                        logger.warning(
+                            "Giving up on %s (%s): %s seeders found, %s needed, for %.0f min",
+                            client.name,
+                            download_id,
+                            seeds,
+                            min_seeders,
+                            minutes,
+                        )
+                        if added_by_shelfmark:
+                            self._remove_dead_torrent(client, download_id)
+                        status_callback(
+                            "error",
+                            f"No seeders: {seeds} found, {min_seeders} needed, "
+                            f"for {minutes:g} min ({status.progress:.0f}% downloaded)",
+                        )
+                        return None
 
                 if status.progress > last_progress:
-                    request_activity_grace(status_callback, MOVING_STALL_SECONDS)
+                    if stall_window > max(
+                        STALL_TIMEOUT_MIN_MINUTES * SECONDS_PER_MINUTE, queue_grace_left
+                    ):
+                        request_activity_grace(status_callback, stall_window)
                     start_window_given = True
                 elif not start_window_given and status.state != DownloadState.QUEUED:
                     # Metadata and the first peer can take longer than the orchestrator's
                     # stall timeout, so a torrent gets one full window to get going.
-                    request_activity_grace(status_callback, MOVING_STALL_SECONDS)
+                    if stall_window > STALL_TIMEOUT_MIN_MINUTES * SECONDS_PER_MINUTE:
+                        request_activity_grace(status_callback, stall_window)
                     start_window_given = True
                 last_progress = status.progress
 
                 # Build status message - use client message if provided, else build progress
                 msg = status.message or self._build_progress_message(status)
+                msg += self._seed_note(seeds, no_seeders_left)
                 if status.state == DownloadState.PROCESSING:
                     # Post-processing (e.g., SABnzbd verifying/extracting)
                     status_callback("resolving", msg)
@@ -1128,6 +1384,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 download_id=download_id,
                 cancel_flag=cancel_flag,
                 status_callback=status_callback,
+                content_type=task.content_type,
             )
             if not source_path_obj:
                 if cancel_flag.is_set():
@@ -1162,7 +1419,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
         # Clean up on success
         if result:
             self._on_download_complete(task)
-            self._cleanup_refs[task.task_id] = (client, download_id, protocol)
+            self._cleanup_refs[task.task_id] = (client, download_id, protocol, added_by_shelfmark)
 
         return result
 

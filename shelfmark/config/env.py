@@ -155,6 +155,13 @@ ENABLE_LOGGING = string_to_bool(os.getenv("ENABLE_LOGGING", "true"))
 
 FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = int(os.getenv("FLASK_PORT", "8084"))
+# Extra origins allowed to open the Socket.IO websocket, comma separated. Needed
+# only when a reverse proxy changes Host and sends no X-Forwarded-Host/Proto.
+SOCKETIO_ALLOWED_ORIGINS = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv("SOCKETIO_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip().rstrip("/")
+]
 
 
 # =============================================================================

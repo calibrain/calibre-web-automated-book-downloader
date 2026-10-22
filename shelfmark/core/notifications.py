@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
-import threading
+import re
+import socket
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, TypeGuard
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 try:
     import apprise
@@ -18,7 +22,7 @@ except ImportError:  # pragma: no cover - exercised in tests via monkeypatch
 
 from shelfmark.core.config import config as app_config
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.request_helpers import normalize_positive_int
+from shelfmark.core.request_helpers import is_plain_email_address, normalize_positive_int
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -35,6 +39,12 @@ _APPRISE_LOGO_URL = (
 )
 _APPRISE_LOGGER_NAME = "apprise"
 _APPRISE_DISPATCH_ERRORS = (RuntimeError, TypeError, ValueError)
+_USER_ROUTE_PLACEHOLDER_PATTERN = re.compile(r"\{(user|email)\}", re.IGNORECASE)
+# Apprise splits a decoded value on these, so "John Smith" or '"a,b@x.com"@y.com' would reach
+# extra topics or recipients (e.g. add recipients to an admin-set mailto route).
+_UNSAFE_PLACEHOLDER_VALUE = re.compile(r'[\s,;/\\"]')
+# Percent-encoding leaves dots alone, so a username of ".." would walk up a webhook URL's path.
+_DOTS_ONLY_PLACEHOLDER_VALUE = re.compile(r"\.+")
 
 
 class _ApprisePluginWithUrl(Protocol):
@@ -133,14 +143,22 @@ def _extract_url_schemes(urls: Iterable[str]) -> list[str]:
     return schemes
 
 
+# The capture active in the current context. Apprise 2 delivers on its own worker
+# threads but runs them in a copy of the caller's context, so a context variable
+# (unlike the thread id) still tells this dispatch's records apart from those of
+# a dispatch running concurrently on another thread.
+_active_apprise_capture: ContextVar[_AppriseLogCapture | None] = ContextVar(
+    "active_apprise_capture", default=None
+)
+
+
 class _AppriseLogCapture(logging.Handler):
-    def __init__(self, *, thread_id: int) -> None:
+    def __init__(self) -> None:
         super().__init__(level=logging.INFO)
         self.records: list[tuple[int, str, str, str]] = []
-        self._thread_id = thread_id
 
     def emit(self, record: logging.LogRecord) -> None:
-        if record.thread != self._thread_id:
+        if _active_apprise_capture.get() is not self:
             return
 
         message = record.getMessage()
@@ -162,7 +180,8 @@ def _capture_apprise_logs(
 ) -> Iterator[list[tuple[int, str, str, str]]]:
     apprise_logger = logging.getLogger(_APPRISE_LOGGER_NAME)
     previous_level = apprise_logger.level
-    handler = _AppriseLogCapture(thread_id=threading.get_ident())
+    handler = _AppriseLogCapture()
+    token = _active_apprise_capture.set(handler)
     apprise_logger.addHandler(handler)
 
     if previous_level == logging.NOTSET or previous_level > min_level:
@@ -173,6 +192,7 @@ def _capture_apprise_logs(
     finally:
         apprise_logger.removeHandler(handler)
         apprise_logger.setLevel(previous_level)
+        _active_apprise_capture.reset(token)
 
 
 def _log_apprise_records(records: Iterable[tuple[int, str, str, str]]) -> None:
@@ -285,14 +305,155 @@ def _normalize_user_id(value: object) -> int | None:
     return normalize_positive_int(value)
 
 
-def _resolve_user_routes(user_id: int | None) -> list[dict[str, str]]:
+# A user's own routes are sent from the server, so they must not be able to reach hosts the user
+# could not reach themselves. These services always talk to the vendor's own host, whatever the
+# rest of the URL says.
+_USER_ROUTE_FIXED_HOST_SCHEMES = frozenset({"discord", "slack", "tgram", "pover", "pbul"})
+# These connect to the host written in the URL, so that host has to be a public one.
+_USER_ROUTE_HOST_SCHEMES = frozenset({"ntfy", "ntfys", "gotify", "gotifys"})
+
+
+def _is_public_address(address: str) -> bool:
+    try:
+        parsed = ipaddress.ip_address(address.split("%", 1)[0])
+    except ValueError:
+        return False
+    if isinstance(parsed, ipaddress.IPv6Address) and parsed.ipv4_mapped is not None:
+        parsed = parsed.ipv4_mapped
+    return parsed.is_global and not parsed.is_multicast
+
+
+def _host_is_public(host: str) -> bool:
+    """Whether every address the host resolves to is a public one. A host that does not resolve
+    has nothing to connect to, so it passes."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return True
+    return all(_is_public_address(str(info[4][0])) for info in infos)
+
+
+def _apprise_host(url: str) -> str | None:
+    """The host Apprise itself reads from the URL, which can differ from urlsplit's reading."""
+    if apprise is None:
+        return None
+    try:
+        plugin = apprise.Apprise.instantiate(url)
+    except Exception:  # noqa: BLE001 - an unparsable URL is judged on urlsplit alone
+        return None
+    host = getattr(plugin, "host", None)
+    return host if isinstance(host, str) and host else None
+
+
+def user_route_url_problem(url: str) -> str | None:
+    """Why a user may not use this URL for a personal route, or None when it is allowed."""
+    scheme = urlsplit(url).scheme.lower()
+    if scheme in _USER_ROUTE_FIXED_HOST_SCHEMES:
+        return None
+    if scheme not in _USER_ROUTE_HOST_SCHEMES:
+        return f"'{scheme or url}' is not available for personal notification routes"
+    hosts = {urlsplit(url).hostname, _apprise_host(url)} - {None}
+    for host in hosts:
+        if not _host_is_public(str(host)):
+            return f"'{host}' is not a public address"
+    return None
+
+
+def _allowed_user_urls(urls: list[str]) -> list[str]:
+    """The URLs a user's routes may send to; the rest are logged and dropped."""
+    allowed: list[str] = []
+    for url in urls:
+        problem = user_route_url_problem(url)
+        if problem is None:
+            allowed.append(url)
+        else:
+            logger.warning("Dropping a personal notification route: %s", problem)
+    return allowed
+
+
+def _resolve_user_routes(user_id: int | None) -> tuple[list[dict[str, str]], bool]:
+    """The user's routes, and whether they are the inherited admin default.
+
+    Admin-set routes are trusted like the global ones, so they skip the personal-route checks.
+    Both come from one config read, so a settings save in between cannot pair the user's own
+    routes with the admin default's trust.
+    """
     normalized_user_id = _normalize_user_id(user_id)
     if normalized_user_id is None:
-        return []
+        return [], False
 
-    return _normalize_routes(
-        app_config.get("USER_NOTIFICATION_ROUTES", [], user_id=normalized_user_id)
+    value, is_own = app_config.get_for_user(
+        "USER_NOTIFICATION_ROUTES", [], user_id=normalized_user_id
     )
+    return _normalize_routes(value), not is_own
+
+
+def _get_route_user(user_id: int) -> dict[str, Any] | None:
+    try:
+        from shelfmark.core.user_db import UserDB, get_users_db_path
+
+        return UserDB(get_users_db_path()).get_user(user_id=user_id)
+    except (ImportError, OSError, sqlite3.Error) as exc:
+        logger.warning("Failed to look up user_id=%s for notification routes: %s", user_id, exc)
+        return None
+
+
+def expand_user_route_placeholders(urls: list[str], user_id: int) -> list[str]:
+    """Expand `{User}` and `{Email}` in per-user route URLs from the user's account.
+
+    Placeholders are only filled in the path, query or fragment: a URL with one in its host part
+    is dropped, because Apprise decodes percent-escapes there (so an email such as
+    ``x%40127.0.0.1`` would still reach 127.0.0.1). Values are fully percent-encoded, and a
+    value containing whitespace or any of ``, ; / \\ "`` is ignored, since Apprise would split it
+    into several targets, and so is a value made only of dots, which would change the URL path.
+    URLs that need a value the user does not have are dropped.
+    Callers should still validate the returned URLs, not the templates.
+    """
+    if not any(_USER_ROUTE_PLACEHOLDER_PATTERN.search(url) for url in urls):
+        return urls
+
+    user = _get_route_user(user_id) or {}
+    values: dict[str, str] = {}
+    for name, field in (("user", "username"), ("email", "email")):
+        value = str(user.get(field) or "").strip()
+        if value and (
+            _UNSAFE_PLACEHOLDER_VALUE.search(value)
+            or _DOTS_ONLY_PLACEHOLDER_VALUE.fullmatch(value)
+            or (name == "email" and not is_plain_email_address(value))
+        ):
+            logger.info(
+                "Ignoring the %s on file for user_id=%s in notification routes: it could "
+                "split into several targets or change the URL path",
+                field,
+                user_id,
+            )
+            value = ""
+        values[name] = value
+
+    expanded: list[str] = []
+    for url in urls:
+        if _USER_ROUTE_PLACEHOLDER_PATTERN.search(urlsplit(url).netloc):
+            logger.warning(
+                "Skipping notification route for user_id=%s: {User}/{Email} is not allowed "
+                "in the host part of a URL",
+                user_id,
+            )
+            continue
+        needed = {match.lower() for match in _USER_ROUTE_PLACEHOLDER_PATTERN.findall(url)}
+        missing = sorted(name for name in needed if not values[name])
+        if missing:
+            logger.info(
+                "Skipping notification route for user_id=%s: no %s on file",
+                user_id,
+                ", ".join(missing),
+            )
+            continue
+        expanded.append(
+            _USER_ROUTE_PLACEHOLDER_PATTERN.sub(
+                lambda match: quote(values[match.group(1).lower()], safe=""), url
+            )
+        )
+    return expanded
 
 
 def _resolve_route_urls_for_event(
@@ -637,13 +798,24 @@ def notify_user(
     if normalized_user_id is None:
         return
 
-    routes = _resolve_user_routes(normalized_user_id)
-    urls = _resolve_route_urls_for_event(routes, event)
+    routes, admin_default = _resolve_user_routes(normalized_user_id)
+    urls = expand_user_route_placeholders(
+        _resolve_route_urls_for_event(routes, event), normalized_user_id
+    )
+    if not admin_default:
+        urls = _allowed_user_urls(urls)
     if not urls:
         return
 
     try:
-        _executor.submit(_dispatch_user_async, normalized_user_id, event, context, urls)
+        _executor.submit(
+            _dispatch_user_async,
+            normalized_user_id,
+            event,
+            context,
+            urls,
+            admin_default=admin_default,
+        )
     except RuntimeError as exc:
         logger.warning(
             "Failed to queue user notification '%s' for user_id=%s: %s",
@@ -670,7 +842,14 @@ def _dispatch_user_async(
     event: NotificationEvent,
     context: NotificationContext,
     urls: list[str],
+    *,
+    admin_default: bool = False,
 ) -> None:
+    # Checked again at send time: the host may resolve differently than when it was queued.
+    if not admin_default:
+        urls = _allowed_user_urls(urls)
+    if not urls:
+        return
     result = _send_admin_event(event, context, urls)
     if not result.get("success", False):
         logger.warning(

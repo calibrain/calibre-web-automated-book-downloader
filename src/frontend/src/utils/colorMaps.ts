@@ -1,3 +1,5 @@
+import type { ColumnColorHint } from '../types';
+
 // Color styles with transparent backgrounds and contrasting text
 interface ColorStyle {
   bg: string;
@@ -117,6 +119,7 @@ export function getProtocolDotColor(protocol?: string): string {
   const p = protocol.toLowerCase();
   if (p === 'torrent') return 'bg-orange-500';
   if (p === 'nzb' || p === 'usenet') return 'bg-sky-500';
+  if (p === 'soulseek') return 'bg-emerald-500';
   return 'bg-gray-400';
 }
 
@@ -130,14 +133,6 @@ function getFlagColor(flag?: string): ColorStyle {
   const normalized = flag.trim().toLowerCase();
   if (!normalized) return FALLBACK_COLOR;
   return FLAG_COLORS[normalized] || DEFAULT_FLAG_COLOR;
-}
-
-/**
- * Color hint type for dynamic column coloring.
- */
-interface ColumnColorHint {
-  type: 'static' | 'map';
-  value: string;
 }
 
 /**

@@ -11,6 +11,7 @@ import pytest
 
 from shelfmark.core.models import DownloadTask, QueueStatus
 from shelfmark.core.notifications import NotificationEvent
+from shelfmark.core.viewer_redaction import public_download_id
 
 
 @pytest.fixture(scope="module")
@@ -37,6 +38,32 @@ def _read_download_history_row(main_module, task_id: str):
         ).fetchone()
     finally:
         conn.close()
+
+
+def _create_release_request(main_module, user: dict, task_id: str) -> dict:
+    return main_module.user_db.create_request(
+        user_id=user["id"],
+        content_type="ebook",
+        request_level="release",
+        policy_mode="request_release",
+        book_data={
+            "title": "Requested Activity",
+            "author": "Activity Author",
+            "provider": "openlibrary",
+            "provider_id": "activity-req",
+        },
+        release_data={"source": "prowlarr", "source_id": task_id, "title": "Requested.epub"},
+        status="fulfilled",
+        delivery_state="queued",
+    )
+
+
+def _activity_update_payloads(mock_emit) -> dict[str, dict]:
+    return {
+        call.kwargs["to"]: call.args[1]
+        for call in mock_emit.call_args_list
+        if call.args[0] == "activity_update"
+    }
 
 
 class TestTerminalSnapshotCapture:
@@ -190,6 +217,35 @@ class TestTerminalSnapshotCapture:
                 ANY,
                 to=f"user_{user['id']}",
             )
+        finally:
+            main_module.backend.book_queue.cancel_download(task_id)
+
+    def test_activity_update_hides_request_linked_task_id_from_owner(self, main_module):
+        user = _create_user(main_module, prefix="snap-activity-redact")
+        task_id = f"7:https://tracker.example/download/1?passkey={uuid.uuid4().hex[:8]}"
+        request_row = _create_release_request(main_module, user, task_id)
+        task = DownloadTask(
+            task_id=task_id,
+            source="prowlarr",
+            title="Requested Activity",
+            user_id=user["id"],
+            username=user["username"],
+            request_id=request_row["id"],
+        )
+        assert main_module.backend.book_queue.add(task) is True
+
+        try:
+            with patch.object(main_module.ws_manager, "is_enabled", return_value=True):
+                with patch.object(main_module.ws_manager.socketio, "emit") as mock_emit:
+                    main_module.backend.book_queue.update_status(task_id, QueueStatus.COMPLETE)
+
+            payloads = _activity_update_payloads(mock_emit)
+            assert payloads["admins"]["task_id"] == task_id
+            assert payloads[f"user_{user['id']}"] == {
+                "kind": "download_terminal",
+                "task_id": public_download_id(task_id),
+                "status": "complete",
+            }
         finally:
             main_module.backend.book_queue.cancel_download(task_id)
 
@@ -419,6 +475,40 @@ class TestTerminalSnapshotCapture:
             ANY,
             to=f"user_{user['id']}",
         )
+
+    def test_queue_hook_reset_hides_request_linked_task_id_from_owner(self, main_module):
+        user = _create_user(main_module, prefix="snap-reset-redact")
+        task_id = f"7:https://tracker.example/download/2?passkey={uuid.uuid4().hex[:8]}"
+        request_row = _create_release_request(main_module, user, task_id)
+        main_module.activity_view_state_service.dismiss(
+            viewer_scope=f"user:{user['id']}",
+            item_type="download",
+            item_key=f"download:{task_id}",
+        )
+
+        task = SimpleNamespace(
+            user_id=user["id"],
+            username=user["username"],
+            request_id=request_row["id"],
+            source="prowlarr",
+            title="Requested Activity",
+            author="Activity Author",
+            format="epub",
+            size="1 MB",
+            preview=None,
+            content_type="ebook",
+        )
+
+        with patch.object(main_module.ws_manager, "is_enabled", return_value=True):
+            with patch.object(main_module.ws_manager.socketio, "emit") as mock_emit:
+                main_module._record_download_queued(task_id, task)
+
+        payloads = _activity_update_payloads(mock_emit)
+        assert payloads["admins"] == {"kind": "activity_reset", "task_id": task_id}
+        assert payloads[f"user_{user['id']}"] == {
+            "kind": "activity_reset",
+            "task_id": public_download_id(task_id),
+        }
 
     def test_cancelled_transition_does_not_trigger_notification(self, main_module):
         user = _create_user(main_module, prefix="snap-notify-cancel")

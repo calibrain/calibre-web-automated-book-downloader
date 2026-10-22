@@ -6,12 +6,14 @@ import os
 import re
 import sqlite3
 import time
+import unicodedata
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from functools import wraps
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, NoReturn, cast
+from urllib.parse import quote
 
 from flask import Flask, g, jsonify, request, send_file, send_from_directory, session
 from flask_cors import CORS
@@ -33,6 +35,7 @@ from shelfmark.config.env import (
     RELEASE_VERSION,
     SESSION_COOKIE_NAME,
     SESSION_COOKIE_SECURE_ENV,
+    SOCKETIO_ALLOWED_ORIGINS,
     _is_config_dir_writable,
     string_to_bool,
 )
@@ -55,7 +58,12 @@ from shelfmark.core.cwa_user_sync import upsert_cwa_user
 from shelfmark.core.download_history_service import DownloadHistoryService
 from shelfmark.core.external_user_linking import upsert_external_user
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.models import TERMINAL_QUEUE_STATUSES, QueueStatus, SearchFilters
+from shelfmark.core.models import (
+    TERMINAL_QUEUE_STATUSES,
+    QueueStatus,
+    SearchFilters,
+    build_filename,
+)
 from shelfmark.core.notifications import (
     NotificationContext,
     NotificationEvent,
@@ -73,6 +81,7 @@ from shelfmark.core.request_helpers import (
     normalize_positive_int,
 )
 from shelfmark.core.request_policy import (
+    DEFAULT_SUPPORTED_CONTENT_TYPES,
     PolicyMode,
     get_source_content_type_capabilities,
     merge_request_policy_settings,
@@ -84,6 +93,7 @@ from shelfmark.core.requests_service import (
     reopen_failed_request,
     sync_delivery_states_from_queue_status,
 )
+from shelfmark.core.socketio_origins import build_cors_allowed_origins
 from shelfmark.core.user_db import UserDB
 from shelfmark.core.utils import AUDIOBOOK_FORMATS, normalize_base_path
 from shelfmark.core.viewer_redaction import (
@@ -95,6 +105,7 @@ from shelfmark.core.viewer_redaction import (
 )
 from shelfmark.download import orchestrator as backend
 from shelfmark.download import warmup
+from shelfmark.download.zip_stream import stream_zip
 from shelfmark.release_sources import (
     BrowseRecord,
     Release,
@@ -103,6 +114,7 @@ from shelfmark.release_sources import (
 )
 
 if TYPE_CHECKING:
+    from shelfmark.core.models import DownloadTask
     from shelfmark.metadata_providers import BookMetadata, MetadataProvider
 
 logger = setup_logger(__name__)
@@ -140,7 +152,8 @@ app.wsgi_app = wsgi_app
 # We run this app under Gunicorn with a gevent websocket worker (even when DEBUG=true),
 # so Socket.IO should always use gevent here.
 async_mode = "gevent"
-socketio_cors_allowed_origins = "*"
+# Same-origin only (python-engineio default), plus any SOCKETIO_ALLOWED_ORIGINS.
+socketio_cors_allowed_origins = build_cors_allowed_origins(SOCKETIO_ALLOWED_ORIGINS)
 
 # Initialize Flask-SocketIO with reverse proxy support
 socketio_path = f"{BASE_PATH}/socket.io" if BASE_PATH else "/socket.io"
@@ -155,7 +168,6 @@ socketio_init_kwargs: dict[str, Any] = {
     "ping_interval": 25,
     # Allow both websocket and polling for better compatibility
     "transports": ["websocket", "polling"],
-    # Enable CORS for all origins (you can restrict this in production)
     "allow_upgrades": True,
     # Important for proxies that buffer
     "http_compression": True,
@@ -173,7 +185,10 @@ def _user_room_queue_status(user_id: int | None = None) -> dict[str, dict[str, A
 
 ws_manager.set_queue_status_fn(_user_room_queue_status)
 logger.info("Flask-SocketIO initialized with async_mode='%s'", async_mode)
-logger.info("Socket.IO CORS allowed origins: %s", socketio_cors_allowed_origins)
+logger.info(
+    "Socket.IO origin check: same-origin plus %s configured origin(s)",
+    len(SOCKETIO_ALLOWED_ORIGINS),
+)
 
 # Ensure all plugins are loaded before starting the download coordinator.
 # This prevents a race condition where the download loop could try to process
@@ -205,11 +220,23 @@ try:
     import_module("shelfmark.config.users_settings")
     from shelfmark.core.admin_routes import register_admin_routes
     from shelfmark.core.oidc_routes import register_oidc_routes
-    from shelfmark.core.self_user_routes import register_self_user_routes
+    from shelfmark.core.self_user_routes import (
+        PasswordAttemptLimiter,
+        register_self_user_routes,
+    )
 
     register_oidc_routes(app, user_db)
     register_admin_routes(app, user_db)
-    register_self_user_routes(app, user_db)
+    register_self_user_routes(
+        app,
+        user_db,
+        # Looked up when called: the lockout helpers are defined further down this module.
+        password_attempts=PasswordAttemptLimiter(
+            is_locked=lambda username: is_account_locked(username),  # noqa: PLW0108
+            record_failure=lambda username: record_failed_login(username, get_client_ip()),
+            clear=lambda username: clear_failed_logins(username),  # noqa: PLW0108
+        ),
+    )
 except (sqlite3.OperationalError, OSError) as e:
     logger.warning(
         "User database initialization failed: %s. Multi-user authentication features will be disabled. Ensure CONFIG_DIR (%s) exists and is writable.",
@@ -489,7 +516,9 @@ def _resolve_policy_mode_for_current_user(*, source: Any, content_type: Any) -> 
     return resolved_mode
 
 
-def _policy_block_response(mode: PolicyMode) -> tuple[Response, int]:
+def _policy_block_response(
+    mode: PolicyMode, *, error: str = "Download not allowed by policy"
+) -> tuple[Response, int]:
     logger.debug(
         "download policy guard user=%s db_user_id=%s mode=%s",
         session.get("user_id"),
@@ -500,7 +529,7 @@ def _policy_block_response(mode: PolicyMode) -> tuple[Response, int]:
         return (
             jsonify(
                 {
-                    "error": "Download not allowed by policy",
+                    "error": error,
                     "code": "policy_blocked",
                     "required_mode": PolicyMode.BLOCKED.value,
                 }
@@ -510,13 +539,82 @@ def _policy_block_response(mode: PolicyMode) -> tuple[Response, int]:
     return (
         jsonify(
             {
-                "error": "Download not allowed by policy",
+                "error": error,
                 "code": "policy_requires_request",
                 "required_mode": mode.value,
             }
         ),
         403,
     )
+
+
+# Modes under which the user never sees a release list: request_book asks for the
+# book as a whole and blocked gets nothing. request_release still lists releases,
+# since that user picks the one they ask for. Listing goes through the shared
+# source credentials (Prowlarr, torrent clients, scrapers), so the routes that
+# list have to refuse these two modes just as the download route does.
+_RELEASE_LISTING_REFUSED_MODES = frozenset({PolicyMode.REQUEST_BOOK, PolicyMode.BLOCKED})
+
+
+def _release_listing_refusal(*, source: Any, content_type: Any) -> PolicyMode | None:
+    """Return the policy mode when the current user may not list releases from `source`."""
+    mode = _resolve_policy_mode_for_current_user(source=source, content_type=content_type)
+    if mode is not None and mode in _RELEASE_LISTING_REFUSED_MODES:
+        return mode
+    return None
+
+
+def _release_listing_block_response(mode: PolicyMode) -> tuple[Response, int]:
+    return _policy_block_response(mode, error="Release listing not allowed by policy")
+
+
+def _sources_allowed_for_listing(
+    sources: list[str], content_type: Any
+) -> tuple[list[str], PolicyMode | None]:
+    """Drop the sources the current user may not list releases from.
+
+    Returns the sources left and, when any was dropped, the mode of the first one
+    dropped, which is what the response reports when nothing is left.
+    """
+    allowed: list[str] = []
+    refused_mode: PolicyMode | None = None
+    for source_name in sources:
+        refusal = _release_listing_refusal(source=source_name, content_type=content_type)
+        if refusal is None:
+            allowed.append(source_name)
+        elif refused_mode is None:
+            refused_mode = refusal
+    return allowed, refused_mode
+
+
+def _release_source_record_refusal(source_name: str) -> PolicyMode | None:
+    """Policy refusal for resolving one browse record of a release source.
+
+    The record's content type is not known before it is fetched, so the user is
+    refused only when every content type the source supports is refused.
+    """
+    capabilities = get_source_content_type_capabilities()
+    content_types = capabilities.get(normalize_source(source_name)) or set(
+        DEFAULT_SUPPORTED_CONTENT_TYPES
+    )
+    refused_mode: PolicyMode | None = None
+    for content_type in sorted(content_types):
+        refusal = _release_listing_refusal(source=source_name, content_type=content_type)
+        if refusal is None:
+            return None
+        if refused_mode is None:
+            refused_mode = refusal
+    return refused_mode
+
+
+def _release_payload_listing_gate(data: dict[str, Any]) -> tuple[Response, int] | None:
+    """Policy gate for routes that take a release payload, shared with the inspect route."""
+    source = data["source"]
+    resolved_content_type, _inferred = _resolve_release_content_type(data, source)
+    refusal = _release_listing_refusal(source=source, content_type=resolved_content_type)
+    if refusal is None:
+        return None
+    return _release_listing_block_response(refusal)
 
 
 def _resolve_download_user_context(
@@ -580,6 +678,7 @@ if user_db is not None:
             resolve_auth_mode=_resolve_auth_mode_for_routes,
             queue_release=_queue_release_for_routes,
             ws_manager=ws_manager,
+            activity_view_state_service=activity_view_state_service,
         )
         if download_history_service is not None and activity_view_state_service is not None:
             register_activity_routes(
@@ -991,6 +1090,25 @@ def login_required(
     return decorated_function
 
 
+def admin_required(
+    f: Callable[..., Response | tuple[Response, int]],
+) -> Callable[..., Response | tuple[Response, int]]:
+    """Require an authenticated admin session for a Flask route.
+
+    Builds on `login_required`, so auth mode "none" (no users, the single
+    operator owns the instance) still has access.
+    """
+
+    @login_required
+    @wraps(f)
+    def decorated_function(*args: object, **kwargs: object) -> Response | tuple[Response, int]:
+        if get_auth_mode() != "none" and not session.get("is_admin", False):
+            return jsonify({"error": "Admin access required"}), 403
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
 _BASE_TAG = '<base href="/" data-shelfmark-base />'
 
 
@@ -1065,7 +1183,7 @@ if _is_debug_enabled():
             _cleanup_orphan_processes()
 
     @app.route("/api/debug", methods=["GET"])
-    @login_required
+    @admin_required
     def debug() -> Response | tuple[Response, int]:
         """Run `/app/genDebug.sh`, generate a debug zip, and return it.
 
@@ -1101,7 +1219,7 @@ if _is_debug_enabled():
             return jsonify({"error": str(e)}), 500
 
     @app.route("/api/restart", methods=["GET"])
-    @login_required
+    @admin_required
     def restart() -> Response | tuple[Response, int]:
         """Restart the application."""
         os._exit(0)
@@ -1178,7 +1296,7 @@ def _serialize_release(release: Release) -> dict:
     return result
 
 
-register_release_inspect_routes(app, login_required)
+register_release_inspect_routes(app, login_required, policy_gate=_release_payload_listing_gate)
 
 
 @app.route("/api/releases/download", methods=["POST"])
@@ -1504,6 +1622,14 @@ def _emit_activity_update_for_task(*, payload: dict[str, Any], task: Any) -> Non
     )
     if owner_user_id is None:
         return
+    # The owner knows a request-linked download by its opaque id, as /api/status
+    # shows it, since the task id can carry a private tracker's passkey (#1418).
+    task_id = payload.get("task_id")
+    if isinstance(task_id, str):
+        payload = {
+            **payload,
+            "task_id": viewer_download_id(task_id, getattr(task, "request_id", None)),
+        }
     emit_ws_event(
         ws_manager,
         event_name="activity_update",
@@ -1800,16 +1926,43 @@ def api_status() -> Response | tuple[Response, int]:
         return jsonify({"error": str(e)}), 500
 
 
+def _attachment_filename_options(download_name: str) -> dict[str, str]:
+    """Content-Disposition filename options, RFC 2231-encoded when not plain ASCII.
+
+    Mirrors what send_file does, for responses built from a generator.
+    """
+    try:
+        download_name.encode("ascii")
+    except UnicodeEncodeError:
+        simple = unicodedata.normalize("NFKD", download_name)
+        simple = simple.encode("ascii", "ignore").decode("ascii")
+        quoted = quote(download_name, safe="!#$&+^`|~")
+        return {"filename": simple, "filename*": f"UTF-8''{quoted}"}
+    return {"filename": download_name}
+
+
+def _zip_download_response(file_paths: list[str], task: DownloadTask) -> Response:
+    """Send a multi-file download (audiobook chapters, a pack) as one streamed ZIP."""
+    download_name = build_filename(task.title or "download", task.author, task.year, "zip")
+    response = Response(stream_zip(file_paths), mimetype="application/zip")
+    response.headers.set(
+        "Content-Disposition", "attachment", **_attachment_filename_options(download_name)
+    )
+    return response
+
+
 @app.route("/api/localdownload", methods=["GET"])
 @login_required
 def api_local_download() -> Response | tuple[Response, int]:
-    """Download an EPUB file from local storage if available.
+    """Download a completed book from local storage if available.
 
     Query Parameters:
         id (str): Book identifier (MD5 hash)
 
     Returns:
-        flask.Response: The EPUB file if found, otherwise an error response.
+        flask.Response: The file if found, a ZIP of all of them when the download
+        produced several (a live task only; history keeps just the first), otherwise
+        an error response.
 
     """
     book_id = request.args.get("id", "")
@@ -1820,8 +1973,8 @@ def api_local_download() -> Response | tuple[Response, int]:
     try:
         # The path, not the bytes: send_file streams it off disk, where reading it
         # first cost two resident copies of the whole book.
-        file_path, book_info = backend.get_book_path(book_id)
-        if file_path is None:
+        file_paths, book_info = backend.get_book_paths(book_id)
+        if not file_paths:
             # Fallback for dismissed/history entries where queue task may no longer exist.
             if download_history_service is not None:
                 is_admin, db_user_id, can_access_status = _resolve_status_scope()
@@ -1853,8 +2006,11 @@ def api_local_download() -> Response | tuple[Response, int]:
             ):
                 return jsonify({"error": "File not found"}), 404
 
+        if book_info is not None and len(file_paths) > 1:
+            return _zip_download_response(file_paths, book_info)
+
         file_name = book_info.get_filename() if book_info is not None else Path(book_id).name
-        return send_file(file_path, download_name=file_name, as_attachment=True)
+        return send_file(file_paths[0], download_name=file_name, as_attachment=True)
 
     except _OPERATIONAL_ERRORS as e:
         logger.error_trace(f"Local download error: {e}")
@@ -1870,10 +2026,11 @@ def api_cover(cover_id: str) -> Response | tuple[Response, int]:
     Images are cached to disk for faster subsequent requests.
 
     Path Parameters:
-        cover_id (str): Cover identifier (book ID or composite key for universal mode)
+        cover_id (str): Cover identifier (book ID or composite key for universal mode).
+            Kept for the link shape only; the cache entry is chosen by `url`.
 
     Query Parameters:
-        url (str): Base64-encoded original image URL (required on first request)
+        url (str): Base64-encoded original image URL (required)
 
     Returns:
         flask.Response: Binary image data with appropriate Content-Type, or 404.
@@ -1883,24 +2040,12 @@ def api_cover(cover_id: str) -> Response | tuple[Response, int]:
         import base64
 
         from shelfmark.config.env import is_covers_cache_enabled
-        from shelfmark.core.image_cache import get_image_cache
+        from shelfmark.core.image_cache import cover_cache_key, get_image_cache
 
         # Check if caching is enabled
         if not is_covers_cache_enabled():
             return jsonify({"error": "Cover caching is disabled"}), 404
 
-        cache = get_image_cache()
-
-        # Try to get from cache first
-        cached = cache.get(cover_id)
-        if cached:
-            image_data, content_type = cached
-            response = app.response_class(response=image_data, status=200, mimetype=content_type)
-            response.headers["Cache-Control"] = "public, max-age=86400"
-            response.headers["X-Cache"] = "HIT"
-            return response
-
-        # Cache miss - get URL from query parameter
         encoded_url = request.args.get("url")
         if not encoded_url:
             return jsonify({"error": "Cover URL not provided"}), 404
@@ -1911,8 +2056,21 @@ def api_cover(cover_id: str) -> Response | tuple[Response, int]:
             logger.warning("Failed to decode cover URL: %s", e)
             return jsonify({"error": "Invalid cover URL encoding"}), 400
 
+        # The entry is keyed by the URL, never by the caller-supplied id: the id would
+        # let any user cache an image of their choosing under another book's link.
+        cache = get_image_cache()
+        cache_key = cover_cache_key(original_url)
+
+        cached = cache.get(cache_key)
+        if cached:
+            image_data, content_type = cached
+            response = app.response_class(response=image_data, status=200, mimetype=content_type)
+            response.headers["Cache-Control"] = "public, max-age=86400"
+            response.headers["X-Cache"] = "HIT"
+            return response
+
         # Fetch and cache the image
-        result = cache.fetch_and_cache(cover_id, original_url)
+        result = cache.fetch_and_cache(cache_key, original_url)
         if not result:
             return jsonify({"error": "Failed to fetch cover image"}), 404
 
@@ -2794,7 +2952,10 @@ def api_metadata_search() -> Response | tuple[Response, int]:
 
         # Extract custom search field values from query params
         fields: dict[str, Any] = {}
+        may_use_account = _session_may_use_provider_account()
         for search_field in provider.search_fields:
+            if search_field.key in provider.account_search_fields and not may_use_account:
+                continue
             value = request.args.get(search_field.key)
             if value is not None:
                 # Strip string values to handle whitespace-only input
@@ -2883,6 +3044,9 @@ def api_metadata_field_options() -> Response:
         if not provider or not provider.is_available():
             return jsonify({"options": []})
 
+        if field_key in provider.account_search_fields and not _session_may_use_provider_account():
+            return jsonify({"options": []})
+
         options = provider.get_search_field_options(field_key, query=query_text or None)
         return jsonify({"options": options})
     except _OPERATIONAL_ERRORS as e:
@@ -2897,6 +3061,16 @@ def _attach_library_ownership(book: Any, book_dict: dict[str, Any]) -> None:
     owned = library_index.ownership(book)
     if owned is not None:
         book_dict["library"] = owned
+
+
+def _session_may_use_provider_account() -> bool:
+    """Whether this session may read or change the metadata provider's own account.
+
+    A provider such as Hardcover is signed in as one account, the instance owner's, and its lists
+    and shelves belong to that person. With no authentication configured the one user is the owner.
+    Otherwise only an admin may use them.
+    """
+    return get_auth_mode() == "none" or bool(session.get("is_admin", False))
 
 
 def _resolve_metadata_provider(provider_name: str) -> MetadataProvider:
@@ -2999,6 +3173,8 @@ def _handle_target_errors(
 def api_metadata_book_targets(provider: str, book_id: str) -> Response | tuple[Response, int]:
     """Get provider-managed list/status targets for a specific book."""
     prov = _resolve_metadata_provider(provider)
+    if not _session_may_use_provider_account():
+        return jsonify({"options": []})
     return jsonify({"options": prov.get_book_targets(book_id)})
 
 
@@ -3016,6 +3192,8 @@ def api_metadata_book_targets_batch(provider: str) -> Response | tuple[Response,
 
     book_ids = [str(bid) for bid in raw_ids[:50]]
 
+    if not _session_may_use_provider_account():
+        return jsonify({"results": {book_id: [] for book_id in book_ids}})
     return jsonify({"results": prov.get_book_targets_batch(book_ids)})
 
 
@@ -3026,6 +3204,8 @@ def api_metadata_book_targets_update(
     provider: str, book_id: str
 ) -> Response | tuple[Response, int]:
     """Set whether a book belongs to a provider-managed list or shelf."""
+    if not _session_may_use_provider_account():
+        return jsonify({"error": "Admin access required"}), 403
     prov = _resolve_metadata_provider(provider)
 
     payload = request.get_json(silent=True) or {}
@@ -3135,8 +3315,6 @@ def api_releases() -> Response | tuple[Response, int]:
         source_query_filters = None
         is_source_provider = bool(provider) and source_results_are_releases(provider)
 
-        book: BookMetadata
-
         if not provider or not book_id:
             if not source_filter or not has_browse_filters:
                 return jsonify({"error": "Parameters 'provider' and 'book_id' are required"}), 400
@@ -3144,9 +3322,31 @@ def api_releases() -> Response | tuple[Response, int]:
                 return jsonify(
                     {"error": f"Source does not support browse release search: {source_filter}"}
                 ), 400
-
-            book = _build_source_query_book(query_text, browse_filters)
             source_query_filters = browse_filters
+
+        # Determine which release sources to search
+        if source_filter:
+            sources_to_search = [source_filter]
+        elif is_source_provider:
+            # Source-backed browse flows stay within the source that produced the record.
+            sources_to_search = [provider]
+        else:
+            # Search only enabled sources
+            sources_to_search = [src["name"] for src in list_available_sources() if src["enabled"]]
+
+        # The policy gate comes before anything is asked of a source: listing goes
+        # through the shared source credentials, so a user whose policy never shows
+        # a release list (request_book, blocked) must not reach them.
+        sources_to_search, refused_mode = _sources_allowed_for_listing(
+            sources_to_search, content_type
+        )
+        if not sources_to_search and refused_mode is not None:
+            return _release_listing_block_response(refused_mode)
+
+        book: BookMetadata
+
+        if source_query_filters is not None:
+            book = _build_source_query_book(query_text, browse_filters)
         elif is_source_provider:
             # Source-backed browse flows can reopen the release modal with provider=<source name>.
             # In that flow, treat the source-native record as release-search context instead of
@@ -3197,17 +3397,13 @@ def api_releases() -> Response | tuple[Response, int]:
             # filtered authors (primary authors only, excluding translators/narrators),
             # which gives better release search results than the unfiltered search data
             if title_param:
+                if title_param != book.title:
+                    # A different title is one the search result carried and the book
+                    # record does not, typically a translation's ("Kinder des Nebels" for
+                    # "Mistborn: The Final Empire"). The provider's search_title derives
+                    # from the original and would otherwise win the release search.
+                    book.search_title = title_param
                 book.title = title_param
-
-        # Determine which release sources to search
-        if source_query_filters is not None or source_filter:
-            sources_to_search = [source_filter]
-        elif is_source_provider:
-            # Source-backed browse flows stay within the source that produced the record.
-            sources_to_search = [provider]
-        else:
-            # Search only enabled sources
-            sources_to_search = [src["name"] for src in list_available_sources() if src["enabled"]]
 
         # Search each source for releases.
         #
@@ -3338,6 +3534,9 @@ def api_release_source_record(source_name: str, record_id: str) -> Response | tu
         from shelfmark.release_sources import get_source
 
         source = get_source(source_name)
+        refused_mode = _release_source_record_refusal(source_name)
+        if refused_mode is not None:
+            return _release_listing_block_response(refused_mode)
         record = source.get_record(record_id)
         if record is None:
             return jsonify({"error": "Record not found"}), 404
