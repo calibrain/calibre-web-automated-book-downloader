@@ -4,6 +4,7 @@ import { searchBooks } from '../services/api';
 import {
   describeSearchFailure,
   CLIENT_TIMEOUT_MESSAGE,
+  PROXY_TIMEOUT_MESSAGE,
   UNREACHABLE_SOURCE_MESSAGE,
 } from '../utils/searchFailureMessage';
 
@@ -20,6 +21,14 @@ const jsonResponse = (body: unknown, status: number): Response =>
     status,
     statusText: 'SERVICE UNAVAILABLE',
     headers: { 'Content-Type': 'application/json' },
+  });
+
+/** A reverse proxy's own error page: HTML, so there is no JSON for the client to read. */
+const proxyErrorPage = (status: number, statusText: string): Response =>
+  new Response(`<html><body><h1>${status} ${statusText}</h1></body></html>`, {
+    status,
+    statusText,
+    headers: { 'Content-Type': 'text/html' },
   });
 
 /** Drive a real searchBooks() failure so the error is the one the hook actually sees. */
@@ -49,6 +58,30 @@ describe('describeSearchFailure', () => {
     expect(describeSearchFailure(error)).toBe(CLIENT_TIMEOUT_MESSAGE);
     expect(describeSearchFailure(error)).not.toBe(UNREACHABLE_SOURCE_MESSAGE);
     expect(describeSearchFailure(error)).not.toContain('mirrors');
+  });
+
+  it("blames the proxy's read timeout when a gateway gave up on the search", async () => {
+    // Discussion #1520: nginx's 60s default cut off every search that needed a
+    // protection solve, and the mirrors line sent the user off changing mirrors.
+    const error = await failedSearch(() =>
+      Promise.resolve(proxyErrorPage(504, 'Gateway Time-out')),
+    );
+
+    expect(describeSearchFailure(error)).toBe(PROXY_TIMEOUT_MESSAGE);
+    expect(describeSearchFailure(error)).not.toContain('mirrors');
+  });
+
+  it("treats Cloudflare's origin timeout as the proxy's too", async () => {
+    const error = await failedSearch(() => Promise.resolve(proxyErrorPage(524, '')));
+
+    expect(describeSearchFailure(error)).toBe(PROXY_TIMEOUT_MESSAGE);
+  });
+
+  it("keeps the gateway's own wording when the proxy could not reach Shelfmark", async () => {
+    const error = await failedSearch(() => Promise.resolve(proxyErrorPage(502, 'Bad Gateway')));
+
+    expect(describeSearchFailure(error)).toContain('Server unavailable (502)');
+    expect(describeSearchFailure(error)).not.toBe(UNREACHABLE_SOURCE_MESSAGE);
   });
 
   it('falls back to the mirrors line only when nothing explained itself', async () => {
