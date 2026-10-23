@@ -36,6 +36,10 @@ logger = setup_logger(__name__)
 
 _API_BASE = "https://api.real-debrid.com/rest/1.0"
 
+# One session for every client instance, so the status poll every couple of seconds
+# reuses a keep-alive connection instead of opening a new TLS connection each time.
+_session = requests.Session()
+
 _REALDEBRID_CLIENT_ERRORS = (
     AttributeError,
     OSError,
@@ -151,7 +155,7 @@ class RealDebridClient(DownloadClient):
             return False, "Real-Debrid API Key is required"
         try:
             url = f"{_API_BASE}/user"
-            resp = requests.get(
+            resp = _session.get(
                 url,
                 headers=self._auth_headers(),
                 timeout=_STATUS_TIMEOUT,
@@ -201,7 +205,7 @@ class RealDebridClient(DownloadClient):
 
             # Select all files so Real-Debrid starts downloading the torrent
             select_url = f"{_API_BASE}/torrents/selectFiles/{torrent_id}"
-            sel_resp = requests.post(
+            sel_resp = _session.post(
                 select_url,
                 headers=self._auth_headers(),
                 data={"files": "all"},
@@ -239,7 +243,7 @@ class RealDebridClient(DownloadClient):
         """Hand the torrent to Real-Debrid, as a magnet or as a file upload."""
         if isinstance(upload, DebridMagnet):
             add_url = f"{_API_BASE}/torrents/addMagnet"
-            resp = requests.post(
+            resp = _session.post(
                 add_url,
                 headers=self._auth_headers(),
                 data={"magnet": upload.magnet_url},
@@ -250,7 +254,7 @@ class RealDebridClient(DownloadClient):
             # addTorrent is a PUT that takes the raw file as the request body,
             # not a form field: https://api.real-debrid.com/
             add_url = f"{_API_BASE}/torrents/addTorrent"
-            resp = requests.put(
+            resp = _session.put(
                 add_url,
                 headers={
                     **self._auth_headers(),
@@ -294,7 +298,7 @@ class RealDebridClient(DownloadClient):
         # Query Real-Debrid for torrent info.
         try:
             info_url = f"{_API_BASE}/torrents/info/{download_id}"
-            resp = requests.get(
+            resp = _session.get(
                 info_url,
                 headers=self._auth_headers(),
                 timeout=_STATUS_TIMEOUT,
@@ -320,7 +324,7 @@ class RealDebridClient(DownloadClient):
         """Delete the torrent from Real-Debrid and clean up local files."""
         try:
             url = f"{_API_BASE}/torrents/delete/{download_id}"
-            requests.delete(
+            _session.delete(
                 url,
                 headers=self._auth_headers(),
                 timeout=_STATUS_TIMEOUT,
@@ -477,7 +481,7 @@ class RealDebridClient(DownloadClient):
 
                 # Unrestrict the Real-Debrid link to get direct CDN download URL
                 unrestrict_url = f"{_API_BASE}/unrestrict/link"
-                unl_resp = requests.post(
+                unl_resp = _session.post(
                     unrestrict_url,
                     headers=self._auth_headers(),
                     data={"link": link},

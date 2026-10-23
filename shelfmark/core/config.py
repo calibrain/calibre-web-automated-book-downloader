@@ -124,9 +124,10 @@ class Config:
         self._field_map.clear()
         self._cache.clear()
 
-        for key, (field, tab_name) in registry.get_settings_field_map().items():
-            self._field_map[key] = (field, tab_name)
-            self._cache[key] = registry.get_setting_value(field, tab_name)
+        with registry.config_files_read_once():
+            for key, (field, tab_name) in registry.get_settings_field_map().items():
+                self._field_map[key] = (field, tab_name)
+                self._cache[key] = registry.get_setting_value(field, tab_name)
 
         self._loaded = True
 
