@@ -285,7 +285,7 @@ if user_db is not None and download_history_service is not None:
                 _reconciled["marked"],
                 _reconciled["reopened"],
             )
-    except (ImportError, OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
+    except _IMPORT_OPERATIONAL_ERRORS as exc:
         logger.warning("Could not reconcile interrupted downloads at startup: %s", exc)
 
 # Start download coordinator
