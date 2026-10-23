@@ -1,11 +1,16 @@
 """Tests for strict release matching and auto-download of pending requests."""
 
+import sqlite3
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from shelfmark.core import auto_download, library_index, text_match
+from shelfmark.core.download_history_service import DownloadHistoryService
 from shelfmark.core.user_db import UserDB
 from shelfmark.metadata_providers import BookMetadata
 from shelfmark.release_sources import Release, ReleaseProtocol
+from tests.core.fakes import FakeConfig
 
 AUDIOBOOK_FORMATS = {"m4b", "mp3"}
 
@@ -513,6 +518,60 @@ class TestAutoDownloadRequest:
         assert outcome.status == "error"
         assert "library" in outcome.detail
         assert user_db.get_request(row["id"])["status"] == "pending"
+
+    def test_a_source_that_errored_is_an_error_not_a_missing_book(self, user_db, monkeypatch):
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        _stub_provider(monkeypatch, _book())
+        monkeypatch.setattr(
+            auto_download,
+            "search_source_releases",
+            lambda *_args, **_kwargs: (None, [], "indexer returned HTTP 503"),
+        )
+
+        outcome = self._run(user_db, row, admin)
+
+        assert outcome.status == "error"
+        assert "HTTP 503" in outcome.detail
+        assert user_db.get_request(row["id"])["status"] == "pending"
+
+    def test_a_working_source_still_queues_when_an_earlier_one_errored(self, user_db, monkeypatch):
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        _stub_provider(monkeypatch, _book())
+        good = _release(title="Dune [M4B]")
+        answers = {"first": (None, [], "timeout"), "second": (None, [good], None)}
+        monkeypatch.setattr(
+            auto_download,
+            "search_source_releases",
+            lambda source, *_args, **_kwargs: answers[source],
+        )
+        monkeypatch.setattr(auto_download, "strict_match", lambda *_a, **_k: True)
+        queued = []
+
+        outcome = self._run(
+            user_db,
+            row,
+            admin,
+            sources=["first", "second"],
+            queue_release=lambda *a, **k: queued.append(a) or (True, None),
+        )
+
+        assert outcome.status == "queued"
+        assert queued
+
+    def test_every_source_clean_and_empty_is_still_no_match(self, user_db, monkeypatch):
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        _stub_provider(monkeypatch, _book())
+        monkeypatch.setattr(
+            auto_download, "search_source_releases", lambda *_a, **_k: (None, [], None)
+        )
+
+        assert self._run(user_db, row, admin).status == "no_match"
 
     # --- multi-book packs: the UI asks "single book or split?"; auto-download cannot ask -----
 
@@ -1095,6 +1154,248 @@ def test_pending_pass_follows_each_request_content_type(user_db, monkeypatch):
     assert seen == [("ebook", ["src"])]
     assert summary["no_match"] == 1
     assert summary["skipped"] == 1  # the audiobook request had no usable sources
+
+
+class TestNoMatchBackoff:
+    """A request that keeps finding nothing is searched less often."""
+
+    NOW = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
+
+    @staticmethod
+    def _book_data(passes, hours_ago, now=NOW):
+        return {
+            auto_download.BACKOFF_KEY: {
+                "no_match_passes": passes,
+                "last_searched_at": (now - timedelta(hours=hours_ago)).isoformat(),
+            }
+        }
+
+    @pytest.mark.parametrize(
+        ("passes", "hours_ago", "due"),
+        [
+            (0, 0, True),
+            (2, 0, True),  # the first passes run at full rate
+            (3, 6, False),  # then once a day
+            (3, 23.5, True),  # a cycle a little early is on time
+            (3, 24, True),
+            (4, 30, False),  # then every two days
+            (4, 48, True),
+            (5, 60, False),  # then at most the setting (3 days)
+            (5, 72, True),
+            (50, 60, False),
+            (50, 72, True),
+        ],
+    )
+    def test_the_wait_grows_with_the_passes_and_stops_at_the_setting(self, passes, hours_ago, due):
+        book_data = self._book_data(passes, hours_ago)
+
+        assert auto_download._search_is_due(book_data, self.NOW, 3) is due
+
+    def test_a_smaller_setting_caps_the_wait(self):
+        book_data = self._book_data(5, 30)
+
+        assert auto_download._search_is_due(book_data, self.NOW, 1) is True
+        assert auto_download._search_is_due(book_data, self.NOW, 3) is False
+
+    def test_zero_turns_the_backoff_off(self):
+        assert auto_download._search_is_due(self._book_data(50, 0), self.NOW, 0) is True
+
+    @pytest.mark.parametrize(
+        "book_data",
+        [
+            {},
+            {auto_download.BACKOFF_KEY: "garbage"},
+            {auto_download.BACKOFF_KEY: {"no_match_passes": 9}},
+            {auto_download.BACKOFF_KEY: {"no_match_passes": 9, "last_searched_at": "not a date"}},
+            {auto_download.BACKOFF_KEY: {"no_match_passes": "many", "last_searched_at": None}},
+        ],
+    )
+    def test_anything_doubtful_is_searched(self, book_data):
+        assert auto_download._search_is_due(book_data, self.NOW, 3) is True
+
+    def _pass(self, user_db, monkeypatch, *, ignore_backoff=False, outcome="no_match"):
+        user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        monkeypatch.setattr(auto_download, "app_config", FakeConfig(AUTO_DOWNLOAD_ENABLED=True))
+        monkeypatch.setattr(auto_download, "_configured_source_priority", lambda _t: ["src"])
+        searched = []
+
+        def _fake_request(_db, request_row, **_kwargs):
+            searched.append(int(request_row["id"]))
+            return auto_download.AutoDownloadOutcome(int(request_row["id"]), outcome)
+
+        monkeypatch.setattr(auto_download, "auto_download_request", _fake_request)
+        return row, searched
+
+    def _run_pass(self, user_db, **kwargs):
+        return auto_download.auto_download_pending(
+            user_db, queue_release=lambda *_a, **_k: (True, None), **kwargs
+        )
+
+    def _stored(self, user_db, row):
+        return user_db.get_request(row["id"])["book_data"].get(auto_download.BACKOFF_KEY)
+
+    def test_each_no_match_pass_is_counted_and_dated(self, user_db, monkeypatch):
+        row, searched = self._pass(user_db, monkeypatch)
+
+        self._run_pass(user_db)
+        self._run_pass(user_db)
+
+        stored = self._stored(user_db, row)
+        assert searched == [int(row["id"])] * 2
+        assert stored["no_match_passes"] == 2
+        assert datetime.fromisoformat(stored["last_searched_at"]).tzinfo is not None
+
+    def test_a_request_inside_its_wait_is_skipped_not_searched(self, user_db, monkeypatch):
+        row, searched = self._pass(user_db, monkeypatch)
+        book_data = {**row["book_data"], **self._book_data(3, 1, datetime.now(UTC))}
+        user_db.update_request(row["id"], book_data=book_data)
+
+        summary = self._run_pass(user_db)
+
+        assert searched == []
+        assert summary["skipped"] == 1
+
+    def test_sync_now_searches_a_request_inside_its_wait(self, user_db, monkeypatch):
+        row, searched = self._pass(user_db, monkeypatch)
+        book_data = {**row["book_data"], **self._book_data(3, 1, datetime.now(UTC))}
+        user_db.update_request(row["id"], book_data=book_data)
+
+        self._run_pass(user_db, ignore_backoff=True)
+
+        assert searched == [int(row["id"])]
+
+    def test_the_setting_at_zero_searches_every_pass(self, user_db, monkeypatch):
+        row, searched = self._pass(user_db, monkeypatch)
+        monkeypatch.setattr(
+            auto_download,
+            "app_config",
+            FakeConfig(AUTO_DOWNLOAD_ENABLED=True, AUTO_DOWNLOAD_BACKOFF_MAX_DAYS=0),
+        )
+        book_data = {**row["book_data"], **self._book_data(9, 1, datetime.now(UTC))}
+        user_db.update_request(row["id"], book_data=book_data)
+
+        self._run_pass(user_db)
+
+        assert searched == [int(row["id"])]
+
+    @pytest.mark.parametrize("outcome", ["queued", "in_library"])
+    def test_a_match_starts_the_count_over(self, user_db, monkeypatch, outcome):
+        row, _searched = self._pass(user_db, monkeypatch, outcome=outcome)
+        book_data = {**row["book_data"], **self._book_data(5, 99, datetime.now(UTC))}
+        user_db.update_request(row["id"], book_data=book_data)
+
+        self._run_pass(user_db)
+
+        assert self._stored(user_db, row) is None
+
+    @pytest.mark.parametrize("outcome", ["error", "skipped"])
+    def test_a_failed_search_does_not_count_against_the_request(
+        self, user_db, monkeypatch, outcome
+    ):
+        row, _searched = self._pass(user_db, monkeypatch, outcome=outcome)
+
+        self._run_pass(user_db)
+
+        assert self._stored(user_db, row) is None
+
+    def test_the_other_book_data_survives_the_bookkeeping(self, user_db, monkeypatch):
+        row, _searched = self._pass(user_db, monkeypatch)
+        book_data = {**row["book_data"], "failed_releases": [{"source": "x", "source_id": "1"}]}
+        user_db.update_request(row["id"], book_data=book_data)
+
+        self._run_pass(user_db)
+
+        stored = user_db.get_request(row["id"])["book_data"]
+        assert stored["failed_releases"] == [{"source": "x", "source_id": "1"}]
+        assert stored["title"] == "Dungeon Crawler Carl"
+        assert stored[auto_download.BACKOFF_KEY]["no_match_passes"] == 1
+
+    def test_a_bookkeeping_failure_never_takes_the_pass_with_it(self, user_db, monkeypatch):
+        row, searched = self._pass(user_db, monkeypatch)
+        real = user_db.update_request
+
+        def _fail_for_book_data(request_id, **kwargs):
+            if "book_data" in kwargs:
+                raise RuntimeError("database is locked")
+            return real(request_id, **kwargs)
+
+        monkeypatch.setattr(user_db, "update_request", _fail_for_book_data)
+
+        summary = self._run_pass(user_db)
+
+        assert searched == [int(row["id"])]
+        assert summary["no_match"] == 1
+
+
+def test_one_metadata_provider_serves_a_whole_pass(user_db, monkeypatch):
+    admin = user_db.create_user(username="admin", role="admin")
+    reader = user_db.create_user(username="reader", role="user")
+    rows = [_pending_request(user_db, reader["id"], provider_id=str(n)) for n in (1, 2, 3)]
+    built = []
+
+    class _Provider:
+        def get_book(self, _book_id):
+            return None  # "book not found": the request ends before any search
+
+    def _get_provider(_name, **_kwargs):
+        built.append(1)
+        return _Provider()
+
+    monkeypatch.setattr(
+        "shelfmark.metadata_providers.is_provider_registered", lambda name: name == "hardcover"
+    )
+    monkeypatch.setattr("shelfmark.metadata_providers.get_provider_kwargs", lambda _n: {})
+    monkeypatch.setattr("shelfmark.metadata_providers.get_provider", _get_provider)
+    providers: dict = {}
+
+    for row in rows:
+        auto_download.auto_download_request(
+            user_db,
+            row,
+            sources=["src"],
+            content_type="audiobook",
+            min_seeders=1,
+            queue_release=lambda *_a, **_k: (True, None),
+            admin_user_id=admin["id"],
+            providers=providers,
+        )
+
+    assert len(built) == 1
+
+
+def test_without_a_shared_dict_each_request_still_builds_its_own_provider(user_db, monkeypatch):
+    admin = user_db.create_user(username="admin", role="admin")
+    reader = user_db.create_user(username="reader", role="user")
+    rows = [_pending_request(user_db, reader["id"], provider_id=str(n)) for n in (1, 2)]
+    built = []
+
+    class _Provider:
+        def get_book(self, _book_id):
+            return None
+
+    monkeypatch.setattr(
+        "shelfmark.metadata_providers.is_provider_registered", lambda name: name == "hardcover"
+    )
+    monkeypatch.setattr("shelfmark.metadata_providers.get_provider_kwargs", lambda _n: {})
+    monkeypatch.setattr(
+        "shelfmark.metadata_providers.get_provider",
+        lambda _n, **_k: built.append(1) or _Provider(),
+    )
+
+    for row in rows:
+        auto_download.auto_download_request(
+            user_db,
+            row,
+            sources=["src"],
+            content_type="audiobook",
+            min_seeders=1,
+            queue_release=lambda *_a, **_k: (True, None),
+            admin_user_id=admin["id"],
+        )
+
+    assert len(built) == 2
 
 
 class TestPackGuard:
@@ -1779,3 +2080,438 @@ class TestAuthorLookup:
         )
 
         assert outcome.status == "no_match"
+
+
+class TestRetryAfterCooldown:
+    """A synced download that never arrived goes back to pending after a cooldown.
+
+    The latest history row says why it never arrived. "active" (or no row) means the process
+    stopped under it, so the same release is worth trying again. "error" means the download
+    itself failed, so that release is remembered and not picked again. "cancelled" is left alone.
+    """
+
+    NOW = datetime(2026, 9, 30, 12, 0, tzinfo=UTC)
+
+    @classmethod
+    def _request(
+        cls,
+        user_db,
+        user_id,
+        *,
+        provider_id,
+        state="error",
+        history="active",
+        history_message="x",
+        days_ago=8.0,
+        status="fulfilled",
+        provider="hardcover",
+        failed_releases=None,
+    ):
+        row = _pending_request(user_db, user_id, provider=provider, provider_id=provider_id)
+        book_data = dict(row["book_data"])
+        if failed_releases is not None:
+            book_data["failed_releases"] = failed_releases
+        stamp = (cls.NOW - timedelta(days=days_ago)).isoformat(timespec="seconds")
+        row = user_db.update_request(
+            row["id"],
+            status=status,
+            delivery_state=state,
+            delivery_updated_at=stamp,
+            book_data=book_data,
+            release_data={"source": "audiobookbay", "source_id": f"rel-{provider_id}"},
+        )
+        if history is not None:
+            service = DownloadHistoryService(user_db._db_path)
+            task_id = f"task-{provider_id}"
+            service.record_download(
+                task_id=task_id,
+                user_id=user_id,
+                username="reader",
+                request_id=row["id"],
+                source="audiobookbay",
+                source_display_name=None,
+                title=f"Book {provider_id}",
+                author=None,
+                file_format=None,
+                size=None,
+                preview=None,
+                content_type="audiobook",
+                downloads=None,
+                origin="requested",
+            )
+            if history != "active":
+                service.finalize_download(
+                    task_id=task_id, final_status=history, status_message=history_message
+                )
+        return row
+
+    def _reopen(self, user_db, **kwargs):
+        kwargs.setdefault("cooldown_days", 7)
+        kwargs.setdefault("db_path", user_db._db_path)
+        return auto_download.reopen_stale_failures(user_db, now=self.NOW, **kwargs)
+
+    @staticmethod
+    def _user(user_db):
+        return user_db.create_user(username="reader", role="user")
+
+    def test_an_interrupted_download_is_reopened_and_may_use_the_same_release(self, user_db):
+        row = self._request(user_db, self._user(user_db)["id"], provider_id="1", history="active")
+
+        assert self._reopen(user_db) == 1
+
+        stored = user_db.get_request(row["id"])
+        assert stored["status"] == "pending"
+        assert stored["delivery_state"] == "none"
+        assert stored["release_data"] is None
+        assert "interrupted" in stored["last_failure_reason"]
+        assert "7-day cooldown" in stored["last_failure_reason"]
+        # Nothing was wrong with the release, so it is not held against it.
+        assert "failed_releases" not in stored["book_data"]
+
+    def test_an_error_the_startup_sweep_labelled_interrupted_is_not_held_against_its_release(
+        self, user_db
+    ):
+        row = self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            history="error",
+            history_message="Interrupted",
+        )
+
+        assert self._reopen(user_db) == 1
+
+        assert "failed_releases" not in user_db.get_request(row["id"])["book_data"]
+
+    def test_a_request_stuck_queued_with_no_history_counts_as_interrupted(self, user_db):
+        row = self._request(
+            user_db, self._user(user_db)["id"], provider_id="1", state="queued", history=None
+        )
+
+        assert self._reopen(user_db) == 1
+        assert user_db.get_request(row["id"])["status"] == "pending"
+
+    def test_a_genuine_failure_is_reopened_and_its_release_is_remembered(self, user_db):
+        row = self._request(user_db, self._user(user_db)["id"], provider_id="1", history="error")
+
+        assert self._reopen(user_db) == 1
+
+        stored = user_db.get_request(row["id"])
+        assert stored["status"] == "pending"
+        assert "failed" in stored["last_failure_reason"]
+        assert stored["book_data"]["failed_releases"] == [
+            {"source": "audiobookbay", "source_id": "rel-1"}
+        ]
+
+    def test_a_release_is_only_remembered_once(self, user_db):
+        seen = [{"source": "audiobookbay", "source_id": "rel-1"}]
+        row = self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            history="error",
+            failed_releases=seen,
+        )
+
+        assert self._reopen(user_db) == 1
+        assert user_db.get_request(row["id"])["book_data"]["failed_releases"] == seen
+
+    def test_it_gives_up_after_three_retries(self, user_db):
+        user_id = self._user(user_db)["id"]
+        three = [{"source": "s", "source_id": f"r{n}"} for n in range(3)]
+        two = three[:2]
+        spent = self._request(
+            user_db, user_id, provider_id="1", history="error", failed_releases=three
+        )
+        left = self._request(
+            user_db, user_id, provider_id="2", history="error", failed_releases=two
+        )
+
+        assert self._reopen(user_db) == 1
+
+        assert user_db.get_request(spent["id"])["status"] == "fulfilled"
+        assert user_db.get_request(left["id"])["status"] == "pending"
+        assert len(user_db.get_request(left["id"])["book_data"]["failed_releases"]) == 3
+
+    def test_a_cancelled_download_is_never_retried(self, user_db):
+        user_id = self._user(user_db)["id"]
+        with_history = self._request(
+            user_db, user_id, provider_id="1", state="cancelled", history="cancelled", days_ago=400
+        )
+        without = self._request(
+            user_db, user_id, provider_id="2", state="cancelled", history=None, days_ago=400
+        )
+
+        assert self._reopen(user_db) == 0
+        assert user_db.get_request(with_history["id"])["status"] == "fulfilled"
+        assert user_db.get_request(without["id"])["status"] == "fulfilled"
+
+    STALL_MESSAGE = "Download stalled (no activity for 300s)"
+
+    def test_a_download_the_stall_timer_cancelled_is_retried_with_its_release_remembered(
+        self, user_db
+    ):
+        row = self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            state="cancelled",
+            history="cancelled",
+            history_message=self.STALL_MESSAGE,
+        )
+
+        assert self._reopen(user_db) == 1
+
+        stored = user_db.get_request(row["id"])
+        assert stored["status"] == "pending"
+        assert "stalled" in stored["last_failure_reason"]
+        assert stored["book_data"]["failed_releases"] == [
+            {"source": "audiobookbay", "source_id": "rel-1"}
+        ]
+
+    @pytest.mark.parametrize("message", ["Cancelled", "Queued", "Fetching metadata", ""])
+    def test_any_other_cancel_stays_a_decision(self, user_db, message):
+        row = self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            state="cancelled",
+            history="cancelled",
+            history_message=message,
+        )
+
+        assert self._reopen(user_db) == 0
+        assert user_db.get_request(row["id"])["status"] == "fulfilled"
+
+    def test_a_stall_cancelled_request_is_given_up_on_after_three_tries(self, user_db):
+        tried = [{"source": "audiobookbay", "source_id": f"old-{n}"} for n in range(3)]
+        row = self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            state="cancelled",
+            history="cancelled",
+            history_message=self.STALL_MESSAGE,
+            failed_releases=tried,
+        )
+
+        assert self._reopen(user_db) == 0
+        assert user_db.get_request(row["id"])["status"] == "fulfilled"
+
+    def test_a_stall_cancel_obeys_the_cooldown(self, user_db):
+        self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            state="cancelled",
+            history="cancelled",
+            history_message=self.STALL_MESSAGE,
+            days_ago=6.99,
+        )
+
+        assert self._reopen(user_db) == 0
+
+    @pytest.mark.parametrize(("days_ago", "reopened"), [(6.99, 0), (7.01, 1)])
+    def test_the_cooldown_is_seven_days(self, user_db, days_ago, reopened):
+        self._request(user_db, self._user(user_db)["id"], provider_id="1", days_ago=days_ago)
+
+        assert self._reopen(user_db) == reopened
+
+    @pytest.mark.parametrize(
+        ("state", "status", "history"),
+        [
+            ("complete", "fulfilled", "complete"),
+            ("none", "fulfilled", None),
+            ("none", "rejected", None),  # a rejection is a decision, never retried
+            ("error", "rejected", "error"),
+            ("error", "fulfilled", "complete"),  # the history disagrees, so do not guess
+        ],
+    )
+    def test_everything_else_is_left_alone(self, user_db, state, status, history):
+        row = self._request(
+            user_db,
+            self._user(user_db)["id"],
+            provider_id="1",
+            state=state,
+            status=status,
+            history=history,
+        )
+
+        assert self._reopen(user_db) == 0
+        assert user_db.get_request(row["id"])["status"] == status
+
+    def test_requests_from_other_providers_are_left_alone(self, user_db):
+        row = self._request(
+            user_db, self._user(user_db)["id"], provider_id="1", provider="openlibrary"
+        )
+
+        assert self._reopen(user_db) == 0
+        assert user_db.get_request(row["id"])["status"] == "fulfilled"
+
+    def test_a_backlog_is_spread_over_passes_oldest_first(self, user_db):
+        user_id = self._user(user_db)["id"]
+        ages = [30, 12, 9, 20, 8, 15, 25]
+        rows = {
+            days: self._request(user_db, user_id, provider_id=str(days), days_ago=days)
+            for days in ages
+        }
+
+        assert self._reopen(user_db, max_reopen=5) == 5
+
+        reopened = {
+            days
+            for days, row in rows.items()
+            if user_db.get_request(row["id"])["status"] == "pending"
+        }
+        assert reopened == {30, 25, 20, 15, 12}  # the five oldest; 9 and 8 wait for the next pass
+        assert self._reopen(user_db, max_reopen=5) == 2
+
+    @pytest.mark.parametrize("days", [0, -3])
+    def test_a_zero_or_negative_cooldown_turns_retries_off(self, user_db, days):
+        row = self._request(user_db, self._user(user_db)["id"], provider_id="1", days_ago=400)
+
+        assert self._reopen(user_db, cooldown_days=days) == 0
+        assert user_db.get_request(row["id"])["status"] == "fulfilled"
+
+    def test_without_readable_history_nothing_is_guessed(self, user_db):
+        row = self._request(user_db, self._user(user_db)["id"], provider_id="1", days_ago=400)
+
+        assert self._reopen(user_db, db_path=None) == 0
+        assert user_db.get_request(row["id"])["status"] == "fulfilled"
+
+    def test_a_history_read_that_fails_retries_nothing(self, user_db, tmp_path):
+        row = self._request(user_db, self._user(user_db)["id"], provider_id="1", days_ago=400)
+        no_history_table = tmp_path / "empty.db"
+        sqlite3.connect(no_history_table).close()
+
+        assert self._reopen(user_db, db_path=str(no_history_table)) == 0
+        assert user_db.get_request(row["id"])["status"] == "fulfilled"
+
+    def test_an_unstamped_failure_ages_from_when_it_was_created(self, user_db):
+        user_id = self._user(user_db)["id"]
+        row = _pending_request(user_db, user_id, provider="hardcover", provider_id="1")
+        user_db.update_request(row["id"], status="fulfilled", delivery_state="error")
+        created = datetime.now(UTC)
+
+        early = auto_download.reopen_stale_failures(
+            user_db, cooldown_days=7, db_path=user_db._db_path, now=created + timedelta(days=6)
+        )
+        late = auto_download.reopen_stale_failures(
+            user_db, cooldown_days=7, db_path=user_db._db_path, now=created + timedelta(days=8)
+        )
+
+        assert (early, late) == (0, 1)
+
+    def test_a_reopened_request_is_picked_up_in_the_same_pass(
+        self, user_db, fake_app_config, monkeypatch
+    ):
+        fake_app_config.values.update(AUTO_DOWNLOAD_ENABLED=True)
+        admin = user_db.create_user(username="admin", role="admin")
+        row = self._request(user_db, admin["id"], provider_id="1")
+        monkeypatch.setattr(auto_download, "_configured_source_priority", lambda _t: ["src"])
+        seen: list[int] = []
+
+        def _fake_request(_user_db, request_row, **_kwargs):
+            seen.append(int(request_row["id"]))
+            return auto_download.AutoDownloadOutcome(int(request_row["id"]), "no_match")
+
+        monkeypatch.setattr(auto_download, "auto_download_request", _fake_request)
+        monkeypatch.setattr(
+            auto_download, "reopen_stale_failures", self._with_fixed_clock(auto_download)
+        )
+
+        auto_download.auto_download_pending(
+            user_db,
+            queue_release=lambda *_args, **_kwargs: (True, None),
+            db_path=user_db._db_path,
+        )
+
+        assert seen == [row["id"]]
+
+    def test_the_setting_can_turn_retries_off(self, user_db, fake_app_config, monkeypatch):
+        fake_app_config.values.update(AUTO_DOWNLOAD_ENABLED=True, AUTO_DOWNLOAD_RETRY_DAYS=0)
+        admin = user_db.create_user(username="admin", role="admin")
+        self._request(user_db, admin["id"], provider_id="1", days_ago=400)
+        monkeypatch.setattr(auto_download, "_configured_source_priority", lambda _t: ["src"])
+        monkeypatch.setattr(
+            auto_download,
+            "auto_download_request",
+            lambda *_a, **_k: pytest.fail("a retry must not run with the setting at 0"),
+        )
+        monkeypatch.setattr(
+            auto_download, "reopen_stale_failures", self._with_fixed_clock(auto_download)
+        )
+
+        auto_download.auto_download_pending(
+            user_db,
+            queue_release=lambda *_args, **_kwargs: (True, None),
+            db_path=user_db._db_path,
+        )
+
+    def test_a_release_that_failed_before_is_not_picked_again(self, user_db, monkeypatch):
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        row = user_db.update_request(
+            row["id"],
+            book_data={
+                **row["book_data"],
+                "failed_releases": [{"source": "prowlarr", "source_id": "bad"}],
+            },
+        )
+        _stub_provider(monkeypatch, _book())
+        bad = _release(source="prowlarr", source_id="bad", seeders=99)
+        good = _release(source="prowlarr", source_id="good", seeders=1)
+        monkeypatch.setattr(
+            auto_download,
+            "search_source_releases",
+            lambda *_a, **_k: (None, [bad, good], None),
+        )
+        queued: list[str] = []
+
+        def _queue(release_data, _priority, *, user_id, username):
+            queued.append(release_data["source_id"])
+            return True, None
+
+        outcome = auto_download.auto_download_request(
+            user_db,
+            user_db.get_request(row["id"]),
+            sources=["prowlarr"],
+            content_type="audiobook",
+            min_seeders=1,
+            queue_release=_queue,
+            admin_user_id=admin["id"],
+        )
+
+        assert outcome.status == "queued"
+        assert queued == ["good"]  # the better-seeded release is the one that failed
+
+    def _with_fixed_clock(self, module):
+        real = module.reopen_stale_failures
+        return lambda *args, **kwargs: real(*args, now=self.NOW, **kwargs)
+
+
+def test_one_request_that_blows_up_does_not_abort_the_pass(user_db, monkeypatch):
+    user_db.create_user(username="admin", role="admin")
+    reader = user_db.create_user(username="reader", role="user")
+    first = _pending_request(user_db, reader["id"], provider_id="1")
+    second = _pending_request(user_db, reader["id"], provider_id="2")
+    monkeypatch.setattr(auto_download, "app_config", _Config(AUTO_DOWNLOAD_ENABLED=True))
+    monkeypatch.setattr(auto_download, "_configured_source_priority", lambda _t: ["src"])
+    seen = []
+
+    def _fake_request(_user_db, row, **_kwargs):
+        seen.append(int(row["id"]))
+        if len(seen) == 1:  # whichever request is walked first
+            raise RuntimeError("provider exploded")
+        return auto_download.AutoDownloadOutcome(int(row["id"]), "queued")
+
+    monkeypatch.setattr(auto_download, "auto_download_request", _fake_request)
+
+    summary = auto_download.auto_download_pending(
+        user_db, queue_release=lambda *_args, **_kwargs: (True, None)
+    )
+
+    assert sorted(seen) == sorted([int(first["id"]), int(second["id"])])
+    assert summary["error"] == 1
+    assert summary["queued"] == 1

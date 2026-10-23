@@ -90,7 +90,9 @@ def run_once(*, force: bool = False) -> dict[str, Any]:
         sync_summary: dict[str, Any] | None = None
         if force or bool(app_config.get("HARDCOVER_SYNC_ENABLED", False)):
             sync_summary = sync_wishlist(user_db, db_path=db_path)
-        auto_summary = auto_download_pending(user_db, queue_release=queue_release)
+        auto_summary = auto_download_pending(
+            user_db, queue_release=queue_release, db_path=db_path, ignore_backoff=force
+        )
         return {"status": "ok", "sync": sync_summary, "auto_download": auto_summary}
     finally:
         _run_lock.release()

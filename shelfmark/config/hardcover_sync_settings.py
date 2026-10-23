@@ -185,6 +185,34 @@ def hardcover_sync_settings() -> list[SettingsField]:
             max_value=1000,
         ),
         NumberField(
+            key="AUTO_DOWNLOAD_RETRY_DAYS",
+            label="Retry failed downloads after (days)",
+            description=(
+                "A synced request whose download failed, or was interrupted (a restart, say), "
+                "goes back to pending after this many days and is tried again, a few per pass. "
+                "A release that failed is not picked again, and a request is given up on after "
+                "three failed retries. A download the stall timer cancelled counts as failed; one "
+                "cancelled by a person, and rejected requests, are never retried. "
+                "0 turns retries off."
+            ),
+            default=7,
+            min_value=0,
+            max_value=365,
+        ),
+        NumberField(
+            key="AUTO_DOWNLOAD_BACKOFF_MAX_DAYS",
+            label="Longest wait between searches for an unmatched request (days)",
+            description=(
+                "A request that no source has a match for is searched every cycle at first. "
+                "After three passes in a row with no match it is searched once a day, then "
+                "every two days, and at most this often apart. A match, or Sync now, starts it "
+                "over. 0 searches every unmatched request every cycle."
+            ),
+            default=3,
+            min_value=0,
+            max_value=30,
+        ),
+        NumberField(
             key="AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT",
             label="Smallest acceptable audiobook copy (%)",
             description=(

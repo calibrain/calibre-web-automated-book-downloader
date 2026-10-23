@@ -8,10 +8,12 @@ carry full metadata incl. covers) and the request-service validation/dedup path.
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from shelfmark.core import library_index
 from shelfmark.core.config import config as app_config
+from shelfmark.core.download_history_service import ACTIVE_DOWNLOAD_STATUS
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.request_policy import normalize_content_type
 from shelfmark.core.utils import transform_cover_url
@@ -129,30 +131,79 @@ def _existing_request_keys(user_db: UserDB) -> set[tuple[str, str]]:
     return keys
 
 
-def _already_downloaded(db_path: str | None, title: str, author: str, content_type: str) -> bool:
-    """Best-effort check that a title/author isn't already in download_history for this type."""
+# An "active" history row older than this is a download the app lost track of (the
+# process died before the row was finalised), not one still running.
+_ACTIVE_DOWNLOAD_MAX_AGE = timedelta(hours=24)
+
+
+def _history_timestamp(value: object) -> datetime | None:
+    """A stored history stamp (SQLite's default or ISO with an offset) as an aware datetime."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).strip())
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _already_downloaded(
+    db_path: str | None,
+    provider: str,
+    provider_id: str,
+    content_type: str,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """True when a request for this book and format has a download finished or running.
+
+    Keyed on ``download_history.request_id`` and the request's ``book_data``: the history
+    row itself holds the release's title and the source's own content label (Anna's
+    Archive writes "book (fiction)"), neither of which compares to the book. The format
+    is the request's, normalised the way requests_service stores it.
+
+    The request-key check in front of this covers every request the sync can see, so
+    this only decides anything for a request it cannot: another user's, on a per-user
+    sync. Failed and cancelled downloads don't count, and neither does an active row
+    older than :data:`_ACTIVE_DOWNLOAD_MAX_AGE`, so a download that broke or was lost
+    does not hold the book back for good.
+    """
     if not db_path:
         return False
+    wanted = normalize_content_type(content_type)
+    cutoff = (now or datetime.now(UTC)) - _ACTIVE_DOWNLOAD_MAX_AGE
     try:
         conn = sqlite3.connect(db_path)
         try:
-            row = conn.execute(
-                "SELECT 1 FROM download_history "
-                "WHERE LOWER(title) = ? AND LOWER(author) = ? "
-                "AND (content_type IS NULL OR LOWER(content_type) = ?) LIMIT 1",
-                (title.strip().lower(), author.strip().lower(), content_type.lower()),
-            ).fetchone()
-            return row is not None
+            rows = conn.execute(
+                "SELECT h.final_status, h.terminal_at, r.content_type "
+                "FROM download_history AS h "
+                "JOIN download_requests AS r ON r.id = h.request_id "
+                "WHERE h.final_status IN ('complete', ?) "
+                "AND json_extract(r.book_data, '$.provider') = ? "
+                "AND CAST(json_extract(r.book_data, '$.provider_id') AS TEXT) = ?",
+                (ACTIVE_DOWNLOAD_STATUS, provider, str(provider_id)),
+            ).fetchall()
         finally:
             conn.close()
     except sqlite3.Error as exc:
         logger.debug("hardcover-sync: history dedup query failed: %s", exc)
         return False
+    for final_status, terminal_at, request_content_type in rows:
+        if normalize_content_type(request_content_type) != wanted:
+            continue
+        if final_status == ACTIVE_DOWNLOAD_STATUS:
+            stamp = _history_timestamp(terminal_at)
+            if stamp is None or stamp < cutoff:
+                continue
+        return True
+    return False
 
 
-def _fetch_status_books(provider: Any, status_id: int) -> list[BookMetadata]:
-    """Page through a Hardcover status shelf, returning all books."""
+def _fetch_status_books(provider: Any, status_id: int) -> tuple[list[BookMetadata], bool]:
+    """Page through a Hardcover status shelf: the books read, and whether a fetch failed."""
     books: list[BookMetadata] = []
+    failed = False
     for page in range(1, _MAX_PAGES + 1):
         try:
             result = provider._fetch_current_user_books_by_status(status_id, page, _PAGE_LIMIT)
@@ -160,12 +211,13 @@ def _fetch_status_books(provider: Any, status_id: int) -> list[BookMetadata]:
             logger.warning(
                 "hardcover-sync: fetch failed (status=%s page=%s): %s", status_id, page, exc
             )
+            failed = True
             break
         page_books = list(result.books or [])
         books.extend(page_books)
         if not result.has_more or not page_books:
             break
-    return books
+    return books, failed
 
 
 def sync_wishlist(
@@ -210,7 +262,10 @@ def sync_wishlist(
     from shelfmark.core.requests_service import RequestServiceError, create_request
 
     for status_id in _configured_statuses():
-        for book in _fetch_status_books(provider, status_id):
+        shelf, fetch_failed = _fetch_status_books(provider, status_id)
+        if fetch_failed:
+            summary["errors"] += 1
+        for book in shelf:
             provider_id = str(book.provider_id)
             author = _primary_author(book)
 
@@ -218,7 +273,7 @@ def sync_wishlist(
                 if (provider_id, content_type) in known_requests:
                     summary["skipped"] += 1
                     continue
-                if _already_downloaded(db_path, book.title, author, content_type):
+                if _already_downloaded(db_path, book.provider, provider_id, content_type):
                     summary["skipped"] += 1
                     continue
                 if library_index.is_in_library(book, content_type):

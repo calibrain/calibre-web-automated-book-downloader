@@ -13,8 +13,8 @@ On a schedule, Shelfmark reads the selected Hardcover shelf (by default **Want t
 A book is skipped when:
 
 - a request with the same Hardcover book id already exists, in any status
-- a download with the same title and author is already in the download history
-- the library check (below) says it is already in your library
+- a request for the same Hardcover book and format, by any user, has a download in the history that finished or is still running (an unfinished download older than a day no longer counts as running)
+- the library check (below) says you already own it
 - a pending request with the same title, author, and content type already exists
 
 ### Automatic downloads
@@ -34,6 +34,10 @@ A release is a strict match only when all of the following hold:
 AudiobookBay requires every word of a query, and its posts for one volume of a multi-part book often spell the part differently from the request ("Part Two" for "Part II"), so a query carrying the part finds only the packs that list it. When no row a query returns carries the requested title, the source tries the next query, ending with the title minus its trailing *, Part N* or *Volume N*. The strict match above still decides which part was found.
 
 Among matching releases from the winning source, format ranks first (`m4b` over `mp3` for audiobooks; `epub` over `azw3` over `mobi` for ebooks), then the copy other people chose — more downloads (direct-download sources report them), then more seeders — then larger size. If no source produces a confident match the request stays **pending** for manual review; nothing is guessed.
+
+A download that fails, or is interrupted (a restart while it was queued, say), does not stay that way forever. Once the request has sat there for **Retry failed downloads after (days)** (7 by default), it goes back to pending and the next pass searches again. Each pass reopens at most five, oldest first, so a backlog is spread out instead of hitting your sources at once. An interrupted download may pick the same release again, since a torrent already in your client is joined instead of added twice. A download that itself failed, or that Shelfmark's stall timer cancelled, has its release remembered and skipped next time, and the request is given up on after three failed retries. Requests you or an admin cancelled are never retried, and neither are rejected ones: both are decisions. Set the value to 0 to turn retries off.
+
+A request that no source has a match for is not searched every cycle for ever. After three passes in a row with no match it is searched once a day, then every two days, and no further apart than **Longest wait between searches for an unmatched request (days)** (3 by default, 0 searches every unmatched request every cycle). A match, a search that failed (which says nothing about the book) or **Sync now** starts it over.
 
 ### Library check
 
@@ -55,6 +59,8 @@ The check **fails closed** here: if an enabled library cannot be read and has no
 | `AUTO_DOWNLOAD_SOURCE_PRIORITY` | Audiobook source priority | All usable sources | Drag to order; used for audiobook requests. Sources you disable here, or that are not configured, are skipped |
 | `AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY` | Ebook source priority | All usable sources | Same, for ebook requests |
 | `AUTO_DOWNLOAD_MIN_SEEDERS` | Minimum seeders (torrents) | 1 | Torrent releases below this are ignored |
+| `AUTO_DOWNLOAD_RETRY_DAYS` | Retry failed downloads after (days) | 7 | A failed or interrupted download goes back to pending after this long. 0 turns retries off |
+| `AUTO_DOWNLOAD_BACKOFF_MAX_DAYS` | Longest wait between searches for an unmatched request (days) | 3 | 0 searches every unmatched request every cycle |
 
 One action button sits at the bottom of the tab:
 

@@ -35,6 +35,13 @@ def test_schedule_and_content_type_defaults():
     assert fields["AUTO_DOWNLOAD_SOURCE_PRIORITY"].default == []
 
 
+def test_failed_downloads_are_retried_after_a_week_and_it_can_be_turned_off():
+    field = _field_map()["AUTO_DOWNLOAD_RETRY_DAYS"]
+
+    assert field.default == 7
+    assert field.min_value == 0  # 0 is the off switch
+
+
 def test_shelf_options_come_from_hardcover_statuses():
     options = _field_map()["HARDCOVER_SYNC_STATUSES"].options()
 
