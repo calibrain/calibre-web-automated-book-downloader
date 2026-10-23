@@ -16,7 +16,7 @@ from shelfmark.core.request_helpers import (
     normalize_optional_text,
     now_utc_iso,
 )
-from shelfmark.core.utils import transform_cover_url
+from shelfmark.core.utils import DB_BUSY_TIMEOUT_SECONDS, transform_cover_url
 
 logger = setup_logger(__name__)
 
@@ -100,7 +100,7 @@ class DownloadHistoryService:
         self._lock = threading.Lock()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
+        conn = sqlite3.connect(self._db_path, timeout=DB_BUSY_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         return conn

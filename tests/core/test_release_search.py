@@ -117,3 +117,58 @@ def test_plan_receives_filters_and_user_id(monkeypatch: pytest.MonkeyPatch) -> N
         "source_filters": None,
         "user_id": 42,
     }
+
+
+def test_search_book_releases_preserves_source_order_and_aggregates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sources = {"a": _Source(result=["a1"]), "b": _Source(result=["b1", "b2"])}
+    monkeypatch.setattr("shelfmark.release_sources.get_source", lambda name: sources[name])
+
+    all_releases, by_source, errors = release_search.search_book_releases(
+        _book(), sources=["b", "a"], content_type="audiobook"
+    )
+
+    assert list(by_source) == ["b", "a"]
+    assert by_source == {"b": ["b1", "b2"], "a": ["a1"]}
+    assert all_releases == ["b1", "b2", "a1"]
+    assert errors == []
+    _book_arg, _plan, expand_search, content_type = sources["a"].calls[0]
+    assert expand_search is True
+    assert content_type == "audiobook"
+
+
+def test_search_book_releases_collects_errors_and_keeps_healthy_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sources = {
+        "down": _Source(error=SourceUnavailableError("offline")),
+        "ok": _Source(result=["r1"]),
+    }
+
+    def _get(name: str) -> Any:
+        if name not in sources:
+            msg = f"Unknown release source: {name}"
+            raise ValueError(msg)
+        return sources[name]
+
+    monkeypatch.setattr("shelfmark.release_sources.get_source", _get)
+
+    all_releases, by_source, errors = release_search.search_book_releases(
+        _book(), sources=["down", "ok", "nope"]
+    )
+
+    assert all_releases == ["r1"]
+    assert by_source == {"ok": ["r1"]}
+    assert errors == ["down: offline", "Unknown source: nope"]
+
+
+def test_search_book_releases_with_no_sources_returns_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _unexpected(_name: str) -> Any:
+        raise AssertionError("no source should be resolved")
+
+    monkeypatch.setattr("shelfmark.release_sources.get_source", _unexpected)
+
+    assert release_search.search_book_releases(_book(), sources=[]) == ([], {}, [])

@@ -2,6 +2,8 @@
 
 import json
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
@@ -419,8 +421,40 @@ def _ensure_config_dir(tab_name: str) -> None:
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
 
+# Set while the whole settings cache is being rebuilt. Every field of a tab used to
+# re-read and re-parse that tab's file, so a rebuild parsed each file once per field.
+_config_file_memo: ContextVar[dict[str, dict[str, Any]] | None] = ContextVar(
+    "config_file_memo", default=None
+)
+
+
+@contextmanager
+def config_files_read_once() -> Iterator[None]:
+    """Read each tab's config file at most once inside the block.
+
+    Only for a read-only pass such as rebuilding the settings cache; a save inside the
+    block would not be seen by reads after it.
+    """
+    token = _config_file_memo.set({})
+    try:
+        yield
+    finally:
+        _config_file_memo.reset(token)
+
+
 def load_config_file(tab_name: str) -> dict[str, Any]:
     """Load a settings tab config file, returning an empty dict on failure."""
+    memo = _config_file_memo.get()
+    if memo is None:
+        return _read_config_file(tab_name)
+    config_path = _get_config_file_path(tab_name)
+    key = str(config_path)  # several tabs share settings.json
+    if key not in memo:
+        memo[key] = _read_config_file(tab_name)
+    return memo[key]
+
+
+def _read_config_file(tab_name: str) -> dict[str, Any]:
     config_path = _get_config_file_path(tab_name)
 
     if not config_path.exists():

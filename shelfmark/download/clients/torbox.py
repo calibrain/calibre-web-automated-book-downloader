@@ -37,6 +37,11 @@ if TYPE_CHECKING:
 logger = setup_logger(__name__)
 
 _API_BASE = "https://api.torbox.app/v1/api"
+
+# One session for every client instance, so the status poll every couple of seconds
+# reuses a keep-alive connection instead of opening a new TLS connection each time.
+_session = requests.Session()
+
 _API_TIMEOUT = 30
 _STATUS_TIMEOUT = 15
 _WORKER_JOIN_TIMEOUT = 5.0
@@ -320,7 +325,7 @@ class TorBoxClient(DownloadClient):
             "verify": get_ssl_verify(url),
             **kwargs,
         }
-        request: Any = requests.get if method == "GET" else requests.post
+        request: Any = _session.get if method == "GET" else _session.post
         try:
             response = request(url, **request_kwargs)
         except requests.exceptions.RequestException as e:

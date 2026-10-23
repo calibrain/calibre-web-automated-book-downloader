@@ -285,6 +285,43 @@ class TestProxyProvisioningRole:
         assert bob["is_admin"] is False
         assert temp_user_db.get_user(username="bob")["role"] == "user"
 
+    def test_repeat_requests_reuse_the_user_lookups_until_the_user_changes(
+        self, main_module, temp_user_db, monkeypatch
+    ):
+        monkeypatch.setattr(main_module, "user_db", temp_user_db)
+        temp_user_db.create_user(username="ops", role="admin", auth_source="proxy")
+        bob = temp_user_db.create_user(username="bob", role="user", auth_source="proxy")
+        calls = []
+        real_get_user = temp_user_db.get_user
+
+        def counting_get_user(**kwargs):
+            calls.append(kwargs)
+            return real_get_user(**kwargs)
+
+        monkeypatch.setattr(temp_user_db, "get_user", counting_get_user)
+
+        def run_middleware():
+            with (
+                patch.object(main_module, "get_auth_mode", return_value="proxy"),
+                main_module.app.test_request_context(
+                    "/api/covers/abc", headers={"X-Auth-User": "bob"}
+                ),
+            ):
+                main_module.session["user_id"] = "bob"
+                main_module.session["db_user_id"] = bob["id"]
+                assert main_module.proxy_auth_middleware() is None
+                return main_module.session["is_admin"]
+
+        assert run_middleware() is False
+        lookups_per_request = len(calls)
+        assert lookups_per_request == 2
+
+        assert run_middleware() is False
+        assert len(calls) == lookups_per_request
+
+        temp_user_db.update_user(bob["id"], role="admin")
+        assert run_middleware() is True
+
 
 class TestLoginLockoutRepair:
     def test_is_account_locked_repairs_missing_timestamp(self, main_module):
