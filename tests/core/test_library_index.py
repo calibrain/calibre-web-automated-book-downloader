@@ -571,3 +571,21 @@ def test_require_ready_only_checks_the_libraries_for_the_content_type(
 
     with pytest.raises(library_index.LibraryUnavailableError, match="Ebook"):
         library_index.require_ready("ebook")
+
+
+def test_matching_tokenises_the_title_once_for_all_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The title does not change between entries, so it is split into words once."""
+    from shelfmark.core import text_match
+
+    calls: list[str | None] = []
+    real = text_match.significant_tokens
+
+    def counting(text: str | None) -> list[str]:
+        calls.append(text)
+        return real(text)
+
+    monkeypatch.setattr(text_match, "significant_tokens", counting)
+    entries = [_entry("unrelated", f"word{i}", "someone") for i in range(50)]
+
+    assert library_index.match_entries(_book(), entries) is None
+    assert len(calls) <= 2

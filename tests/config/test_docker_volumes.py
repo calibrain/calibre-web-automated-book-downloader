@@ -104,3 +104,20 @@ def test_save_config_file_returns_false_when_config_dir_is_not_writable(tmp_path
             assert save_config_file("downloads", {"key": "value"}) is False
     finally:
         config_dir.chmod(stat.S_IRWXU)
+
+
+def test_covers_cache_probe_is_remembered_for_a_short_time(monkeypatch):
+    from shelfmark.config import env
+
+    probes: list[int] = []
+    monkeypatch.setattr(env, "_is_config_dir_writable", lambda: (probes.append(1), True)[1])
+    clock = [1000.0]
+    monkeypatch.setattr(env.time, "monotonic", lambda: clock[0])
+
+    for _ in range(5):
+        assert env._config_dir_writable_cached() is True
+    assert probes == [1]
+
+    clock[0] += env._WRITABLE_PROBE_TTL_SECONDS + 1
+    assert env._config_dir_writable_cached() is True
+    assert probes == [1, 1]

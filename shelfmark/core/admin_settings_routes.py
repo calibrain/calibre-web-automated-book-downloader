@@ -226,14 +226,26 @@ def build_user_notification_test_response(
     """Build a notification test response using effective per-user routes."""
     from shelfmark.core.config import config as app_config
 
-    routes_input = app_config.get("USER_NOTIFICATION_ROUTES", [], user_id=user_id)
+    effective_routes, is_own = app_config.get_for_user(
+        "USER_NOTIFICATION_ROUTES", [], user_id=user_id
+    )
+    routes_input = effective_routes
     if isinstance(payload, dict):
         if "USER_NOTIFICATION_ROUTES" in payload:
             routes_input = payload.get("USER_NOTIFICATION_ROUTES")
         elif "routes" in payload:
             routes_input = payload.get("routes")
 
-    result = build_notification_test_result(routes_input, scope_label="personal", user_scope=True)
+    # The settings screens always post the routes they show, which for a user without their own
+    # is the inherited admin default. Trust it like at send time only when it is exactly that;
+    # anything else would become the user's own routes once saved, so it is checked.
+    user_scope = is_own or normalize_notification_routes(
+        routes_input
+    ) != normalize_notification_routes(effective_routes)
+
+    result = build_notification_test_result(
+        routes_input, scope_label="personal", user_scope=user_scope, user_id=user_id
+    )
     status_code = 200 if result.get("success", False) else 400
     return result, status_code
 

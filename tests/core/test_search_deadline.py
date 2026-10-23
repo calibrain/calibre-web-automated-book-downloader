@@ -255,3 +255,60 @@ def test_expired_budget_reports_the_challenge_not_a_cancellation(monkeypatch):
     assert failures, "a give-up reason should have been recorded"
     assert "ran out of time" in failures[-1]
     assert "cancelled" not in failures[-1]
+
+
+# --------------------------------------------------------------------------- #
+# Slicing the budget between providers (issue #1531)
+# --------------------------------------------------------------------------- #
+def test_unit_deadline_is_a_no_op_outside_a_search():
+    with search_deadline.unit_deadline(waiting=2) as unit:
+        assert unit is None
+        assert search_deadline.current() is None
+
+
+def test_a_lone_unit_gets_the_whole_budget():
+    with search_deadline.search_deadline(300) as parent, search_deadline.unit_deadline() as unit:
+        assert unit is not None
+        assert unit.budget_seconds == pytest.approx(parent.remaining, abs=1)
+        assert unit.budget_seconds > 299
+
+
+def test_waiting_units_each_keep_a_reserve():
+    with search_deadline.search_deadline(300), search_deadline.unit_deadline(waiting=2) as unit:
+        assert unit is not None
+        assert unit.budget_seconds == pytest.approx(240, abs=1)
+
+
+def test_a_unit_is_never_given_less_than_the_reserve_while_the_parent_has_it():
+    with search_deadline.search_deadline(60), search_deadline.unit_deadline(waiting=5) as unit:
+        assert unit is not None
+        assert unit.budget_seconds == pytest.approx(30, abs=1)
+
+
+def test_a_unit_never_outlives_its_parent():
+    with (
+        search_deadline.search_deadline(10) as parent,
+        search_deadline.unit_deadline(waiting=3) as unit,
+    ):
+        assert unit is not None
+        assert unit.expires_at <= parent.expires_at + 0.01
+
+
+def test_the_parent_is_back_in_force_after_a_unit():
+    with search_deadline.search_deadline(300) as parent:
+        with search_deadline.unit_deadline(waiting=1):
+            pass
+        assert search_deadline.current() is parent
+
+
+def test_a_stuck_unit_stops_at_its_slice_and_the_next_still_runs(monkeypatch):
+    """The unit's own limit trips while the parent still has the reserve left."""
+    monkeypatch.setattr(search_deadline, "DEFAULT_UNIT_RESERVE_SECONDS", 0.2)
+    with search_deadline.search_deadline(1.0):
+        with search_deadline.unit_deadline(waiting=1, reserve=0.5) as first:
+            assert first is not None
+            assert first.event.wait(timeout=5) is True
+            assert search_deadline.expired() is True
+        assert search_deadline.expired() is False
+        with search_deadline.unit_deadline(waiting=0):
+            assert search_deadline.expired() is False

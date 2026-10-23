@@ -21,6 +21,7 @@ from bs4.element import NavigableString
 from shelfmark.bypass.challenge import MAX_CHALLENGE_HTML_CHARS, challenge_marker
 from shelfmark.config.env import DEBUG_SKIP_SOURCES
 from shelfmark.core import search_deadline
+from shelfmark.core.cache import CacheService
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.models import SearchFilters
@@ -822,15 +823,29 @@ def search_books(query: str, filters: SearchFilters) -> tuple[list[BrowseRecord]
     return (books, total_count)
 
 
+# One search asks for the same md5 once per title variant that finds it, and reopening
+# the release list asks again. A count that is a few minutes old is fine on a list.
+_DOWNLOAD_COUNT_TTL = 300
+_DOWNLOAD_COUNT_WORKERS = 5
+_download_count_cache = CacheService(max_size=2000)
+# Keeps connections to the mirror open between lookups. requests' default pool of 10
+# per host already covers _DOWNLOAD_COUNT_WORKERS.
+_inline_info_session = requests.Session()
+
+
 def _fetch_download_count_inline(book_id: str) -> int | None:
     """Fetch the download count for a single book from Anna's Archive inline_info API."""
+    cached = _download_count_cache.get(book_id)
+    if isinstance(cached, int):
+        return cached
     try:
         url = f"{network.get_aa_base_url()}/dyn/md5/inline_info/{book_id}"
-        resp = requests.get(url, timeout=5, headers={"Accept": "application/json"})
+        resp = _inline_info_session.get(url, timeout=5, headers={"Accept": "application/json"})
         if resp.status_code == 200:
             data = resp.json()
             count = data.get("downloads_total")
             if count is not None:
+                _download_count_cache.set(book_id, count, _DOWNLOAD_COUNT_TTL)
                 return count
     except Exception:
         logger.debug("Failed to fetch download count for %s", book_id, exc_info=True)
@@ -848,7 +863,7 @@ def _enrich_search_results_with_downloads(books: list[BrowseRecord]) -> None:
 
     # Fetch counts in parallel using the inline_info API (cheaper than summary)
     counts: dict[str, int] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=_DOWNLOAD_COUNT_WORKERS) as executor:
         futures = {executor.submit(_fetch_download_count_inline, bid): bid for bid in book_ids}
         for future in concurrent.futures.as_completed(futures):
             bid = futures[future]

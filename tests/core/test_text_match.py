@@ -75,3 +75,11 @@ def test_title_tokens_match_without_significant_tokens_is_false(title):
 )
 def test_normalize_isbn(value, expected):
     assert text_match.normalize_isbn(value) == expected
+
+
+def test_significant_tokens_match_agrees_with_title_tokens_match():
+    haystack = {"alpha", "beta", "gamma"}
+    for title in ("Alpha Beta", "alpha delta", "the of", ""):
+        assert text_match.significant_tokens_match(
+            text_match.significant_tokens(title), haystack
+        ) is text_match.title_tokens_match(title, haystack)
