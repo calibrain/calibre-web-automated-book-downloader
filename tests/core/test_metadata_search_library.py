@@ -69,3 +69,27 @@ def test_search_results_omit_library_when_no_check_is_enabled(main_module, clien
     result = _search(main_module, client, lambda book: None)
 
     assert "library" not in result
+
+
+def test_search_passes_the_logged_in_user_to_the_provider(main_module, client):
+    # Providers may resolve per-user settings, e.g. DNB's book languages
+    seen = []
+
+    class _RecordingProvider(_StubProvider):
+        def search_paginated(self, options):
+            seen.append(options.user_id)
+            return super().search_paginated(options)
+
+    with client.session_transaction() as session:
+        session["db_user_id"] = 7
+    with (
+        patch.object(main_module, "get_auth_mode", return_value="none"),
+        patch("shelfmark.metadata_providers.is_provider_registered", return_value=True),
+        patch("shelfmark.metadata_providers.is_provider_enabled", return_value=True),
+        patch("shelfmark.metadata_providers.get_provider_kwargs", return_value={}),
+        patch("shelfmark.metadata_providers.get_provider", return_value=_RecordingProvider([])),
+    ):
+        response = client.get("/api/metadata/search?query=carl&provider=stub")
+
+    assert response.status_code == 200, response.get_json()
+    assert seen == [7]

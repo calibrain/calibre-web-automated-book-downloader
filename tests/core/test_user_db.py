@@ -611,6 +611,71 @@ class TestUserCRUD:
         assert "charlie" in usernames
 
 
+class TestCachedUserLookup:
+    """Tests for the short-lived lookup cache used by per-request auth."""
+
+    @pytest.fixture
+    def counted(self, user_db, monkeypatch):
+        calls = []
+        real_get_user = user_db.get_user
+
+        def counting_get_user(**kwargs):
+            calls.append(kwargs)
+            return real_get_user(**kwargs)
+
+        monkeypatch.setattr(user_db, "get_user", counting_get_user)
+        return calls
+
+    def test_repeat_lookups_are_answered_from_memory(self, user_db, counted):
+        user = user_db.create_user(username="john", role="admin")
+
+        for _ in range(3):
+            assert user_db.get_user_cached(username="john")["id"] == user["id"]
+            assert user_db.get_user_cached(user_id=user["id"])["username"] == "john"
+        assert user_db.get_user_cached(username="nobody") is None
+        assert user_db.get_user_cached(username="nobody") is None
+
+        assert len(counted) == 3
+
+    def test_entries_expire_after_the_ttl(self, user_db, counted, monkeypatch):
+        import shelfmark.core.user_db as user_db_module
+
+        user_db.create_user(username="john")
+        now = [1000.0]
+        monkeypatch.setattr(user_db_module.time, "monotonic", lambda: now[0])
+
+        user_db.get_user_cached(username="john")
+        now[0] += user_db_module.USER_CACHE_TTL_SECONDS - 0.1
+        user_db.get_user_cached(username="john")
+        assert len(counted) == 1
+
+        now[0] += 0.2
+        user_db.get_user_cached(username="john")
+        assert len(counted) == 2
+
+    def test_writes_through_the_db_drop_cached_entries(self, user_db):
+        user = user_db.create_user(username="john", role="admin")
+        assert user_db.get_user_cached(username="john")["role"] == "admin"
+        assert user_db.get_user_cached(username="jane") is None
+
+        user_db.update_user(user["id"], role="user")
+        assert user_db.get_user_cached(username="john")["role"] == "user"
+
+        user_db.create_user(username="jane")
+        assert user_db.get_user_cached(username="jane") is not None
+
+        user_db.delete_user(user["id"])
+        assert user_db.get_user_cached(username="john") is None
+        assert user_db.get_user_cached(user_id=user["id"]) is None
+
+    def test_callers_cannot_change_the_cached_row(self, user_db):
+        user_db.create_user(username="john", role="user")
+
+        user_db.get_user_cached(username="john")["role"] = "admin"
+
+        assert user_db.get_user_cached(username="john")["role"] == "user"
+
+
 class TestUserSettings:
     """Tests for per-user settings."""
 

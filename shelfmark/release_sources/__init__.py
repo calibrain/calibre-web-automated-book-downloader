@@ -510,6 +510,7 @@ _BUILTIN_SOURCE_MODULES = (
     "shelfmark.release_sources.newznab",
     "shelfmark.release_sources.prowlarr",
     "shelfmark.release_sources.slskd",
+    "shelfmark.release_sources.webshare",
 )
 _builtin_source_state = {"loaded": False}
 

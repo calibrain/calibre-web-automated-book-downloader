@@ -285,3 +285,11 @@ def test_bundle_markers_ignore_words_the_search_title_carries(title, search, exp
 )
 def test_is_bundle_title(title, search, expected) -> None:
     assert text_match.is_bundle_title(title, search) is expected
+
+
+def test_significant_tokens_match_agrees_with_title_tokens_match():
+    haystack = {"alpha", "beta", "gamma"}
+    for title in ("Alpha Beta", "alpha delta", "the of", ""):
+        assert text_match.significant_tokens_match(
+            text_match.significant_tokens(title), haystack
+        ) is text_match.title_tokens_match(title, haystack)

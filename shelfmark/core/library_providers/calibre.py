@@ -43,6 +43,7 @@ _ISBN_TYPES = frozenset({"isbn", "isbn13", "isbn-13", "isbn10", "isbn-10"})
 _ASIN_TYPES = frozenset({"amazon", "mobi-asin", "asin"})
 # Calibre identifier type -> Shelfmark metadata provider name.
 _EXTERNAL_ID_TYPES = {
+    "dnb-idn": "dnb",
     "hardcover-id": "hardcover",
     "google": "googlebooks",
     "openlibrary": "openlibrary",

@@ -17,15 +17,7 @@ circular imports (`archive` is used by the pipeline).
 from __future__ import annotations
 
 import shelfmark.core.config as core_config
-
-
-def _normalize_format_list(value: object, default: list[str]) -> list[str]:
-    if isinstance(value, str):
-        return [fmt.strip().lower() for fmt in value.split(",") if fmt.strip()]
-    if isinstance(value, (list, tuple, set)):
-        normalized = [str(fmt).strip().lower() for fmt in value if str(fmt).strip()]
-        return normalized or default
-    return default
+from shelfmark.core.utils import DEFAULT_EBOOK_FORMATS, normalize_format_list
 
 
 def _config_text(value: object) -> str:
@@ -36,16 +28,15 @@ def _config_text(value: object) -> str:
 
 def get_supported_formats() -> list[str]:
     """Get current supported formats from config singleton."""
-    default_formats = ["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"]
-    formats = core_config.config.get("SUPPORTED_FORMATS", default_formats)
-    return _normalize_format_list(formats, default_formats)
+    formats = core_config.config.get("SUPPORTED_FORMATS", None)
+    return normalize_format_list(formats, DEFAULT_EBOOK_FORMATS)
 
 
 def get_supported_audiobook_formats() -> list[str]:
     """Get current supported audiobook formats from config singleton."""
     default_formats = ["m4b", "mp3"]
     formats = core_config.config.get("SUPPORTED_AUDIOBOOK_FORMATS", default_formats)
-    return _normalize_format_list(formats, default_formats)
+    return normalize_format_list(formats, default_formats)
 
 
 def get_file_organization(*, is_audiobook: bool) -> str:

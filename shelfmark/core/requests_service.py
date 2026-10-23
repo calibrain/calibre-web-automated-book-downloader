@@ -204,6 +204,11 @@ def sync_delivery_states_from_queue_status(
     user_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """Persist delivery-state transitions for fulfilled requests based on queue status."""
+    # Runs on every status poll. With no task in the queue nothing can change, so skip
+    # reading (and parsing) the whole fulfilled-request history.
+    if not any(queue_status.get(status_key) for status_key in QueueStatus):
+        return []
+
     fulfilled_rows = user_db.list_requests(user_id=user_id, status=RequestStatus.FULFILLED)
     if not fulfilled_rows:
         return []
