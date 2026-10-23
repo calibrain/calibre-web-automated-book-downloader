@@ -177,7 +177,8 @@ class JackettSource(ReleaseSource):
         """Indexer ids to query: the filter's names, else the settings selection.
 
         None means "ask Jackett's ``all`` aggregate", which is one request instead of one
-        per indexer. A name that no longer matches a configured indexer is dropped.
+        per indexer. A name that no longer matches a configured indexer is dropped; if an
+        explicit filter matches nothing, an empty list is returned (search nothing).
         """
         if not plan.indexers:
             return self._get_selected_indexer_ids()
@@ -188,7 +189,7 @@ class JackettSource(ReleaseSource):
             msg = f"could not reach Jackett: {e}"
             raise SourceUnavailableError(msg) from e
         by_name = {idx["name"]: idx["id"] for idx in indexers}
-        return [by_name[name] for name in plan.indexers if name in by_name] or None
+        return [by_name[name] for name in plan.indexers if name in by_name]
 
     def search(
         self,
@@ -215,6 +216,9 @@ class JackettSource(ReleaseSource):
             return []
 
         indexer_ids = self._resolve_indexer_ids(client, plan)
+        if indexer_ids is not None and not indexer_ids:
+            logger.warning("Jackett indexer filter matched no configured indexers")
+            return []
         targets = indexer_ids or [ALL_INDEXERS_ID]
 
         # Audiobooks use 3030 (Audio/Audiobook), ebooks use 7000 (Books)

@@ -192,6 +192,16 @@ class TestSource:
 
         assert client.torznab_search.call_args.kwargs["indexer_id"] == "a"
 
+    def test_filter_matching_no_indexers_searches_nothing(self, jackett_config):
+        client = MagicMock()
+        client.indexer_timeout = 30
+        client.get_indexers.return_value = [{"id": "a", "name": "Alpha"}]
+        with patch.object(JackettSource, "_get_client", return_value=client):
+            results = JackettSource().search(_book(), _plan(indexers=["Gone"]))
+
+        assert results == []
+        client.torznab_search.assert_not_called()
+
     def test_all_failures_raise_instead_of_returning_empty(self, jackett_config):
         client = MagicMock()
         client.indexer_timeout = 30
