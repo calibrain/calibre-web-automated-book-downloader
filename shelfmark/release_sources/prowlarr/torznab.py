@@ -98,13 +98,16 @@ def parse_torznab_xml(xml_text: str) -> list[dict[str, Any]]:
         if not download_url and enclosure_url:
             download_url = enclosure_url.strip() or None
 
-        prowlarr_indexer_el = item.find("prowlarrindexer")
-        indexer_id = (
-            _coerce_int(prowlarr_indexer_el.get("id")) if prowlarr_indexer_el is not None else None
+        # Prowlarr tags each item with <prowlarrindexer id="12">, Jackett with
+        # <jackettindexer id="mytracker"> (a slug, so only Prowlarr's id is numeric).
+        indexer_el = item.find("prowlarrindexer")
+        if indexer_el is None:
+            indexer_el = item.find("jackettindexer")
+        indexer_key = (
+            ((indexer_el.get("id") or "").strip() or None) if indexer_el is not None else None
         )
-        indexer_name = (
-            (prowlarr_indexer_el.text or "").strip() if prowlarr_indexer_el is not None else ""
-        )
+        indexer_id = _coerce_int(indexer_key)
+        indexer_name = (indexer_el.text or "").strip() if indexer_el is not None else ""
 
         categories: list[int] = []
         for cat_el in item.findall("category"):
@@ -153,6 +156,7 @@ def parse_torznab_xml(xml_text: str) -> list[dict[str, Any]]:
                 "publishDate": pub_date,
                 "indexer": indexer_name or None,
                 "indexerId": indexer_id,
+                "indexerKey": indexer_key,
                 "categories": categories,
                 "seeders": seeders,
                 "leechers": leechers,

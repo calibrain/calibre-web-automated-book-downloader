@@ -15,6 +15,7 @@ This document lists all configuration options that can be set via environment va
 - [Network](#network)
 - [Advanced](#advanced)
 - [Prowlarr](#prowlarr)
+- [Jackett](#jackett)
 - [Newznab](#newznab)
 - [Soulseek (slskd)](#soulseek-slskd)
 - [AudiobookBay](#audiobookbay)
@@ -1459,6 +1460,100 @@ The mam_id value MyAnonamouse shows when you create a session. MAM locks each se
 
 - **Type:** string (secret)
 - **Default:** _none_
+
+</details>
+
+## Jackett
+
+| Variable | Description | Type | Default |
+|----------|-------------|------|---------|
+| `JACKETT_ENABLED` | Enable searching for books via Jackett indexers | boolean | `false` |
+| `JACKETT_URL` | Base URL of your Jackett instance | string | _none_ |
+| `JACKETT_API_KEY` | Shown at the top right of the Jackett dashboard | string (secret) | _none_ |
+| `JACKETT_INDEXERS` | Select which indexers to search. Leave empty to search all configured indexers. | string (comma-separated) | _empty list_ |
+| `JACKETT_INDEXER_TIMEOUT` | How long to wait for Jackett to answer a search. Searching all indexers waits for the slowest one, and indexers behind FlareSolverr can need 90 seconds or more on a cold Cloudflare challenge. | number | `90` |
+| `JACKETT_EBOOK_MAX_SIZE_MB` | Hide ebook results larger than this. 0 shows everything, and a result with no reported size is always shown. Audiobook searches are not limited. | number | `0` |
+| `JACKETT_AUTO_EXPAND` | Automatically retry search without category filtering if no results are found | boolean | `false` |
+| `JACKETT_HIDE_UNSUPPORTED_FORMATS` | Hide a result whose title ends in a file extension that is not in Supported Book Formats, such as a .doc or .rtf file. Titles without an extension, archives and audiobook searches are never hidden. | boolean | `true` |
+
+<details>
+<summary>Detailed descriptions</summary>
+
+#### `JACKETT_ENABLED`
+
+**Enable Jackett source**
+
+Enable searching for books via Jackett indexers
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `JACKETT_URL`
+
+**Jackett URL**
+
+Base URL of your Jackett instance
+
+- **Type:** string
+- **Default:** _none_
+- **Required:** Yes
+
+#### `JACKETT_API_KEY`
+
+**API Key**
+
+Shown at the top right of the Jackett dashboard
+
+- **Type:** string (secret)
+- **Default:** _none_
+- **Required:** Yes
+
+#### `JACKETT_INDEXERS`
+
+**Indexers to Search**
+
+Select which indexers to search. Leave empty to search all configured indexers.
+
+- **Type:** string (comma-separated)
+- **Default:** _empty list_
+
+#### `JACKETT_INDEXER_TIMEOUT`
+
+**Indexer Search Timeout (seconds)**
+
+How long to wait for Jackett to answer a search. Searching all indexers waits for the slowest one, and indexers behind FlareSolverr can need 90 seconds or more on a cold Cloudflare challenge.
+
+- **Type:** number
+- **Default:** `90`
+- **Constraints:** min: 5, max: 300
+
+#### `JACKETT_EBOOK_MAX_SIZE_MB`
+
+**Maximum Ebook Size (MB)**
+
+Hide ebook results larger than this. 0 shows everything, and a result with no reported size is always shown. Audiobook searches are not limited.
+
+- **Type:** number
+- **Default:** `0`
+- **Constraints:** min: 0, max: 100000
+
+#### `JACKETT_AUTO_EXPAND`
+
+**Auto-expand search on no results**
+
+Automatically retry search without category filtering if no results are found
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `JACKETT_HIDE_UNSUPPORTED_FORMATS`
+
+**Hide results in formats you did not enable**
+
+Hide a result whose title ends in a file extension that is not in Supported Book Formats, such as a .doc or .rtf file. Titles without an extension, archives and audiobook searches are never hidden.
+
+- **Type:** boolean
+- **Default:** `true`
 
 </details>
 
