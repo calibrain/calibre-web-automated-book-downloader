@@ -28,6 +28,7 @@ This document lists all configuration options that can be set via environment va
   - [Google Books](#metadata-providers-google-books)
   - [Moly.hu](#metadata-providers-moly.hu)
   - [Databáze knih](#metadata-providers-databáze-knih)
+  - [DNB](#metadata-providers-dnb)
 - [Direct Download](#direct-download)
   - [Download Sources](#direct-download-download-sources)
   - [Cloudflare Bypass](#direct-download-cloudflare-bypass)
@@ -2739,6 +2740,47 @@ Enable Moly.hu as a metadata provider for book searches
 
 - **Type:** boolean
 - **Default:** `false`
+
+</details>
+
+### Metadata Providers: DNB
+
+| Variable | Description | Type | Default |
+|----------|-------------|------|---------|
+| `DNB_ENABLED` | Enable DNB as a metadata provider for book searches | boolean | `false` |
+| `DNB_DEFAULT_SORT` | Default sort order for DNB search results. | string (choice) | `relevance` |
+| `DNB_USE_BOOK_LANGUAGES` | Filter DNB results by Default Book Languages: each user's own setting, else the system default. DNB also catalogs translations into many other languages. | boolean | `true` |
+
+<details>
+<summary>Detailed descriptions</summary>
+
+#### `DNB_ENABLED`
+
+**Enable DNB**
+
+Enable DNB as a metadata provider for book searches
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `DNB_DEFAULT_SORT`
+
+**Default Sort Order**
+
+Default sort order for DNB search results.
+
+- **Type:** string (choice)
+- **Default:** `relevance`
+- **Options:** `relevance` (Most relevant), `newest` (Newest), `oldest` (Oldest)
+
+#### `DNB_USE_BOOK_LANGUAGES`
+
+**Only show editions in my book languages**
+
+Filter DNB results by Default Book Languages: each user's own setting, else the system default. DNB also catalogs translations into many other languages.
+
+- **Type:** boolean
+- **Default:** `true`
 
 </details>
 

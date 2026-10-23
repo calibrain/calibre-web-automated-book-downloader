@@ -2984,7 +2984,7 @@ def api_metadata_search() -> Response | tuple[Response, int]:
             return jsonify({"error": "Either 'query' or search field values are required"}), 400
 
         options = MetadataSearchOptions(
-            query=query, limit=limit, page=page, sort=sort_order, fields=fields
+            query=query, limit=limit, page=page, sort=sort_order, fields=fields, user_id=db_user_id
         )
         search_result = provider.search_paginated(options)
 

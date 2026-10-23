@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 import shelfmark.config.settings as settings_config
+import shelfmark.metadata_providers.dnb as dnb_provider
 import shelfmark.metadata_providers.googlebooks as googlebooks_provider
 import shelfmark.metadata_providers.hardcover as hardcover_provider
 import shelfmark.metadata_providers.openlibrary as openlibrary_provider
@@ -12,6 +13,7 @@ import shelfmark.release_sources.prowlarr.settings as prowlarr_settings
 
 _REGISTERED_SETTINGS_MODULES = (
     settings_config,
+    dnb_provider,
     googlebooks_provider,
     hardcover_provider,
     openlibrary_provider,
@@ -178,3 +180,42 @@ def test_save_onboarding_settings_skips_hidden_fields(monkeypatch):
     assert all("EXT_BYPASSER_URL" not in payload for payload in bypass_payloads)
     assert all("EXT_BYPASSER_PATH" not in payload for payload in bypass_payloads)
     assert all("EXT_BYPASSER_TIMEOUT" not in payload for payload in bypass_payloads)
+
+
+def test_onboarding_offers_dnb():
+    from shelfmark.core.onboarding import get_metadata_provider_fields
+
+    provider_field = next(
+        field
+        for field in get_metadata_provider_fields()
+        if getattr(field, "key", None) == "METADATA_PROVIDER"
+    )
+
+    assert "dnb" in {option["value"] for option in provider_field.options}
+
+
+def test_save_onboarding_settings_enables_dnb(monkeypatch):
+    import shelfmark.core.config as app_config
+    import shelfmark.core.onboarding as onboarding
+
+    save_calls: list[tuple[str, dict[str, object]]] = []
+
+    def _fake_save(tab_name: str, values: dict[str, object]) -> bool:
+        save_calls.append((tab_name, dict(values)))
+        return True
+
+    monkeypatch.setattr(onboarding, "save_config_file", _fake_save)
+    monkeypatch.setattr(onboarding, "mark_onboarding_complete", lambda: True)
+    monkeypatch.setattr(app_config.config, "refresh", lambda: None, raising=False)
+
+    result = onboarding.save_onboarding_settings(
+        {"SEARCH_MODE": "universal", "METADATA_PROVIDER": "dnb"}
+    )
+
+    grouped_calls = _group_save_calls(save_calls)
+
+    assert result == {"success": True, "message": "Onboarding complete!"}
+    assert {"DNB_ENABLED": True} in grouped_calls["dnb"]
+    assert any(
+        payload.get("METADATA_PROVIDER") == "dnb" for payload in grouped_calls["search_mode"]
+    )

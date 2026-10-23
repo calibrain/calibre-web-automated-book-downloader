@@ -265,6 +265,11 @@ def get_metadata_provider_fields() -> list[SettingsField]:
                 "label": "Google Books",
                 "description": "Google's book database with good coverage. Requires free API key.",
             },
+            {
+                "value": "dnb",
+                "label": "DNB (Deutsche Nationalbibliothek)",
+                "description": "German national library catalog with the best coverage of German-language editions. No API key required.",
+            },
         ]
 
         # Clone with onboarding-specific options and default
