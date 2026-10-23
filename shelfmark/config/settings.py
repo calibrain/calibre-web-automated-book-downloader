@@ -2167,3 +2167,8 @@ def advanced_settings() -> list[SettingsField]:
 
 
 register_on_save("advanced", _on_save_advanced)
+
+
+# Register the Hardcover Sync settings tab. Imported here (rather than at each
+# settings endpoint) so every code path that imports this module also registers it.
+from shelfmark.config import hardcover_sync_settings as _hardcover_sync_settings  # noqa: E402,F401

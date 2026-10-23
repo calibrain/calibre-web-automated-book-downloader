@@ -92,3 +92,41 @@ def search_source_releases(
         return None, [], f"{source_name}: {exc!s}"
     else:
         return source, releases, None
+
+
+def search_book_releases(
+    book: BookMetadata,
+    *,
+    sources: list[str],
+    content_type: str = "ebook",
+    expand_search: bool = True,
+    languages: list[str] | None = None,
+    indexers: list[str] | None = None,
+) -> tuple[list[Release], dict[str, list[Release]], list[str]]:
+    """Search several sources for releases of ``book``.
+
+    Returns ``(all_releases, releases_by_source, errors)``. ``releases_by_source``
+    preserves the requested ``sources`` order so callers can prioritise.
+    """
+    all_releases: list[Release] = []
+    by_source: dict[str, list[Release]] = {}
+    errors: list[str] = []
+
+    for source_name in sources:
+        source, releases, error = search_source_releases(
+            source_name,
+            book,
+            languages=languages,
+            manual_query=None,
+            indexers=indexers,
+            expand_search=expand_search,
+            content_type=content_type,
+            source_filters=None,
+        )
+        if source is not None:
+            by_source[source_name] = list(releases)
+            all_releases.extend(releases)
+        if error is not None:
+            errors.append(error)
+
+    return all_releases, by_source, errors
