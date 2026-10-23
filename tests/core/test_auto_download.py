@@ -2,7 +2,7 @@
 
 import pytest
 
-from shelfmark.core import auto_download
+from shelfmark.core import auto_download, library_index
 from shelfmark.core.user_db import UserDB
 from shelfmark.metadata_providers import BookMetadata
 from shelfmark.release_sources import Release, ReleaseProtocol
@@ -119,6 +119,9 @@ class TestStrictMatch:
     def test_non_torrent_ignores_seeders(self):
         release = _release(protocol=ReleaseProtocol.NZB, seeders=None)
         assert _strict(release, min_seeders=5) is True
+
+    def test_a_release_without_a_title_does_not_match(self):
+        assert _strict(_release(title=None)) is False
 
 
 class TestPickBestRelease:
@@ -376,6 +379,33 @@ class TestAutoDownloadRequest:
         outcome = self._run(user_db, row, admin)
 
         assert outcome.status == "in_library"
+        assert user_db.get_request(row["id"])["status"] == "pending"
+
+    def test_a_library_that_cannot_be_read_stops_the_request_before_searching(
+        self, user_db, monkeypatch
+    ):
+        admin = user_db.create_user(username="admin", role="admin")
+        reader = user_db.create_user(username="reader", role="user")
+        row = _pending_request(user_db, reader["id"])
+        _stub_provider(monkeypatch, _book())
+        monkeypatch.setattr(auto_download, "app_config", _Config())
+
+        def _is_in_library(_book, _content_type=None, *, strict=False):
+            if strict:
+                raise library_index.LibraryUnavailableError("Audiobookshelf is unavailable")
+            return False  # what a fail-open check would have answered
+
+        monkeypatch.setattr("shelfmark.core.library_index.is_in_library", _is_in_library)
+        monkeypatch.setattr(
+            auto_download,
+            "search_book_releases",
+            lambda *_a, **_k: pytest.fail("a request must not be searched for blind"),
+        )
+
+        outcome = self._run(user_db, row, admin)
+
+        assert outcome.status == "error"
+        assert "library" in outcome.detail
         assert user_db.get_request(row["id"])["status"] == "pending"
 
     def test_unregistered_provider_is_skipped(self, user_db, monkeypatch):

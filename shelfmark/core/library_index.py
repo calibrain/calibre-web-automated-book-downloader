@@ -69,14 +69,31 @@ def _store(provider_name: str, entries: list[LibraryEntry], fingerprint: object 
         slot.failed_at = None
 
 
-def _entries_for(provider: LibraryProvider) -> list[LibraryEntry]:
-    """Cached entries for one provider, re-indexed past the TTL or when the library changed."""
+class LibraryUnavailableError(RuntimeError):
+    """An enabled library could not be read and there is no earlier index to fall back on."""
+
+
+def _entries_for(provider: LibraryProvider, *, strict: bool = False) -> list[LibraryEntry]:
+    """Cached entries for one provider, re-indexed past the TTL or when the library changed.
+
+    A library that cannot be read answers from its stale cache when there is one. With
+    nothing cached the default is to fail open (no entries, so nothing counts as owned),
+    which suits badges. ``strict`` raises instead, for callers that act on the answer.
+    """
     slot = _slot(provider.name)
     with _lock:
-        if slot.failed_at is not None and time.monotonic() - slot.failed_at < (
-            _FAILURE_BACKOFF_SECONDS
-        ):
-            return slot.entries or []
+        backing_off = slot.failed_at is not None and (
+            time.monotonic() - slot.failed_at < _FAILURE_BACKOFF_SECONDS
+        )
+        stale = slot.entries
+    if backing_off:
+        # Same answer the failure gave: the stale index, or (strict) a refusal to guess.
+        if stale is not None:
+            return stale
+        if strict:
+            msg = f"{provider.describe()} is unavailable (retrying after a short back-off)"
+            raise LibraryUnavailableError(msg)
+        return []
     try:
         fingerprint = provider.fingerprint()
         with _lock:
@@ -86,11 +103,30 @@ def _entries_for(provider: LibraryProvider) -> list[LibraryEntry]:
         if cached is not None and fresh and unchanged:
             return cached
         entries = provider.fetch_entries()
-    except Exception as exc:  # noqa: BLE001 - any failure must fail open
-        logger.warning("library check: %s unavailable (%s); failing open", provider.describe(), exc)
+        with _lock:
+            had_entries = bool(slot.entries)
+        if had_entries and not entries:
+            # A library that held books a moment ago and now lists none is far more likely a
+            # changed answer from the server than an emptied shelf. Indexing it would make
+            # every owned book look missing, so it is treated like any other failed read
+            # (the earlier index keeps answering, strict callers hold). A library that was
+            # really emptied clears on the next restart.
+            msg = "it listed no items although it held some at the last index"
+            raise ValueError(msg)  # noqa: TRY301 - handled by the failure path below
+    except Exception as exc:
         with _lock:
             slot.failed_at = time.monotonic()
-            return slot.entries or []  # Use the stale cache if we have one.
+            stale = slot.entries
+        if stale is not None:
+            logger.warning(
+                "library check: %s unavailable (%s); using stale index", provider.describe(), exc
+            )
+            return stale
+        if strict:
+            msg = f"{provider.describe()} is unavailable: {exc}"
+            raise LibraryUnavailableError(msg) from exc
+        logger.warning("library check: %s unavailable (%s); failing open", provider.describe(), exc)
+        return []
 
     _store(provider.name, entries, fingerprint)
     logger.info("library check: indexed %d %s item(s)", len(entries), provider.display_name)
@@ -153,13 +189,25 @@ def book_matches_entries(book: BookMetadata, entries: list[LibraryEntry]) -> boo
     return match_entries(book, entries) is not None
 
 
-def is_in_library(book: BookMetadata, content_type: str | None = None) -> bool:
-    """True if an enabled library holding ``content_type`` already has ``book`` (fail-open).
+def require_ready(content_type: str | None = None) -> None:
+    """Raise LibraryUnavailableError unless every enabled library can be read (or is cached).
 
-    ``content_type`` None consults every enabled provider.
+    ``content_type`` limits the check to the libraries holding that type.
+    """
+    for provider in _enabled_providers(content_type):
+        _entries_for(provider, strict=True)
+
+
+def is_in_library(
+    book: BookMetadata, content_type: str | None = None, *, strict: bool = False
+) -> bool:
+    """True if an enabled library holding ``content_type`` already has ``book``.
+
+    ``content_type`` None consults every enabled provider. A library that cannot be read
+    counts as not holding the book, unless ``strict``, which raises LibraryUnavailableError.
     """
     return any(
-        book_matches_entries(book, _entries_for(provider))
+        book_matches_entries(book, _entries_for(provider, strict=strict))
         for provider in _enabled_providers(content_type)
     )
 
