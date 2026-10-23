@@ -141,7 +141,7 @@ def test_book_to_book_data_includes_optional_fields_only_when_present():
     }
 
 
-def test_existing_provider_ids_reads_provider_id_or_id(user_db):
+def test_existing_request_keys_pair_provider_id_with_content_type(user_db):
     user = user_db.create_user(username="reader", role="user")
     for book_data in (
         {"title": "A", "author": "X", "provider": "hardcover", "provider_id": 11},
@@ -158,21 +158,30 @@ def test_existing_provider_ids_reads_provider_id_or_id(user_db):
             book_data=book_data,
         )
 
-    assert hardcover_sync._existing_provider_ids(user_db) == {"11", "22"}
+    assert hardcover_sync._existing_request_keys(user_db) == {
+        ("11", "audiobook"),
+        ("22", "audiobook"),
+    }
 
 
 def test_already_downloaded_matches_history_case_insensitively(user_db, db_path):
     _insert_history(db_path, title="Dungeon Crawler Carl", author="Matt Dinniman")
 
-    assert hardcover_sync._already_downloaded(db_path, "dungeon crawler CARL", "MATT dinniman")
-    assert not hardcover_sync._already_downloaded(db_path, "Dungeon Crawler Carl", "Someone")
-    assert not hardcover_sync._already_downloaded(None, "Dungeon Crawler Carl", "Matt Dinniman")
+    assert hardcover_sync._already_downloaded(
+        db_path, "dungeon crawler CARL", "MATT dinniman", "audiobook"
+    )
+    assert not hardcover_sync._already_downloaded(
+        db_path, "Dungeon Crawler Carl", "Someone", "audiobook"
+    )
+    assert not hardcover_sync._already_downloaded(
+        None, "Dungeon Crawler Carl", "Matt Dinniman", "audiobook"
+    )
 
 
 def test_already_downloaded_fails_open_without_history_table(tmp_path):
     missing = str(tmp_path / "empty.db")
 
-    assert hardcover_sync._already_downloaded(missing, "Anything", "Anyone") is False
+    assert hardcover_sync._already_downloaded(missing, "Anything", "Anyone", "ebook") is False
 
 
 class TestSyncWishlist:
@@ -313,3 +322,79 @@ class TestResolveRequestOwner:
 
         assert summary["added"] == 1
         assert user_db.list_requests()[0]["user_id"] == admin["id"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("ebook", ["ebook"]),
+        ("audiobook", ["audiobook"]),
+        ("both", ["ebook", "audiobook"]),
+        ("BOTH ", ["ebook", "audiobook"]),
+        ("garbage", ["audiobook"]),
+        (None, ["audiobook"]),
+    ],
+)
+def test_configured_content_types(monkeypatch, raw, expected):
+    _configure(monkeypatch, HARDCOVER_SYNC_CONTENT_TYPE=raw)
+
+    assert hardcover_sync._configured_content_types() == expected
+
+
+def test_already_downloaded_is_per_content_type(user_db, db_path):
+    _insert_history(db_path, title="Dungeon Crawler Carl", author="Matt Dinniman")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("UPDATE download_history SET content_type = 'ebook'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert hardcover_sync._already_downloaded(
+        db_path, "Dungeon Crawler Carl", "Matt Dinniman", "ebook"
+    )
+    assert not hardcover_sync._already_downloaded(
+        db_path, "Dungeon Crawler Carl", "Matt Dinniman", "audiobook"
+    )
+
+
+class TestSyncBothFormats:
+    def test_both_creates_an_ebook_and_an_audiobook_request_per_book(
+        self, user_db, db_path, monkeypatch
+    ):
+        admin = user_db.create_user(username="ops", role="admin")
+        _configure(monkeypatch, HARDCOVER_SYNC_STATUSES="1", HARDCOVER_SYNC_CONTENT_TYPE="both")
+        provider = _Provider({1: [[_book(1, "Dungeon Crawler Carl")]]})
+        monkeypatch.setattr(hardcover_sync, "_build_provider", lambda: provider)
+        checked: list[str] = []
+        monkeypatch.setattr("shelfmark.core.library_index.any_provider_enabled", lambda: True)
+        monkeypatch.setattr(
+            "shelfmark.core.library_index.is_in_library",
+            lambda _book, content_type=None: (
+                checked.append(content_type) or content_type == "ebook"
+            ),
+        )
+
+        summary = hardcover_sync.sync_wishlist(user_db, db_path=db_path, user_id=admin["id"])
+
+        assert summary == {"added": 1, "skipped": 0, "in_library": 1, "errors": 0}
+        assert checked == ["ebook", "audiobook"]
+        rows = user_db.list_requests()
+        assert [row["content_type"] for row in rows] == ["audiobook"]
+        assert rows[0]["book_data"]["content_type"] == "audiobook"
+
+    def test_second_run_skips_both_existing_requests(self, user_db, db_path, monkeypatch):
+        admin = user_db.create_user(username="ops", role="admin")
+        _configure(monkeypatch, HARDCOVER_SYNC_STATUSES="1", HARDCOVER_SYNC_CONTENT_TYPE="both")
+        provider = _Provider({1: [[_book(1, "Dungeon Crawler Carl")]]})
+        monkeypatch.setattr(hardcover_sync, "_build_provider", lambda: provider)
+
+        first = hardcover_sync.sync_wishlist(user_db, db_path=db_path, user_id=admin["id"])
+        second = hardcover_sync.sync_wishlist(user_db, db_path=db_path, user_id=admin["id"])
+
+        assert first["added"] == 2
+        assert second == {"added": 0, "skipped": 2, "in_library": 0, "errors": 0}
+        assert sorted(row["content_type"] for row in user_db.list_requests()) == [
+            "audiobook",
+            "ebook",
+        ]

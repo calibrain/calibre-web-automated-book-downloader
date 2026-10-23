@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 from shelfmark.core.config import config
 from shelfmark.core.languages import normalize_language
 from shelfmark.core.logger import setup_logger
+from shelfmark.core.text_match import strip_part_suffix, title_tokens_match, tokens
 from shelfmark.release_sources import (
     ColumnAlign,
     ColumnColorHint,
@@ -74,6 +75,19 @@ def _split_title_and_author(raw_title: str) -> tuple[str, str | None]:
         return cleaned_title, None
 
     return title_part, author_part
+
+
+def _holds_title(rows: list[dict[str, str]], title: str) -> bool:
+    """True when some scraped row's own title carries the searched title's words.
+
+    ABB matches a query against whole posts, so a pack whose description lists the
+    book comes back as readily as the book itself. Rows that only mention the title
+    somewhere in their text are not a reason to stop trying simpler queries.
+    """
+    return any(
+        title_tokens_match(title, set(tokens(normalize_search_punctuation(row.get("title", "")))))
+        for row in rows
+    )
 
 
 def _map_language(language: str) -> str | None:
@@ -161,20 +175,32 @@ class AudiobookBaySource(ReleaseSource):
         max_pages = _coerce_positive_int(config.get("ABB_PAGE_LIMIT", 1), 1)
         exact_phrase = bool(config.get("ABB_EXACT_PHRASE", False))
 
-        # Build search query candidates from plan.
+        # Build search query candidates from plan. Each is tried only when the ones before
+        # it brought back no row that holds the title (see ``_holds_title``).
         query_candidates: list[str] = []
+        wanted_title = ""
         if plan.manual_query:
             query_candidates.append(plan.manual_query.strip())
+            wanted_title = plan.manual_query.strip()
         elif plan.title_variants:
             variant = plan.title_variants[0]
-            combined_query = f"{variant.title} {variant.author}".strip()
-            title_only_query = (variant.title or "").strip()
-            if combined_query:
-                query_candidates.append(combined_query)
-            if title_only_query and title_only_query.lower() != combined_query.lower():
-                query_candidates.append(title_only_query)
+            wanted_title = (variant.title or "").strip()
+            # ABB ANDs every term over the whole post, so ", Part II" keeps the volume
+            # itself out of the results while a pack whose description lists it gets in.
+            # Without the part the volume's own post comes back, and the strict matcher
+            # still tells Part One from Part Two.
+            titles = [wanted_title]
+            if (without_part := strip_part_suffix(wanted_title)) != wanted_title:
+                titles.append(without_part)
+            for title in titles:
+                combined_query = f"{title} {variant.author}".strip()
+                if combined_query:
+                    query_candidates.append(combined_query)
+                if title and title.lower() != combined_query.lower():
+                    query_candidates.append(title)
         elif book.title:
             query_candidates.append(book.title.strip())
+            wanted_title = book.title.strip()
 
         # Remove empty and duplicate queries while preserving order.
         deduped_queries: list[str] = []
@@ -193,8 +219,12 @@ class AudiobookBaySource(ReleaseSource):
             logger.debug("No search query available")
             return []
 
-        results = []
-        query_lower = deduped_queries[0].lower()
+        results: list[dict[str, str]] = []
+        seen_links: set[str] = set()
+        # Words of every query run, for the relevance check below. Both sides of that
+        # comparison are punctuation-normalized: scraped titles carry the typographic
+        # forms WordPress renders, queries carry the ASCII ones.
+        query_words: set[str] = set()
 
         try:
             for index, query in enumerate(deduped_queries):
@@ -202,7 +232,7 @@ class AudiobookBaySource(ReleaseSource):
                 logger.info("Searching AudiobookBay for: %s", query_lower)
 
                 # Search AudiobookBay
-                results = scraper.search_audiobookbay(
+                found = scraper.search_audiobookbay(
                     query=query_lower,
                     max_pages=max_pages,
                     hostname=hostname,
@@ -210,35 +240,39 @@ class AudiobookBaySource(ReleaseSource):
                 )
 
                 # Fallback to broad matching if exact phrase returns nothing (manual or auto query).
-                if exact_phrase and not results:
+                if exact_phrase and not found:
                     logger.info(
                         "No exact phrase results, retrying AudiobookBay search without quotes"
                     )
-                    results = scraper.search_audiobookbay(
+                    found = scraper.search_audiobookbay(
                         query=query_lower,
                         max_pages=max_pages,
                         hostname=hostname,
                         exact_phrase=False,
                     )
 
-                if results:
+                query_words |= {
+                    word.lower()
+                    for word in normalize_search_punctuation(query_lower).split()
+                    if len(word) > MIN_RELEVANCE_QUERY_WORD_LENGTH
+                }
+                for row in found:
+                    link = row.get("link") or ""
+                    if link in seen_links:
+                        continue
+                    seen_links.add(link)
+                    results.append(row)
+
+                if _holds_title(found, wanted_title):
                     break
 
                 if index < len(deduped_queries) - 1:
                     logger.info(
-                        "No AudiobookBay results for '%s', retrying with '%s'",
+                        "No AudiobookBay result holds '%s' for '%s', retrying with '%s'",
+                        wanted_title,
                         query_lower,
                         deduped_queries[index + 1].lower(),
                     )
-
-            # Extract query words for relevance checking. Both sides of the
-            # comparison are punctuation-normalized: scraped titles carry the
-            # typographic forms WordPress renders, queries carry the ASCII ones.
-            query_words = {
-                word.lower()
-                for word in normalize_search_punctuation(query_lower).split()
-                if len(word) > MIN_RELEVANCE_QUERY_WORD_LENGTH
-            }
 
             releases = []
             for result in results:

@@ -460,6 +460,19 @@ def test_a_collection_reports_itself_as_a_collection() -> None:
     assert library_index.match_entries(book, shelf) == "collection"
 
 
+def test_a_collection_word_the_search_title_carries_is_the_book_itself() -> None:
+    shelf = [_shelf_entry({"the", "complete", "maus"}, {"art", "spiegelman"})]
+    book = _book(title="The Complete Maus", authors=["Art Spiegelman"])
+
+    assert library_index.match_entries(book, shelf) == "owned"
+
+
+def test_a_megapack_reports_itself_as_a_collection() -> None:
+    shelf = [_shelf_entry({"dungeon", "crawler", "carl", "megapack"}, {"matt", "dinniman"})]
+
+    assert library_index.match_entries(_book(), shelf) == "collection"
+
+
 def test_an_exact_shelf_title_outranks_a_collection_holding_the_same_book() -> None:
     collection = _shelf_entry({"dungeon", "crawler", "carl", "omnibus"}, {"matt", "dinniman"})
     single = _shelf_entry({"dungeon", "crawler", "carl"}, {"matt", "dinniman"})

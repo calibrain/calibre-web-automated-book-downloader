@@ -19,16 +19,21 @@ A book is skipped when:
 
 ### Automatic downloads
 
-When enabled, each pending request that came from Hardcover is searched across your release sources in the configured priority order. The first source that yields a **strict match** wins, and the best candidate from that source is queued through the normal request fulfilment path, so it appears in the activity view and download history exactly like a request an admin approved.
+When enabled, each pending request that came from Hardcover is searched across your release sources in the priority order configured for its content type (audiobook requests use the audiobook list, ebook requests the ebook list). The first source that yields a **strict match** wins, and the best candidate from that source is queued through the normal request fulfilment path, so it appears in the activity view and download history exactly like a request an admin approved.
 
 A release is a strict match only when all of the following hold:
 
-- at least 85% of the significant title words appear in the release title
-- the author's surname appears in the release title, indexer name, or author field
-- the release is an audiobook: an audiobook format (`m4b`, `mp3`, or your configured audiobook formats), or "audiobook"/"unabridged" in the title. Ebook-only formats such as `epub` and `pdf` are rejected
-- for torrents, seeders meet **Minimum seeders**; other protocols ignore this check
+- at least 85% of the significant words in the book's title appear in the release title. Numbers from 1 to 20 count as the same word however they are written, so *Part II*, *Part Two* and *Part 2* agree, while *Part One* never stands in for *Part Two*;
+- the author's surname appears in the release title, indexer name or author field (a book with no author metadata matches on title alone). Some AudiobookBay listings carry no author in their title (*The Mummy or Ramses the Damned*). When a source turns up no strict match, the detail pages of up to three such releases that pass every other rule are read, and the author they credit (a narrator does not count) is checked like any other. A page that credits nobody, or someone else, leaves the release rejected;
+- the release title doesn't name a different book that contains the requested one. A "Dune" request won't take *Dune Messiah* or *Children of Dune*, and a bare number after the title (*Mistborn 2*, *Mistborn Two*, *Dune Chronicles Book II*) names a sequel. A title with a number of its own (*Ready Player One*) takes no other number after it, 1 included. Only the parts of the release name that hold the title are judged, so narrators, uploader tags and the book's own series, author and subtitle words don't count against it; a part that is just the series name (*Alex Cross 25*) does not vouch for a one-word title, so a "Cross" request won't take *Alex Cross: Cross Justice*. Two slash-separated names that both hold the title (*Dune / Dune Messiah*) are two books;
+- the release is not a derivative of the work: *summary*, *analysis*, *study guide*, *workbook*, *abridged*, *dramatized*, *adaptation* or *graphic novel* anywhere in the name disqualifies it, unless the requested title itself carries the word. *Unabridged* is a full recording and is fine;
+- the release is not a multi-book pack: ranges like `1-24` or `Books 1 to 17`, or words like *complete*, *collection*, *box set*, *omnibus*, *trilogy*, *megapack*, *+ short stories*, unless the requested title itself carries them. "Complete and Unabridged" describes one recording and doesn't count. The library check uses the same word list;
+- the format fits the request — an audiobook request needs an audiobook signal (`m4b`/`mp3`, a release from an audiobook-only source, or "audiobook"/"unabridged" in the title) and is never an ebook-only file; an ebook request needs one of your **Supported Book Formats** (or an `.epub`-style marker in the title) and no audiobook signal;
+- for torrents that report a seeder count, it meets **Minimum seeders** — sources that report none (AudiobookBay) are not judged on seeders.
 
-Among matching releases from the winning source, `m4b` outranks `mp3`, then more seeders, then larger size. If no source produces a confident match the request stays **pending** for manual review; nothing is guessed.
+AudiobookBay requires every word of a query, and its posts for one volume of a multi-part book often spell the part differently from the request ("Part Two" for "Part II"), so a query carrying the part finds only the packs that list it. When no row a query returns carries the requested title, the source tries the next query, ending with the title minus its trailing *, Part N* or *Volume N*. The strict match above still decides which part was found.
+
+Among matching releases from the winning source, format ranks first (`m4b` over `mp3` for audiobooks; `epub` over `azw3` over `mobi` for ebooks), then the copy other people chose — more downloads (direct-download sources report them), then more seeders — then larger size. If no source produces a confident match the request stays **pending** for manual review; nothing is guessed.
 
 ### Library check
 
@@ -43,11 +48,12 @@ The check **fails closed** here: if an enabled library cannot be read and has no
 | `HARDCOVER_SYNC_ENABLED` | Enable scheduled sync | Off | Runs shelf sync on the interval below |
 | `HARDCOVER_SYNC_TOKEN` | Hardcover API Token | — | Leave blank to reuse the Hardcover metadata provider's token |
 | `HARDCOVER_SYNC_STATUSES` | Shelves to sync | Want to Read | Hardcover reading status to pull from |
-| `HARDCOVER_SYNC_CONTENT_TYPE` | Request as | Audiobooks | Content type given to synced requests and targeted by automatic downloads |
+| `HARDCOVER_SYNC_CONTENT_TYPE` | Request as | Audiobooks | `Audiobooks`, `Ebooks`, or `Ebooks and audiobooks` — the last creates one request of each per shelf book, each checked against its own library |
 | `HARDCOVER_SYNC_INTERVAL` | Sync interval | 6 | Combined with the unit below |
 | `HARDCOVER_SYNC_INTERVAL_UNIT` | Interval unit | Hours | Minutes or hours. The effective interval never drops below 60 seconds |
 | `AUTO_DOWNLOAD_ENABLED` | Enable automatic downloads | Off | Auto-approve and queue strict matches for Hardcover requests |
-| `AUTO_DOWNLOAD_SOURCE_PRIORITY` | Source priority | All usable sources | Drag to order. Sources you disable here, or that are not configured, are skipped |
+| `AUTO_DOWNLOAD_SOURCE_PRIORITY` | Audiobook source priority | All usable sources | Drag to order; used for audiobook requests. Sources you disable here, or that are not configured, are skipped |
+| `AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY` | Ebook source priority | All usable sources | Same, for ebook requests |
 | `AUTO_DOWNLOAD_MIN_SEEDERS` | Minimum seeders (torrents) | 1 | Torrent releases below this are ignored |
 
 One action button sits at the bottom of the tab:
@@ -72,7 +78,7 @@ Only one run happens at a time. If a scheduled cycle is in progress, **Sync now*
 
 **Sync adds nothing and the log says "no Hardcover token configured"** — set **Hardcover API Token** on this tab, or configure the token on the Hardcover metadata provider. A sync without a usable token counts as an error and creates no requests.
 
-**Requests appear but nothing downloads** — check **Enable automatic downloads** is on, that **Source priority** contains at least one configured source that supports audiobooks, and look for `no strict match` lines in the log. Lowering **Minimum seeders** helps on quiet trackers; loosening the title or author match is deliberately not an option.
+**Requests appear but nothing downloads** — check **Enable automatic downloads** is on, that the source-priority list for the request's content type contains at least one configured source, and look for `no strict match` lines in the log. Lowering **Minimum seeders** helps on quiet trackers; loosening the title or author match is deliberately not an option.
 
 **Books you own keep being added** — enable the library check for the format you request (see [Library Check](library-check.md)) and use its test button. A library that cannot be read shows up in the log as a skipped cycle.
 

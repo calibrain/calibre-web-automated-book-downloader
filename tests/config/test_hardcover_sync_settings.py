@@ -69,3 +69,13 @@ def test_sync_now_starts_a_forced_run(monkeypatch):
 
     assert result["success"] is True
     assert seen == [{"force": True}]
+
+
+def test_request_as_offers_both_and_ebook_sources_have_their_own_priority_list():
+    fields = _field_map()
+    options = fields["HARDCOVER_SYNC_CONTENT_TYPE"].options
+    values = {o["value"] for o in (options() if callable(options) else options)}
+
+    assert values == {"audiobook", "ebook", "both"}
+    assert "AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY" in fields
+    assert fields["AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY"].default == []

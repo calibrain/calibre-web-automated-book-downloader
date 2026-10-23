@@ -454,6 +454,50 @@ def extract_file_list(detail_html: str) -> list[PackFile] | None:
     return None
 
 
+# One credit in a line of them: "Anne Rice (Author)", "Dylan Baker (Reader)".
+_CREDIT = re.compile(r"^(?P<name>[^()]+?)\s*\((?P<role>[A-Za-z ]+)\)$")
+_LEADING_BY = re.compile(r"^\s*by\s+", re.IGNORECASE)
+_AUTHOR_ROLES = frozenset({"author", "writer"})
+
+
+def _credited_authors(text: str) -> list[str]:
+    """Authors from a paragraph that is nothing but credits, else an empty list.
+
+    "by Anne Rice (Author)" and "James Patterson (Author), Richard DiLallo (Author),
+    Dylan Baker (Reader)" qualify. A paragraph with anything else in it is description,
+    and a name it mentions says nothing about who wrote the book.
+    """
+    parts = [part.strip() for part in _LEADING_BY.sub("", text).split(",")]
+    matches = [_CREDIT.match(part) for part in parts]
+    if not parts or not all(matches):
+        return []
+    return [
+        credit.group("name").strip()
+        for credit in matches
+        if credit and credit.group("role").strip().lower() in _AUTHOR_ROLES
+    ]
+
+
+def extract_authors(detail_html: str) -> list[str]:
+    """The book's authors as a detail page credits them; empty when it does not say.
+
+    Newer posts mark the authors up ("Written by" and ``span.author``); older ones, whose
+    listing title carries no " - Author", have a line of credits instead. Only names
+    credited as the author count: a narrator is not one, and a name in the description
+    is not read at all.
+    """
+    soup = BeautifulSoup(detail_html, "html.parser")
+    content = soup.select_one(".postContent") or soup
+    marked = [span.get_text(" ", strip=True) for span in content.select("span.author")]
+    if any(marked):
+        return [name for name in marked if name]
+    for paragraph in content.find_all("p"):
+        authors = _credited_authors(paragraph.get_text(" ", strip=True))
+        if authors:
+            return authors
+    return []
+
+
 def extract_magnet_link(details_url: str, hostname: str = "audiobookbay.lu") -> str | None:
     """Extract info hash and trackers from book detail page, then construct magnet link.
 
