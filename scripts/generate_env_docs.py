@@ -362,6 +362,7 @@ def generate_env_docs() -> str:
     # Import settings modules to ensure all settings are registered
     import shelfmark.config.security
     import shelfmark.config.settings
+    import shelfmark.metadata_providers.dnb
     import shelfmark.metadata_providers.googlebooks
     import shelfmark.metadata_providers.hardcover
     import shelfmark.metadata_providers.openlibrary
