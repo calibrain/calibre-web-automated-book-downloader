@@ -130,6 +130,38 @@ def _fetch_library_entries(url: str, token: str, lib_ids: list[str]) -> list[Lib
     return entries
 
 
+def search_books(
+    title: str,
+    author: str,
+    provider: str,
+    *,
+    timeout: float = _REQUEST_TIMEOUT,
+    overrides: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Ask Audiobookshelf's metadata search (``GET /api/search/books``) about a book.
+
+    ``provider`` names one of the server's metadata providers: ``audible`` is the US
+    store, ``audible.uk`` the UK one. The result is the server's list of matches, best
+    first, each with at least ``title``, ``author`` and (for Audible) ``asin``. Raises
+    ValueError without a URL and token, and the requests error when the server or the
+    store fails; the caller decides what an error means.
+    """
+    _enabled, url, token, _lib_ids = _config(overrides)
+    if not url or not token:
+        raise ValueError("Set the Audiobookshelf URL and token first.")
+    resp = _session(url, token).get(
+        f"{url}/api/search/books",
+        params={"title": title, "author": author, "provider": provider},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if not isinstance(payload, list):
+        msg = "Audiobookshelf answered the book search with something other than a list"
+        raise ValueError(msg)  # noqa: TRY004 - a bad answer from the server, not a bad argument
+    return [item for item in payload if isinstance(item, dict)]
+
+
 class AudiobookshelfLibrary:
     """Audiobook ownership via the Audiobookshelf REST API."""
 

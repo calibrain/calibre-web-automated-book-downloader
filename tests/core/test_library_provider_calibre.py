@@ -5,13 +5,16 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from shelfmark.core import library_index
 from shelfmark.core.library_providers import calibre
 from shelfmark.metadata_providers import BookMetadata
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _SCHEMA = """
 CREATE TABLE books (id INTEGER PRIMARY KEY, title TEXT NOT NULL, uuid TEXT);
@@ -72,6 +75,19 @@ def _configure(monkeypatch: pytest.MonkeyPatch, path: Path, *, enabled: bool = T
         lambda key, default=None, user_id=None: values.get(key, default),
     )
     monkeypatch.setattr(library_index, "_cache", {})
+
+
+@pytest.fixture
+def calibre_library(monkeypatch: pytest.MonkeyPatch) -> Callable[..., Path]:
+    """Point the provider at a library, building it first unless ``create=False``."""
+
+    def make(*, path: Path, create: bool = True, enabled: bool = True) -> Path:
+        if create:
+            _make_library(path)
+        _configure(monkeypatch, path, enabled=enabled)
+        return path
+
+    return make
 
 
 def _infos(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -317,3 +333,126 @@ def test_fingerprint_follows_the_database_and_wal_mtime(
     os.utime(wal, (later, later))
 
     assert provider.fingerprint() == later
+
+
+def _library_with(path: Path, books: list[tuple[int, str, str, str | None]]) -> None:
+    """A library of (id, title, author, series) rows."""
+    conn = sqlite3.connect(path)
+    conn.executescript(_SCHEMA)
+    series_ids: dict[str, int] = {}
+    for book_id, title, author, series_name in books:
+        conn.execute(
+            "INSERT INTO books(id, title, uuid) VALUES (?, ?, ?)", (book_id, title, f"u{book_id}")
+        )
+        conn.execute("INSERT INTO authors(id, name) VALUES (?, ?)", (book_id, author))
+        conn.execute(
+            "INSERT INTO books_authors_link(book, author) VALUES (?, ?)", (book_id, book_id)
+        )
+        if series_name:
+            sid = series_ids.setdefault(series_name, len(series_ids) + 1)
+            conn.execute("INSERT OR IGNORE INTO series(id, name) VALUES (?, ?)", (sid, series_name))
+            conn.execute(
+                "INSERT INTO books_series_link(book, series) VALUES (?, ?)", (book_id, sid)
+            )
+    conn.commit()
+    conn.close()
+
+
+def _owned(entries: list[Any], title: str, author: str) -> str | None:
+    book = BookMetadata(provider="hardcover", provider_id="x", title=title, authors=[author])
+    return library_index.match_entries(book, entries)
+
+
+def test_an_abbreviated_series_label_in_the_title_does_not_hide_an_owned_book(
+    tmp_path: Path, calibre_library: Callable[..., Path]
+) -> None:
+    # The library names books "Label NN: Title". When the label abbreviates the series
+    # ("HHG" for The Hitchhiker's Guide to the Galaxy) its words are in neither the
+    # series nor the author, and the book read as not owned, so it was fetched again.
+    path = tmp_path / "metadata.db"
+    _library_with(
+        path,
+        [
+            (1, "HHG 5: Mostly Harmless", "Douglas Adams", "The Hitchhiker's Guide to the Galaxy"),
+            (2, "DCC 7: This Inevitable Ruin", "Matt Dinniman", "Dungeon Crawler Carl"),
+        ],
+    )
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Mostly Harmless", "Douglas Adams") == "owned"
+    assert _owned(entries, "This Inevitable Ruin", "Matt Dinniman") == "owned"
+
+
+def test_a_series_label_still_does_not_make_a_different_book_match(
+    tmp_path: Path, calibre_library: Callable[..., Path]
+) -> None:
+    path = tmp_path / "metadata.db"
+    _library_with(
+        path,
+        [(1, "HHG 5: Mostly Harmless", "Douglas Adams", "The Hitchhiker's Guide to the Galaxy")],
+    )
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Harmless", "Douglas Adams") is None
+    assert _owned(entries, "Mostly Harmless", "Someone Else") is None
+
+
+def test_a_title_prefix_without_a_series_is_left_alone(
+    tmp_path: Path, calibre_library: Callable[..., Path]
+) -> None:
+    # Only a book that has a series gets its leading "Label NN:" treated as the label.
+    path = tmp_path / "metadata.db"
+    _library_with(path, [(1, "Messiah 2: Dune", "Frank Herbert", None)])
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Dune", "Frank Herbert") is None
+
+
+@pytest.mark.parametrize(
+    "shelf_title",
+    [
+        "Dungeon Crawler Carl (Full Cast Edition)",
+        "Dungeon Crawler Carl (Dramatized Adaptation)",
+        "Dungeon Crawler Carl [GraphicAudio]",
+    ],
+)
+def test_an_edition_marker_in_the_title_is_a_different_edition(
+    tmp_path: Path, calibre_library: Callable[..., Path], shelf_title: str
+) -> None:
+    # A bracketed marker with no number in it describes the edition. Owning a full-cast
+    # or dramatized recording is not owning the book it adapts, so the request must
+    # not be closed as already in the library.
+    path = tmp_path / "metadata.db"
+    _library_with(path, [(1, shelf_title, "Matt Dinniman", None)])
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Dungeon Crawler Carl", "Matt Dinniman") is None
+    # The same edition, asked for by its own name, is on the shelf.
+    assert _owned(entries, shelf_title, "Matt Dinniman") == "owned"
+
+
+@pytest.mark.parametrize(
+    ("shelf_title", "series"),
+    [
+        ("Kiss the Girls (Alex Cross Series #11)", None),
+        ("Kiss the Girls (Alex Cross, Book 2)", None),
+        ("Alex Cross 02: Kiss the Girls", "Alex Cross"),
+        ("Kiss the Girls (Illustrated Edition)", None),
+        ("Kiss the Girls (Unabridged)", None),
+    ],
+)
+def test_series_metadata_and_printing_words_in_the_title_do_not_hide_the_book(
+    tmp_path: Path, calibre_library: Callable[..., Path], shelf_title: str, series: str | None
+) -> None:
+    # A numbered parenthetical is the series by Calibre convention, often in place of
+    # the series field, and a printing word changes nothing about which work it is.
+    path = tmp_path / "metadata.db"
+    _library_with(path, [(1, shelf_title, "James Patterson", series)])
+    calibre_library(path=path, create=False)
+    entries = calibre.CalibreLibrary().fetch_entries()
+
+    assert _owned(entries, "Kiss the Girls", "James Patterson") == "owned"

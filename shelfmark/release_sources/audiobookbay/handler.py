@@ -117,6 +117,18 @@ class AudiobookBayHandler(ExternalClientHandler):
             return None
         return scraper.extract_authors(detail_html) or None
 
+    def seed_complaints(self, release_data: dict[str, Any]) -> int | None:
+        """Count the comments on the post that say nobody is seeding it (None: page unreadable)."""
+        raw_url = release_data.get("download_url") or release_data.get("source_url")
+        detail_url = raw_url.strip() if isinstance(raw_url, str) else ""
+        hostname = _resolve_allowed_detail_hostname()
+        if not detail_url or not _detail_url_matches_host(detail_url, hostname):
+            return None
+        detail_html = scraper.fetch_detail_html(detail_url, hostname)
+        if not detail_html:
+            return None
+        return scraper.extract_seed_complaints(detail_html)
+
     def _get_client(self, protocol: str) -> DownloadClient | None:
         """Compatibility shim so module-level patching still works in tests."""
         return get_client(protocol)

@@ -33,11 +33,30 @@ A release is a strict match only when all of the following hold:
 
 AudiobookBay requires every word of a query, and its posts for one volume of a multi-part book often spell the part differently from the request ("Part Two" for "Part II"), so a query carrying the part finds only the packs that list it. When no row a query returns carries the requested title, the source tries the next query, ending with the title minus its trailing *, Part N* or *Volume N*. The strict match above still decides which part was found.
 
+When no source yields a strict match for the request's own search title, up to three simpler titles are tried in turn, each across the sources in priority order and all within the request's search budget: the title without a subtitle after `:` or ` - `, the title without an alternate title (*The Hobbit, or There and Back Again* becomes *The Hobbit*), and the title with its numbers written as digits (*Part II* becomes *Part 2*). The first one that yields a strict match wins, and the log names it. A simpler title is matched by exactly the rules above, so a release has to name the shorter title, the right author, and no sequel, edition, derivative or pack. The subtitle is only dropped when the book's metadata says it is one (a series name is known, or the book's subtitle is what follows the separator), and never when what is left is only the series or author name: *Star Wars: Thrawn* is not searched as *Star Wars*.
+
 Among matching releases from the winning source, format ranks first (`m4b` over `mp3` for audiobooks; `epub` over `azw3` over `mobi` for ebooks), then the copy other people chose — more downloads (direct-download sources report them), then more seeders — then larger size. If no source produces a confident match the request stays **pending** for manual review; nothing is guessed.
+
+A request whose book turns out to be in your library already is closed, not left pending: it is marked fulfilled with the admin note `[auto] Already in the library.`, so it stops being looked up every pass. Before this it sat in Needs Review indefinitely. **Clear Completed** clears these too.
+
+Hardcover allows a short burst of lookups and then answers 429. Each pass paces its book lookups and backs off when told to, following `Retry-After`. A lookup that still fails counts as an error for that request, not as "book not found", and the request is tried again next pass.
 
 A download that fails, or is interrupted (a restart while it was queued, say), does not stay that way forever. Once the request has sat there for **Retry failed downloads after (days)** (7 by default), it goes back to pending and the next pass searches again. Each pass reopens at most five, oldest first, so a backlog is spread out instead of hitting your sources at once. An interrupted download may pick the same release again, since a torrent already in your client is joined instead of added twice. A download that itself failed, or that Shelfmark's stall timer cancelled, has its release remembered and skipped next time, and the request is given up on after three failed retries. Requests you or an admin cancelled are never retried, and neither are rejected ones: both are decisions. Set the value to 0 to turn retries off.
 
 A request that no source has a match for is not searched every cycle for ever. After three passes in a row with no match it is searched once a day, then every two days, and no further apart than **Longest wait between searches for an unmatched request (days)** (3 by default, 0 searches every unmatched request every cycle). A match, a search that failed (which says nothing about the book) or **Sync now** starts it over.
+**Trying another release sooner.** Set **Try another release after a failed download (minutes)** (off by default) and a download that fails, or that is given up on (stalled, or no seeders when **Give Up With No Seeders** is on), does not wait for the days above. Between sync cycles Shelfmark looks for such requests, reopens them after that many minutes and searches again, for those requests only. The release that failed is skipped, and a request is still given up on after three failed attempts.
+
+**Sources known to be dead are tried last.** When choosing among matching releases, a Soulseek peer whose transfers failed in the last three days and who delivered nothing in that time comes after the others. AudiobookBay shows no seed counts, so the comments on its five best posts are read, and a post where comments say it has no seeders comes after the others. Nothing is excluded: if a dead-looking release is the only match, it is still tried.
+
+### Audiobooks no store sells
+
+Some requested books were never recorded, so no source will ever match them and the request waits in Needs Review for good. With **Mark audiobooks no store sells** on, an audiobook request that has gone **Look the book up after (unmatched passes)** consecutive passes (3 by default) without a strict match is looked up on Audible's US and UK stores, through the metadata search of the Audiobookshelf server set up for the library check (its URL and token are needed; the library check itself can stay off).
+
+- **On neither store:** the request stays pending and its failure reason reads `Not found on Audible (US/UK) after <N> searches, <date>`. It is not declined: Audible search misses real recordings (novellas sold only in a collection, books retitled before release, older or fan recordings), so the call is left to you. The store is asked again a week later.
+- **On a store:** the request stays pending and its failure reason reads `Exists on Audible (<ASIN>), not on our sources yet`. The store is asked again a week later, not every pass.
+- **Lookup failed:** nothing changes and the next pass asks again. A failed lookup never marks a request. Audiobookshelf answers a failed Audible search with an empty list, which looks like "no such book", so before marking a request as not found Shelfmark also looks up a book both stores are known to sell (*The Hobbit*). If that comes back missing too, the answer is treated as a failure.
+
+A store result counts as the book when its title matches the request's once both are normalised (accents, punctuation, "Part II"/"Part Two"/"Part 2", a subtitle after `:` or `, or`, bracketed notes like "(Unabridged)" and a leading series label are all ignored, and a title that begins the other with at least two words also counts) and the request author's surname is in its author field. The matching leans towards "found": a wrong "found" only leaves the request pending. The pass counter is reset when a source matches the book and when the request is rejected, so a reopened request counts afresh. Store lookups come out of the request's search time; when too little is left, the lookup waits for the next pass. Ebook requests are not checked.
 
 ### Library check
 
@@ -61,6 +80,10 @@ The check **fails closed** here: if an enabled library cannot be read and has no
 | `AUTO_DOWNLOAD_MIN_SEEDERS` | Minimum seeders (torrents) | 1 | Torrent releases below this are ignored |
 | `AUTO_DOWNLOAD_RETRY_DAYS` | Retry failed downloads after (days) | 7 | A failed or interrupted download goes back to pending after this long. 0 turns retries off |
 | `AUTO_DOWNLOAD_BACKOFF_MAX_DAYS` | Longest wait between searches for an unmatched request (days) | 3 | 0 searches every unmatched request every cycle |
+| `AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES` | Try another release after a failed download (minutes) | 0 (off) | Reopens failed or given-up downloads and picks another release this long after, between sync cycles |
+| `AUTO_DOWNLOAD_RETRY_FAILED_RELEASE_DAYS` | Try a failed release again after (days) | 7 | A release that failed or stalled is kept out of the search for this long, then may be picked again; a request is still given up on after three failed attempts |
+| `AUTO_DOWNLOAD_EXISTENCE_CHECK_ENABLED` | Mark audiobooks no store sells | Off | See [Audiobooks no store sells](#audiobooks-no-store-sells). Needs the Audiobookshelf URL and token |
+| `AUTO_DOWNLOAD_EXISTENCE_CHECK_AFTER_PASSES` | Look the book up after (unmatched passes) | 3 | Consecutive passes without a strict match before the stores are asked |
 
 One action button sits at the bottom of the tab:
 

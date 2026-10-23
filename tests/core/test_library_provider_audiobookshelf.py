@@ -159,6 +159,88 @@ def test_a_plain_shelf_title_is_unchanged_by_the_series_handling() -> None:
     assert library_index.match_entries(_searching("Kiss the Girls"), [entry]) == "owned"
 
 
+@pytest.mark.parametrize(
+    "shelf_title",
+    [
+        "Dungeon Crawler Carl (Full Cast Edition)",
+        "Dungeon Crawler Carl (Audio Immersion Tunnel)",
+        "Dungeon Crawler Carl (GraphicAudio)",
+        "Dungeon Crawler Carl [Dramatized Adaptation]",
+        "Dungeon Crawler Carl (Part 1 of 3) (Dramatized Adaptation)",
+    ],
+)
+def test_an_alternate_edition_on_the_shelf_is_not_the_book(shelf_title: str) -> None:
+    # A full-cast or dramatized recording shares the title and author of the
+    # single-narrator original, but owning one is not owning the other. The bracketed
+    # words stay in the title set, where the matcher reads them as naming another
+    # edition.
+    entry = audiobookshelf._item_to_entry(_item(shelf_title, "Matt Dinniman"))
+
+    assert (
+        library_index.match_entries(_searching("Dungeon Crawler Carl", "Matt Dinniman"), [entry])
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    ("shelf_title", "searching"),
+    [
+        ("Dungeon Crawler Carl (Unabridged)", "Dungeon Crawler Carl"),
+        ("Dungeon Crawler Carl (Abridged)", "Dungeon Crawler Carl"),
+        ("Dungeon Crawler Carl (Illustrated Edition)", "Dungeon Crawler Carl"),
+        ("Dungeon Crawler Carl (Full Cast Edition)", "Dungeon Crawler Carl (Full Cast Edition)"),
+    ],
+)
+def test_a_printing_word_or_the_same_edition_marker_is_still_the_book(
+    shelf_title: str, searching: str
+) -> None:
+    # "(Unabridged)" is shelf noise, not an edition; and the edition asked for by its
+    # own name is the one on the shelf.
+    entry = audiobookshelf._item_to_entry(_item(shelf_title, "Matt Dinniman"))
+
+    assert library_index.match_entries(_searching(searching, "Matt Dinniman"), [entry]) == "owned"
+
+
+def test_a_marker_on_the_searched_title_alone_is_not_on_the_shelf() -> None:
+    entry = audiobookshelf._item_to_entry(_item("Dungeon Crawler Carl", "Matt Dinniman"))
+
+    assert (
+        library_index.match_entries(
+            _searching("Dungeon Crawler Carl (GraphicAudio)", "Matt Dinniman"), [entry]
+        )
+        is None
+    )
+
+
+class _Response:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, Any]:
+        return self.payload
+
+
+class _Session:
+    def __init__(self, libraries: list[dict[str, Any]], pages: dict[int, dict[str, Any]]) -> None:
+        self.libraries = libraries
+        self.pages = pages
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def get(self, url: str, params: dict[str, Any] | None = None, timeout: int = 0) -> _Response:
+        self.calls.append((url, dict(params or {})))
+        if url.endswith("/api/libraries"):
+            return _Response({"libraries": self.libraries})
+        return _Response(self.pages[int(self.calls[-1][1]["page"])])
+
+
+def _install(monkeypatch: pytest.MonkeyPatch, session: _Session) -> None:
+    monkeypatch.setattr(audiobookshelf, "_session", lambda url, token: session)
+    monkeypatch.setattr(audiobookshelf, "_ITEMS_PAGE_LIMIT", 2)
+
+
 def test_fetch_pages_through_book_libraries(monkeypatch: pytest.MonkeyPatch) -> None:
     session = _Session(
         libraries=[{"id": "books", "mediaType": "book"}, {"id": "pods", "mediaType": "podcast"}],

@@ -200,6 +200,33 @@ def hardcover_sync_settings() -> list[SettingsField]:
             max_value=365,
         ),
         NumberField(
+            key="AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES",
+            label="Try another release after a failed download (minutes)",
+            description=(
+                "A download that failed, or that was given up on (stalled, no seeders), goes "
+                "back to pending this many minutes later and another release is chosen, "
+                "without waiting for the retry days above or the next sync cycle. The release "
+                "that failed is not picked again, and a request is given up on after three "
+                "failed attempts. 0 turns this off."
+            ),
+            default=0,
+            min_value=0,
+            max_value=1440,
+        ),
+        NumberField(
+            key="AUTO_DOWNLOAD_RETRY_FAILED_RELEASE_DAYS",
+            label="Try a failed release again after (days)",
+            description=(
+                "A release that failed or stalled is kept out of the search for this many "
+                "days, then it may be picked again. A torrent that stalled can be revived "
+                "by new seeds, so a failure should not shut a book out for good. A request "
+                "is still given up on after three failed attempts."
+            ),
+            default=7,
+            min_value=1,
+            max_value=365,
+        ),
+        NumberField(
             key="AUTO_DOWNLOAD_BACKOFF_MAX_DAYS",
             label="Longest wait between searches for an unmatched request (days)",
             description=(
@@ -211,6 +238,30 @@ def hardcover_sync_settings() -> list[SettingsField]:
             default=3,
             min_value=0,
             max_value=30,
+        ),
+        CheckboxField(
+            key="AUTO_DOWNLOAD_EXISTENCE_CHECK_ENABLED",
+            label="Mark audiobooks no store sells",
+            description=(
+                "An audiobook request that stays unmatched is looked up on Audible (US and "
+                "UK) through your Audiobookshelf server. Either way it stays pending and its "
+                "reason says what the store answered (with the ASIN when listed), for you to "
+                "decline or keep; it is checked again after a week. A lookup that "
+                "fails decides nothing. Needs the Audiobookshelf URL and token below."
+            ),
+            default=False,
+        ),
+        NumberField(
+            key="AUTO_DOWNLOAD_EXISTENCE_CHECK_AFTER_PASSES",
+            label="Look the book up after (unmatched passes)",
+            description=(
+                "How many consecutive passes with no strict match a request goes through "
+                "before the store is asked. A pass that matched, or a reopen, starts the "
+                "count over."
+            ),
+            default=3,
+            min_value=1,
+            max_value=100,
         ),
         NumberField(
             key="AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT",

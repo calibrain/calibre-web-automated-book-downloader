@@ -52,6 +52,8 @@ In order of confidence:
 
 ## Behaviour worth knowing
 
+Sequels and other near-miss titles fail the title rule; the same title by a different author fails the surname rule. A series label in front of a library title ("Alex Cross 02: Kiss the Girls", "HHG 5: Mostly Harmless") is read as the series, not as part of the title, when the entry is in a series, so renaming a shelf to show reading order doesn't make its books look unowned. A shelf title whose bracketed words name another edition ("Full Cast Edition", "Dramatized Adaptation") is not the book either: owning the adaptation is not owning the recording asked for. Printing words ("Illustrated Edition", "Unabridged") change nothing, and in a Calibre title a numbered parenthetical ("(Alex Cross Series #11)") is read as the series, not as an edition.
+
 - **It fails open for badges.** If a library cannot be read, Shelfmark logs a warning, reuses
   the last successful read if it has one, and otherwise treats the book as not owned. A
   broken path degrades the badge, it never blocks a search.
