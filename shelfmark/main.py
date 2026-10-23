@@ -2022,8 +2022,10 @@ def api_local_download() -> Response | tuple[Response, int]:
         return send_file(file_paths[0], download_name=file_name, as_attachment=True)
 
     except _OPERATIONAL_ERRORS as e:
+        # The details are logged. The message of an OSError names the file's path on the server,
+        # which a non-admin never sees anywhere else.
         logger.error_trace(f"Local download error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Could not read the file"}), 500
 
 
 @app.route("/api/covers/<cover_id>", methods=["GET"])
