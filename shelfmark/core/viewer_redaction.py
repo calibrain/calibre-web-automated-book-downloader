@@ -6,7 +6,8 @@ Its task id is that release's ``source_id``, which for Prowlarr is
 The requester never browsed those releases, so for them a request-linked
 download is addressed by an opaque id instead. Request rows keep only the
 release fields the activity cards display, and a download path shrinks to the
-file name, which the browser download reveals anyway.
+file name, which the browser download reveals anyway. A status message that quotes
+a client error loses the links in it, which can carry an indexer key or a tracker passkey.
 
 Downloads a user queued directly keep their real id: the user picked that
 release from search results that already showed its ``source_id``, and the
@@ -18,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import re
 from pathlib import PurePath
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +29,17 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 PUBLIC_DOWNLOAD_ID_PREFIX = "dl_"
+
+# A client error is stored as the download's status message, and it quotes the request:
+# "401 Client Error: Unauthorized for url: <full url>", or for a refused connection
+# "Max retries exceeded with url: <path and query>" with no scheme. The link can carry an
+# indexer key or a tracker passkey in its query string or path, and a non-admin has no use
+# for it. Schemes are case-insensitive.
+_LINK_IN_MESSAGE_PATTERN = re.compile(
+    r"https?://[^\s'\"<>)\]]+|(?<=url: )/[^\s'\"<>)\]]*",
+    re.IGNORECASE,
+)
+_REMOVED_LINK = "(link removed)"
 
 # Release fields a non-admin's activity cards display. Everything else (source_id,
 # indexer, info and download URLs, torrent attributes) stays server-side.
@@ -108,9 +121,21 @@ def redact_request_row(row: dict[str, Any]) -> dict[str, Any]:
     return {**row, "release_data": redact_release_data(row["release_data"])}
 
 
+def redact_status_message(message: str) -> str:
+    """Replace every link in a status message, keeping the rest of the text.
+
+    A link is a full http(s) URL, or the scheme-less path after ``url: `` that requests
+    prints for a failed connection.
+    """
+    return _LINK_IN_MESSAGE_PATTERN.sub(_REMOVED_LINK, message)
+
+
 def redact_download_payload(payload: dict[str, Any], task_id: str | None = None) -> dict[str, Any]:
     """Return a copy of a download payload that is safe to show its non-admin owner."""
     redacted = dict(payload)
+    status_message = payload.get("status_message")
+    if isinstance(status_message, str):
+        redacted["status_message"] = redact_status_message(status_message)
     raw_id = task_id if task_id is not None else payload.get("id")
     if isinstance(raw_id, str) and raw_id:
         viewer_id = viewer_download_id(raw_id, payload.get("request_id"))
