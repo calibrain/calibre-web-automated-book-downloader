@@ -151,8 +151,8 @@ class TestRealDebridAdd:
         ok.json = MagicMock(return_value={"id": "RD1"})
         post = MagicMock(return_value=ok)
         put = MagicMock(return_value=ok)
-        monkeypatch.setattr("shelfmark.download.clients.realdebrid.requests.post", post)
-        monkeypatch.setattr("shelfmark.download.clients.realdebrid.requests.put", put)
+        monkeypatch.setattr("shelfmark.download.clients.realdebrid._session.post", post)
+        monkeypatch.setattr("shelfmark.download.clients.realdebrid._session.put", put)
         return post, put
 
     def test_proxy_url_is_uploaded_as_a_torrent_file_not_posted_as_a_magnet(self, monkeypatch):
@@ -258,7 +258,7 @@ class TestAllDebridAdd:
             return_value={"status": "success", "data": {entries_key: [{"id": 4242}]}}
         )
         post = MagicMock(return_value=ok)
-        monkeypatch.setattr("shelfmark.download.clients.alldebrid.requests.post", post)
+        monkeypatch.setattr("shelfmark.download.clients.alldebrid._session.post", post)
         return post
 
     def test_proxy_url_is_uploaded_to_the_file_endpoint(self, monkeypatch):

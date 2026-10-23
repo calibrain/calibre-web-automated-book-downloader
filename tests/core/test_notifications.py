@@ -6,6 +6,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import apprise
+import pytest
 
 from shelfmark.core import notifications as notifications_module
 
@@ -529,9 +530,9 @@ def test_resolve_admin_routes_returns_empty_when_no_routes(monkeypatch):
 
 
 def test_resolve_user_routes_uses_user_overrides(monkeypatch):
-    def _fake_get(key, default=None, user_id=None):
+    def _fake_get_for_user(key, default=None, user_id=None):
         if user_id != 42:
-            return default
+            return default, False
         values = {
             "USER_NOTIFICATION_ROUTES": [
                 {"event": "all", "url": " ntfys://ntfy.sh/alice "},
@@ -539,16 +540,17 @@ def test_resolve_user_routes_uses_user_overrides(monkeypatch):
                 {"event": "download_failed", "url": "ntfys://ntfy.sh/errors"},
             ],
         }
-        return values.get(key, default)
+        return values.get(key, default), True
 
-    monkeypatch.setattr(notifications_module.app_config, "get", _fake_get)
+    monkeypatch.setattr(notifications_module.app_config, "get_for_user", _fake_get_for_user)
 
-    routes = notifications_module._resolve_user_routes(42)
+    routes, admin_default = notifications_module._resolve_user_routes(42)
 
     assert routes == [
         {"event": "all", "url": "ntfys://ntfy.sh/alice"},
         {"event": "download_failed", "url": "ntfys://ntfy.sh/errors"},
     ]
+    assert admin_default is False
 
 
 def test_notify_user_submits_non_blocking_when_route_matches_event(monkeypatch):
@@ -557,7 +559,7 @@ def test_notify_user_submits_non_blocking_when_route_matches_event(monkeypatch):
     monkeypatch.setattr(
         notifications_module,
         "_resolve_user_routes",
-        lambda _user_id: [{"event": "download_failed", "url": "discord://Webhook/Token"}],
+        lambda _user_id: ([{"event": "download_failed", "url": "discord://Webhook/Token"}], False),
     )
 
     context = notifications_module.NotificationContext(
@@ -652,26 +654,176 @@ def test_resolve_admin_routes_expands_multiselect_event_rows(monkeypatch):
 
 
 def test_resolve_user_routes_expands_multiselect_event_rows(monkeypatch):
-    def _fake_get(key, default=None, user_id=None):
+    def _fake_get_for_user(key, default=None, user_id=None):
         if key != "USER_NOTIFICATION_ROUTES" or user_id != 7:
-            return default
+            return default, False
         return [
             {
                 "event": ["download_complete", "request_fulfilled"],
                 "url": "ntfys://ntfy.sh/user-main",
             },
             {"event": ["all", "download_failed"], "url": "ntfys://ntfy.sh/user-all"},
-        ]
+        ], True
 
-    monkeypatch.setattr(notifications_module.app_config, "get", _fake_get)
+    monkeypatch.setattr(notifications_module.app_config, "get_for_user", _fake_get_for_user)
 
-    routes = notifications_module._resolve_user_routes(7)
+    routes, _ = notifications_module._resolve_user_routes(7)
 
     assert routes == [
         {"event": "download_complete", "url": "ntfys://ntfy.sh/user-main"},
         {"event": "request_fulfilled", "url": "ntfys://ntfy.sh/user-main"},
         {"event": "all", "url": "ntfys://ntfy.sh/user-all"},
     ]
+
+
+def test_expand_user_route_placeholders_fills_account_details(monkeypatch):
+    monkeypatch.setattr(
+        notifications_module,
+        "_get_route_user",
+        lambda user_id: {"username": "alice", "email": "alice+books@example.com"},
+    )
+
+    urls = notifications_module.expand_user_route_placeholders(
+        [
+            "mailtos://smtp.example.com?to={Email}",
+            "ntfys://ntfy.sh/shelfmark-{user}",
+            "ntfys://ntfy.sh/static",
+        ],
+        7,
+    )
+
+    assert urls == [
+        "mailtos://smtp.example.com?to=alice%2Bbooks%40example.com",
+        "ntfys://ntfy.sh/shelfmark-alice",
+        "ntfys://ntfy.sh/static",
+    ]
+
+
+def test_expand_user_route_placeholders_refuses_placeholder_in_host(monkeypatch):
+    # Apprise decodes %40 in the host, so x%40127.0.0.1 would still reach loopback.
+    monkeypatch.setattr(
+        notifications_module,
+        "_get_route_user",
+        lambda user_id: {"username": "mallory", "email": "x@127.0.0.1"},
+    )
+
+    urls = notifications_module.expand_user_route_placeholders(
+        ["ntfys://{Email}/alerts", "ntfys://{User}.example.com/alerts", "ntfys://ntfy.sh/{User}"],
+        7,
+    )
+
+    assert urls == ["ntfys://ntfy.sh/mallory"]
+
+
+def test_notify_user_does_not_queue_placeholder_host_pointing_at_loopback(monkeypatch):
+    fake_executor = _FakeExecutor()
+    monkeypatch.setattr(notifications_module, "_executor", fake_executor)
+    monkeypatch.setattr(
+        notifications_module,
+        "_resolve_user_routes",
+        lambda _user_id: ([{"event": "all", "url": "ntfys://{Email}/alerts"}], False),
+    )
+    monkeypatch.setattr(
+        notifications_module,
+        "_get_route_user",
+        lambda user_id: {"username": "mallory", "email": "x@127.0.0.1"},
+    )
+
+    context = notifications_module.NotificationContext(
+        event=notifications_module.NotificationEvent.DOWNLOAD_FAILED,
+        title="Example Book",
+        author="Example Author",
+        username="mallory",
+    )
+    notifications_module.notify_user(
+        7, notifications_module.NotificationEvent.DOWNLOAD_FAILED, context
+    )
+
+    assert fake_executor.calls == []
+
+
+@pytest.mark.parametrize(
+    ("username", "email", "expected"),
+    [
+        # A list would let a user add recipients to an admin-set mailto route.
+        ("mallory", "a@example.com,b@example.com", ["ntfys://ntfy.sh/mallory"]),
+        # Valid syntax, but Apprise decodes %2C and sends to a@evil.com and b@evil.com.
+        ("mallory", '"x,a@evil.com,b@evil.com"@example.com', ["ntfys://ntfy.sh/mallory"]),
+        # Apprise would publish to two topics, "...-John" and "Smith".
+        ("John Smith", "john@example.com", ["mailtos://smtp.example.com?to=john%40example.com"]),
+        ("a/b", "x\\y@example.com", []),
+        # A slash walks the topic path: this would publish to a topic called "admin".
+        ("bob/../admin", "bob@example.com", ["mailtos://smtp.example.com?to=bob%40example.com"]),
+        # A newline splits like any other whitespace.
+        ("eve\nadmin", "eve@example.com\nb@example.com", []),
+    ],
+)
+def test_expand_user_route_placeholders_ignores_values_apprise_would_split(
+    monkeypatch, username, email, expected
+):
+    monkeypatch.setattr(
+        notifications_module,
+        "_get_route_user",
+        lambda user_id: {"username": username, "email": email},
+    )
+
+    urls = notifications_module.expand_user_route_placeholders(
+        ["mailtos://smtp.example.com?to={Email}", "ntfys://ntfy.sh/{User}"],
+        7,
+    )
+
+    assert urls == expected
+
+
+@pytest.mark.parametrize(
+    ("username", "expected"),
+    [
+        # Left unencoded, ".." would turn /notify/.. into /, another path on the same host.
+        (".", []),
+        ("..", []),
+        ("...", []),
+        ("john.doe", ["json://hook.example/notify/john.doe"]),
+        ("..john", ["json://hook.example/notify/..john"]),
+    ],
+)
+def test_expand_user_route_placeholders_ignores_dots_only_values(monkeypatch, username, expected):
+    monkeypatch.setattr(
+        notifications_module,
+        "_get_route_user",
+        lambda user_id: {"username": username, "email": "user@example.com"},
+    )
+
+    urls = notifications_module.expand_user_route_placeholders(
+        ["json://hook.example/notify/{User}"],
+        7,
+    )
+
+    assert urls == expected
+
+
+def test_expand_user_route_placeholders_drops_routes_missing_a_value(monkeypatch):
+    monkeypatch.setattr(
+        notifications_module,
+        "_get_route_user",
+        lambda user_id: {"username": "carol", "email": None},
+    )
+
+    urls = notifications_module.expand_user_route_placeholders(
+        ["mailtos://smtp.example.com?to={Email}", "ntfys://ntfy.sh/{User}"],
+        7,
+    )
+
+    assert urls == ["ntfys://ntfy.sh/carol"]
+
+
+def test_expand_user_route_placeholders_skips_lookup_without_placeholders(monkeypatch):
+    def _fail_lookup(user_id):
+        raise AssertionError("user lookup should not run")
+
+    monkeypatch.setattr(notifications_module, "_get_route_user", _fail_lookup)
+
+    urls = ["ntfys://ntfy.sh/static"]
+    assert notifications_module.expand_user_route_placeholders(urls, 7) == urls
 
 
 class TestAppriseProxyEnv:

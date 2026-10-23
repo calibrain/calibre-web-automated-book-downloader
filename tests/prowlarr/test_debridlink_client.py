@@ -54,12 +54,12 @@ def _mock_fetch(monkeypatch, *, content=b"", status_code=200, error=None):
 
 
 def _mock_request(monkeypatch, payload, *, status_code=200):
-    """Patch requests.request with a single canned Debrid-Link envelope."""
+    """Patch the API session with a single canned Debrid-Link envelope."""
     response = MagicMock(status_code=status_code)
     response.raise_for_status = MagicMock()
     response.json = MagicMock(return_value=payload)
     request = MagicMock(return_value=response)
-    monkeypatch.setattr("shelfmark.download.clients.debridlink.requests.request", request)
+    monkeypatch.setattr("shelfmark.download.clients.debridlink._session.request", request)
     return request
 
 
@@ -114,7 +114,7 @@ class TestEnvelope:
         response = MagicMock(status_code=503)
         response.json = MagicMock(side_effect=ValueError("no json"))
         monkeypatch.setattr(
-            "shelfmark.download.clients.debridlink.requests.request",
+            "shelfmark.download.clients.debridlink._session.request",
             MagicMock(return_value=response),
         )
         client = _client(monkeypatch)
@@ -140,7 +140,7 @@ class TestEnvelope:
 
     def test_a_network_failure_does_not_leak_the_url(self, monkeypatch):
         monkeypatch.setattr(
-            "shelfmark.download.clients.debridlink.requests.request",
+            "shelfmark.download.clients.debridlink._session.request",
             MagicMock(side_effect=requests.ConnectionError("https://debrid-link.com/secret")),
         )
         client = _client(monkeypatch)

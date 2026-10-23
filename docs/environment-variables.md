@@ -19,6 +19,7 @@ This document lists all configuration options that can be set via environment va
 - [Soulseek (slskd)](#soulseek-slskd)
 - [AudiobookBay](#audiobookbay)
 - [Libgen Search](#libgen-search)
+- [Webshare.cz](#webshare.cz)
 - [IRC](#irc)
 - [Download Clients](#download-clients)
 - [Metadata Providers](#metadata-providers)
@@ -27,6 +28,7 @@ This document lists all configuration options that can be set via environment va
   - [Google Books](#metadata-providers-google-books)
   - [Moly.hu](#metadata-providers-moly.hu)
   - [Databáze knih](#metadata-providers-databáze-knih)
+  - [DNB](#metadata-providers-dnb)
 - [Direct Download](#direct-download)
   - [Download Sources](#direct-download-download-sources)
   - [Cloudflare Bypass](#direct-download-cloudflare-bypass)
@@ -549,8 +551,8 @@ Audiobooks only. AudiobookBay lists it for most releases. In Prowlarr results it
 | `HARDLINK_TORRENTS_AUDIOBOOK` | Create hardlinks instead of copying. Preserves seeding but archives won't be extracted. Don't use if destination is a library ingest folder. | boolean | `true` |
 | `AUTO_OPEN_DOWNLOADS_SIDEBAR` | Automatically open the downloads sidebar when a new download is queued. | boolean | `false` |
 | `DOWNLOAD_TO_BROWSER_CONTENT_TYPES` | Automatically download completed files to your browser for the selected content types. | string (comma-separated) | _empty list_ |
-| `MAX_CONCURRENT_DOWNLOADS` | Maximum number of simultaneous downloads. | number | `3` |
-| `MAX_CONCURRENT_DOWNLOADS_PER_SOURCE` | Simultaneous downloads allowed from each source (Soulseek, AudiobookBay, Direct Download and so on). A source at its limit does not hold the others back, so a Soulseek download waiting in a peer's queue cannot stop a torrent from starting. 0 uses the single limit above for all sources together. | number | `0` |
+| `MAX_CONCURRENT_DOWNLOADS` | Maximum number of simultaneous downloads. Not used while Max Concurrent Downloads Per Source is above 0. | number | `3` |
+| `MAX_CONCURRENT_DOWNLOADS_PER_SOURCE` | Simultaneous downloads allowed from each source (Soulseek, AudiobookBay, Direct Download and so on). A source at its limit does not hold the others back, so a Soulseek download waiting in a peer's queue cannot stop a torrent from starting. Above 0 this replaces Max Concurrent Downloads: the total can be this number for every source that has downloads at once. 0 uses the single limit above for all sources together. | number | `0` |
 | `STATUS_TIMEOUT` | How long to keep completed/failed downloads in the queue display. | number | `3600` |
 
 <details>
@@ -854,7 +856,7 @@ Automatically download completed files to your browser for the selected content 
 
 **Max Concurrent Downloads**
 
-Maximum number of simultaneous downloads.
+Maximum number of simultaneous downloads. Not used while Max Concurrent Downloads Per Source is above 0.
 
 - **Type:** number
 - **Default:** `3`
@@ -865,7 +867,7 @@ Maximum number of simultaneous downloads.
 
 **Max Concurrent Downloads Per Source**
 
-Simultaneous downloads allowed from each source (Soulseek, AudiobookBay, Direct Download and so on). A source at its limit does not hold the others back, so a Soulseek download waiting in a peer's queue cannot stop a torrent from starting. 0 uses the single limit above for all sources together.
+Simultaneous downloads allowed from each source (Soulseek, AudiobookBay, Direct Download and so on). A source at its limit does not hold the others back, so a Soulseek download waiting in a peer's queue cannot stop a torrent from starting. Above 0 this replaces Max Concurrent Downloads: the total can be this number for every source that has downloads at once. 0 uses the single limit above for all sources together.
 
 - **Type:** number
 - **Default:** `0`
@@ -1779,6 +1781,59 @@ Maximum number of results to request per search (1-100).
 
 </details>
 
+## Webshare.cz
+
+| Variable | Description | Type | Default |
+|----------|-------------|------|---------|
+| `WEBSHARE_ENABLED` | Search Webshare.cz by file name and download matching ebooks and audiobooks. Requires a Webshare account; a VIP account is recommended for full download speed. | boolean | `false` |
+| `WEBSHARE_USERNAME` | Your Webshare.cz login. | string | _none_ |
+| `WEBSHARE_PASSWORD` | Your Webshare.cz password. | string (secret) | _none_ |
+| `WEBSHARE_MAX_RESULTS` | Maximum number of files to request per search (1-200). Results are then filtered to your supported ebook or audiobook formats. | number | `50` |
+
+<details>
+<summary>Detailed descriptions</summary>
+
+#### `WEBSHARE_ENABLED`
+
+**Enable Webshare.cz**
+
+Search Webshare.cz by file name and download matching ebooks and audiobooks. Requires a Webshare account; a VIP account is recommended for full download speed.
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `WEBSHARE_USERNAME`
+
+**Username or Email**
+
+Your Webshare.cz login.
+
+- **Type:** string
+- **Default:** _none_
+- **Required:** Yes
+
+#### `WEBSHARE_PASSWORD`
+
+**Password**
+
+Your Webshare.cz password.
+
+- **Type:** string (secret)
+- **Default:** _none_
+- **Required:** Yes
+
+#### `WEBSHARE_MAX_RESULTS`
+
+**Max Results**
+
+Maximum number of files to request per search (1-200). Results are then filtered to your supported ebook or audiobook formats.
+
+- **Type:** number
+- **Default:** `50`
+- **Constraints:** min: 1, max: 200
+
+</details>
+
 ## IRC
 
 | Variable | Description | Type | Default |
@@ -2685,6 +2740,47 @@ Enable Moly.hu as a metadata provider for book searches
 
 - **Type:** boolean
 - **Default:** `false`
+
+</details>
+
+### Metadata Providers: DNB
+
+| Variable | Description | Type | Default |
+|----------|-------------|------|---------|
+| `DNB_ENABLED` | Enable DNB as a metadata provider for book searches | boolean | `false` |
+| `DNB_DEFAULT_SORT` | Default sort order for DNB search results. | string (choice) | `relevance` |
+| `DNB_USE_BOOK_LANGUAGES` | Filter DNB results by Default Book Languages: each user's own setting, else the system default. DNB also catalogs translations into many other languages. | boolean | `true` |
+
+<details>
+<summary>Detailed descriptions</summary>
+
+#### `DNB_ENABLED`
+
+**Enable DNB**
+
+Enable DNB as a metadata provider for book searches
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `DNB_DEFAULT_SORT`
+
+**Default Sort Order**
+
+Default sort order for DNB search results.
+
+- **Type:** string (choice)
+- **Default:** `relevance`
+- **Options:** `relevance` (Most relevant), `newest` (Newest), `oldest` (Oldest)
+
+#### `DNB_USE_BOOK_LANGUAGES`
+
+**Only show editions in my book languages**
+
+Filter DNB results by Default Book Languages: each user's own setting, else the system default. DNB also catalogs translations into many other languages.
+
+- **Type:** boolean
+- **Default:** `true`
 
 </details>
 

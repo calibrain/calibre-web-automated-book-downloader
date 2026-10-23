@@ -78,7 +78,19 @@ def test_a_search_runs_under_a_budget(client, main_module):
     assert observed and observed[0] is not None, "no budget was in force during the search"
 
 
-def test_the_budget_is_shared_across_sources(client, main_module):
+def _run_the_clock_out() -> None:
+    """Stand in for a source that waits on the cancel flag until the whole budget is gone."""
+    event = search_deadline.cancel_event()
+    assert event is not None
+    event.wait(timeout=5)
+
+
+@pytest.fixture
+def short_budget(monkeypatch):
+    monkeypatch.setattr(search_deadline, "budget_seconds", lambda: 0.3)
+
+
+def test_the_budget_is_shared_across_sources(client, main_module, short_budget):
     """A stuck first source must not spend the whole request on its own."""
     _authenticate(client)
     searched: list[str] = []
@@ -86,9 +98,7 @@ def test_the_budget_is_shared_across_sources(client, main_module):
     def _search(book, _plan):
         searched.append(book.title)
         # Whatever the first source did, it ran the clock out.
-        deadline = search_deadline.current()
-        if deadline is not None:
-            deadline.event.set()
+        _run_the_clock_out()
         return []
 
     sources = [
@@ -101,7 +111,7 @@ def test_the_budget_is_shared_across_sources(client, main_module):
     assert "ran out of time" in resp.get_json()["error"]
 
 
-def test_the_failure_carries_a_message_the_frontend_will_show(client, main_module):
+def test_the_failure_carries_a_message_the_frontend_will_show(client, main_module, short_budget):
     """The whole point of the budget.
 
     Shelfmark answers 503 when a search comes back empty with errors, and the frontend
@@ -113,9 +123,7 @@ def test_the_failure_carries_a_message_the_frontend_will_show(client, main_modul
     _authenticate(client)
 
     def _search(_book, _plan):
-        deadline = search_deadline.current()
-        if deadline is not None:
-            deadline.event.set()
+        _run_the_clock_out()
         return []
 
     sources = [

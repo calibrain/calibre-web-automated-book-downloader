@@ -172,6 +172,8 @@ class MetadataSearchOptions:
     limit: int = 40
     page: int = 1
     fields: dict[str, Any] = field(default_factory=dict)  # Custom search field values
+    # Searching user, for per-user settings; kept out of repr and thus out of cache keys
+    user_id: int | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -719,3 +721,6 @@ with suppress(ImportError):
 
 with suppress(ImportError):
     from shelfmark.metadata_providers import databazeknih as databazeknih
+
+with suppress(ImportError):
+    from shelfmark.metadata_providers import dnb as dnb

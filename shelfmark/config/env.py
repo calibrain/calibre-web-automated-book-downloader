@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
@@ -118,14 +119,36 @@ def _is_config_dir_writable() -> bool:
         return True
 
 
+# The probe above creates and deletes a file, and cover URLs are rewritten per result,
+# per queue task and per history row, so it is remembered for a short time.
+_WRITABLE_PROBE_TTL_SECONDS = 60.0
+_writable_probe: tuple[float, bool] | None = None
+
+
+def _config_dir_writable_cached() -> bool:
+    global _writable_probe
+    now = time.monotonic()
+    if _writable_probe is not None and now - _writable_probe[0] < _WRITABLE_PROBE_TTL_SECONDS:
+        return _writable_probe[1]
+    writable = _is_config_dir_writable()
+    _writable_probe = (now, writable)
+    return writable
+
+
+def reset_config_dir_writable_cache() -> None:
+    """Forget the remembered probe (tests change the directory under it)."""
+    global _writable_probe
+    _writable_probe = None
+
+
 def is_covers_cache_enabled() -> bool:
     """Check if cover caching is enabled (requires setting + writable config dir)."""
     from shelfmark.core.config import config
 
     setting_enabled = config.get("COVERS_CACHE_ENABLED", True)
     if isinstance(setting_enabled, str):
-        return string_to_bool(setting_enabled) and _is_config_dir_writable()
-    return bool(setting_enabled) and _is_config_dir_writable()
+        return string_to_bool(setting_enabled) and _config_dir_writable_cached()
+    return bool(setting_enabled) and _config_dir_writable_cached()
 
 
 # =============================================================================

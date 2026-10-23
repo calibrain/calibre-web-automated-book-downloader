@@ -7,6 +7,7 @@ import threading
 from typing import Any
 
 from shelfmark.core.request_helpers import now_utc_iso
+from shelfmark.core.utils import DB_BUSY_TIMEOUT_SECONDS
 
 VALID_ACTIVITY_ITEM_TYPES = frozenset({"download", "request"})
 ADMIN_VIEWER_SCOPE = "admin:shared"
@@ -82,7 +83,7 @@ class ActivityViewStateService:
         self._lock = threading.Lock()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
+        conn = sqlite3.connect(self._db_path, timeout=DB_BUSY_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
