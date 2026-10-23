@@ -25,7 +25,8 @@ from shelfmark.core.text_match import (
     author_surname,
     extra_work_tokens,
     isbn_variants,
-    title_tokens_match,
+    significant_tokens,
+    significant_tokens_match,
 )
 
 if TYPE_CHECKING:
@@ -128,8 +129,9 @@ def match_entries(book: BookMetadata, entries: list[LibraryEntry]) -> str | None
     title = book.search_title or book.title
     surname = author_surname(book.search_author or (book.authors[0] if book.authors else ""))
     collection: str | None = None
+    title_toks = significant_tokens(title)
     for entry in entries:
-        if not title_tokens_match(title, set(entry.tokens)):
+        if not significant_tokens_match(title_toks, entry.tokens):
             continue
         if surname is not None and surname not in entry.tokens:
             continue

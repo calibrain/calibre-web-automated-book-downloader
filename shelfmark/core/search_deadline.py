@@ -39,6 +39,12 @@ logger = setup_logger(__name__)
 DEFAULT_SEARCH_BUDGET_SECONDS = 300.0
 
 _MIN_SEARCH_BUDGET_SECONDS = 30.0
+
+# What each unit still waiting its turn keeps back from the one running now, and the
+# least a unit is given while the parent has that much left. Thirty seconds covers a
+# plain search; it is not enough for a bypass solve, which is why the unit running
+# keeps everything else.
+DEFAULT_UNIT_RESERVE_SECONDS = 30.0
 _MAX_SEARCH_BUDGET_SECONDS = 1800.0
 
 # Raised to the caller when the budget runs out, so the API can say so plainly.
@@ -108,6 +114,28 @@ def search_deadline(budget: float | None = None) -> Iterator[SearchDeadline]:
     finally:
         deadline.cancel()
         _current.reset(token)
+
+
+@contextmanager
+def unit_deadline(
+    waiting: int = 0, *, reserve: float = DEFAULT_UNIT_RESERVE_SECONDS
+) -> Iterator[SearchDeadline | None]:
+    """Budget for one unit of work inside a search, keeping time back for those after it.
+
+    The unit gets the parent's remaining time minus `reserve` for each of the `waiting`
+    units still to run, but never less than `reserve` and never more than the parent has
+    left. A lone unit gets everything, and time a fast unit does not use rolls on to the
+    next. A stuck unit stops at its own limit, so it cannot spend the seconds the next
+    one needs. Outside a search there is no budget to divide, so nothing is applied.
+    """
+    parent = _current.get()
+    if parent is None:
+        yield None
+        return
+    remaining = parent.remaining
+    budget = min(remaining, max(reserve, remaining - reserve * max(waiting, 0)))
+    with search_deadline(budget) as child:
+        yield child
 
 
 def current() -> SearchDeadline | None:
