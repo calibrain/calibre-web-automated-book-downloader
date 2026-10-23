@@ -54,7 +54,7 @@ class TestTorBoxConfiguration:
     def test_connection_reports_valid_free_plan(self, monkeypatch):
         client = _client(monkeypatch)
         get = MagicMock(return_value=_response({"email": "reader@example.com", "plan": 0}))
-        monkeypatch.setattr("shelfmark.download.clients.torbox.requests.get", get)
+        monkeypatch.setattr("shelfmark.download.clients.torbox._session.get", get)
 
         assert client.test_connection() == (
             True,
@@ -73,7 +73,7 @@ class TestTorBoxConfiguration:
                 detail="Your token is invalid or has expired.",
             )
         )
-        monkeypatch.setattr("shelfmark.download.clients.torbox.requests.get", get)
+        monkeypatch.setattr("shelfmark.download.clients.torbox._session.get", get)
 
         success, message = client.test_connection()
 
@@ -87,7 +87,7 @@ class TestTorBoxCreation:
         client = _client(monkeypatch)
         monkeypatch.setattr("shelfmark.download.clients.torbox.TMP_DIR", tmp_path)
         post = MagicMock(return_value=_response({"torrent_id": 42}))
-        monkeypatch.setattr("shelfmark.download.clients.torbox.requests.post", post)
+        monkeypatch.setattr("shelfmark.download.clients.torbox._session.post", post)
 
         assert client.add_download(MAGNET, "Dune") == "42"
 
@@ -104,7 +104,7 @@ class TestTorBoxCreation:
             lambda *_args, **_kwargs: DebridTorrentFile(torrent_data=b"torrent"),
         )
         post = MagicMock(return_value=_response({"torrent_id": 42}))
-        monkeypatch.setattr("shelfmark.download.clients.torbox.requests.post", post)
+        monkeypatch.setattr("shelfmark.download.clients.torbox._session.post", post)
 
         client.add_download("https://prowlarr.example/download", "Dune")
 
@@ -123,7 +123,7 @@ class TestTorBoxCreation:
                 detail="You have reached your active download limit.",
             )
         )
-        monkeypatch.setattr("shelfmark.download.clients.torbox.requests.post", post)
+        monkeypatch.setattr("shelfmark.download.clients.torbox._session.post", post)
 
         with pytest.raises(RuntimeError, match=r"ACTIVE_LIMIT.*active download limit"):
             client.add_download(MAGNET, "Dune")
@@ -132,7 +132,7 @@ class TestTorBoxCreation:
         client = _client(monkeypatch)
         monkeypatch.setattr("shelfmark.download.clients.torbox.TMP_DIR", tmp_path)
         post = MagicMock(return_value=_response({"torrent_id": "x/../../escape"}))
-        monkeypatch.setattr("shelfmark.download.clients.torbox.requests.post", post)
+        monkeypatch.setattr("shelfmark.download.clients.torbox._session.post", post)
 
         with pytest.raises(RuntimeError, match="invalid torrent ID"):
             client.add_download(MAGNET, "Dune")
@@ -252,7 +252,7 @@ class TestTorBoxStatus:
         get = MagicMock(
             return_value=_response([{"id": 42, "download_state": "downloading", "progress": 20}])
         )
-        monkeypatch.setattr("shelfmark.download.clients.torbox.requests.get", get)
+        monkeypatch.setattr("shelfmark.download.clients.torbox._session.get", get)
 
         status = client.get_status("42")
 
@@ -265,7 +265,7 @@ class TestTorBoxStatus:
         get = MagicMock(
             return_value=_response([{"id": 42, "download_state": "downloading", "progress": 20}])
         )
-        monkeypatch.setattr("shelfmark.download.clients.torbox.requests.get", get)
+        monkeypatch.setattr("shelfmark.download.clients.torbox._session.get", get)
 
         try:
             client.get_status("0042")
@@ -279,7 +279,7 @@ class TestTorBoxStatus:
         client = _client(monkeypatch)
         monkeypatch.setattr("shelfmark.download.clients.torbox.TMP_DIR", tmp_path)
         get = MagicMock()
-        monkeypatch.setattr("shelfmark.download.clients.torbox.requests.get", get)
+        monkeypatch.setattr("shelfmark.download.clients.torbox._session.get", get)
 
         with pytest.raises(RuntimeError, match="invalid torrent ID"):
             client.get_status("x/../../escape")
@@ -343,7 +343,7 @@ class TestTorBoxFileRetrieval:
 
         monkeypatch.setattr("shelfmark.download.clients.torbox.download_url", wait_for_cancellation)
         monkeypatch.setattr(
-            "shelfmark.download.clients.torbox.requests.post",
+            "shelfmark.download.clients.torbox._session.post",
             MagicMock(return_value=_response(None)),
         )
         TorBoxClient._downloads["42"] = state
@@ -369,7 +369,7 @@ class TestTorBoxFileRetrieval:
                 detail="Token rejected",
             )
         )
-        monkeypatch.setattr("shelfmark.download.clients.torbox.requests.get", get)
+        monkeypatch.setattr("shelfmark.download.clients.torbox._session.get", get)
 
         with pytest.raises(RuntimeError) as excinfo:
             client._request_download_link("42", 7)
@@ -381,7 +381,7 @@ class TestTorBoxFileRetrieval:
         client = _client(monkeypatch)
         signed_url = "HtTpS://cdn.example/Dune?token=signed"
         monkeypatch.setattr(
-            "shelfmark.download.clients.torbox.requests.get",
+            "shelfmark.download.clients.torbox._session.get",
             MagicMock(return_value=_response(signed_url)),
         )
 
@@ -390,7 +390,7 @@ class TestTorBoxFileRetrieval:
     @staticmethod
     def _link_request(monkeypatch, data: object) -> MagicMock:
         get = MagicMock(return_value=_response(data))
-        monkeypatch.setattr("shelfmark.download.clients.torbox.requests.get", get)
+        monkeypatch.setattr("shelfmark.download.clients.torbox._session.get", get)
         return get
 
     def test_file_link_rejects_http_urls(self, monkeypatch):
@@ -421,7 +421,7 @@ class TestTorBoxFileRetrieval:
         logger = MagicMock()
         monkeypatch.setattr("shelfmark.download.clients.torbox.logger", logger)
         monkeypatch.setattr(
-            "shelfmark.download.clients.torbox.requests.get",
+            "shelfmark.download.clients.torbox._session.get",
             MagicMock(side_effect=requests.exceptions.ConnectionError(f"token={API_KEY}")),
         )
         state = _state(tmp_path)
@@ -440,7 +440,7 @@ class TestTorBoxCleanup:
         state = _DownloadState(torrent_id="42", name="Dune", target_dir=target_dir)
         monkeypatch.setattr("shelfmark.download.clients.torbox.TMP_DIR", tmp_path)
         monkeypatch.setattr(
-            "shelfmark.download.clients.torbox.requests.post",
+            "shelfmark.download.clients.torbox._session.post",
             MagicMock(
                 return_value=_response(
                     None, success=False, error="NOT_OWNER", detail="You are not the owner."
@@ -462,7 +462,7 @@ class TestTorBoxCleanup:
         escaped_dir = tmp_path.parent / "escape"
         escaped_dir.mkdir()
         post = MagicMock()
-        monkeypatch.setattr("shelfmark.download.clients.torbox.requests.post", post)
+        monkeypatch.setattr("shelfmark.download.clients.torbox._session.post", post)
 
         with pytest.raises(RuntimeError, match="invalid torrent ID"):
             client.remove("x/../../escape")
@@ -499,7 +499,7 @@ class TestTorBoxRemoveWorkerTimeout:
         thread.is_alive.return_value = True
         state.download_thread = thread
         post = MagicMock(return_value=_response(None))
-        monkeypatch.setattr("shelfmark.download.clients.torbox.requests.post", post)
+        monkeypatch.setattr("shelfmark.download.clients.torbox._session.post", post)
         monkeypatch.setattr("shelfmark.download.clients.torbox._WORKER_JOIN_TIMEOUT", 0.01)
         TorBoxClient._downloads["42"] = state
 
