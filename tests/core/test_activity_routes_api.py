@@ -357,6 +357,44 @@ class TestActivityRoutes:
         assert response.status_code == 200
         assert response.data == file_bytes
 
+    def test_localdownload_error_does_not_reveal_the_server_path(
+        self, main_module, client, tmp_path
+    ):
+        """A failed read answers with a fixed message, not the OSError text and its path."""
+        user = _create_user(main_module, prefix="reader")
+        _set_session(client, user_id=user["username"], db_user_id=user["id"], is_admin=False)
+
+        task_id = f"live-localdownload-{uuid.uuid4().hex[:8]}"
+        file_path = tmp_path / "Hidden Author" / "Hidden Title.epub"
+        file_path.parent.mkdir()
+        file_path.write_bytes(b"payload")
+
+        task = DownloadTask(
+            task_id=task_id,
+            source="direct_download",
+            title="Live Local Download",
+            user_id=user["id"],
+            username=user["username"],
+            download_path=str(file_path),
+        )
+        assert main_module.backend.book_queue.add(task) is True
+
+        failure = FileNotFoundError(2, "No such file or directory", str(file_path))
+        try:
+            main_module.backend.book_queue.update_status(task_id, QueueStatus.COMPLETE)
+            with (
+                patch.object(main_module, "get_auth_mode", return_value="builtin"),
+                patch.object(main_module, "send_file", side_effect=failure),
+            ):
+                response = client.get(f"/api/localdownload?id={task_id}")
+        finally:
+            main_module.backend.book_queue.cancel_download(task_id)
+
+        assert response.status_code == 500
+        assert response.get_json() == {"error": "Could not read the file"}
+        assert "Hidden" not in response.get_data(as_text=True)
+        assert str(tmp_path) not in response.get_data(as_text=True)
+
     def test_localdownload_zips_a_live_multi_file_download(self, main_module, client, tmp_path):
         user = _create_user(main_module, prefix="reader")
         _set_session(client, user_id=user["username"], db_user_id=user["id"], is_admin=False)
