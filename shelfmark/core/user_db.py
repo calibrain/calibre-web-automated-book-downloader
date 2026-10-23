@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -21,8 +22,14 @@ from shelfmark.core.request_validation import (
     validate_request_level_payload,
     validate_status_transition,
 )
+from shelfmark.core.utils import DB_BUSY_TIMEOUT_SECONDS
 
 logger = setup_logger(__name__)
+
+# How long get_user_cached may answer from memory. Writes through the same UserDB drop
+# the cache at once, so this only bounds changes made by another process or instance.
+USER_CACHE_TTL_SECONDS = 5.0
+_USER_CACHE_MAX_ENTRIES = 256
 
 _CREATE_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS users (
@@ -187,6 +194,9 @@ class UserDB:
         """Initialize the user database wrapper for the given SQLite path."""
         self._db_path = db_path
         self._lock = threading.Lock()
+        self._user_cache: dict[tuple[str, object], tuple[float, dict[str, Any] | None]] = {}
+        self._user_cache_lock = threading.Lock()
+        self._user_cache_generation = 0
 
     @property
     def db_path(self) -> str:
@@ -194,7 +204,7 @@ class UserDB:
         return self._db_path
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
+        conn = sqlite3.connect(self._db_path, timeout=DB_BUSY_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
@@ -317,6 +327,7 @@ class UserDB:
                     ),
                 )
                 conn.commit()
+                self._drop_user_cache()
                 user_id = cursor.lastrowid
                 if not isinstance(user_id, int):
                     msg = "Failed to create user"
@@ -351,6 +362,36 @@ class UserDB:
             return dict(row) if row else None
         finally:
             conn.close()
+
+    def get_user_cached(
+        self, *, user_id: int | None = None, username: str | None = None
+    ) -> dict[str, Any] | None:
+        """Get a user like get_user, answering repeats from memory for a few seconds.
+
+        For hot paths such as per-request proxy auth, where every API call (cover
+        images included) would otherwise open a connection for the same row.
+        """
+        key = ("id", user_id) if user_id is not None else ("username", username)
+        now = time.monotonic()
+        with self._user_cache_lock:
+            cached = self._user_cache.get(key)
+            if cached is not None and cached[0] > now:
+                return dict(cached[1]) if cached[1] else None
+            generation = self._user_cache_generation
+
+        user = self.get_user(user_id=user_id, username=username)
+        with self._user_cache_lock:
+            # A write that landed during the read may have made this row stale.
+            if generation == self._user_cache_generation:
+                if len(self._user_cache) >= _USER_CACHE_MAX_ENTRIES:
+                    self._user_cache.clear()
+                self._user_cache[key] = (now + USER_CACHE_TTL_SECONDS, user)
+        return dict(user) if user else None
+
+    def _drop_user_cache(self) -> None:
+        with self._user_cache_lock:
+            self._user_cache.clear()
+            self._user_cache_generation += 1
 
     def _get_user_by_id(self, conn: sqlite3.Connection, user_id: int) -> dict[str, Any] | None:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
@@ -398,6 +439,7 @@ class UserDB:
                 for column, value in kwargs.items():
                     conn.execute(self._USER_UPDATE_STATEMENTS[column], (value, user_id))
                 conn.commit()
+                self._drop_user_cache()
             finally:
                 conn.close()
 
@@ -426,6 +468,7 @@ class UserDB:
                 )
                 conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
                 conn.commit()
+                self._drop_user_cache()
             finally:
                 conn.close()
 

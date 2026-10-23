@@ -42,6 +42,7 @@ _IDENTIFIERS = [
     (2, "goodreads", "12067"),
     (4, "isbn-13", "978-0-8041-3902-1"),
     (4, "openlibrary", "OL17091839W"),
+    (4, "dnb-idn", "1061425843"),
 ]
 
 
@@ -119,7 +120,7 @@ def test_indexes_titles_authors_series_and_identifiers(
 
     martian = _by_token(entries, "martian")
     assert martian.isbns == {"9780804139021"}
-    assert martian.external_ids == {("openlibrary", "OL17091839W")}
+    assert martian.external_ids == {("openlibrary", "OL17091839W"), ("dnb", "1061425843")}
 
     draft = _by_token(entries, "draft")
     assert draft.tokens == {"untitled", "draft"}

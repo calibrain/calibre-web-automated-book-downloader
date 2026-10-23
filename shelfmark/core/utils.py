@@ -7,7 +7,7 @@ import re
 import sqlite3
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from shelfmark.core.logger import setup_logger
@@ -17,6 +17,11 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 logger = setup_logger(__name__)
+
+# How long an app database connection waits for another writer before it raises. SQLite's
+# own default is 5 s, which a start-up migration or a restart reconcile can outlast when a
+# backup or a second process holds the file.
+DB_BUSY_TIMEOUT_SECONDS = 30
 
 
 def normalize_http_url(
@@ -136,6 +141,26 @@ AUDIOBOOK_FORMATS = ("m4b", "mp3", "m4a", "mp4", "flac", "ogg", "wma", "aac", "w
 # rather than formats: they are what a *release* looks like, and the formats above are
 # what comes out of one after extraction.
 ARCHIVE_FORMATS = ("zip", "rar")
+
+# What the Supported Book Formats setting holds until someone changes it. The settings
+# registry, post-processing and every release source fall back to this one list.
+DEFAULT_EBOOK_FORMATS = ("epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr")
+
+
+def normalize_format_list(value: object, default: tuple[str, ...] | list[str]) -> list[str]:
+    """Read a configured format list, or a comma or space separated string of them.
+
+    Lower-cases, drops a leading dot and empty items, and returns ``default`` when the
+    value is not a list or string or nothing is left of it.
+    """
+    if isinstance(value, str):
+        items: list[Any] = value.replace(",", " ").split()
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        items = list(value)
+    else:
+        return list(default)
+    formats = [fmt for fmt in (str(item).strip().lower().lstrip(".") for item in items) if fmt]
+    return formats or list(default)
 
 
 CONTENT_TYPES = [

@@ -49,6 +49,10 @@ logger = setup_logger(__name__)
 
 _API_BASE = "https://debrid-link.com/api/v2"
 
+# One session for every client instance, so the status poll every couple of seconds
+# reuses a keep-alive connection instead of opening a new TLS connection each time.
+_session = requests.Session()
+
 _DEBRIDLINK_CLIENT_ERRORS = (
     AttributeError,
     OSError,
@@ -428,7 +432,7 @@ class DebridLinkClient(DownloadClient):
         """
         url = f"{_API_BASE}{path}"
         try:
-            resp = requests.request(
+            resp = _session.request(
                 method,
                 url,
                 headers=self._auth_headers(),

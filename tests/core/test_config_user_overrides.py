@@ -5,6 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from shelfmark.core.config import config
 
 
@@ -81,6 +83,34 @@ def test_get_keeps_empty_string_override(monkeypatch):
     )
 
     assert config.get("DESTINATION_AUDIOBOOK", "/default", user_id=10) == ""
+
+
+@pytest.mark.parametrize(
+    ("override", "from_env", "expected"),
+    [
+        ("/user/books", False, ("/user/books", True)),
+        ("", False, ("", True)),
+        (None, False, ("/global/books", False)),
+        ("/user/books", True, ("/global/books", False)),
+    ],
+)
+def test_get_for_user_returns_get_value_and_whether_it_is_the_users_own(
+    monkeypatch, override, from_env, expected
+):
+    field = _download_field("DESTINATION")
+
+    monkeypatch.setattr(config, "_ensure_loaded", lambda: None)
+    monkeypatch.setattr(config, "_cache", {"DESTINATION": "/global/books"})
+    monkeypatch.setattr(config, "_field_map", {"DESTINATION": (field, "downloads")})
+    monkeypatch.setattr(config, "_get_user_override", lambda user_id, key: override)
+    monkeypatch.setattr(
+        "shelfmark.core.config._get_registry",
+        lambda: SimpleNamespace(is_value_from_env=lambda field: from_env),
+    )
+
+    assert config.get_for_user("DESTINATION", "/default", user_id=10) == expected
+    assert config.get("DESTINATION", "/default", user_id=10) == expected[0]
+    assert config.get_for_user("DESTINATION", "/default", user_id=None) == ("/global/books", False)
 
 
 def test_build_user_preferences_payload_reports_effective_sources(monkeypatch):

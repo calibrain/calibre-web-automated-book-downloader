@@ -89,6 +89,77 @@ def test_download_payload_loses_its_path_and_tracker_id():
     assert payload["id"] == _TRACKER_ID  # the caller's copy is untouched
 
 
+def test_status_message_loses_the_links_a_client_error_carries():
+    """A failed add embeds the client's exception text, which names the full URL."""
+    message = (
+        "Failed to add to qbittorrent: 401 Client Error: Unauthorized for url: "
+        "http://prowlarr:9696/api/v1/indexer/21/download?apikey=s3cret&link=abc&file=Example"
+    )
+
+    redacted = redact_download_payload({"id": "task", "status_message": message})
+
+    assert redacted["status_message"] == (
+        "Failed to add to qbittorrent: 401 Client Error: Unauthorized for url: (link removed)"
+    )
+    assert "s3cret" not in redacted["status_message"]
+    assert "prowlarr:9696" not in redacted["status_message"]
+    assert message.endswith("file=Example")  # the caller's copy is untouched
+
+
+def test_status_message_loses_the_path_a_connection_error_carries():
+    """requests prints a failed connection as ``with url: <path and query>``, no scheme."""
+    message = (
+        "Failed to add to qbittorrent: HTTPConnectionPool(host='prowlarr', port=9696): "
+        "Max retries exceeded with url: /api/v1/indexer/21/download?apikey=s3cret&link=abc "
+        "(Caused by NewConnectionError(\"HTTPConnection(host='prowlarr', port=9696): "
+        'Failed to establish a new connection: [Errno 111] Connection refused"))'
+    )
+
+    redacted = redact_download_payload({"id": "task", "status_message": message})["status_message"]
+
+    assert "s3cret" not in redacted
+    assert "/api/v1/indexer" not in redacted
+    assert (
+        "Max retries exceeded with url: (link removed) (Caused by NewConnectionError(" in redacted
+    )
+
+
+@pytest.mark.parametrize("scheme", ["HTTP", "Https", "HTTPS"])
+def test_status_message_link_scheme_is_matched_case_insensitively(scheme):
+    message = f"502 Server Error: Bad Gateway for url: {scheme}://prowlarr:9696/api?apikey=s3cret"
+
+    redacted = redact_download_payload({"id": "task", "status_message": message})["status_message"]
+
+    assert redacted == "502 Server Error: Bad Gateway for url: (link removed)"
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["Downloading 42% - 1.2 MB/s", "No seeders: 0 found, 1 needed, for 5 min", None, ""],
+)
+def test_status_message_without_a_link_is_left_alone(message):
+    assert (
+        redact_download_payload({"id": "task", "status_message": message})["status_message"]
+        == message
+    )
+
+
+def test_status_message_is_redacted_in_a_whole_status_snapshot():
+    status = {
+        "error": {
+            "task": {
+                "id": "task",
+                "request_id": None,
+                "status_message": "Search failed for url: https://indexer.example/api?passkey=abc",
+            }
+        }
+    }
+
+    redacted = redact_status(status)
+
+    assert redacted["error"]["task"]["status_message"] == "Search failed for url: (link removed)"
+
+
 def test_status_is_rekeyed_only_for_request_linked_downloads():
     status = {
         "complete": {
