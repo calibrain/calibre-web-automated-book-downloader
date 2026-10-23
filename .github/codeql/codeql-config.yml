@@ -1,0 +1,6 @@
+name: Shelfmark CodeQL configuration
+
+# Test code only runs in CI and the e2e docker stack (mock servers, URL asserts), so its
+# findings are noise. Skipping it drops those alerts without hiding anything in the app.
+paths-ignore:
+  - tests
