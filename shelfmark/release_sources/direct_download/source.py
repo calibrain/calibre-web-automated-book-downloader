@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import requests
 
+from shelfmark.core import search_deadline
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.utils import get_aa_content_type_dir
 from shelfmark.core.utils import is_audiobook as check_audiobook
@@ -203,14 +204,18 @@ class DirectDownloadSource(ReleaseSource):
 
         releases: list[Release] = []
         failures: list[Exception] = []
-        for provider in registry.enabled_providers(self._providers):
+        providers = registry.enabled_providers(self._providers)
+        for index, provider in enumerate(providers):
             try:
-                records = provider.search(
-                    book,
-                    plan,
-                    expand_search=expand_search,
-                    content_type=content_type,
-                )
+                # Each provider gets its own slice of the search budget, so a bypass that
+                # burns its whole share on the first one still leaves the next a chance.
+                with search_deadline.unit_deadline(waiting=len(providers) - index - 1):
+                    records = provider.search(
+                        book,
+                        plan,
+                        expand_search=expand_search,
+                        content_type=content_type,
+                    )
             except SourceUnavailableError as exc:
                 failures.append(exc)
                 continue

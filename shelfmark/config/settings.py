@@ -36,7 +36,7 @@ from shelfmark.core.settings_registry import (
     register_on_save,
     register_settings,
 )
-from shelfmark.core.utils import ARCHIVE_FORMATS, AUDIOBOOK_FORMATS
+from shelfmark.core.utils import ARCHIVE_FORMATS, AUDIOBOOK_FORMATS, DEFAULT_EBOOK_FORMATS
 
 _DOWNLOAD_CLIENT_COMPLETED_PATH_TIMEOUT_DEFAULT = 60
 _DOWNLOAD_CLIENT_COMPLETED_PATH_TIMEOUT_MAX = 3600
@@ -454,7 +454,7 @@ def general_settings() -> list[SettingsField]:
             label="Supported Book Formats",
             description="Book formats to include in search results. ZIP/RAR archives are extracted automatically and book files are used if found.",
             options=_FORMAT_OPTIONS,
-            default=["epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr"],
+            default=list(DEFAULT_EBOOK_FORMATS),
         ),
         MultiSelectField(
             key="SUPPORTED_AUDIOBOOK_FORMATS",
@@ -1486,7 +1486,10 @@ def download_settings() -> list[SettingsField]:
         NumberField(
             key="MAX_CONCURRENT_DOWNLOADS",
             label="Max Concurrent Downloads",
-            description="Maximum number of simultaneous downloads.",
+            description=(
+                "Maximum number of simultaneous downloads. Not used while Max Concurrent "
+                "Downloads Per Source is above 0."
+            ),
             default=3,
             min_value=1,
             max_value=10,
@@ -1499,7 +1502,9 @@ def download_settings() -> list[SettingsField]:
                 "Simultaneous downloads allowed from each source (Soulseek, AudiobookBay, "
                 "Direct Download and so on). A source at its limit does not hold the others "
                 "back, so a Soulseek download waiting in a peer's queue cannot stop a torrent "
-                "from starting. 0 uses the single limit above for all sources together."
+                "from starting. Above 0 this replaces Max Concurrent Downloads: the total can "
+                "be this number for every source that has downloads at once. "
+                "0 uses the single limit above for all sources together."
             ),
             default=0,
             min_value=0,

@@ -88,6 +88,23 @@ def test_a_late_complete_does_not_overwrite_a_cancel():
     assert terminal_events == [QueueStatus.CANCELLED]
 
 
+def test_a_late_progress_update_does_not_reopen_a_cancelled_task():
+    """A poll that reports DOWNLOADING after the cancel must not reopen the task.
+
+    Without this the next COMPLETE or ERROR is accepted as a first terminal status and
+    the terminal hook fires a second time.
+    """
+    queue = BookQueue()
+    terminal_events = _downloading_task(queue, "race-task")
+
+    assert queue.cancel_download("race-task") is True
+    queue.update_status("race-task", QueueStatus.DOWNLOADING)
+    queue.update_status("race-task", QueueStatus.COMPLETE)
+
+    assert queue.get_task_status("race-task") == QueueStatus.CANCELLED
+    assert terminal_events == [QueueStatus.CANCELLED]
+
+
 def test_a_task_that_ended_in_error_is_not_completed_afterwards():
     queue = BookQueue()
     terminal_events = _downloading_task(queue, "race-task")

@@ -7,6 +7,10 @@ library matches titles, authors and ISBNs the same way.
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 DEFAULT_TITLE_MATCH_THRESHOLD = 0.85
 
@@ -57,7 +61,18 @@ def title_tokens_match(
     threshold: float = DEFAULT_TITLE_MATCH_THRESHOLD,
 ) -> bool:
     """True when enough significant title tokens appear in ``haystack_tokens``."""
-    title_toks = significant_tokens(title)
+    return significant_tokens_match(significant_tokens(title), haystack_tokens, threshold)
+
+
+def significant_tokens_match(
+    title_toks: list[str],
+    haystack_tokens: Collection[str],
+    threshold: float = DEFAULT_TITLE_MATCH_THRESHOLD,
+) -> bool:
+    """``title_tokens_match`` for a title already run through ``significant_tokens``.
+
+    Matching one title against many entries should tokenise it once, not per entry.
+    """
     if not title_toks:
         return False
     present = sum(1 for tok in title_toks if tok in haystack_tokens)

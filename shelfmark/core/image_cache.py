@@ -47,6 +47,11 @@ NEGATIVE_CACHE_TTL = 3600
 # Short enough to retry soon, long enough to prevent spam during one page view
 TRANSIENT_CACHE_TTL = 60
 
+# A hit only moves the entry's last-access time, which orders LRU eviction. The whole
+# index is rewritten to disk, so that is done at most this often instead of per hit.
+# A crash inside the window loses some access times, nothing else.
+ACCESS_FLUSH_SECONDS = 30
+
 _MIN_WEBP_HEADER_LENGTH = 12
 HTTP_NOT_FOUND = HTTPStatus.NOT_FOUND
 
@@ -102,6 +107,7 @@ class ImageCacheService:
         self.index_path = cache_dir / "cache_index.json"
         self._lock = threading.RLock()
         self._index: dict[str, dict[str, Any]] = {}
+        self._last_saved = time.monotonic()
 
         # Stats tracking
         self._hits = 0
@@ -195,6 +201,7 @@ class ImageCacheService:
             with temp_path.open("w") as f:
                 json.dump(self._index, f)
             temp_path.rename(self.index_path)
+            self._last_saved = time.monotonic()
         except OSError:
             pass
 
@@ -325,9 +332,11 @@ class ImageCacheService:
                 with image_path.open("rb") as f:
                     data = f.read()
 
-                # Update accessed time
+                # Update accessed time. Written out with the next save, or here once
+                # enough time has passed, not once per hit.
                 entry["accessed_at"] = time.time()
-                self._save_index()
+                if time.monotonic() - self._last_saved >= ACCESS_FLUSH_SECONDS:
+                    self._save_index()
                 result = data, content_type
 
             except OSError:
