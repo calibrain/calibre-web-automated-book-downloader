@@ -3423,13 +3423,14 @@ def api_releases() -> Response | tuple[Response, int]:
         warmup.note_user_search()
 
         with search_deadline.search_deadline():
-            for source_name in sources_to_search:
+            for index, source_name in enumerate(sources_to_search):
                 if search_deadline.expired():
                     logger.warning("Release search budget spent; %s not searched", source_name)
                     errors.append(f"{source_name}: {search_deadline.deadline_message()}")
                     continue
 
-                source, releases, error = _search_source_releases(source_name, book)
+                with search_deadline.unit_deadline(waiting=len(sources_to_search) - index - 1):
+                    source, releases, error = _search_source_releases(source_name, book)
                 if source is not None:
                     source_instances[source_name] = source
                     all_releases.extend(releases)
