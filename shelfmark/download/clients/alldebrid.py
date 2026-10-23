@@ -29,6 +29,7 @@ from shelfmark.download.clients._coercion import config_text
 from shelfmark.download.clients.torrent_utils import (
     DebridMagnet,
     DebridUpload,
+    _safe_url,
     resolve_debrid_upload,
 )
 from shelfmark.download.http import download_url
@@ -564,13 +565,14 @@ class AllDebridClient(DownloadClient):
                         return direct
                 err_msg = body.get("error", {}).get("message", err_msg)
         except _ALLDEBRID_CLIENT_ERRORS as e:
-            logger.debug("GET unlock exception: %s", e)
+            # The request URL carries the API key and requests puts it in the message.
+            logger.debug("GET unlock exception: %s", type(e).__name__)
 
         # 4. Last-resort: append apikey to alldebrid.com/f/ links.
         if "alldebrid.com/f/" in link:
             logger.info(
                 "Using apikey fallback for AllDebrid file link: %s",
-                link,
+                _safe_url(link),
             )
             if "apikey=" not in link:
                 sep = "&" if "?" in link else "?"
@@ -579,7 +581,7 @@ class AllDebridClient(DownloadClient):
 
         logger.error(
             "AllDebrid unlock failed for '%s': %s",
-            link,
+            _safe_url(link),
             err_msg,
         )
         msg = f"AllDebrid unlock failed: {err_msg}"
@@ -662,7 +664,7 @@ class AllDebridClient(DownloadClient):
                     referer="https://alldebrid.com/",
                 )
                 if not buf:
-                    msg = f"Failed to download from {direct_link}"
+                    msg = f"Failed to download from {_safe_url(direct_link)}"
                     _raise_runtime_error(msg)
 
                 with dest.open("wb") as fh:

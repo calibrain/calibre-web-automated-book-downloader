@@ -45,7 +45,7 @@ class NewznabClient:
             params["apikey"] = self.api_key
 
         url = self._api_url()
-        logger.debug("Newznab API: GET %s params=%s", url, *params)
+        logger.debug("Newznab API: GET %s params=%s", url, sorted(params))
 
         headers = {}
         if accept_xml:
