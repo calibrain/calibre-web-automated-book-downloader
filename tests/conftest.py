@@ -30,6 +30,16 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _reset_config_dir_writable_cache():
+    """The writable-config-dir probe is remembered; each test starts without it."""
+    from shelfmark.config.env import reset_config_dir_writable_cache
+
+    reset_config_dir_writable_cache()
+    yield
+    reset_config_dir_writable_cache()
+
+
+@pytest.fixture(autouse=True)
 def _clear_torrent_fetch_cache():
     """Keep the shared torrent fetch cache from leaking between tests."""
     from shelfmark.download.clients.torrent_utils import clear_torrent_fetch_cache
