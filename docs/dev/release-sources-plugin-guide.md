@@ -655,11 +655,16 @@ from shelfmark.core.settings_registry import (
 )
 
 
-def test_my_source_connection():
-    """Test connection callback - returns result dict."""
+def test_my_source_connection(current_values: dict):
+    """Test connection callback - returns result dict.
+
+    `current_values` holds the form's unsaved values, so the button tests what the user just
+    typed. A password the user has not touched may not be sent, so fall back to the saved one.
+    """
     try:
-        # Get current API key
-        api_key = get_setting_value(PasswordField(key="MY_SOURCE_API_KEY", label=""), "my_source")
+        api_key = current_values.get("MY_SOURCE_API_KEY") or get_setting_value(
+            PasswordField(key="MY_SOURCE_API_KEY", label=""), "my_source"
+        )
 
         if not api_key:
             return {"success": False, "message": "API key not configured"}
@@ -1088,12 +1093,16 @@ logger = setup_logger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _test_booknet_connection() -> Dict:
-    """Test BookNet API connection."""
+def _test_booknet_connection(current_values: Dict) -> Dict:
+    """Test BookNet API connection using the form's unsaved values, then the saved ones."""
     try:
-        config = load_config_file("booknet")
-        api_key = config.get("BOOKNET_API_KEY")
-        base_url = config.get("BOOKNET_BASE_URL", "https://api.booknet.example.com")
+        saved = load_config_file("booknet")
+        api_key = current_values.get("BOOKNET_API_KEY") or saved.get("BOOKNET_API_KEY")
+        base_url = (
+            current_values.get("BOOKNET_BASE_URL")
+            or saved.get("BOOKNET_BASE_URL")
+            or "https://api.booknet.example.com"
+        )
 
         if not api_key:
             return {"success": False, "message": "API key not configured"}
