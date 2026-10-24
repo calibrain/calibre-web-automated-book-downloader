@@ -1344,6 +1344,16 @@ _coordinator_thread: threading.Thread | None = None
 _coordinator_lock = Lock()
 
 
+def coordinator_running() -> bool:
+    """Whether the download coordinator thread is alive.
+
+    The coordinator is the only thing that picks queued downloads up. If it dies, every task
+    stays "Queued" while the rest of the app looks healthy, so /api/health reports this.
+    """
+    with _coordinator_lock:
+        return _coordinator_thread is not None and _coordinator_thread.is_alive()
+
+
 def start() -> None:
     """Start the download coordinator thread. Safe to call multiple times."""
     global _coordinator_thread

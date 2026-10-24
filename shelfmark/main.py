@@ -1520,7 +1520,9 @@ def api_health() -> Response | tuple[Response, int]:
     No authentication required.
 
     Returns:
-        flask.Response: JSON with status "ok" and optional degraded features.
+        flask.Response: JSON with status "ok" and optional degraded features. Answers 503 with
+        status "error" when the download coordinator is not running, since nothing is
+        downloaded without it.
 
     """
     response: dict[str, object] = {"status": "ok"}
@@ -1528,6 +1530,12 @@ def api_health() -> Response | tuple[Response, int]:
     # Report degraded features
     if not backend.WEBSOCKET_AVAILABLE:
         response["degraded"] = {"websocket": "WebSocket unavailable - real-time updates disabled"}
+
+    coordinator_up = backend.coordinator_running()
+    response["coordinator"] = "running" if coordinator_up else "stopped"
+    if not coordinator_up:
+        response["status"] = "error"
+        return jsonify(response), 503
 
     return jsonify(response)
 
