@@ -25,7 +25,7 @@ from shelfmark.core.request_helpers import (
 )
 from shelfmark.core.utils import is_audiobook as check_audiobook
 from shelfmark.core.utils import transform_cover_url
-from shelfmark.download.activity import STALL_TIMEOUT_SECONDS, parse_activity_grace
+from shelfmark.download.activity import STALL_TIMEOUT_SECONDS, activity_key, parse_activity_grace
 from shelfmark.download.fs import run_blocking_io
 from shelfmark.download.postprocess.pipeline import is_torrent_source, safe_cleanup_path
 from shelfmark.download.postprocess.router import post_process_download
@@ -977,9 +977,16 @@ def update_download_status(book_id: str, status: str, message: str | None = None
 
     with _progress_lock:
         status_event = (status_key, message)
-        if _last_status_event.get(book_id) == status_event:
+        previous_event = _last_status_event.get(book_id)
+        if previous_event == status_event:
             return
-        _last_activity[book_id] = time.time()
+        # A change only in the swarm note beside the progress is shown but is not activity.
+        if (
+            previous_event is None
+            or previous_event[0] != status_key
+            or activity_key(previous_event[1]) != activity_key(message)
+        ):
+            _last_activity[book_id] = time.time()
         _last_status_event[book_id] = status_event
 
     # Update status message first so terminal snapshots capture the final message
