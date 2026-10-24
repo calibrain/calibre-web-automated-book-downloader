@@ -19,6 +19,7 @@ import requests
 from shelfmark.config.env import TMP_DIR
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
+from shelfmark.core.redaction import safe_url
 from shelfmark.download.clients import (
     DownloadClient,
     DownloadState,
@@ -29,7 +30,6 @@ from shelfmark.download.clients._coercion import config_text
 from shelfmark.download.clients.torrent_utils import (
     DebridMagnet,
     DebridUpload,
-    _safe_url,
     resolve_debrid_upload,
 )
 from shelfmark.download.http import download_url
@@ -572,7 +572,7 @@ class AllDebridClient(DownloadClient):
         if "alldebrid.com/f/" in link:
             logger.info(
                 "Using apikey fallback for AllDebrid file link: %s",
-                _safe_url(link),
+                safe_url(link),
             )
             if "apikey=" not in link:
                 sep = "&" if "?" in link else "?"
@@ -581,7 +581,7 @@ class AllDebridClient(DownloadClient):
 
         logger.error(
             "AllDebrid unlock failed for '%s': %s",
-            _safe_url(link),
+            safe_url(link),
             err_msg,
         )
         msg = f"AllDebrid unlock failed: {err_msg}"
@@ -664,7 +664,7 @@ class AllDebridClient(DownloadClient):
                     referer="https://alldebrid.com/",
                 )
                 if not buf:
-                    msg = f"Failed to download from {_safe_url(direct_link)}"
+                    msg = f"Failed to download from {safe_url(direct_link)}"
                     _raise_runtime_error(msg)
 
                 with dest.open("wb") as fh:

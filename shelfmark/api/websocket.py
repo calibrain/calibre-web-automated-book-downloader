@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
 from flask_socketio import SocketIO, join_room, leave_room
 
+from shelfmark.core.logger import setup_logger
 from shelfmark.core.viewer_redaction import viewer_download_id
 
 if TYPE_CHECKING:
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from flask import Flask
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class WebSocketManager:

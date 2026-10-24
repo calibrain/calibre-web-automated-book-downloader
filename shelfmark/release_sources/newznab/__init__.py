@@ -27,6 +27,6 @@ try:
     import_module("shelfmark.download.clients")
     import_module("shelfmark.download.clients.settings")
 except ImportError as e:
-    import logging
+    from shelfmark.core.logger import setup_logger
 
-    logging.getLogger(__name__).debug("Download clients not loaded: %s", e)
+    setup_logger(__name__).debug("Download clients not loaded: %s", e)

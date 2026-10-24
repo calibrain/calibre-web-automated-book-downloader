@@ -1,7 +1,6 @@
 """Logging configuration and custom logger with error tracing."""
 
 import logging
-import re
 import sys
 from collections.abc import Mapping
 from logging.handlers import RotatingFileHandler
@@ -9,6 +8,7 @@ from threading import Lock
 from typing import TYPE_CHECKING
 
 from shelfmark.config.env import ENABLE_LOGGING, LOG_FILE, LOG_LEVEL
+from shelfmark.core.redaction import redact_secrets
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -16,22 +16,6 @@ if TYPE_CHECKING:
 
 _file_handlers: dict[Path, RotatingFileHandler] = {}
 _file_handlers_lock = Lock()
-
-# Query parameters that carry tracker/indexer credentials. Prowlarr guids are often
-# the download URL itself (apikey included), and they end up in task ids that are
-# logged all over the download pipeline, so mask them at the formatter instead.
-_SECRET_QUERY_PARAM_PATTERN = re.compile(
-    r"(?<=[?&;])"
-    r"([a-z0-9_-]*api[_-]?key|api|apitoken|access_token|token|passkey|authkey|rsskey"
-    r"|torrent_pass|auth|key|password|passwd|pwd|pass|secret|sid|uid)"
-    r"=[^&\s#'\"<>;:,)\]]+",
-    re.IGNORECASE,
-)
-
-
-def redact_secrets(text: str) -> str:
-    """Mask credential query parameters in text, keeping the rest of the URL readable."""
-    return _SECRET_QUERY_PARAM_PATTERN.sub(r"\1=(removed)", text)
 
 
 class RedactingFormatter(logging.Formatter):

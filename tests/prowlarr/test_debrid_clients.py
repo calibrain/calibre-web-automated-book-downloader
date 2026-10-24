@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from shelfmark.core.redaction import safe_url
 from shelfmark.download.clients import DownloadState
 from shelfmark.download.clients.alldebrid import AllDebridClient
 from shelfmark.download.clients.realdebrid import RealDebridClient, _DownloadState
@@ -103,7 +104,7 @@ class TestResolveDebridUpload:
 
         logged = str(logger.mock_calls)
         assert _PROWLARR_PROXY_URL not in logged
-        assert torrent_utils._safe_url(_PROWLARR_PROXY_URL) in logged
+        assert safe_url(_PROWLARR_PROXY_URL) in logged
 
     def test_resolver_does_not_log_a_credential_bearing_redirect(self, monkeypatch):
         import shelfmark.download.clients.torrent_utils as torrent_utils
@@ -124,7 +125,7 @@ class TestResolveDebridUpload:
 
         logged = str(logger.mock_calls)
         assert redirect_url not in logged
-        assert torrent_utils._safe_url(redirect_url) in logged
+        assert safe_url(redirect_url) in logged
 
     def test_resolver_failure_message_keeps_out_the_source_url(self, monkeypatch):
         _mock_fetch(monkeypatch, error=OSError("tracker unreachable"))

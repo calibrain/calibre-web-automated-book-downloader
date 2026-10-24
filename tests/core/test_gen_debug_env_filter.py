@@ -98,6 +98,26 @@ def test_proxy_credentials_are_redacted() -> None:
     assert "NO_PROXY=localhost" in lines
 
 
+def test_an_address_after_a_query_or_fragment_is_not_taken_for_credentials(
+    tmp_path: Path,
+) -> None:
+    """The authority of a URL ends at "/", "?" or "#", as in the log redaction."""
+    lines = _filtered_env_lines(
+        {
+            "PATH": "/usr/bin:/bin",
+            "TRACKER_URL": "https://tracker.example?contact=ops@tracker.example",
+            "DOCS_URL": "https://docs.example#reach-us@docs.example",
+        }
+    )
+    redacted = _redacted_config(
+        tmp_path, {"TRACKER_URL": "https://tracker.example?contact=ops@tracker.example"}
+    )
+
+    assert "TRACKER_URL=https://tracker.example?contact=ops@tracker.example" in lines
+    assert "DOCS_URL=https://docs.example#reach-us@docs.example" in lines
+    assert redacted["TRACKER_URL"] == "https://tracker.example?contact=ops@tracker.example"
+
+
 def test_config_secrets_are_redacted(tmp_path: Path) -> None:
     redacted = _redacted_config(
         tmp_path,
