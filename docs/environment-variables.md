@@ -12,6 +12,7 @@ This document lists all configuration options that can be set via environment va
 - [Search Mode](#search-mode)
 - [Downloads](#downloads)
 - [Security](#security)
+- [Hardcover Sync](#hardcover-sync)
 - [Network](#network)
 - [Advanced](#advanced)
 - [Prowlarr](#prowlarr)
@@ -20,14 +21,14 @@ This document lists all configuration options that can be set via environment va
 - [Soulseek (slskd)](#soulseek-slskd)
 - [AudiobookBay](#audiobookbay)
 - [Libgen Search](#libgen-search)
-- [Webshare.cz](#webshare.cz)
+- [Webshare.cz](#websharecz)
 - [IRC](#irc)
 - [Download Clients](#download-clients)
 - [Metadata Providers](#metadata-providers)
   - [Hardcover](#metadata-providers-hardcover)
   - [Open Library](#metadata-providers-open-library)
   - [Google Books](#metadata-providers-google-books)
-  - [Moly.hu](#metadata-providers-moly.hu)
+  - [Moly.hu](#metadata-providers-molyhu)
   - [Databáze knih](#metadata-providers-databáze-knih)
   - [DNB](#metadata-providers-dnb)
 - [Direct Download](#direct-download)
@@ -55,8 +56,9 @@ These environment variables are used at startup before the settings system loads
 | `HIDE_LOCAL_AUTH` | Hide the username/password login form when OIDC is active. | boolean | `false` |
 | `DISABLE_LOCAL_AUTH` | Disable username/password login and remove the local-admin prerequisite for OIDC. Implies HIDE_LOCAL_AUTH; with AUTH_METHOD=builtin, everyone is locked out until auth env vars are changed. | boolean | `false` |
 | `SHELFMARK_API_KEY` | Optional static API key. When set, requests carrying it as 'Authorization: Bearer <key>' (or X-Api-Key) are authenticated as an admin; browser sessions keep working. Unset = off. | string | `unset` |
-| `SHELFMARK_API_KEY_READONLY` | Optional read-only API key. Can only GET `/api/stats`; never an admin. Unset = off. | string | `unset` |
+| `SHELFMARK_API_KEY_READONLY` | Optional second API key for dashboards and monitors. Send it like SHELFMARK_API_KEY. It can only GET /api/stats (counters only, no titles or user names). Every other request, and any write, is refused with 403, and it never gets a session. Unset = off. | string | `unset` |
 | `OIDC_AUTO_REDIRECT` | Automatically redirect to the OIDC provider instead of showing the login page. | boolean | `false` |
+| `UMASK` | File creation mask for the app process, read by entrypoint.sh. The default 0022 gives files 644 and directories 755. | string (octal) | `0022` |
 | `DOCKERMODE` | Indicates the application is running inside a Docker container. | boolean | `false` |
 | `ONBOARDING` | Show the onboarding wizard on first run. Set to false to skip (useful for ephemeral storage). | boolean | `true` |
 
@@ -149,7 +151,7 @@ Optional static API key. When set, requests carrying it as 'Authorization: Beare
 
 #### `SHELFMARK_API_KEY_READONLY`
 
-Optional second API key for dashboards. Send it like `SHELFMARK_API_KEY`. It can only `GET /api/stats` (counters only, no titles or user names). Every other request, and any write, is refused with 403, and it never gets a session. Unset = off.
+Optional second API key for dashboards and monitors. Send it like SHELFMARK_API_KEY. It can only GET /api/stats (counters only, no titles or user names). Every other request, and any write, is refused with 403, and it never gets a session. Unset = off.
 
 - **Type:** string
 - **Default:** `unset`
@@ -160,6 +162,13 @@ Automatically redirect to the OIDC provider instead of showing the login page.
 
 - **Type:** boolean
 - **Default:** `false`
+
+#### `UMASK`
+
+File creation mask for the app process, read by entrypoint.sh. The default 0022 gives files 644 and directories 755.
+
+- **Type:** string (octal)
+- **Default:** `0022`
 
 #### `DOCKERMODE`
 
@@ -179,7 +188,7 @@ Show the onboarding wizard on first run. Set to false to skip (useful for epheme
 
 ## Egress / VPN Routing
 
-These startup-only variables are consumed by `entrypoint.sh` / `wireguard.sh` to select and configure the WireGuard transparent-egress kill-switch. `USING_WIREGUARD` and [`USING_TOR`](#using_tor) (documented under Network) are mutually exclusive; both require root startup.
+These startup-only variables are consumed by `entrypoint.sh` / `wireguard.sh` to select and configure the WireGuard transparent-egress kill-switch. `USING_WIREGUARD` and [`USING_TOR`](#using_tor) (documented under Network) are mutually exclusive; both require root startup. `TOR_CHECK_INTERVAL` and `TOR_MAX_FAILURES` tune the Tor watchdog in `tor.sh`.
 
 | Variable | Description | Type | Default |
 |----------|-------------|------|---------|
@@ -193,6 +202,8 @@ These startup-only variables are consumed by `entrypoint.sh` / `wireguard.sh` to
 | `WIREGUARD_ALLOW_IPV6_LEAK` | Escape hatch: continue startup even when an IPv6 kill-switch cannot be installed AND IPv6 cannot be disabled. Only set when the container has no IPv6 connectivity, as IPv6 egress may otherwise bypass the tunnel. | boolean | `false` |
 | `WIREGUARD_ALLOW_WEBUI_OFFTUNNEL` | When false (default) the kill-switch is strictly fail-closed: the only off-tunnel egress permitted is loopback, the tunnel device and the LAN allowlist. Set true only if a NON-LAN client (e.g. a public reverse proxy on a different segment) must reach the WebUI; it permits app-server REPLY packets (--sport FLASK_PORT, conntrack REPLY) to leave off-tunnel. Server replies only, never client-initiated egress, so it cannot leak outbound browsing/downloads or the real IP for outbound requests, but it is still an off-tunnel path while the tunnel is down, hence opt-in. LAN WebUI clients never need it (covered by LAN_NETWORK). | boolean | `false` |
 | `WIREGUARD_STALE_AFTER` | Seconds since the last WireGuard handshake before the healthcheck bounces the tunnel. | number | `180` |
+| `TOR_CHECK_INTERVAL` | Seconds between Tor watchdog probes. The watchdog resets the container when Tor stops being usable, so the restart policy rebuilds the Tor setup. | integer (seconds) | `30` |
+| `TOR_MAX_FAILURES` | Consecutive failed Tor watchdog probes before the container is reset. 2 tolerates one failed probe. | integer | `2` |
 
 <details>
 <summary>Detailed descriptions</summary>
@@ -267,6 +278,20 @@ Seconds since the last WireGuard handshake before the healthcheck bounces the tu
 - **Type:** number
 - **Default:** `180`
 
+#### `TOR_CHECK_INTERVAL`
+
+Seconds between Tor watchdog probes. The watchdog resets the container when Tor stops being usable, so the restart policy rebuilds the Tor setup.
+
+- **Type:** integer (seconds)
+- **Default:** `30`
+
+#### `TOR_MAX_FAILURES`
+
+Consecutive failed Tor watchdog probes before the container is reset. 2 tolerates one failed probe.
+
+- **Type:** integer
+- **Default:** `2`
+
 </details>
 
 ## General
@@ -278,6 +303,10 @@ Seconds since the last WireGuard handshake before the healthcheck bounces the tu
 | `AUDIOBOOK_LIBRARY_URL` | Adds a separate navigation button for your audiobook library (Audiobookshelf, Plex, etc). When both URLs are set, icons are shown instead of text. | string | _none_ |
 | `LIBRARY_CHECK_CALIBRE_ENABLED` | Read the Calibre metadata.db and mark search results you already own, so you do not download a second copy. Read only, nothing is written to the library. | boolean | `false` |
 | `CALIBRE_LIBRARY_DB_PATH` | Path to metadata.db as seen from inside the Shelfmark container. Mount the Calibre library folder read-only, e.g. /path/to/calibre-library:/calibre-library:ro. | string | `/calibre-library/metadata.db` |
+| `LIBRARY_CHECK_AUDIOBOOKSHELF_ENABLED` | Ask your Audiobookshelf server which audiobooks you already own, so synced and automatic downloads skip them. Read only, nothing is written to Audiobookshelf. | boolean | `false` |
+| `AUDIOBOOKSHELF_URL` | Base URL reachable from the Shelfmark container (not the public URL). Often the host LAN IP, e.g. http://10.0.0.91:13378. | string | _none_ |
+| `AUDIOBOOKSHELF_TOKEN` | API token from Audiobookshelf (Settings > Users > your user > API Token). | string (secret) | _none_ |
+| `AUDIOBOOKSHELF_LIBRARY_IDS` | Comma-separated library IDs to check. Leave blank for all book libraries. | string | _none_ |
 | `SUPPORTED_FORMATS` | Book formats to include in search results. ZIP/RAR archives are extracted automatically and book files are used if found. | string (comma-separated) | `epub,mobi,azw3,fb2,djvu,cbz,cbr` |
 | `SUPPORTED_AUDIOBOOK_FORMATS` | Audiobook formats to include in search results. ZIP/RAR archives are extracted automatically and audiobook files are used if found. | string (comma-separated) | `m4b,mp3,m4a,mp4,flac,ogg,wma,aac,wav,opus,zip,rar` |
 
@@ -328,6 +357,42 @@ Path to metadata.db as seen from inside the Shelfmark container. Mount the Calib
 
 - **Type:** string
 - **Default:** `/calibre-library/metadata.db`
+
+#### `LIBRARY_CHECK_AUDIOBOOKSHELF_ENABLED`
+
+**Mark audiobooks already in your Audiobookshelf library**
+
+Ask your Audiobookshelf server which audiobooks you already own, so synced and automatic downloads skip them. Read only, nothing is written to Audiobookshelf.
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `AUDIOBOOKSHELF_URL`
+
+**Audiobookshelf URL**
+
+Base URL reachable from the Shelfmark container (not the public URL). Often the host LAN IP, e.g. http://10.0.0.91:13378.
+
+- **Type:** string
+- **Default:** _none_
+
+#### `AUDIOBOOKSHELF_TOKEN`
+
+**Audiobookshelf API Token**
+
+API token from Audiobookshelf (Settings > Users > your user > API Token).
+
+- **Type:** string (secret)
+- **Default:** _none_
+
+#### `AUDIOBOOKSHELF_LIBRARY_IDS`
+
+**Audiobookshelf Library IDs (optional)**
+
+Comma-separated library IDs to check. Leave blank for all book libraries.
+
+- **Type:** string
+- **Default:** _none_
 
 #### `SUPPORTED_FORMATS`
 
@@ -1049,6 +1114,197 @@ Custom label for the OIDC sign-in button on the login page.
 
 - **Type:** string
 - **Default:** _empty string_
+
+</details>
+
+## Hardcover Sync
+
+| Variable | Description | Type | Default |
+|----------|-------------|------|---------|
+| `HARDCOVER_SYNC_ENABLED` | Periodically sync the selected Hardcover shelves into requests. | boolean | `false` |
+| `HARDCOVER_SYNC_TOKEN` | Bearer token for your Hardcover account. Leave blank to reuse the token from the Hardcover metadata provider. | string (secret) | _none_ |
+| `HARDCOVER_SYNC_STATUSES` | Which Hardcover reading shelf to pull from. | string (choice) | `1` |
+| `HARDCOVER_SYNC_CONTENT_TYPE` | Content type for synced requests. "Ebooks and audiobooks" creates one request of each per shelf book; every request is checked against its own library and downloaded with its own format guard and source priority. | string (choice) | `audiobook` |
+| `HARDCOVER_SYNC_INTERVAL` | How often the scheduled sync runs (minimum 1 minute). | number | `6` |
+| `HARDCOVER_SYNC_INTERVAL_UNIT` | Whether the sync interval is measured in minutes or hours. | string (choice) | `hours` |
+| `AUTO_DOWNLOAD_ENABLED` | Auto-approve and auto-download matching releases for synced requests. | boolean | `false` |
+| `AUTO_DOWNLOAD_SOURCE_PRIORITY` | Drag to set which release sources are tried first for audiobook requests. The first source with a strict match wins. Disabled sources are skipped. | JSON array | _empty list_ |
+| `AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY` | Drag to set which release sources are tried first for ebook requests. The first source with a strict match wins. Disabled sources are skipped. | JSON array | _empty list_ |
+| `AUTO_DOWNLOAD_MIN_SEEDERS` | Skip torrent releases with fewer seeders than this. | number | `1` |
+| `AUTO_DOWNLOAD_RETRY_DAYS` | A synced request whose download failed, or was interrupted (a restart, say), goes back to pending after this many days and is tried again, a few per pass. A release that failed is not picked again, and a request is given up on after three failed retries. A download the stall timer cancelled counts as failed; one cancelled by a person, and rejected requests, are never retried. 0 turns retries off. | number | `7` |
+| `AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES` | A download that failed, or that was given up on (stalled, no seeders), goes back to pending this many minutes later and another release is chosen, without waiting for the retry days above or the next sync cycle. The release that failed is not picked again, and a request is given up on after three failed attempts. 0 turns this off. | number | `0` |
+| `AUTO_DOWNLOAD_RETRY_FAILED_RELEASE_DAYS` | A release that failed or stalled is kept out of the search for this many days, then it may be picked again. A torrent that stalled can be revived by new seeds, so a failure should not shut a book out for good. A request is still given up on after three failed attempts. | number | `7` |
+| `AUTO_DOWNLOAD_BACKOFF_MAX_DAYS` | A request that no source has a match for is searched every cycle at first. After three passes in a row with no match it is searched once a day, then every two days, and at most this often apart. A match, or Sync now, starts it over. 0 searches every unmatched request every cycle. | number | `3` |
+| `AUTO_DOWNLOAD_EXISTENCE_CHECK_ENABLED` | An audiobook request that stays unmatched is looked up on Audible (US and UK) through your Audiobookshelf server. Either way it stays pending and its reason says what the store answered (with the ASIN when listed), for you to decline or keep; it is checked again after a week. A lookup that fails decides nothing. Needs the Audiobookshelf URL and token below. | boolean | `false` |
+| `AUTO_DOWNLOAD_EXISTENCE_CHECK_AFTER_PASSES` | How many consecutive passes with no strict match a request goes through before the store is asked. A pass that matched, or a reopen, starts the count over. | number | `3` |
+| `AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT` | A copy of an audiobook smaller than this share of the largest copy found for the same book is probably a lower-bitrate copy. It is tried after the others, and a single m4b that small is not preferred over a fuller set of chapter files. 0 turns the check off. | number | `67` |
+
+<details>
+<summary>Detailed descriptions</summary>
+
+#### `HARDCOVER_SYNC_ENABLED`
+
+**Enable scheduled sync**
+
+Periodically sync the selected Hardcover shelves into requests.
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `HARDCOVER_SYNC_TOKEN`
+
+**Hardcover API Token**
+
+Bearer token for your Hardcover account. Leave blank to reuse the token from the Hardcover metadata provider.
+
+- **Type:** string (secret)
+- **Default:** _none_
+
+#### `HARDCOVER_SYNC_STATUSES`
+
+**Shelves to sync**
+
+Which Hardcover reading shelf to pull from.
+
+- **Type:** string (choice)
+- **Default:** `1`
+- **Options:** `1` (Want to Read), `2` (Currently Reading), `3` (Read), `5` (Did Not Finish)
+
+#### `HARDCOVER_SYNC_CONTENT_TYPE`
+
+**Request as**
+
+Content type for synced requests. "Ebooks and audiobooks" creates one request of each per shelf book; every request is checked against its own library and downloaded with its own format guard and source priority.
+
+- **Type:** string (choice)
+- **Default:** `audiobook`
+- **Options:** `audiobook` (Audiobooks), `ebook` (Ebooks), `both` (Ebooks and audiobooks)
+
+#### `HARDCOVER_SYNC_INTERVAL`
+
+**Sync interval**
+
+How often the scheduled sync runs (minimum 1 minute).
+
+- **Type:** number
+- **Default:** `6`
+- **Constraints:** min: 1, max: 10000
+
+#### `HARDCOVER_SYNC_INTERVAL_UNIT`
+
+**Interval unit**
+
+Whether the sync interval is measured in minutes or hours.
+
+- **Type:** string (choice)
+- **Default:** `hours`
+- **Options:** `minutes` (Minutes), `hours` (Hours)
+
+#### `AUTO_DOWNLOAD_ENABLED`
+
+**Enable automatic downloads**
+
+Auto-approve and auto-download matching releases for synced requests.
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `AUTO_DOWNLOAD_SOURCE_PRIORITY`
+
+**Audiobook source priority**
+
+Drag to set which release sources are tried first for audiobook requests. The first source with a strict match wins. Disabled sources are skipped.
+
+- **Type:** JSON array
+- **Default:** _empty list_
+
+#### `AUTO_DOWNLOAD_EBOOK_SOURCE_PRIORITY`
+
+**Ebook source priority**
+
+Drag to set which release sources are tried first for ebook requests. The first source with a strict match wins. Disabled sources are skipped.
+
+- **Type:** JSON array
+- **Default:** _empty list_
+
+#### `AUTO_DOWNLOAD_MIN_SEEDERS`
+
+**Minimum seeders (torrents)**
+
+Skip torrent releases with fewer seeders than this.
+
+- **Type:** number
+- **Default:** `1`
+- **Constraints:** min: 0, max: 1000
+
+#### `AUTO_DOWNLOAD_RETRY_DAYS`
+
+**Retry failed downloads after (days)**
+
+A synced request whose download failed, or was interrupted (a restart, say), goes back to pending after this many days and is tried again, a few per pass. A release that failed is not picked again, and a request is given up on after three failed retries. A download the stall timer cancelled counts as failed; one cancelled by a person, and rejected requests, are never retried. 0 turns retries off.
+
+- **Type:** number
+- **Default:** `7`
+- **Constraints:** min: 0, max: 365
+
+#### `AUTO_DOWNLOAD_FAILURE_RETRY_MINUTES`
+
+**Try another release after a failed download (minutes)**
+
+A download that failed, or that was given up on (stalled, no seeders), goes back to pending this many minutes later and another release is chosen, without waiting for the retry days above or the next sync cycle. The release that failed is not picked again, and a request is given up on after three failed attempts. 0 turns this off.
+
+- **Type:** number
+- **Default:** `0`
+- **Constraints:** min: 0, max: 1440
+
+#### `AUTO_DOWNLOAD_RETRY_FAILED_RELEASE_DAYS`
+
+**Try a failed release again after (days)**
+
+A release that failed or stalled is kept out of the search for this many days, then it may be picked again. A torrent that stalled can be revived by new seeds, so a failure should not shut a book out for good. A request is still given up on after three failed attempts.
+
+- **Type:** number
+- **Default:** `7`
+- **Constraints:** min: 1, max: 365
+
+#### `AUTO_DOWNLOAD_BACKOFF_MAX_DAYS`
+
+**Longest wait between searches for an unmatched request (days)**
+
+A request that no source has a match for is searched every cycle at first. After three passes in a row with no match it is searched once a day, then every two days, and at most this often apart. A match, or Sync now, starts it over. 0 searches every unmatched request every cycle.
+
+- **Type:** number
+- **Default:** `3`
+- **Constraints:** min: 0, max: 30
+
+#### `AUTO_DOWNLOAD_EXISTENCE_CHECK_ENABLED`
+
+**Mark audiobooks no store sells**
+
+An audiobook request that stays unmatched is looked up on Audible (US and UK) through your Audiobookshelf server. Either way it stays pending and its reason says what the store answered (with the ASIN when listed), for you to decline or keep; it is checked again after a week. A lookup that fails decides nothing. Needs the Audiobookshelf URL and token below.
+
+- **Type:** boolean
+- **Default:** `false`
+
+#### `AUTO_DOWNLOAD_EXISTENCE_CHECK_AFTER_PASSES`
+
+**Look the book up after (unmatched passes)**
+
+How many consecutive passes with no strict match a request goes through before the store is asked. A pass that matched, or a reopen, starts the count over.
+
+- **Type:** number
+- **Default:** `3`
+- **Constraints:** min: 1, max: 100
+
+#### `AUTO_DOWNLOAD_AUDIOBOOK_MIN_SIZE_PERCENT`
+
+**Smallest acceptable audiobook copy (%)**
+
+A copy of an audiobook smaller than this share of the largest copy found for the same book is probably a lower-bitrate copy. It is tried after the others, and a single m4b that small is not preferred over a fuller set of chapter files. 0 turns the check off.
+
+- **Type:** number
+- **Default:** `67`
+- **Constraints:** min: 0, max: 100
 
 </details>
 
@@ -2044,44 +2300,44 @@ How long to keep cached search results before they expire.
 | `DEBRIDLINK_API_KEY` | Debrid-Link API Key from your Debrid-Link account settings | string (secret) | _none_ |
 | `REALDEBRID_API_KEY` | Real-Debrid API Key (Secret Token) from your Real-Debrid account settings | string (secret) | _none_ |
 | `TORBOX_API_KEY` | TorBox API Key from your TorBox account settings | string (secret) | _none_ |
-| `QBITTORRENT_DOWNLOAD_DIR_BOOK` | Server-side directory where book torrents are downloaded (optional, uses qBittorrent default if not specified) | string | _none_ |
-| `QBITTORRENT_DOWNLOAD_DIR_AUDIOBOOK` | Server-side directory where audiobook torrents are downloaded (optional, uses qBittorrent default if not specified) | string | _none_ |
 | `QBITTORRENT_URL` | Web UI URL of your qBittorrent instance | string | _none_ |
 | `QBITTORRENT_USERNAME` | qBittorrent Web UI username | string | _none_ |
 | `QBITTORRENT_PASSWORD` | qBittorrent Web UI password | string (secret) | _none_ |
 | `QBITTORRENT_API_KEY` | Found in qBittorrent: Options > Web UI > API Key (qBittorrent 5.2.0+). Used instead of the username and password when set. | string (secret) | _none_ |
 | `QBITTORRENT_CATEGORY` | Category to assign to book downloads in qBittorrent | string | `books` |
 | `QBITTORRENT_CATEGORY_AUDIOBOOK` | Category for audiobook downloads. Leave empty to use the book category. | string | _empty string_ |
-| `TRANSMISSION_SEPARATE_DOWNLOAD_DIRS` | Download books and audiobooks to different directories instead of one shared directory. | boolean | `false` |
 | `QBITTORRENT_SEPARATE_DOWNLOAD_DIRS` | Download books and audiobooks to different directories instead of one shared directory. | boolean | `false` |
-| `TRANSMISSION_DOWNLOAD_DIR_BOOK` | Server-side directory where book torrents are downloaded (optional, uses Transmission default if not specified) | string | _none_ |
-| `TRANSMISSION_DOWNLOAD_DIR_AUDIOBOOK` | Server-side directory where audiobook torrents are downloaded (optional, uses Transmission default if not specified) | string | _none_ |
 | `QBITTORRENT_DOWNLOAD_DIR` | Server-side directory where torrents are downloaded (optional, uses qBittorrent default if not specified) | string | _none_ |
+| `QBITTORRENT_DOWNLOAD_DIR_BOOK` | Server-side directory where book torrents are downloaded (optional, uses qBittorrent default if not specified) | string | _none_ |
+| `QBITTORRENT_DOWNLOAD_DIR_AUDIOBOOK` | Server-side directory where audiobook torrents are downloaded (optional, uses qBittorrent default if not specified) | string | _none_ |
 | `QBITTORRENT_TAG` | Tag(s) to assign to qBittorrent downloads. Leave empty for no tags. | string (comma-separated) | _empty list_ |
 | `TRANSMISSION_URL` | URL of your Transmission instance (use https:// for TLS) | string | _none_ |
 | `TRANSMISSION_USERNAME` | Transmission RPC username (if authentication enabled) | string | _none_ |
 | `TRANSMISSION_PASSWORD` | Transmission RPC password | string (secret) | _none_ |
-| `DELUGE_SEPARATE_DOWNLOAD_DIRS` | Download books and audiobooks to different directories instead of one shared directory. | boolean | `false` |
 | `TRANSMISSION_CATEGORY` | Label to assign to book downloads in Transmission | string | `books` |
-| `DELUGE_DOWNLOAD_DIR_BOOK` | Server-side directory where book torrents are downloaded (optional, uses Deluge default if not specified) | string | _none_ |
-| `DELUGE_DOWNLOAD_DIR_AUDIOBOOK` | Server-side directory where audiobook torrents are downloaded (optional, uses Deluge default if not specified) | string | _none_ |
 | `TRANSMISSION_CATEGORY_AUDIOBOOK` | Label for audiobook downloads. Leave empty to use the book label. | string | _empty string_ |
+| `TRANSMISSION_SEPARATE_DOWNLOAD_DIRS` | Download books and audiobooks to different directories instead of one shared directory. | boolean | `false` |
 | `TRANSMISSION_DOWNLOAD_DIR` | Server-side directory where torrents are downloaded (optional, uses Transmission default if not specified) | string | _none_ |
+| `TRANSMISSION_DOWNLOAD_DIR_BOOK` | Server-side directory where book torrents are downloaded (optional, uses Transmission default if not specified) | string | _none_ |
+| `TRANSMISSION_DOWNLOAD_DIR_AUDIOBOOK` | Server-side directory where audiobook torrents are downloaded (optional, uses Transmission default if not specified) | string | _none_ |
 | `DELUGE_HOST` | Hostname/IP or full URL of your Deluge Web UI (deluge-web) | string | `localhost` |
 | `DELUGE_PORT` | Deluge Web UI port (default: 8112) | string | `8112` |
 | `DELUGE_PASSWORD` | Deluge Web UI password (default: deluge) | string (secret) | _none_ |
-| `RTORRENT_SEPARATE_DOWNLOAD_DIRS` | Download books and audiobooks to different directories instead of one shared directory. | boolean | `false` |
 | `DELUGE_CATEGORY` | Label to assign to book downloads in Deluge | string | `books` |
-| `RTORRENT_DOWNLOAD_DIR_BOOK` | Server-side directory where book torrents are downloaded (optional, uses rTorrent default if not specified) | string | _none_ |
-| `RTORRENT_DOWNLOAD_DIR_AUDIOBOOK` | Server-side directory where audiobook torrents are downloaded (optional, uses rTorrent default if not specified) | string | _none_ |
 | `DELUGE_CATEGORY_AUDIOBOOK` | Label for audiobook downloads. Leave empty to use the book label. | string | _empty string_ |
+| `DELUGE_SEPARATE_DOWNLOAD_DIRS` | Download books and audiobooks to different directories instead of one shared directory. | boolean | `false` |
 | `DELUGE_DOWNLOAD_DIR` | Server-side directory where torrents are downloaded (optional, uses Deluge default if not specified) | string | _none_ |
+| `DELUGE_DOWNLOAD_DIR_BOOK` | Server-side directory where book torrents are downloaded (optional, uses Deluge default if not specified) | string | _none_ |
+| `DELUGE_DOWNLOAD_DIR_AUDIOBOOK` | Server-side directory where audiobook torrents are downloaded (optional, uses Deluge default if not specified) | string | _none_ |
 | `RTORRENT_URL` | XML-RPC URL of your rTorrent instance | string | _none_ |
 | `RTORRENT_USERNAME` | HTTP Basic auth username (if authentication enabled) | string | _none_ |
 | `RTORRENT_PASSWORD` | HTTP Basic auth password | string (secret) | _none_ |
 | `RTORRENT_LABEL` | Label to assign to ebook downloads in rTorrent | string | `cwabd` |
 | `RTORRENT_AUDIOBOOK_LABEL` | Label to assign to audiobook downloads in rTorrent (falls back to Book Label if not set) | string | _none_ |
+| `RTORRENT_SEPARATE_DOWNLOAD_DIRS` | Download books and audiobooks to different directories instead of one shared directory. | boolean | `false` |
 | `RTORRENT_DOWNLOAD_DIR` | Server-side directory where torrents are downloaded (optional, uses rTorrent default if not specified) | string | _none_ |
+| `RTORRENT_DOWNLOAD_DIR_BOOK` | Server-side directory where book torrents are downloaded (optional, uses rTorrent default if not specified) | string | _none_ |
+| `RTORRENT_DOWNLOAD_DIR_AUDIOBOOK` | Server-side directory where audiobook torrents are downloaded (optional, uses rTorrent default if not specified) | string | _none_ |
 | `PROWLARR_TORRENT_ACTION` | After a successful import, Remove keeps downloaded files in qBittorrent, Transmission, and Deluge; Remove & Delete Files also deletes them. rTorrent cannot delete download data, so this action leaves its torrent untouched. Blackhole does not support removal. Debrid clients delete temporary local files for either Remove action. | string (choice) | `keep` |
 | `TORRENT_NO_SEEDERS_WAIT` | Give up on a torrent when its client sees no seed at all for this long, even while it is still downloading, or fewer seeds than the minimum below while nothing is downloading. The torrent is removed and the download marked failed, so another release can be tried. The card shows the seed count and a countdown while it waits. 0 keeps the default behaviour (only the stall timer ends it). Only qBittorrent reports seed counts. | number | `0` |
 | `TORRENT_MIN_SEEDERS` | Seeds the client must see for a motionless torrent to keep waiting. 0 also turns the no-seed check off. | number | `1` |
@@ -2203,6 +2459,14 @@ Category to assign to book downloads in qBittorrent
 - **Default:** `books`
 
 #### `QBITTORRENT_CATEGORY_AUDIOBOOK`
+
+**Audiobook Category**
+
+Category for audiobook downloads. Leave empty to use the book category.
+
+- **Type:** string
+- **Default:** _empty string_
+
 #### `QBITTORRENT_SEPARATE_DOWNLOAD_DIRS`
 
 **Separate Book and Audiobook Directories**
@@ -2212,16 +2476,7 @@ Download books and audiobooks to different directories instead of one shared dir
 - **Type:** boolean
 - **Default:** `false`
 
-
-**Audiobook Category**
-
-Category for audiobook downloads. Leave empty to use the book category.
-
-- **Type:** string
-- **Default:** _empty string_
-
 #### `QBITTORRENT_DOWNLOAD_DIR`
-#### `QBITTORRENT_DOWNLOAD_DIR_BOOK`
 
 **Download Directory**
 
@@ -2230,6 +2485,7 @@ Server-side directory where torrents are downloaded (optional, uses qBittorrent 
 - **Type:** string
 - **Default:** _none_
 
+#### `QBITTORRENT_DOWNLOAD_DIR_BOOK`
 
 **Book Download Directory**
 
@@ -2293,6 +2549,14 @@ Label to assign to book downloads in Transmission
 - **Default:** `books`
 
 #### `TRANSMISSION_CATEGORY_AUDIOBOOK`
+
+**Audiobook Label**
+
+Label for audiobook downloads. Leave empty to use the book label.
+
+- **Type:** string
+- **Default:** _empty string_
+
 #### `TRANSMISSION_SEPARATE_DOWNLOAD_DIRS`
 
 **Separate Book and Audiobook Directories**
@@ -2302,16 +2566,7 @@ Download books and audiobooks to different directories instead of one shared dir
 - **Type:** boolean
 - **Default:** `false`
 
-
-**Audiobook Label**
-
-Label for audiobook downloads. Leave empty to use the book label.
-
-- **Type:** string
-- **Default:** _empty string_
-
 #### `TRANSMISSION_DOWNLOAD_DIR`
-#### `TRANSMISSION_DOWNLOAD_DIR_BOOK`
 
 **Download Directory**
 
@@ -2320,6 +2575,7 @@ Server-side directory where torrents are downloaded (optional, uses Transmission
 - **Type:** string
 - **Default:** _none_
 
+#### `TRANSMISSION_DOWNLOAD_DIR_BOOK`
 
 **Book Download Directory**
 
@@ -2374,6 +2630,14 @@ Label to assign to book downloads in Deluge
 - **Default:** `books`
 
 #### `DELUGE_CATEGORY_AUDIOBOOK`
+
+**Audiobook Label**
+
+Label for audiobook downloads. Leave empty to use the book label.
+
+- **Type:** string
+- **Default:** _empty string_
+
 #### `DELUGE_SEPARATE_DOWNLOAD_DIRS`
 
 **Separate Book and Audiobook Directories**
@@ -2383,16 +2647,7 @@ Download books and audiobooks to different directories instead of one shared dir
 - **Type:** boolean
 - **Default:** `false`
 
-
-**Audiobook Label**
-
-Label for audiobook downloads. Leave empty to use the book label.
-
-- **Type:** string
-- **Default:** _empty string_
-
 #### `DELUGE_DOWNLOAD_DIR`
-#### `DELUGE_DOWNLOAD_DIR_BOOK`
 
 **Download Directory**
 
@@ -2401,6 +2656,7 @@ Server-side directory where torrents are downloaded (optional, uses Deluge defau
 - **Type:** string
 - **Default:** _none_
 
+#### `DELUGE_DOWNLOAD_DIR_BOOK`
 
 **Book Download Directory**
 
@@ -2455,6 +2711,14 @@ Label to assign to ebook downloads in rTorrent
 - **Default:** `cwabd`
 
 #### `RTORRENT_AUDIOBOOK_LABEL`
+
+**Audiobook Label**
+
+Label to assign to audiobook downloads in rTorrent (falls back to Book Label if not set)
+
+- **Type:** string
+- **Default:** _none_
+
 #### `RTORRENT_SEPARATE_DOWNLOAD_DIRS`
 
 **Separate Book and Audiobook Directories**
@@ -2464,16 +2728,7 @@ Download books and audiobooks to different directories instead of one shared dir
 - **Type:** boolean
 - **Default:** `false`
 
-
-**Audiobook Label**
-
-Label to assign to audiobook downloads in rTorrent (falls back to Book Label if not set)
-
-- **Type:** string
-- **Default:** _none_
-
 #### `RTORRENT_DOWNLOAD_DIR`
-#### `RTORRENT_DOWNLOAD_DIR_BOOK`
 
 **Download Directory**
 
@@ -2482,6 +2737,7 @@ Server-side directory where torrents are downloaded (optional, uses rTorrent def
 - **Type:** string
 - **Default:** _none_
 
+#### `RTORRENT_DOWNLOAD_DIR_BOOK`
 
 **Book Download Directory**
 
@@ -2810,6 +3066,14 @@ Default sort order for Google Books search results.
 #### `MOLY_ENABLED`
 
 **Enable Moly.hu**
+
+Enable Moly.hu as a metadata provider for book searches
+
+- **Type:** boolean
+- **Default:** `false`
+
+</details>
+
 ### Metadata Providers: Databáze knih
 
 | Variable | Description | Type | Default |
@@ -2824,14 +3088,6 @@ Default sort order for Google Books search results.
 **Enable Databáze knih**
 
 Enable Databáze knih as a metadata provider for book searches
-
-- **Type:** boolean
-- **Default:** `false`
-
-</details>
-
-
-Enable Moly.hu as a metadata provider for book searches
 
 - **Type:** boolean
 - **Default:** `false`
