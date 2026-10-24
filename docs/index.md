@@ -22,6 +22,10 @@ Use the guides below to set up the app, connect your library tools, and understa
 - [Library Check](library-check.md)
 - [Custom Scripts](custom-scripts.md)
 
+## Developers
+
+- [Developer Documentation](dev/index.md)
+
 ## Help
 
 - [Troubleshooting](troubleshooting.md)
