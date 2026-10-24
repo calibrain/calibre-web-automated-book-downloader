@@ -21,3 +21,10 @@ repos:
         types_or: [javascript, jsx, ts, tsx, css, json]
         files: ^src/frontend/
         exclude: package-lock\.json
+
+      - id: i18n-check
+        name: i18n catalogs (every t() string translated, en.json in sync)
+        entry: npx --prefix src/frontend vitest run src/tests/i18n.test.ts
+        language: system
+        files: ^(src/frontend/src|shelfmark)/
+        pass_filenames: false

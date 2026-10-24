@@ -43,6 +43,7 @@ import { primeSettingsCache } from './hooks/useSettings';
 import { useToast } from './hooks/useToast';
 import { useExternalHashChange, useSyncUrlSearchHash, useUrlSearch } from './hooks/useUrlSearch';
 import { primeUsersCache } from './hooks/useUsersFetch';
+import { t } from './i18n';
 import { LoginPage } from './pages/LoginPage';
 import {
   getSourceRecordInfo,
@@ -191,13 +192,13 @@ const getSubmissionSuccessMessage = (
       const title =
         typeof queuedDownloads[0].title === 'string' && queuedDownloads[0].title.trim()
           ? queuedDownloads[0].title.trim()
-          : 'Untitled';
-      return `Download queued: ${title}`;
+          : t('Untitled');
+      return t('Download queued: {title}', { title });
     }
-    return 'Downloads queued';
+    return t('Downloads queued');
   }
 
-  return 'Download queued and request submitted';
+  return t('Download queued and request submitted');
 };
 
 const CONFIRMED_DOWNLOAD_INTERRUPTED_MESSAGE =
@@ -566,7 +567,7 @@ function App() {
       }
     } catch (error) {
       console.error('Failed to load admin users:', error);
-      setAdminUsersError('Failed to load users');
+      setAdminUsersError(t('Failed to load users'));
     } finally {
       setIsAdminUsersLoading(false);
     }
@@ -1010,7 +1011,7 @@ function App() {
         if (book) {
           setSelectedBook(book);
         } else {
-          showToast('Failed to load book details', 'error');
+          showToast(t('Failed to load book details'), 'error');
         }
       }
     }
@@ -1029,7 +1030,7 @@ function App() {
         return true;
       } catch (error) {
         console.error('Request creation failed:', error);
-        showToast(getErrorMessage(error, 'Failed to create request'), 'error');
+        showToast(getErrorMessage(error, t('Failed to create request')), 'error');
         if (isPolicyGuardError(error)) {
           await refreshRequestPolicy({ force: true });
         }
@@ -1074,7 +1075,7 @@ function App() {
         requestPayloads,
         requestPayloads.length === 1
           ? getRequestSuccessMessage(requestPayloads[0])
-          : 'Requests submitted',
+          : t('Requests submitted'),
       );
       if (!success) return false;
 
@@ -1144,7 +1145,10 @@ function App() {
             selected: false,
           });
           const listName = searchFieldLabels['hardcover_list'];
-          showToast(`Removed from ${listName || 'list'}`, 'info');
+          showToast(
+            listName ? t('Removed from {list}', { list: listName }) : t('Removed from list'),
+            'info',
+          );
         }
       })
       .catch(() => undefined);
@@ -1176,7 +1180,7 @@ function App() {
             await refreshRequestPolicy({ force: true });
             return;
           }
-          showToast('Download blocked by policy', 'error');
+          showToast(t('Download blocked by policy'), 'error');
           await refreshRequestPolicy({ force: true });
           return;
         }
@@ -1187,13 +1191,13 @@ function App() {
           ) {
             await fetchStatus();
             removeBookFromActiveList(book);
-            showToast(CONFIRMED_DOWNLOAD_INTERRUPTED_MESSAGE, 'info');
+            showToast(t(CONFIRMED_DOWNLOAD_INTERRUPTED_MESSAGE), 'info');
             return;
           }
         } catch (verificationError) {
           console.warn('Failed to verify download after response error:', verificationError);
         }
-        showToast(getErrorMessage(error, 'Failed to queue download'), 'error');
+        showToast(getErrorMessage(error, t('Failed to queue download')), 'error');
         throw error;
       }
     },
@@ -1275,7 +1279,7 @@ function App() {
             await refreshRequestPolicy({ force: true });
             return;
           }
-          showToast('Download blocked by policy', 'error');
+          showToast(t('Download blocked by policy'), 'error');
           await refreshRequestPolicy({ force: true });
           return;
         }
@@ -1286,7 +1290,7 @@ function App() {
           ) {
             await fetchStatus();
             removeBookFromActiveList(book);
-            showToast(CONFIRMED_DOWNLOAD_INTERRUPTED_MESSAGE, 'info');
+            showToast(t(CONFIRMED_DOWNLOAD_INTERRUPTED_MESSAGE), 'info');
             return;
           }
         } catch (verificationError) {
@@ -1295,7 +1299,7 @@ function App() {
             verificationError,
           );
         }
-        showToast(getErrorMessage(error, 'Failed to queue download'), 'error');
+        showToast(getErrorMessage(error, t('Failed to queue download')), 'error');
         throw error;
       }
     },
@@ -1467,7 +1471,7 @@ function App() {
 
     if (mode === 'blocked') {
       policyTrace('direct.action:block', { bookId: book.id, mode });
-      showToast('Download blocked by policy', 'error');
+      showToast(t('Download blocked by policy'), 'error');
       await refreshRequestPolicy({ force: true });
       return;
     }
@@ -1497,7 +1501,7 @@ function App() {
       await Promise.all([fetchStatus(), refreshActivitySnapshot()]);
     } catch (error) {
       console.error('Cancel failed:', error);
-      showToast('Failed to cancel/clear download', 'error');
+      showToast(t('Failed to cancel/clear download'), 'error');
     }
   };
 
@@ -1507,7 +1511,7 @@ function App() {
       await fetchStatus();
     } catch (error) {
       console.error('Retry failed:', error);
-      showToast('Failed to retry download', 'error');
+      showToast(t('Failed to retry download'), 'error');
     }
   };
 
@@ -1545,7 +1549,7 @@ function App() {
 
     if (mode === 'blocked') {
       policyTrace('universal.get:block', { bookId: book.id, contentType: normalizedContentType });
-      showToast('This title is unavailable by policy', 'error');
+      showToast(t('This title is unavailable by policy'), 'error');
       return;
     }
 
@@ -1770,9 +1774,9 @@ function App() {
       try {
         await cancelUserRequest(requestId);
         await refreshActivitySnapshot();
-        showToast('Request cancelled', 'success');
+        showToast(t('Request cancelled'), 'success');
       } catch (error) {
-        showToast(getErrorMessage(error, 'Failed to cancel request'), 'error');
+        showToast(getErrorMessage(error, t('Failed to cancel request')), 'error');
       }
     },
     [cancelUserRequest, refreshActivitySnapshot, showToast],
@@ -1787,9 +1791,9 @@ function App() {
       try {
         await rejectSidebarRequest(requestId, adminNote);
         await refreshActivitySnapshot();
-        showToast('Request rejected', 'success');
+        showToast(t('Request rejected'), 'success');
       } catch (error) {
-        showToast(getErrorMessage(error, 'Failed to reject request'), 'error');
+        showToast(getErrorMessage(error, t('Failed to reject request')), 'error');
       }
     },
     [refreshActivitySnapshot, requestRoleIsAdmin, rejectSidebarRequest, showToast],
@@ -1836,10 +1840,10 @@ function App() {
         try {
           await fulfilSidebarRequest(requestId, undefined, undefined, true);
           await refreshActivitySnapshot();
-          showToast('Request approved', 'success');
+          showToast(t('Request approved'), 'success');
           await fetchStatus();
         } catch (error) {
-          showToast(getErrorMessage(error, 'Failed to approve request'), 'error');
+          showToast(getErrorMessage(error, t('Failed to approve request')), 'error');
         }
         return;
       }
@@ -1850,10 +1854,10 @@ function App() {
         try {
           await fulfilSidebarRequest(requestId, record.release_data || undefined);
           await refreshActivitySnapshot();
-          showToast('Request approved', 'success');
+          showToast(t('Request approved'), 'success');
           await fetchStatus();
         } catch (error) {
-          showToast(getErrorMessage(error, 'Failed to approve request'), 'error');
+          showToast(getErrorMessage(error, t('Failed to approve request')), 'error');
         }
         return;
       }
@@ -1888,12 +1892,15 @@ function App() {
           buildReleaseDataFromMetadataRelease(book, release, toContentType(releaseContentType)),
         );
         await refreshActivitySnapshot();
-        showToast(`Request approved: ${book.title || 'Untitled'}`, 'success');
+        showToast(
+          t('Request approved: {title}', { title: book.title || t('Untitled') }),
+          'success',
+        );
         setFulfillingRequest(null);
         await fetchStatus();
       } catch (error) {
         console.error('Browse fulfil failed:', error);
-        showToast(getErrorMessage(error, 'Failed to fulfil request'), 'error');
+        showToast(getErrorMessage(error, t('Failed to fulfil request')), 'error');
         throw error;
       }
     },
@@ -2441,12 +2448,12 @@ function App() {
       effectivePendingOnBehalfDownload.type === 'book' ||
       effectivePendingOnBehalfDownload.type === 'combined'
     ) {
-      pendingOnBehalfTitle = effectivePendingOnBehalfDownload.book.title || 'Untitled';
+      pendingOnBehalfTitle = effectivePendingOnBehalfDownload.book.title || t('Untitled');
     } else {
       pendingOnBehalfTitle =
         effectivePendingOnBehalfDownload.release.title ||
         effectivePendingOnBehalfDownload.book.title ||
-        'Untitled';
+        t('Untitled');
     }
   }
   const pendingOnBehalfUserName = effectivePendingOnBehalfDownload
@@ -2546,8 +2553,9 @@ function App() {
 
         {!isInitialState && effectiveActiveQueryTarget === 'manual' && (
           <p className="px-4 pt-2 text-xs opacity-50 sm:px-6 lg:ml-16 lg:px-8">
-            Manual search queries release sources directly. Some sources may return limited
-            metadata, which can affect file naming templates.
+            {t(
+              'Manual search queries release sources directly. Some sources may return limited metadata, which can affect file naming templates.',
+            )}
           </p>
         )}
 
@@ -2699,7 +2707,16 @@ function App() {
                 effectiveCombinedState
                   ? {
                       phase: effectiveCombinedState.phase,
-                      stepLabel: `Step ${combinedCurrentStep} of ${combinedSelectionPhases.length} — Select ${effectiveCombinedState.phase === 'ebook' ? 'book' : 'audiobook'}`,
+                      stepLabel:
+                        effectiveCombinedState.phase === 'ebook'
+                          ? t('Step {current} of {total} — Select book', {
+                              current: combinedCurrentStep,
+                              total: combinedSelectionPhases.length,
+                            })
+                          : t('Step {current} of {total} — Select audiobook', {
+                              current: combinedCurrentStep,
+                              total: combinedSelectionPhases.length,
+                            }),
                       ebookMode: effectiveCombinedState.ebookMode,
                       audiobookMode: effectiveCombinedState.audiobookMode,
                       stagedEbookRelease: effectiveCombinedState.stagedEbook?.release ?? null,
@@ -2927,7 +2944,7 @@ function App() {
         {metadataConfigSession}
         {urlSearchBootstrapMount}
         <div aria-live="polite" style={visuallyHiddenStyle}>
-          Checking authentication…
+          {t('Checking authentication…')}
         </div>
       </>
     );
@@ -2942,7 +2959,7 @@ function App() {
         {metadataConfigSession}
         {urlSearchBootstrapMount}
         <div aria-live="polite" style={visuallyHiddenStyle}>
-          Loading configuration…
+          {t('Loading configuration…')}
         </div>
       </>
     );

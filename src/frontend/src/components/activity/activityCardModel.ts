@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import type { RequestRecord } from '../../types';
 import { isActiveDownloadStatus } from './activityStyles.js';
 import type { ActivityItem, ActivityVisualStatus } from './activityTypes';
@@ -41,7 +42,7 @@ const formatDownloadProgress = (progress: number, sizeRaw?: string): string => {
       return `${downloaded.toFixed(1)}${sizeUnit} / ${sizeRaw}`;
     }
   }
-  return `Downloading ${Math.round(progress)}%`;
+  return t('Downloading {percent}%', { percent: Math.round(progress) });
 };
 
 const toRequestVisualStatus = (status: RequestRecord['status']): ActivityVisualStatus => {
@@ -53,10 +54,10 @@ const toRequestVisualStatus = (status: RequestRecord['status']): ActivityVisualS
 
 const getPendingRequestText = (item: ActivityItem, isAdmin: boolean): string => {
   if (!isAdmin) {
-    return 'Awaiting review';
+    return t('Awaiting review');
   }
   const username = item.username?.trim() || item.requestRecord?.username?.trim();
-  return username ? `Needs review · ${username}` : 'Needs review';
+  return username ? t('Needs review · {username}', { username }) : t('Needs review');
 };
 
 const getRequestBadge = (item: ActivityItem, isAdmin: boolean): ActivityCardBadge => {
@@ -78,17 +79,17 @@ const getRequestBadge = (item: ActivityItem, isAdmin: boolean): ActivityCardBadg
 
   let text = item.statusLabel;
   if (hasInFlightLinkedDownload) {
-    text = 'Approved';
+    text = t('Approved');
   } else if (hasFailureReason && failureReason) {
-    text = failureReason;
+    text = t(failureReason);
   } else if (requestVisualStatus === 'pending') {
     text = getPendingRequestText(item, isAdmin);
   } else if (requestVisualStatus === 'fulfilled') {
-    text = 'Approved';
+    text = t('Approved');
   } else if (requestVisualStatus === 'rejected') {
-    text = isAdmin ? 'Declined' : 'Not approved';
+    text = isAdmin ? t('Declined') : t('Not approved');
   } else if (requestVisualStatus === 'cancelled') {
-    text = isAdmin ? 'Cancelled by requester' : 'Cancelled';
+    text = isAdmin ? t('Cancelled by requester') : t('Cancelled');
   }
 
   return {
@@ -102,7 +103,7 @@ const getRequestBadge = (item: ActivityItem, isAdmin: boolean): ActivityCardBadg
 const getDownloadBadge = (item: ActivityItem): ActivityCardBadge => {
   let text = item.statusLabel;
   if (item.statusDetail) {
-    text = item.statusDetail;
+    text = t(item.statusDetail);
   } else if (item.visualStatus === 'downloading' && typeof item.progress === 'number') {
     text = formatDownloadProgress(item.progress, item.sizeRaw);
   }

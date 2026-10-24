@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { t } from '../i18n';
 
 interface OnBehalfConfirmationModalProps {
   isOpen: boolean;
@@ -64,7 +65,7 @@ export const OnBehalfConfirmationModal = ({
         className={`absolute inset-0 bg-black/60 transition-opacity duration-150 ${isClosing ? 'opacity-0' : 'opacity-100'}`}
         onClick={handleClose}
         tabIndex={-1}
-        aria-label="Close download confirmation"
+        aria-label={t('Close download confirmation')}
       />
 
       <div
@@ -76,13 +77,13 @@ export const OnBehalfConfirmationModal = ({
       >
         <header className="flex items-center justify-between border-b border-(--border-muted) px-6 py-4">
           <h3 id={titleId} className="text-lg font-semibold">
-            Download as {actingAsName}?
+            {t('Download as {name}?', { name: actingAsName })}
           </h3>
           <button
             type="button"
             onClick={handleClose}
             className="rounded-lg p-1.5 transition-colors hover:bg-(--hover-surface) disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Close download confirmation"
+            aria-label={t('Close download confirmation')}
             disabled={isSubmitting}
           >
             <svg
@@ -99,11 +100,12 @@ export const OnBehalfConfirmationModal = ({
 
         <div className="space-y-3 px-6 py-5">
           <p className="text-sm opacity-90">
-            This download will use {actingAsName}&apos;s output preferences and destination
-            settings.
+            {t("This download will use {name}'s output preferences and destination settings.", {
+              name: actingAsName,
+            })}
           </p>
           <div className="rounded-xl border border-(--border-muted) bg-(--bg-soft) px-4 py-3">
-            <p className="text-xs tracking-wide uppercase opacity-60">Title</p>
+            <p className="text-xs tracking-wide uppercase opacity-60">{t('Title')}</p>
             <p className="mt-1 text-sm font-medium wrap-break-word">{itemTitle}</p>
           </div>
         </div>
@@ -115,7 +117,7 @@ export const OnBehalfConfirmationModal = ({
             disabled={isSubmitting}
             className="rounded-lg border border-(--border-muted) bg-(--bg-soft) px-4 py-2 text-sm font-medium transition-colors hover:bg-(--hover-surface) disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Cancel
+            {t('Cancel')}
           </button>
           <button
             type="button"
@@ -125,7 +127,7 @@ export const OnBehalfConfirmationModal = ({
             disabled={confirmDisabled}
             className="inline-flex items-center gap-2 rounded-lg bg-sky-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isSubmitting ? 'Queuing...' : 'Confirm'}
+            {isSubmitting ? t('Queuing...') : t('Confirm')}
           </button>
         </footer>
       </div>

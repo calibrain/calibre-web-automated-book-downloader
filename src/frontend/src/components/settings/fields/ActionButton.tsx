@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { t } from '../../../i18n';
 import type { ActionButtonConfig, ActionResult } from '../../../types/settings';
 
 interface ActionButtonProps {
@@ -37,7 +38,7 @@ export const ActionButton = ({ field, onAction, disabled }: ActionButtonProps) =
     } catch (err) {
       setResult({
         success: false,
-        message: err instanceof Error ? err.message : 'Action failed',
+        message: err instanceof Error ? err.message : t('Action failed'),
       });
     } finally {
       setIsLoading(false);
@@ -79,7 +80,7 @@ export const ActionButton = ({ field, onAction, disabled }: ActionButtonProps) =
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                 />
               </svg>
-              Running...
+              {t('Running...')}
             </span>
           ) : (
             field.label
@@ -96,11 +97,11 @@ export const ActionButton = ({ field, onAction, disabled }: ActionButtonProps) =
               : 'bg-red-500/20 text-red-700 dark:text-red-300'
           }`}
         >
-          <p>{result.message}</p>
+          <p>{t(result.message)}</p>
           {Array.isArray(result.details) && result.details.length > 0 && (
             <ul className="mt-2 list-disc space-y-1 pl-5 text-xs opacity-90">
               {createDetailEntries(result.details).map(({ key, detail }) => (
-                <li key={key}>{detail}</li>
+                <li key={key}>{t(detail)}</li>
               ))}
             </ul>
           )}

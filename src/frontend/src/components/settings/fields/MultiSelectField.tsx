@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 
+import { t } from '../../../i18n';
 import type { MultiSelectFieldConfig } from '../../../types/settings';
 import { DropdownList } from '../../DropdownList';
 
@@ -164,10 +165,10 @@ const MultiSelectDropdownField = ({
   // Custom summary formatter - only count explicit selections
   const summaryFormatter = () => {
     if (allSelected) {
-      return orderedOptions.find((opt) => opt.value === ALL_OPTION_VALUE)?.label || 'All';
+      return orderedOptions.find((opt) => opt.value === ALL_OPTION_VALUE)?.label || t('All');
     }
     if (selectedExplicit.length === 0) {
-      return <span className="opacity-60">{field.placeholder || 'Select categories...'}</span>;
+      return <span className="opacity-60">{field.placeholder || t('Select categories...')}</span>;
     }
     const selectedLabels = selectedExplicit
       .map((v) => orderedOptions.find((o) => o.value === v)?.label)
@@ -196,7 +197,7 @@ const MultiSelectDropdownField = ({
       multiple
       showCheckboxes
       keepOpenOnSelect
-      placeholder={field.placeholder || 'Select categories...'}
+      placeholder={field.placeholder || t('Select categories...')}
       widthClassName="w-full"
       summaryFormatter={summaryFormatter}
     />
@@ -343,7 +344,7 @@ const MultiSelectPillsField = ({
                   d="M5 15l7-7 7 7"
                 />
               </svg>
-              Show less
+              {t('Show less')}
             </>
           ) : (
             <>
@@ -355,7 +356,7 @@ const MultiSelectPillsField = ({
                   d="M19 9l-7 7-7-7"
                 />
               </svg>
-              Show all {field.options.length} options
+              {t('Show all {count} options', { count: field.options.length })}
             </>
           )}
         </button>

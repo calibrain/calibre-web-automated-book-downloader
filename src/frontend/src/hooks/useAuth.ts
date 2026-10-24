@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { useSocket } from '../contexts/SocketContext';
+import { t } from '../i18n';
 import { login, logout, checkAuth } from '../services/api';
 import type { LoginCredentials } from '../types';
 import { getReturnToFromSearch } from '../utils/authRedirect';
@@ -140,13 +141,13 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthReturn {
           setLoginError(null);
           void navigate(postLoginPath, { replace: true });
         } else {
-          setLoginError(response.error || 'Login failed');
+          setLoginError(response.error ? t(response.error) : t('Login failed'));
         }
       } catch (error) {
         if (error instanceof Error) {
-          setLoginError(error.message || 'Login failed');
+          setLoginError(error.message || t('Login failed'));
         } else {
-          setLoginError('Login failed');
+          setLoginError(t('Login failed'));
         }
       } finally {
         setIsLoggingIn(false);
@@ -177,7 +178,7 @@ export function useAuth(options: UseAuthOptions = {}): UseAuthReturn {
       void navigate('/login', { replace: true });
     } catch (error) {
       console.error('Logout failed:', error);
-      showToast?.('Logout failed', 'error');
+      showToast?.(t('Logout failed'), 'error');
     }
   }, [navigate, onLogoutSuccess, refreshSocketSession, showToast, applyAuthResponse]);
 

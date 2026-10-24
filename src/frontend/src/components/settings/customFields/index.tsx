@@ -1,5 +1,6 @@
 import type { ComponentType, ReactNode } from 'react';
 
+import { t } from '../../../i18n';
 import { NamingTemplateField } from './NamingTemplateField';
 import { OidcAdminHint } from './OidcAdminHint';
 import { OidcEnvInfo } from './OidcEnvInfo';
@@ -68,7 +69,7 @@ export const renderCustomSettingsField = (props: CustomSettingsFieldRendererProp
   if (!Renderer) {
     return (
       <p className="text-xs opacity-60">
-        Unknown custom settings component: {props.field.component}
+        {t('Unknown custom settings component: {component}', { component: props.field.component })}
       </p>
     );
   }

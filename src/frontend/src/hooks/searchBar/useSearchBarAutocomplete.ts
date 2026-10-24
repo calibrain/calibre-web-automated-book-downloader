@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 
+import { t } from '../../i18n';
 import type { TextSearchField } from '../../types';
 
 interface AutocompleteTextState {
@@ -37,15 +38,15 @@ const getAutocompleteDisplayValue = (
 
 const getAutocompleteEmptyMessage = (fieldKey: string | null): string => {
   if (fieldKey === 'author') {
-    return 'No authors found';
+    return t('No authors found');
   }
   if (fieldKey === 'title') {
-    return 'No titles found';
+    return t('No titles found');
   }
   if (fieldKey === 'series') {
-    return 'No series found';
+    return t('No series found');
   }
-  return 'No suggestions found';
+  return t('No suggestions found');
 };
 
 export const useSearchBarAutocomplete = ({

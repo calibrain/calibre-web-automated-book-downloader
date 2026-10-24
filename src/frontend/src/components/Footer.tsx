@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { shortBuildId } from '../utils/buildVersion';
 
 interface FooterProps {
@@ -30,7 +31,11 @@ export const Footer = ({ buildVersion, releaseVersion, debug }: FooterProps) => 
         </a>
         <span
           className="text-xs font-normal opacity-40"
-          title={buildVersion && buildVersion !== 'N/A' ? `Build: ${buildVersion}` : undefined}
+          title={
+            buildVersion && buildVersion !== 'N/A'
+              ? t('Build: {version}', { version: buildVersion })
+              : undefined
+          }
         >
           {versionDisplay}
           {buildId && ` (${buildId})`}
@@ -40,7 +45,7 @@ export const Footer = ({ buildVersion, releaseVersion, debug }: FooterProps) => 
             className="rounded-sm px-1.5 py-0.5 text-xs opacity-60"
             style={{ background: 'var(--border-muted)' }}
           >
-            Debug
+            {t('Debug')}
           </span>
         )}
       </div>

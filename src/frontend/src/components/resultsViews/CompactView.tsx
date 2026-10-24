@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { useSearchMode } from '../../contexts/SearchModeContext';
+import { t } from '../../i18n';
 import type { Book, ButtonStateInfo } from '../../types';
 import { getDownloadsCount } from '../../types';
 import { bookSupportsTargets } from '../../utils/bookTargetLoader';
@@ -109,7 +110,7 @@ export const CompactView = ({
               )}
               <img
                 src={book.preview}
-                alt={book.title || 'Book cover'}
+                alt={book.title || t('Book cover')}
                 className="h-full w-full"
                 loading="lazy"
                 style={{
@@ -127,7 +128,7 @@ export const CompactView = ({
               className="flex h-full w-full items-center justify-center text-sm opacity-50"
               style={{ background: 'var(--border-muted)' }}
             >
-              No Cover
+              {t('No Cover')}
             </div>
           )}
 
@@ -163,7 +164,7 @@ export const CompactView = ({
                 void handleDetails(book.id);
               }}
               disabled={isLoadingDetails}
-              aria-label="Book details"
+              aria-label={t('Book details')}
             >
               {isLoadingDetails ? (
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -186,11 +187,13 @@ export const CompactView = ({
         <div className="min-w-0 space-y-0.5">
           <h3
             className="line-clamp-3 min-w-0 text-base leading-tight font-semibold"
-            title={book.title || 'Untitled'}
+            title={book.title || t('Untitled')}
           >
-            {book.title || 'Untitled'}
+            {book.title || t('Untitled')}
           </h3>
-          <p className="min-w-0 truncate text-xs opacity-80">{book.author || 'Unknown author'}</p>
+          <p className="min-w-0 truncate text-xs opacity-80">
+            {book.author || t('Unknown author')}
+          </p>
           <div className="text-xs opacity-70">
             <span>{book.year || '-'}</span>
           </div>
@@ -247,7 +250,7 @@ export const CompactView = ({
                 disabled={isLoadingDetails}
               >
                 <span className="details-button-text">
-                  {isLoadingDetails ? 'Loading' : 'Details'}
+                  {isLoadingDetails ? t('Loading') : t('Details')}
                 </span>
                 {isLoadingDetails && (
                   <div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />

@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 
 import type { PerUserSettings } from '../components/settings/users/types';
+import { t } from '../i18n';
 import type { AdminUser, DeliveryPreferencesResponse, DownloadDefaults } from '../services/api';
 import {
   getAdminDeliveryPreferences,
@@ -22,11 +23,12 @@ let cachedUsers: AdminUser[] | null = null;
 let cachedLoadError: string | null = null;
 let usersCacheLoadPromise: Promise<AdminUser[]> | null = null;
 
+// API errors arrive translated.
 const shouldSuppressAccessToast = (message: string): boolean =>
-  message.toLowerCase().includes('admin access required');
+  message.toLowerCase().includes(t('Admin access required').toLowerCase());
 
 const toLoadErrorMessage = (err: unknown): string =>
-  err instanceof Error ? err.message : 'Failed to load users';
+  err instanceof Error ? err.message : t('Failed to load users');
 
 interface LoadUsersOptions {
   force?: boolean;

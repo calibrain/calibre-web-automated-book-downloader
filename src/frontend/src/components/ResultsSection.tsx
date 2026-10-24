@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useSearchMode } from '../contexts/SearchModeContext';
 import { SORT_OPTIONS } from '../data/filterOptions';
 import { useMediaQuery } from '../hooks/useMediaQuery';
+import { t } from '../i18n';
 import type { Book, ButtonStateInfo, SortOption } from '../types';
 import { Dropdown } from './Dropdown';
 import { CardView } from './resultsViews/CardView';
@@ -108,7 +109,7 @@ export const ResultsSection = ({
               rel="noopener noreferrer"
               className="animate-pop-up inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
             >
-              View list on Hardcover
+              {t('View list on Hardcover')}
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
@@ -132,7 +133,7 @@ export const ResultsSection = ({
             if (totalCount === 1) {
               return (
                 <span className="mx-2 mt-4 px-2 text-xs whitespace-nowrap text-gray-500 dark:text-gray-400">
-                  Result 1 (1 Total)
+                  {t('Result 1 (1 Total)')}
                 </span>
               );
             }
@@ -140,7 +141,7 @@ export const ResultsSection = ({
             const totalStr = isCapped ? '500+' : String(totalCount);
             return (
               <span className="mx-2 mt-4 px-2 text-xs whitespace-nowrap text-gray-500 dark:text-gray-400">
-                Results 1-{shownEnd} ({totalStr} Total)
+                {t('Results 1-{end} ({total} Total)', { end: shownEnd, total: totalStr })}
               </span>
             );
           })()}
@@ -157,8 +158,8 @@ export const ResultsSection = ({
                   ? activeViewClasses
                   : 'hover-action text-gray-900 dark:text-gray-100'
               }`}
-              title="Card view"
-              aria-label="Card view"
+              title={t('Card view')}
+              aria-label={t('Card view')}
               aria-pressed={viewMode === 'card'}
             >
               <svg
@@ -184,8 +185,8 @@ export const ResultsSection = ({
                 ? activeViewClasses
                 : 'hover-action text-gray-900 dark:text-gray-100'
             }`}
-            title="Compact view"
-            aria-label="Compact view"
+            title={t('Compact view')}
+            aria-label={t('Compact view')}
             aria-pressed={viewMode === 'compact'}
           >
             <svg
@@ -209,8 +210,8 @@ export const ResultsSection = ({
                 ? activeViewClasses
                 : 'hover-action text-gray-900 dark:text-gray-100'
             }`}
-            title="List view"
-            aria-label="List view"
+            title={t('List view')}
+            aria-label={t('List view')}
             aria-pressed={viewMode === 'list'}
           >
             <svg
@@ -283,7 +284,9 @@ export const ResultsSection = ({
           })}
         </div>
       )}
-      {books.length === 0 && <div className="mt-4 text-sm opacity-80">No results found.</div>}
+      {books.length === 0 && (
+        <div className="mt-4 text-sm opacity-80">{t('No results found.')}</div>
+      )}
 
       {/* Load More button (universal mode pagination) */}
       {searchMode === 'universal' && hasMore && onLoadMore && (
@@ -316,15 +319,15 @@ export const ResultsSection = ({
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                   />
                 </svg>
-                Loading...
+                {t('Loading...')}
               </span>
             ) : (
-              'Load More'
+              t('Load More')
             )}
           </button>
           {totalFound !== undefined && totalFound > 0 && (
             <span className="text-sm text-gray-500 dark:text-gray-400">
-              Showing {books.length} of {totalFound} results
+              {t('Showing {shown} of {total} results', { shown: books.length, total: totalFound })}
             </span>
           )}
         </div>
@@ -370,7 +373,7 @@ const SortControl = ({ value, onChange, metadataSortOptions }: SortControlProps)
           } animate-pop-up`}
           aria-haspopup="listbox"
           aria-expanded={isOpen}
-          aria-label="Change sort order"
+          aria-label={t('Change sort order')}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -386,12 +389,12 @@ const SortControl = ({ value, onChange, metadataSortOptions }: SortControlProps)
               d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5"
             />
           </svg>
-          <span className="text-sm font-medium whitespace-nowrap">{selected.label}</span>
+          <span className="text-sm font-medium whitespace-nowrap">{t(selected.label)}</span>
         </button>
       )}
     >
       {({ close }) => (
-        <div role="listbox" aria-label="Sort results">
+        <div role="listbox" aria-label={t('Sort results')}>
           {sortOptions.map((option) => {
             const isSelected = option.value === selected.value;
             let selectedClassName = '';
@@ -413,7 +416,7 @@ const SortControl = ({ value, onChange, metadataSortOptions }: SortControlProps)
                 role="option"
                 aria-selected={isSelected}
               >
-                <span>{option.label}</span>
+                <span>{t(option.label)}</span>
                 {isSelected && (
                   <svg
                     xmlns="http://www.w3.org/2000/svg"

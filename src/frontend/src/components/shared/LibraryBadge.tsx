@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import type { LibraryOwnership } from '../../types';
 
 /** True when the library check reports this book held in any format. */
@@ -24,8 +25,10 @@ export function LibraryBadge({ library, overlay = false, className = '' }: Libra
   if (!isInLibrary(library)) return null;
 
   const collectionOnly = isCollectionOnly(library);
-  const label = collectionOnly ? 'In your library, inside a collection' : 'Already in your library';
-  const text = collectionOnly ? 'In a collection' : 'In library';
+  const label = collectionOnly
+    ? t('In your library, inside a collection')
+    : t('Already in your library');
+  const text = collectionOnly ? t('In a collection') : t('In library');
 
   const pill = overlay
     ? 'rounded-md border border-sky-700 bg-sky-600 px-1.5 py-0.5 text-[10px] font-bold text-white'

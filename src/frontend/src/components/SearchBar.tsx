@@ -5,6 +5,7 @@ import { useSearchMode } from '../contexts/SearchModeContext';
 import { useSearchBarAutocomplete } from '../hooks/searchBar/useSearchBarAutocomplete';
 import { useDismiss } from '../hooks/useDismiss';
 import { useLatestCallback } from '../hooks/useLatestCallback';
+import { t } from '../i18n';
 import type { DynamicFieldOption } from '../services/api';
 import type { ContentType, MetadataSearchField, QueryTargetOption, SortOption } from '../types';
 import { SearchBarAutocompleteSession } from './SearchBarAutocompleteSession';
@@ -158,20 +159,20 @@ const getDefaultPlaceholder = (
   if (fallback) return fallback;
 
   if (!activeQueryTarget || activeQueryTarget.source === 'general') {
-    if (isCombinedMode) return 'Search Books & Audiobooks';
-    return contentType === 'ebook' ? 'Search Books' : 'Search Audiobooks';
+    if (isCombinedMode) return t('Search Books & Audiobooks');
+    return contentType === 'ebook' ? t('Search Books') : t('Search Audiobooks');
   }
 
   if (activeQueryTarget.source === 'manual') {
-    return 'Search releases directly…';
+    return t('Search releases directly…');
   }
 
   const field = activeQueryTarget.field;
   if (field?.placeholder) {
-    return field.placeholder;
+    return t(field.placeholder);
   }
 
-  return `Search by ${activeQueryTarget.label.toLowerCase()}…`;
+  return t('Search by {field}…', { field: t(activeQueryTarget.label).toLowerCase() });
 };
 
 const hasActiveValue = (value: string | number | boolean): boolean => {
@@ -202,14 +203,14 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
       onAdvancedToggle,
       isAdvancedActive = false,
       placeholder,
-      inputAriaLabel = 'Search books',
+      inputAriaLabel = t('Search books'),
       className = '',
       inputClassName = '',
       controlsClassName = '',
-      clearButtonLabel = 'Clear search input',
-      clearButtonTitle = 'Clear search',
-      searchButtonLabel = 'Search books',
-      searchButtonTitle = 'Search',
+      clearButtonLabel = t('Clear search input'),
+      clearButtonTitle = t('Clear search'),
+      searchButtonLabel = t('Search books'),
+      searchButtonTitle = t('Search'),
       autoComplete = 'off',
       enterKeyHint = 'search',
       contentType = 'ebook',
@@ -405,7 +406,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
       combinedSelectionActive,
     );
     const effectiveInputAriaLabel = activeTarget
-      ? `${inputAriaLabel}: ${activeTarget.label}`
+      ? `${inputAriaLabel}: ${t(activeTarget.label)}`
       : inputAriaLabel;
 
     const selectDropdownOpen = isSelectField && isSelectOpen && selectOptions.length > 0;
@@ -515,7 +516,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             <span className="truncate opacity-50">{effectivePlaceholder}</span>
           );
           if (isDynamicLoading) {
-            selectTriggerContent = <span className="truncate opacity-50">Loading…</span>;
+            selectTriggerContent = <span className="truncate opacity-50">{t('Loading…')}</span>;
           } else if (selectedOption) {
             selectTriggerContent = <span className="truncate">{selectedOption.label}</span>;
           }
@@ -564,11 +565,11 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                 type="checkbox"
                 checked={Boolean(value)}
                 onChange={(e) => onChange(e.target.checked)}
-                aria-label={activeQueryField.label}
+                aria-label={t(activeQueryField.label)}
                 className="h-4 w-4 rounded-sm border-(--border-muted) text-emerald-500 focus:ring-emerald-500/50"
               />
               <span className="truncate text-sm" style={{ color: 'var(--text)' }}>
-                {activeQueryField.label}
+                {t(activeQueryField.label)}
               </span>
             </label>
           );
@@ -578,13 +579,13 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
       }
     };
 
-    let selectorContentTypeLabel = 'audiobooks';
+    let selectorContentTypeLabel = t('audiobooks');
     let selectorIcon = <AudiobookIcon />;
     if (combinedSelectionActive) {
-      selectorContentTypeLabel = 'books and audiobooks';
+      selectorContentTypeLabel = t('books and audiobooks');
       selectorIcon = <BothIcon />;
     } else if (contentType === 'ebook') {
-      selectorContentTypeLabel = 'books';
+      selectorContentTypeLabel = t('books');
       selectorIcon = <BookIcon />;
     }
 
@@ -625,7 +626,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"
           />
         </svg>
-        Options
+        {t('Options')}
       </button>
     ) : null;
 
@@ -633,7 +634,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
       <div id={optionsPanelId} ref={optionsPanelRef} className={layoutClasses.panel}>
         {showContentTypeSelector && (
           <div className={layoutClasses.group}>
-            <OptionsGroupHeader label="Content" action={optionsButton} />
+            <OptionsGroupHeader label={t('Content')} action={optionsButton} />
             <div className={layoutClasses.options}>
               {CONTENT_TYPE_OPTIONS.map(({ type, label, Icon }) => {
                 const isActive = contentType === type || combinedSelectionActive;
@@ -647,20 +648,20 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                     <span className="flex w-4 justify-center">
                       {isActive ? <CheckIcon /> : <Icon />}
                     </span>
-                    <span>{label}</span>
+                    <span>{t(label)}</span>
                   </button>
                 );
               })}
             </div>
             {combinedToggleAvailable && (
               <div className="flex items-center gap-3 px-1 py-1 text-sm font-medium">
-                Combined
+                {t('Combined')}
                 <ToggleSwitch
                   checked={combinedSelectionActive}
                   onChange={handleCombinedModeToggle}
                   disabled={combinedSelectorLocked}
                   color="emerald"
-                  ariaLabel="Combined search"
+                  ariaLabel={t('Combined search')}
                 />
               </div>
             )}
@@ -670,7 +671,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
         {queryTargets.length > 1 && (
           <div className={layoutClasses.group}>
             <OptionsGroupHeader
-              label="Search by"
+              label={t('Search by')}
               action={showContentTypeSelector ? null : optionsButton}
             />
             <div className={layoutClasses.options}>
@@ -681,12 +682,12 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                     type="button"
                     key={target.key}
                     onClick={() => handleQueryTargetSelect(target.key)}
-                    title={target.description || target.label}
-                    aria-label={target.label}
+                    title={t(target.description || target.label)}
+                    aria-label={t(target.label)}
                     className={optionClasses(isActive)}
                   >
                     {isActive && <CheckIcon />}
-                    <span className="block truncate">{target.label}</span>
+                    <span className="block truncate">{t(target.label)}</span>
                   </button>
                 );
               })}
@@ -754,7 +755,10 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                 }}
                 className="hover-action flex cursor-pointer items-center gap-1.5 rounded-l-full pr-2 pl-5 transition-colors"
                 style={{ color: 'var(--text)' }}
-                aria-label={`Searching ${selectorContentTypeLabel} by ${activeTarget?.label ?? 'general'}. Click to change.`}
+                aria-label={t('Searching {content} by {target}. Click to change.', {
+                  content: selectorContentTypeLabel,
+                  target: activeTarget ? t(activeTarget.label) : t('general'),
+                })}
                 aria-expanded={isOptionsOpen}
                 aria-controls={optionsPanelId}
                 aria-haspopup={isPopover ? 'dialog' : undefined}
@@ -762,7 +766,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                 {selectorIcon}
                 {showActiveTargetLabel && (
                   <span className="hidden max-w-24 truncate text-sm font-medium sm:inline">
-                    {activeTarget?.label}
+                    {activeTarget && t(activeTarget.label)}
                   </span>
                 )}
                 <svg
@@ -879,7 +883,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                     <div key={option.value}>
                       {showGroupHeader && (
                         <div className="px-5 pt-2 pb-1 text-xs font-medium tracking-wide uppercase opacity-60 select-none">
-                          {option.group}
+                          {option.group && t(option.group)}
                         </div>
                       )}
                       <button
@@ -929,12 +933,12 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
               className="animate-fade-in-down absolute top-full right-0 left-0 z-50 mt-2 overflow-hidden rounded-2xl border shadow-xl"
               style={{ background: 'var(--bg)', borderColor: 'var(--border-muted)' }}
               role="listbox"
-              aria-label={`${effectiveInputAriaLabel} suggestions`}
+              aria-label={t('{label} suggestions', { label: effectiveInputAriaLabel })}
             >
               <div className="max-h-72 overflow-y-auto py-1.5">
                 {isAutocompleteLoading && (
                   <div className="px-5 py-3 text-sm opacity-70" style={{ color: 'var(--text)' }}>
-                    Searching…
+                    {t('Searching…')}
                   </div>
                 )}
 

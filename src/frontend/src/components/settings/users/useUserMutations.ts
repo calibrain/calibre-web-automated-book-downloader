@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { t } from '../../../i18n';
 import type { AdminUser, DeliveryPreferencesResponse } from '../../../services/api';
 import {
   createAdminUser,
@@ -37,8 +38,8 @@ interface SaveEditedUserOptions {
 const getPasswordError = (password: string, passwordConfirm: string) => {
   if (!password) return null;
   if (password.length < MIN_PASSWORD_LENGTH)
-    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
-  return password === passwordConfirm ? null : 'Passwords do not match';
+    return t('Password must be at least {count} characters', { count: MIN_PASSWORD_LENGTH });
+  return password === passwordConfirm ? null : t('Passwords do not match');
 };
 
 const authSourceLabel: Record<AdminUser['auth_source'], string> = {
@@ -72,7 +73,7 @@ export const useUserMutations = ({
 
   const createUser = async () => {
     if (!createForm.username || !createForm.password)
-      return fail('Username and password are required');
+      return fail(t('Username and password are required'));
     const createPasswordError = getPasswordError(createForm.password, createForm.password_confirm);
     if (createPasswordError) return fail(createPasswordError);
 
@@ -86,11 +87,11 @@ export const useUserMutations = ({
         role: createForm.role || undefined,
       });
       resetCreateForm();
-      onShowToast?.(`Local user ${created.username} created`, 'success');
+      onShowToast?.(t('Local user {username} created', { username: created.username }), 'success');
       await fetchUsers({ force: true });
       return true;
     } catch (err) {
-      return fail(err instanceof Error ? err.message : 'Failed to create user');
+      return fail(err instanceof Error ? err.message : t('Failed to create user'));
     } finally {
       setCreating(false);
     }
@@ -144,15 +145,15 @@ export const useUserMutations = ({
       onEditSaveSuccess?.();
       onShowToast?.(
         includeSettings && !includeProfile && !includePassword
-          ? 'User preferences updated'
-          : 'User updated',
+          ? t('User preferences updated')
+          : t('User updated'),
         'success',
       );
       await fetchUsers({ force: true });
       return true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update user';
-      return fail(`Failed to update user: ${message}`);
+      const message = err instanceof Error ? err.message : t('Failed to update user');
+      return fail(t('Failed to update user: {error}', { error: message }));
     } finally {
       setSaving(false);
     }
@@ -163,18 +164,21 @@ export const useUserMutations = ({
     setDeletingUserId(userId);
     try {
       await deleteAdminUser(userId);
-      onShowToast?.('User deleted', 'success');
+      onShowToast?.(t('User deleted'), 'success');
       await fetchUsers({ force: true });
       if (deletedUser && deletedUser.auth_source !== 'builtin') {
         onShowToast?.(
-          `${authSourceLabel[deletedUser.auth_source]} users may be re-provisioned by your authentication source on a future login or sync.`,
+          t(
+            '{source} users may be re-provisioned by your authentication source on a future login or sync.',
+            { source: t(authSourceLabel[deletedUser.auth_source]) },
+          ),
           'info',
         );
       }
       return true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to delete user';
-      return fail(`Failed to delete user: ${message}`);
+      const message = err instanceof Error ? err.message : t('Failed to delete user');
+      return fail(t('Failed to delete user: {error}', { error: message }));
     } finally {
       setDeletingUserId(null);
     }
@@ -184,11 +188,11 @@ export const useUserMutations = ({
     setSyncingCwa(true);
     try {
       const result = await syncAdminCwaUsers();
-      onShowToast?.(result.message || 'Users synced from CWA', 'success');
+      onShowToast?.(result.message ? t(result.message) : t('Users synced from CWA'), 'success');
       await fetchUsers({ force: true });
       return true;
     } catch (err) {
-      return fail(err instanceof Error ? err.message : 'Failed to sync users from CWA');
+      return fail(err instanceof Error ? err.message : t('Failed to sync users from CWA'));
     } finally {
       setSyncingCwa(false);
     }

@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 
+import { t } from '../../../i18n';
 import type { SelectFieldConfig } from '../../../types/settings';
 import { DropdownList } from '../../DropdownList';
 
@@ -61,7 +62,7 @@ export const SelectField = ({
     const selectedOption = filteredOptions.find((opt) => opt.value === effectiveValue);
     return (
       <div className="w-full cursor-not-allowed rounded-lg border border-(--border-muted) bg-(--bg-soft) px-3 py-2 text-sm opacity-60">
-        {selectedOption?.label || 'Select...'}
+        {selectedOption?.label || t('Select...')}
       </div>
     );
   }
@@ -71,7 +72,7 @@ export const SelectField = ({
       options={dropdownOptions}
       value={effectiveValue}
       onChange={handleChange}
-      placeholder="Select..."
+      placeholder={t('Select...')}
       widthClassName="w-full"
     />
   );

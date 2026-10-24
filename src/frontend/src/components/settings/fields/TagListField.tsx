@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 
+import { t } from '../../../i18n';
 import type { TagListFieldConfig } from '../../../types/settings';
 
 interface TagListFieldProps {
@@ -62,7 +63,7 @@ export const TagListField = ({
   const [draft, setDraft] = useState('');
   const normalizeUrls = field.normalizeUrls ?? true;
 
-  const tags = useMemo(() => (value ?? []).map(String).filter((t) => t.trim() !== ''), [value]);
+  const tags = useMemo(() => (value ?? []).map(String).filter((tag) => tag.trim() !== ''), [value]);
   const tagEntries = useMemo(() => createTagEntries(tags), [tags]);
 
   const addFromRaw = (raw: string) => {
@@ -120,7 +121,7 @@ export const TagListField = ({
                   removeAt(tagIndex);
                 }}
                 className="rounded-sm p-0.5 hover:bg-(--hover-surface)"
-                aria-label={`Remove ${tag}`}
+                aria-label={t('Remove {tag}', { tag })}
               >
                 <svg
                   className="h-4 w-4"
@@ -143,7 +144,7 @@ export const TagListField = ({
             type="text"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            aria-label={field.label || field.placeholder || 'Add item'}
+            aria-label={field.label || field.placeholder || t('Add item')}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -162,7 +163,7 @@ export const TagListField = ({
         )}
 
         {isDisabled && tags.length === 0 && (
-          <span className="opacity-60">{field.placeholder || 'No values'}</span>
+          <span className="opacity-60">{field.placeholder || t('No values')}</span>
         )}
       </div>
     </div>

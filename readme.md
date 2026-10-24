@@ -274,6 +274,8 @@ Shelfmark's core feature set is complete.
 
 Pull requests are welcome and all of them get reviewed, new features included. If you want a feature, the fastest path is to send a PR for it rather than to file a request.
 
+Interface text is translated, never hardcoded: see [docs/dev/translations.md](docs/dev/translations.md).
+
 Feature requests that fall outside the project scope (library integration, automation, collection management) will be closed, and PRs implementing them won't be merged. If you're unsure whether something fits, open a discussion first.
 
 ## Health Monitoring

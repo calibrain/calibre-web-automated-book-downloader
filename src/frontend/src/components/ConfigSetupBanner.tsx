@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react';
 
+import { t } from '../i18n';
+
 const STORAGE_KEY = 'cwa-config-banner-dismissed';
 
 interface ConfigSetupBannerProps {
@@ -74,7 +76,7 @@ export const ConfigSetupBanner = ({
         type="button"
         className={`absolute inset-0 bg-black/60 transition-opacity duration-150 ${isClosing ? 'opacity-0' : 'opacity-100'}`}
         onClick={handleClose}
-        aria-label="Close settings setup dialog"
+        aria-label={t('Close settings setup dialog')}
       />
 
       {/* Modal */}
@@ -83,18 +85,18 @@ export const ConfigSetupBanner = ({
         style={{ background: 'var(--bg)' }}
         role="dialog"
         aria-modal="true"
-        aria-label="Settings Setup Information"
+        aria-label={t('Settings Setup Information')}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-(--border-muted) px-5 py-4">
           <h2 className="text-lg font-semibold">
-            {showContinueButton ? 'Config Volume Required' : 'New Feature: Settings Page'}
+            {showContinueButton ? t('Config Volume Required') : t('New Feature: Settings Page')}
           </h2>
           <button
             type="button"
             onClick={handleClose}
             className="rounded-lg p-1.5 transition-colors hover:bg-(--hover-surface)"
-            aria-label="Close"
+            aria-label={t('Close')}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -113,8 +115,10 @@ export const ConfigSetupBanner = ({
         <div className="space-y-4 px-5 py-4">
           <p className="text-sm opacity-80">
             {showContinueButton
-              ? 'To save settings, add a config volume to your Docker Compose file:'
-              : 'Shelfmark now has a settings page! To enable it, add a config volume to your Docker Compose file:'}
+              ? t('To save settings, add a config volume to your Docker Compose file:')
+              : t(
+                  'Shelfmark now has a settings page! To enable it, add a config volume to your Docker Compose file:',
+                )}
           </p>
 
           {/* Code snippet */}
@@ -143,8 +147,12 @@ export const ConfigSetupBanner = ({
 
           <p className="text-xs opacity-60">
             {showContinueButton
-              ? 'Without this volume, settings changes will not persist across container restarts.'
-              : 'This allows you to configure settings through the UI and persist them across container restarts.'}
+              ? t(
+                  'Without this volume, settings changes will not persist across container restarts.',
+                )
+              : t(
+                  'This allows you to configure settings through the UI and persist them across container restarts.',
+                )}
           </p>
         </div>
 
@@ -157,14 +165,14 @@ export const ConfigSetupBanner = ({
                 onClick={handleClose}
                 className="rounded-lg border border-(--border-muted) bg-(--bg-soft) px-4 py-2 text-sm font-medium transition-colors hover:bg-(--hover-surface)"
               >
-                Close
+                {t('Close')}
               </button>
               <button
                 type="button"
                 onClick={handleContinue}
                 className="rounded-lg bg-(--primary-color) px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-(--primary-dark)"
               >
-                Continue to Settings
+                {t('Continue to Settings')}
               </button>
             </>
           ) : (
@@ -173,7 +181,7 @@ export const ConfigSetupBanner = ({
               onClick={handleClose}
               className="rounded-lg bg-(--primary-color) px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-(--primary-dark)"
             >
-              Got it
+              {t('Got it')}
             </button>
           )}
         </div>

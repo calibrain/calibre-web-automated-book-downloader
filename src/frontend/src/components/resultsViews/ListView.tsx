@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { useSearchMode } from '../../contexts/SearchModeContext';
+import { t } from '../../i18n';
 import type { Book, ButtonStateInfo, DisplayField } from '../../types';
 import { getDownloadsCount } from '../../types';
 import { bookSupportsTargets } from '../../utils/bookTargetLoader';
@@ -53,9 +54,9 @@ const ListViewThumbnail = ({
     return (
       <div
         className={`${sizeClass} flex items-center justify-center rounded-sm bg-gray-200 text-[8px] font-medium text-gray-500 sm:text-[9px] dark:bg-gray-700 dark:text-gray-300`}
-        aria-label="No cover available"
+        aria-label={t('No cover available')}
       >
-        No Cover
+        {t('No Cover')}
       </div>
     );
   }
@@ -69,7 +70,7 @@ const ListViewThumbnail = ({
       )}
       <img
         src={preview}
-        alt={title || 'Book cover'}
+        alt={title || t('Book cover')}
         className={`h-full w-full object-cover ${isSquare ? 'object-center' : 'object-top'}`}
         loading="lazy"
         onLoad={() => setImageLoaded(true)}
@@ -125,7 +126,7 @@ export const ListView = ({
         boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)',
       }}
       role="region"
-      aria-label="List view of books"
+      aria-label={t('List view of books')}
     >
       <div className="w-full divide-y divide-gray-200/60 dark:divide-gray-800/60">
         {books.map((book, index) => {
@@ -184,7 +185,7 @@ export const ListView = ({
                 <div className="flex min-w-0 flex-col justify-center sm:pl-3">
                   <h3
                     className="line-clamp-1 flex items-center gap-2 text-xs leading-tight font-semibold min-[400px]:text-sm sm:line-clamp-2 sm:text-base"
-                    title={book.title || 'Untitled'}
+                    title={book.title || t('Untitled')}
                   >
                     {showSeriesPosition && book.series_position != null && (
                       <span
@@ -197,10 +198,10 @@ export const ListView = ({
                         #{book.series_position}
                       </span>
                     )}
-                    <span className="truncate">{book.title || 'Untitled'}</span>
+                    <span className="truncate">{book.title || t('Untitled')}</span>
                   </h3>
                   <p className="truncate text-[10px] text-gray-600 min-[400px]:text-xs sm:text-sm dark:text-gray-300">
-                    {book.author || 'Unknown author'}
+                    {book.author || t('Unknown author')}
                     {book.year && <span className="sm:hidden"> • {book.year}</span>}
                   </p>
                   <LibraryBadge library={book.library} className="mt-0.5" />
@@ -210,7 +211,7 @@ export const ListView = ({
                 <div className="flex flex-col items-end text-[10px] leading-tight opacity-70 sm:hidden">
                   {mobileDisplayFields.length > 0 ? (
                     mobileDisplayFields.map(({ field, key }) => (
-                      <span key={key} className="flex items-center gap-0.5" title={field.label}>
+                      <span key={key} className="flex items-center gap-0.5" title={t(field.label)}>
                         <DisplayFieldIcon icon={field.icon} />
                         <span>{field.value}</span>
                       </span>
@@ -263,7 +264,7 @@ export const ListView = ({
                   <div className="hidden justify-center sm:flex">
                     <span
                       className={`${languageColor.bg} ${languageColor.text} rounded-lg px-2 py-0.5 text-[11px] font-semibold tracking-wide uppercase`}
-                      title={book.language || 'Unknown'}
+                      title={book.language || t('Unknown')}
                     >
                       {book.language || '-'}
                     </span>
@@ -275,7 +276,7 @@ export const ListView = ({
                   <div className="hidden justify-center sm:flex">
                     <span
                       className={`${formatColor.bg} ${formatColor.text} rounded-lg px-2 py-0.5 text-[11px] font-semibold tracking-wide uppercase`}
-                      title={book.format || 'Unknown'}
+                      title={book.format || t('Unknown')}
                     >
                       {book.format || '-'}
                     </span>
@@ -317,7 +318,9 @@ export const ListView = ({
                       void handleDetails(book.id);
                     }}
                     disabled={isLoadingDetails}
-                    aria-label={`View details for ${book.title || 'this book'}`}
+                    aria-label={t('View details for {title}', {
+                      title: book.title || t('this book'),
+                    })}
                   >
                     {isLoadingDetails ? (
                       <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent sm:h-5 sm:w-5" />

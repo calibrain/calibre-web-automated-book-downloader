@@ -1,3 +1,5 @@
+import { t } from '../../i18n';
+
 interface ToggleSwitchProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
@@ -16,7 +18,7 @@ export const ToggleSwitch = ({
   onChange,
   disabled = false,
   color = 'sky',
-  ariaLabel = 'Toggle switch',
+  ariaLabel = t('Toggle switch'),
 }: ToggleSwitchProps) => {
   const { active, ring } = colorClasses[color];
 

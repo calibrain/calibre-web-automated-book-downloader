@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import type { Book, RequestRecord, StatusData } from '../../types';
 import { getDownloadsCount } from '../../types';
 import { STATUS_LABELS, isActiveDownloadStatus } from './activityStyles.js';
@@ -90,7 +91,9 @@ export const downloadToActivityItem = (book: Book, statusKey: DownloadStatusKey)
       : undefined;
   const downloadsCount = getDownloadsCount(book);
   const downloadsText =
-    downloadsCount != null ? `${downloadsCount.toLocaleString()} downloads` : undefined;
+    downloadsCount != null
+      ? t('{count} downloads', { count: downloadsCount.toLocaleString() })
+      : undefined;
   const metaLine = joinMetaParts([
     toOptionalText(book.format)?.toUpperCase(),
     toOptionalText(book.size),
@@ -106,11 +109,11 @@ export const downloadToActivityItem = (book: Book, statusKey: DownloadStatusKey)
     id: book.id,
     kind: 'download',
     visualStatus,
-    title: toText(book.title, 'Unknown title'),
-    author: toText(book.author, 'Unknown author'),
+    title: toText(book.title, t('Unknown title')),
+    author: toText(book.author, t('Unknown author')),
     preview: toOptionalText(book.preview),
     metaLine,
-    statusLabel: STATUS_LABELS[visualStatus],
+    statusLabel: t(STATUS_LABELS[visualStatus]),
     statusDetail,
     progress,
     progressAnimated: isActiveDownloadStatus(visualStatus),
@@ -144,7 +147,8 @@ const buildRequestMetaLine = (
 ): string => {
   if (record.request_level === 'book') {
     const contentType = toOptionalText(record.content_type || bookData.content_type)?.toLowerCase();
-    const requestTypeLabel = contentType === 'audiobook' ? 'Audiobook request' : 'Book request';
+    const requestTypeLabel =
+      contentType === 'audiobook' ? t('Audiobook request') : t('Book request');
     const username = viewerRole === 'admin' ? toOptionalText(record.username) : undefined;
     return joinMetaParts([requestTypeLabel, username]);
   }
@@ -155,7 +159,7 @@ const buildRequestMetaLine = (
   const username = viewerRole === 'admin' ? toOptionalText(record.username) : undefined;
 
   const line = joinMetaParts([format, size, source, username]);
-  return line || joinMetaParts(['Release request', username]);
+  return line || joinMetaParts([t('Release request'), username]);
 };
 
 export const requestToActivityItem = (
@@ -174,11 +178,11 @@ export const requestToActivityItem = (
     id: `request-${record.id}`,
     kind: 'request',
     visualStatus,
-    title: toText(bookData.title ?? releaseData.title, 'Unknown title'),
-    author: toText(bookData.author ?? releaseData.author, 'Unknown author'),
+    title: toText(bookData.title ?? releaseData.title, t('Unknown title')),
+    author: toText(bookData.author ?? releaseData.author, t('Unknown author')),
     preview: toOptionalText(bookData.preview) || toOptionalText(releaseData.preview),
     metaLine: buildRequestMetaLine(record, bookData, releaseData, viewerRole),
-    statusLabel: STATUS_LABELS[visualStatus],
+    statusLabel: t(STATUS_LABELS[visualStatus]),
     adminNote: toOptionalText(record.admin_note),
     timestamp,
     username: toOptionalText(record.username),

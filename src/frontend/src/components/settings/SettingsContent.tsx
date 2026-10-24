@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
+import { t } from '../../i18n';
 import type {
   SettingsTab,
   SettingsField,
@@ -313,7 +314,7 @@ const renderField = (
     case 'CustomComponentField':
       return null;
     default:
-      return <div>Unknown field type</div>;
+      return <div>{t('Unknown field type')}</div>;
   }
 };
 
@@ -521,10 +522,10 @@ function SettingsContentPanel({
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
               />
             </svg>
-            Saving...
+            {t('Saving...')}
           </span>
         ) : (
-          'Save Changes'
+          t('Save Changes')
         )}
       </button>
     ) : null;

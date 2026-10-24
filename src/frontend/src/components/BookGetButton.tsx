@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 
+import { t } from '../i18n';
 import type { Book, ButtonStateInfo } from '../types';
 import { CircularProgress } from './shared';
 
@@ -101,16 +102,16 @@ export const BookGetButton = ({
 
   // Determine display text
   const getDisplayText = () => {
-    if (isBlocked) return buttonState?.text || 'Unavailable';
-    if (isCompleted) return 'Downloaded';
-    if (hasError) return 'Failed';
-    if (isLoading) return 'Loading';
-    if (buttonState?.state === 'downloading') return 'Downloading';
-    if (buttonState?.state === 'locating') return 'Locating files';
-    if (buttonState?.state === 'resolving') return 'Resolving';
-    if (buttonState?.state === 'queued') return 'Queued';
-    if (buttonState?.state === 'download' && buttonState.text) return buttonState.text;
-    return 'Get';
+    if (isBlocked) return buttonState?.text ? t(buttonState.text) : t('Unavailable');
+    if (isCompleted) return t('Downloaded');
+    if (hasError) return t('Failed');
+    if (isLoading) return t('Loading');
+    if (buttonState?.state === 'downloading') return t('Downloading');
+    if (buttonState?.state === 'locating') return t('Locating files');
+    if (buttonState?.state === 'resolving') return t('Resolving');
+    if (buttonState?.state === 'queued') return t('Queued');
+    if (buttonState?.state === 'download' && buttonState.text) return t(buttonState.text);
+    return t('Get');
   };
 
   // Render appropriate icon based on state
@@ -190,7 +191,10 @@ export const BookGetButton = ({
         onClick={handleClick}
         disabled={isDisabled}
         style={style}
-        aria-label={`${getDisplayText()} releases for ${book.title}`}
+        aria-label={t('{action} releases for {title}', {
+          action: getDisplayText(),
+          title: book.title,
+        })}
       >
         {renderIcon()}
       </button>
@@ -204,7 +208,10 @@ export const BookGetButton = ({
       onClick={handleClick}
       disabled={isDisabled}
       style={style}
-      aria-label={`${getDisplayText()} releases for ${book.title}`}
+      aria-label={t('{action} releases for {title}', {
+        action: getDisplayText(),
+        title: book.title,
+      })}
     >
       {renderIcon()}
       <span>{getDisplayText()}</span>

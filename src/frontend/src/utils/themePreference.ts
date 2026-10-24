@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { SelectFieldConfig } from '../types/settings';
 
 const THEME_PREFERENCE_KEY = 'preferred-theme';
@@ -6,13 +7,13 @@ const DEFAULT_THEME_PREFERENCE = 'auto';
 export const THEME_FIELD: SelectFieldConfig = {
   type: 'SelectField',
   key: '_THEME',
-  label: 'Theme',
-  description: 'Choose your preferred color scheme.',
+  label: t('Theme'),
+  description: t('Choose your preferred color scheme.'),
   value: DEFAULT_THEME_PREFERENCE,
   options: [
-    { value: 'light', label: 'Light' },
-    { value: 'dark', label: 'Dark' },
-    { value: 'auto', label: 'Auto (System)' },
+    { value: 'light', label: t('Light') },
+    { value: 'dark', label: t('Dark') },
+    { value: 'auto', label: t('Auto (System)') },
   ],
 };
 

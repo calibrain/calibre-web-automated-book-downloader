@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { DEFAULT_SUPPORTED_FORMATS } from '../data/languages';
+import { t } from '../i18n';
 import { searchBooks, searchMetadata, AuthenticationError } from '../services/api';
 import type { Book, AppConfig, AdvancedFilterState, ContentType, SearchMode } from '../types';
 import { LANGUAGE_OPTION_DEFAULT } from '../utils/languageFilters';
@@ -167,7 +168,7 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
       }
 
       console.error(`${context}:`, error);
-      const message = error instanceof Error ? error.message : context;
+      const message = error instanceof Error ? error.message : t(context);
       showToast(message, 'error');
     },
     [setIsAuthenticated, authRequired, navigate, showToast],
@@ -262,7 +263,7 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
             setTotalFound(0);
             setResultsSourceUrl(undefined);
             setResultsSourceTitle(undefined);
-            showToast('No results found', 'error');
+            showToast(t('No results found'), 'error');
           }
         } catch (error) {
           handleSearchError(error, 'Search failed');
@@ -294,7 +295,7 @@ export function useSearch(options: UseSearchOptions): UseSearchReturn {
           setBooks(sorted);
           setDirectTotalResults(totalResults);
         } else {
-          showToast('No results found', 'error');
+          showToast(t('No results found'), 'error');
           setDirectTotalResults(null);
         }
       } catch (error) {

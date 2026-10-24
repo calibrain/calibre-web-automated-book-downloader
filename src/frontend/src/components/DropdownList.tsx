@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 
+import { t } from '../i18n';
 import { Dropdown } from './Dropdown';
 
 export interface DropdownListOption {
@@ -33,7 +34,7 @@ interface DropdownListProps {
 
 export const DropdownList = ({
   label,
-  placeholder = 'Select an option',
+  placeholder = t('Select an option'),
   options,
   multiple = false,
   showCheckboxes,
@@ -131,7 +132,7 @@ export const DropdownList = ({
                 <div key={option.value}>
                   {showGroupHeader && (
                     <div className="px-3 pt-2 pb-1 text-xs font-medium tracking-wide uppercase opacity-60 select-none">
-                      {option.group}
+                      {option.group && t(option.group)}
                     </div>
                   )}
                   <button

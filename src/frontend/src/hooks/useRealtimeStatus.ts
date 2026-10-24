@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
 import { useSocket } from '../contexts/SocketContext';
+import { t } from '../i18n';
 import { getStatus } from '../services/api';
 import type { StatusData } from '../types';
 import { useMountEffect } from './useMountEffect';
@@ -41,7 +42,7 @@ export const useRealtimeStatus = ({
         setError(null);
       } catch (err) {
         console.error('Error polling status:', err);
-        setError('Failed to fetch status');
+        setError(t('Failed to fetch status'));
       }
     })();
   }, []);

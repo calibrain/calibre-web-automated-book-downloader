@@ -1,4 +1,5 @@
 import { LoginForm } from '../components/LoginForm';
+import { t } from '../i18n';
 import type { LoginCredentials } from '../types';
 import { withBasePath } from '../utils/basePath';
 
@@ -38,7 +39,7 @@ export const LoginPage = ({
           }}
         >
           <div className="mb-5 text-center">
-            <img src={logoUrl} alt="Logo" className="mx-auto h-12 w-12" />
+            <img src={logoUrl} alt={t('Logo')} className="mx-auto h-12 w-12" />
           </div>
           <LoginForm
             onSubmit={onLogin}
