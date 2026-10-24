@@ -208,9 +208,8 @@ class TestStrictMatch:
         release = _release(title="Dungeon Crawler Carl by Matt Dinniman (Unabridged)", format=None)
         assert _strict(release) is True
 
-    @pytest.mark.parametrize("seeders", [0])
-    def test_torrent_below_minimum_seeders_rejected(self, seeders):
-        assert _strict(_release(seeders=seeders), min_seeders=1) is False
+    def test_torrent_below_minimum_seeders_rejected(self):
+        assert _strict(_release(seeders=0), min_seeders=1) is False
 
     def test_torrent_without_seeder_count_is_not_judged_on_seeders(self):
         release = _release(seeders=None)
@@ -1306,7 +1305,7 @@ class TestNoMatchBackoff:
     def test_anything_doubtful_is_searched(self, book_data):
         assert auto_download._search_is_due(book_data, self.NOW, 3) is True
 
-    def _pass(self, user_db, monkeypatch, *, ignore_backoff=False, outcome="no_match"):
+    def _pass(self, user_db, monkeypatch, *, outcome="no_match"):
         user_db.create_user(username="admin", role="admin")
         reader = user_db.create_user(username="reader", role="user")
         row = _pending_request(user_db, reader["id"])

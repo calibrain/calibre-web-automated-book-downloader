@@ -100,7 +100,7 @@ Only requests whose provider is Hardcover are considered for automatic downloads
 
 ## Scheduler
 
-The scheduler starts with the app and waits **60 seconds** before its first cycle. Each cycle runs a shelf sync (when scheduled sync is enabled) followed by an automatic-download pass (when that is enabled), then sleeps for the configured interval. Intervals shorter than 60 seconds are raised to 60 seconds so a typo cannot hammer the Hardcover API. When neither toggle is on the scheduler idles.
+The scheduler starts with the app and waits **60 seconds** before its first cycle. Each cycle runs a shelf sync (when scheduled sync is enabled) followed by an automatic-download pass (when that is enabled), then sleeps for the configured interval. Intervals shorter than 60 seconds are raised to 60 seconds so a typo cannot hammer the Hardcover API. If the interval cannot be read at all, the scheduler logs the error and tries again after six hours instead of stopping. When neither toggle is on the scheduler idles.
 
 Only one run happens at a time. If a scheduled cycle is in progress, **Sync now** reports that a sync is already running.
 

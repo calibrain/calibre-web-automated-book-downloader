@@ -25,6 +25,7 @@ logger = setup_logger(__name__)
 _WARMUP_SECONDS = 60  # Delay before the first cycle after startup.
 _MIN_INTERVAL_SECONDS = 60  # Floor so a misconfigured interval can't hammer the API.
 _UNIT_SECONDS = {"minutes": 60.0, "hours": 3600.0}
+_FALLBACK_WAIT_SECONDS = 6 * 3600.0  # Wait used when the interval cannot be read.
 
 _ctx_lock = threading.Lock()
 _ctx: dict[str, Any] = {}
@@ -173,7 +174,16 @@ def _scheduler_loop() -> None:
                 logger.info("Hardcover scheduler: cycle result %s", result)
         except Exception:
             logger.exception("Hardcover scheduler: cycle failed")
-        _wait_for_next_cycle()
+        try:
+            _wait_for_next_cycle()
+        except Exception:
+            # An unreadable interval setting must not end the thread: nothing would sync
+            # again until a restart.
+            logger.exception(
+                "Hardcover scheduler: could not wait for the next cycle; retrying in %d s",
+                int(_FALLBACK_WAIT_SECONDS),
+            )
+            time.sleep(_FALLBACK_WAIT_SECONDS)
 
 
 def start(

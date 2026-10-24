@@ -243,3 +243,29 @@ def test_the_quick_retry_skips_while_a_cycle_holds_the_lock():
         assert scheduler.run_quick_retry() is None
     finally:
         scheduler._run_lock.release()
+
+
+def test_an_unreadable_interval_does_not_end_the_scheduler_thread(monkeypatch):
+    sleeps: list[float] = []
+
+    def _sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= 3:
+            raise KeyboardInterrupt  # stands in for the end of the test: the loop never returns
+
+    def _wait():
+        raise RuntimeError("bad interval")
+
+    monkeypatch.setattr(scheduler.time, "sleep", _sleep)
+    monkeypatch.setattr(scheduler, "_enabled", lambda: False)
+    monkeypatch.setattr(scheduler, "_wait_for_next_cycle", _wait)
+
+    with pytest.raises(KeyboardInterrupt):
+        scheduler._scheduler_loop()
+
+    # Warm-up, then the fallback wait twice: the loop went round again after the failure.
+    assert sleeps == [
+        scheduler._WARMUP_SECONDS,
+        scheduler._FALLBACK_WAIT_SECONDS,
+        scheduler._FALLBACK_WAIT_SECONDS,
+    ]
