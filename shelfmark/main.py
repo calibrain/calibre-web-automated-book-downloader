@@ -94,6 +94,7 @@ from shelfmark.core.requests_service import (
     sync_delivery_states_from_queue_status,
 )
 from shelfmark.core.socketio_origins import build_cors_allowed_origins
+from shelfmark.core.stats_routes import STATS_PATH, register_stats_routes
 from shelfmark.core.user_db import UserDB
 from shelfmark.core.utils import AUDIOBOOK_FORMATS, normalize_base_path
 from shelfmark.core.viewer_redaction import (
@@ -836,7 +837,7 @@ def _proxy_default_is_admin(db: UserDB) -> bool:
 
 _API_KEY_EXEMPT_PREFIXES = ("/api/auth/",)
 _API_KEY_EXEMPT_PATHS = frozenset({"/api/health"})
-_READ_ONLY_KEY_PATHS = frozenset({"/api/stats"})
+_READ_ONLY_KEY_PATHS = frozenset({STATS_PATH})
 
 
 @app.before_request
@@ -1491,26 +1492,11 @@ def api_config() -> Response | tuple[Response, int]:
         return jsonify({"error": "Could not load the configuration"}), 500
 
 
-@app.route("/api/stats", methods=["GET"])
-def api_stats() -> Response | tuple[Response, int]:
-    """Counters for dashboards. Reachable with the read-only API key, an admin key or an admin session."""
-    from shelfmark.core import stats
-
-    scope = g.get("api_key_scope")
-    if get_auth_mode() != "none" and scope is None:
-        if "user_id" not in session:
-            return jsonify({"error": "Unauthorized"}), 401
-        if not session.get("is_admin", False):
-            return jsonify({"error": "Admin access required"}), 403
-
-    if user_db is None:
-        return jsonify({"error": "User database unavailable"}), 503
-    try:
-        payload = stats.collect(user_db.db_path)
-    except sqlite3.Error:
-        logger.exception("stats: could not read the database")
-        return jsonify({"error": "Internal Server Error"}), 500
-    return jsonify(payload)
+register_stats_routes(
+    app,
+    get_user_db=lambda: user_db,
+    resolve_auth_mode=_resolve_auth_mode_for_routes,
+)
 
 
 @app.route("/api/health", methods=["GET"])
