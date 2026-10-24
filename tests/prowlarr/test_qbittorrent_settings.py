@@ -65,6 +65,18 @@ def test_api_key_field_is_registered():
     assert field.show_when == {"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"}
 
 
+@pytest.mark.parametrize("key", ["TORRENT_NO_SEEDERS_WAIT", "TORRENT_MIN_SEEDERS"])
+def test_seed_settings_are_offered_for_qbittorrent_only(key):
+    """Only qBittorrent reports seed counts, so the other torrent clients ignore these (U7)."""
+    from shelfmark.download.clients.settings import prowlarr_clients_settings
+
+    field = _get_field(prowlarr_clients_settings(), key)
+
+    assert field is not None
+    assert field.show_when == {"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"}
+    assert "qBittorrent" in field.description
+
+
 @pytest.mark.parametrize(
     ("api_key", "expected_kwarg", "expected_suffix"),
     [(API_KEY, API_KEY, " using the API key"), ("", None, "")],

@@ -1084,16 +1084,19 @@ def prowlarr_clients_settings() -> list[SettingsField]:
             default=0,
             min_value=0,
             max_value=240,
-            show_when={"field": "PROWLARR_TORRENT_CLIENT", "notEmpty": True},
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
         ),
         NumberField(
             key="TORRENT_MIN_SEEDERS",
             label="Minimum Seeders",
-            description="Seeds the client must see for a motionless torrent to keep waiting. 0 also turns the no-seed check off.",
+            description=(
+                "Seeds the client must see for a motionless torrent to keep waiting. 0 also "
+                "turns the no-seed check off. Only qBittorrent reports seed counts."
+            ),
             default=1,
             min_value=0,
             max_value=1000,
-            show_when={"field": "PROWLARR_TORRENT_CLIENT", "notEmpty": True},
+            show_when={"field": "PROWLARR_TORRENT_CLIENT", "value": "qbittorrent"},
         ),
         TextField(
             key="PROWLARR_TORRENT_POST_IMPORT_CATEGORY",
