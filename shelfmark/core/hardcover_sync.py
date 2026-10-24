@@ -8,6 +8,7 @@ carry full metadata incl. covers) and the request-service validation/dedup path.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +20,8 @@ from shelfmark.core.request_policy import normalize_content_type
 from shelfmark.core.utils import transform_cover_url
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from shelfmark.core.user_db import UserDB
     from shelfmark.metadata_providers import BookMetadata
 
@@ -147,8 +150,28 @@ def _history_timestamp(value: object) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+@contextmanager
+def _history_connection(db_path: str | None) -> Iterator[sqlite3.Connection | None]:
+    """One read connection to the history for a whole sync pass, None when there is none.
+
+    The history check runs for every book on the shelf, so opening a connection per book
+    is a lot of work for a slow disk or a small board.
+    """
+    conn: sqlite3.Connection | None = None
+    if db_path:
+        try:
+            conn = sqlite3.connect(db_path)
+        except sqlite3.Error as exc:
+            logger.debug("hardcover-sync: history dedup connection failed: %s", exc)
+    try:
+        yield conn
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def _already_downloaded(
-    db_path: str | None,
+    conn: sqlite3.Connection | None,
     provider: str,
     provider_id: str,
     content_type: str,
@@ -168,24 +191,20 @@ def _already_downloaded(
     older than :data:`_ACTIVE_DOWNLOAD_MAX_AGE`, so a download that broke or was lost
     does not hold the book back for good.
     """
-    if not db_path:
+    if conn is None:
         return False
     wanted = normalize_content_type(content_type)
     cutoff = (now or datetime.now(UTC)) - _ACTIVE_DOWNLOAD_MAX_AGE
     try:
-        conn = sqlite3.connect(db_path)
-        try:
-            rows = conn.execute(
-                "SELECT h.final_status, h.terminal_at, r.content_type "
-                "FROM download_history AS h "
-                "JOIN download_requests AS r ON r.id = h.request_id "
-                "WHERE h.final_status IN ('complete', ?) "
-                "AND json_extract(r.book_data, '$.provider') = ? "
-                "AND CAST(json_extract(r.book_data, '$.provider_id') AS TEXT) = ?",
-                (ACTIVE_DOWNLOAD_STATUS, provider, str(provider_id)),
-            ).fetchall()
-        finally:
-            conn.close()
+        rows = conn.execute(
+            "SELECT h.final_status, h.terminal_at, r.content_type "
+            "FROM download_history AS h "
+            "JOIN download_requests AS r ON r.id = h.request_id "
+            "WHERE h.final_status IN ('complete', ?) "
+            "AND json_extract(r.book_data, '$.provider') = ? "
+            "AND CAST(json_extract(r.book_data, '$.provider_id') AS TEXT) = ?",
+            (ACTIVE_DOWNLOAD_STATUS, provider, str(provider_id)),
+        ).fetchall()
     except sqlite3.Error as exc:
         logger.debug("hardcover-sync: history dedup query failed: %s", exc)
         return False
@@ -261,71 +280,72 @@ def sync_wishlist(
 
     from shelfmark.core.requests_service import RequestServiceError, create_request
 
-    for status_id in _configured_statuses():
-        shelf, fetch_failed = _fetch_status_books(provider, status_id)
-        if fetch_failed:
-            summary["errors"] += 1
-        for book in shelf:
-            provider_id = str(book.provider_id)
-            author = _primary_author(book)
+    with _history_connection(db_path) as history:
+        for status_id in _configured_statuses():
+            shelf, fetch_failed = _fetch_status_books(provider, status_id)
+            if fetch_failed:
+                summary["errors"] += 1
+            for book in shelf:
+                provider_id = str(book.provider_id)
+                author = _primary_author(book)
 
-            for content_type in content_types:
-                if (provider_id, content_type) in known_requests:
-                    summary["skipped"] += 1
-                    continue
-                if _already_downloaded(db_path, book.provider, provider_id, content_type):
-                    summary["skipped"] += 1
-                    continue
-                if library_index.is_in_library(book, content_type):
-                    summary["in_library"] += 1
-                    logger.info(
-                        "hardcover-sync: '%s' (%s) already in library; skipping",
-                        book.title,
-                        content_type,
-                    )
-                    continue
-
-                try:
-                    create_request(
-                        user_db,
-                        user_id=user_id,
-                        source_hint=None,
-                        content_type=content_type,
-                        request_level="book",
-                        policy_mode="request_book",
-                        book_data=_book_to_book_data(book, content_type),
-                        note=None,
-                    )
-                except RequestServiceError as exc:
-                    # Duplicate / max-pending / validation: treat as skip, not failure.
-                    if exc.code in {"duplicate_pending_request", "max_pending_reached"}:
+                for content_type in content_types:
+                    if (provider_id, content_type) in known_requests:
                         summary["skipped"] += 1
-                    else:
-                        logger.warning(
-                            "hardcover-sync: could not add '%s' (%s): %s",
+                        continue
+                    if _already_downloaded(history, book.provider, provider_id, content_type):
+                        summary["skipped"] += 1
+                        continue
+                    if library_index.is_in_library(book, content_type):
+                        summary["in_library"] += 1
+                        logger.info(
+                            "hardcover-sync: '%s' (%s) already in library; skipping",
                             book.title,
                             content_type,
-                            exc,
+                        )
+                        continue
+
+                    try:
+                        create_request(
+                            user_db,
+                            user_id=user_id,
+                            source_hint=None,
+                            content_type=content_type,
+                            request_level="book",
+                            policy_mode="request_book",
+                            book_data=_book_to_book_data(book, content_type),
+                            note=None,
+                        )
+                    except RequestServiceError as exc:
+                        # Duplicate / max-pending / validation: treat as skip, not failure.
+                        if exc.code in {"duplicate_pending_request", "max_pending_reached"}:
+                            summary["skipped"] += 1
+                        else:
+                            logger.warning(
+                                "hardcover-sync: could not add '%s' (%s): %s",
+                                book.title,
+                                content_type,
+                                exc,
+                            )
+                            summary["errors"] += 1
+                        continue
+                    except Exception:
+                        logger.exception(
+                            "hardcover-sync: unexpected error adding '%s' (%s)",
+                            book.title,
+                            content_type,
                         )
                         summary["errors"] += 1
-                    continue
-                except Exception:
-                    logger.exception(
-                        "hardcover-sync: unexpected error adding '%s' (%s)",
-                        book.title,
-                        content_type,
-                    )
-                    summary["errors"] += 1
-                    continue
+                        continue
 
-                known_requests.add((provider_id, content_type))
-                summary["added"] += 1
-                logger.info(
-                    "hardcover-sync: added %s request for '%s' by %s",
-                    content_type,
-                    book.title,
-                    author,
-                )
+                    known_requests.add((provider_id, content_type))
+                    summary["added"] += 1
+                    logger.info(
+                        "hardcover-sync: added %s request for '%s' by %s",
+                        content_type,
+                        book.title,
+                        author,
+                    )
 
     logger.info("hardcover-sync complete: %s", summary)
     return summary

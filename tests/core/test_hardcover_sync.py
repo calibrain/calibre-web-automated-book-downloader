@@ -203,6 +203,11 @@ def test_existing_request_keys_pair_provider_id_with_content_type(user_db):
     }
 
 
+def _already_downloaded(db_path, *args, **kwargs):
+    with hardcover_sync._history_connection(db_path) as conn:
+        return hardcover_sync._already_downloaded(conn, *args, **kwargs)
+
+
 def test_already_downloaded_is_keyed_on_the_request_book_not_the_release_title(user_db, db_path):
     user = user_db.create_user(username="reader", role="user")
     request_id = _request(user_db, user["id"], "42", title="Dungeon Crawler Carl")
@@ -214,10 +219,10 @@ def test_already_downloaded_is_keyed_on_the_request_book_not_the_release_title(u
         request_id=request_id,
     )
 
-    assert hardcover_sync._already_downloaded(db_path, "hardcover", "42", "audiobook")
-    assert not hardcover_sync._already_downloaded(db_path, "hardcover", "43", "audiobook")
-    assert not hardcover_sync._already_downloaded(db_path, "openlibrary", "42", "audiobook")
-    assert not hardcover_sync._already_downloaded(None, "hardcover", "42", "audiobook")
+    assert _already_downloaded(db_path, "hardcover", "42", "audiobook")
+    assert not _already_downloaded(db_path, "hardcover", "43", "audiobook")
+    assert not _already_downloaded(db_path, "openlibrary", "42", "audiobook")
+    assert not _already_downloaded(None, "hardcover", "42", "audiobook")
 
 
 def test_a_download_with_no_request_does_not_count(user_db, db_path):
@@ -225,7 +230,7 @@ def test_a_download_with_no_request_does_not_count(user_db, db_path):
     _request(user_db, user["id"], "42", title="Dungeon Crawler Carl")
     _insert_history(db_path, title="Dungeon Crawler Carl", author="Matt Dinniman")
 
-    assert not hardcover_sync._already_downloaded(db_path, "hardcover", "42", "audiobook")
+    assert not _already_downloaded(db_path, "hardcover", "42", "audiobook")
 
 
 def test_a_provider_id_stored_as_a_number_still_matches(user_db, db_path):
@@ -233,7 +238,7 @@ def test_a_provider_id_stored_as_a_number_still_matches(user_db, db_path):
     request_id = _request(user_db, user["id"], 42)
     _insert_history(db_path, title="Some Book", author="Matt Dinniman", request_id=request_id)
 
-    assert hardcover_sync._already_downloaded(db_path, "hardcover", "42", "audiobook")
+    assert _already_downloaded(db_path, "hardcover", "42", "audiobook")
 
 
 @pytest.mark.parametrize(
@@ -251,7 +256,7 @@ def test_only_a_finished_or_running_download_counts(user_db, db_path, final_stat
         request_id=request_id,
     )
 
-    assert hardcover_sync._already_downloaded(db_path, "hardcover", "42", "ebook") is counts
+    assert _already_downloaded(db_path, "hardcover", "42", "ebook") is counts
 
 
 @pytest.mark.parametrize(
@@ -277,10 +282,7 @@ def test_an_active_row_older_than_a_day_is_a_lost_download(user_db, db_path, ter
     )
     now = datetime(2026, 10, 11, 12, 0, tzinfo=UTC)
 
-    assert (
-        hardcover_sync._already_downloaded(db_path, "hardcover", "42", "audiobook", now=now)
-        is counts
-    )
+    assert _already_downloaded(db_path, "hardcover", "42", "audiobook", now=now) is counts
 
 
 def test_a_finished_download_counts_however_old_it_is(user_db, db_path):
@@ -294,13 +296,13 @@ def test_a_finished_download_counts_however_old_it_is(user_db, db_path):
         terminal_at="2025-01-01T00:00:00+00:00",
     )
 
-    assert hardcover_sync._already_downloaded(db_path, "hardcover", "42", "audiobook")
+    assert _already_downloaded(db_path, "hardcover", "42", "audiobook")
 
 
 def test_already_downloaded_fails_open_without_history_table(tmp_path):
     missing = str(tmp_path / "empty.db")
 
-    assert hardcover_sync._already_downloaded(missing, "hardcover", "1", "ebook") is False
+    assert _already_downloaded(missing, "hardcover", "1", "ebook") is False
 
 
 class TestSyncWishlist:
@@ -310,6 +312,25 @@ class TestSyncWishlist:
         monkeypatch.setattr(
             "shelfmark.core.library_index.is_in_library", lambda *_args, **_kwargs: False
         )
+
+    def test_a_sync_pass_shares_one_history_connection(self, user_db, db_path, monkeypatch):
+        user_db.create_user(username="admin", role="admin")
+        provider = _Provider({1: [[_book(1, "One"), _book(2, "Two"), _book(3, "Three")]]})
+        self._use_provider(monkeypatch, provider)
+        seen = []
+        real = hardcover_sync._already_downloaded
+
+        def _spy(conn, *args, **kwargs):
+            seen.append(conn)
+            return real(conn, *args, **kwargs)
+
+        monkeypatch.setattr(hardcover_sync, "_already_downloaded", _spy)
+
+        hardcover_sync.sync_wishlist(user_db, db_path=db_path)
+
+        assert len(seen) > 1
+        assert isinstance(seen[0], sqlite3.Connection)
+        assert all(conn is seen[0] for conn in seen)
 
     def _use_provider(self, monkeypatch, provider):
         monkeypatch.setattr(hardcover_sync, "_build_provider", lambda: provider)
@@ -515,8 +536,8 @@ def test_already_downloaded_is_per_content_type(user_db, db_path):
         request_id=request_id,
     )
 
-    assert hardcover_sync._already_downloaded(db_path, "hardcover", "42", "ebook")
-    assert not hardcover_sync._already_downloaded(db_path, "hardcover", "42", "audiobook")
+    assert _already_downloaded(db_path, "hardcover", "42", "ebook")
+    assert not _already_downloaded(db_path, "hardcover", "42", "audiobook")
 
 
 class TestSyncBothFormats:
