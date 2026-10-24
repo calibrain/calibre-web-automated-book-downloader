@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Protocol, TypeGuard
 from shelfmark.core.config import config
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.request_helpers import coerce_int, normalize_optional_text
-from shelfmark.core.utils import is_audiobook
+from shelfmark.core.utils import AUDIOBOOK_FORMATS, DEFAULT_EBOOK_FORMATS, is_audiobook
 from shelfmark.download.activity import release_activity_grace, request_activity_grace
 from shelfmark.download.clients import (
     DownloadClient,
@@ -245,6 +245,56 @@ def _completed_file_signature(
                 continue
             name = candidate.relative_to(path).as_posix() if path.is_dir() else candidate.name
             signature.append((name, stat.st_size, stat.st_mtime_ns))
+    except OSError:
+        return None
+
+    return tuple(sorted(signature)) or None
+
+
+# Extensions that mean a finished book or recording, whichever content type the task is for.
+# A file with one of these that the task does not accept (an .m4b in an ebook task, a .pdf
+# with the default format list) is a wrong-type result, not a sidecar still waiting for the
+# real files to sync.
+_PAYLOAD_SUFFIXES = frozenset(
+    f".{fmt}" for fmt in (*AUDIOBOOK_FORMATS, *DEFAULT_EBOOK_FORMATS, "pdf")
+)
+
+
+def _unsupported_payload_signature(
+    path: Path, content_type: str | None
+) -> tuple[tuple[str, int, int], ...] | None:
+    """Sizes and mtimes of book or audio files in a path that this task does not accept.
+
+    None when there are none. Used to tell a finished directory that holds the wrong kind of
+    files apart from one that has only cover art and notes so far.
+    """
+    from shelfmark.download.postprocess.policy import (
+        get_supported_audiobook_formats,
+        get_supported_formats,
+    )
+
+    formats = (
+        get_supported_audiobook_formats() if is_audiobook(content_type) else get_supported_formats()
+    )
+    supported_suffixes = {f".{fmt.lstrip('.').lower()}" for fmt in formats}
+
+    try:
+        if not path.is_dir():
+            return None
+        signature = []
+        for candidate in path.rglob("*"):
+            suffix = candidate.suffix.lower()
+            if suffix not in _PAYLOAD_SUFFIXES or suffix in supported_suffixes:
+                continue
+            try:
+                stat = candidate.stat()
+            except OSError:
+                continue
+            if not candidate.is_file() or stat.st_size <= 0:
+                continue
+            signature.append(
+                (candidate.relative_to(path).as_posix(), stat.st_size, stat.st_mtime_ns)
+            )
     except OSError:
         return None
 
@@ -867,6 +917,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
         """Wait for supported files to appear and stop changing on disk."""
         last_error: str | None = None
         previous_signature: tuple[tuple[str, int, int], ...] | None = None
+        previous_unsupported: tuple[tuple[str, int, int], ...] | None = None
         retry_interval = self._completed_path_retry_interval()
         timeout_seconds = self._completed_path_timeout_seconds()
         if retry_interval <= 0 or timeout_seconds <= 0:
@@ -896,6 +947,20 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 if signature is not None and (signature == previous_signature or max_attempts == 1):
                     return result.path, None
                 previous_signature = signature
+                if signature is None:
+                    # Nothing this task accepts. If the directory instead holds finished files
+                    # of another kind and has stopped changing, waiting longer will not help:
+                    # hand it on so post-processing names the format problem.
+                    unsupported = run_blocking_io(
+                        _unsupported_payload_signature,
+                        result.path,
+                        content_type,
+                    )
+                    if unsupported is not None and (
+                        unsupported == previous_unsupported or max_attempts == 1
+                    ):
+                        return result.path, None
+                    previous_unsupported = unsupported
                 last_error = "Completed download has no stable supported files yet."
                 if attempt < max_attempts:
                     status_callback("locating", "Waiting for completed files...")
