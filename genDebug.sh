@@ -141,14 +141,14 @@ fi
 
 # Add environment variables (redacting sensitive info and the credentials in URLs
 # such as a proxy's http://user:pass@host:port)
-env | grep -v -E "^[^=]*(_KEY|_SECRET|_PASSWORD|_TOKEN|_MAM_ID)[^=]*=" | sed -E 's#(://)[^/@[:space:]]+@#\1[REDACTED]@#g' | sort > "$LOG_DIR/environment.txt"
+env | grep -v -E "^[^=]*(_KEY|_SECRET|_PASSWORD|_TOKEN|_MAM_ID)[^=]*=" | sed -E 's#(://)[^/?#@[:space:]]+@#\1[REDACTED]@#g' | sort > "$LOG_DIR/environment.txt"
 
 # Redact sensitive fields (API keys, passwords, tokens, the MAM session id), the
 # credentials in URLs, and notification URLs, which carry their service's token
 redact_config_json() {
   sed -E \
     -e 's/("(AA_DONATOR_KEY|HARDCOVER_API_KEY|[^"]*_KEY|[^"]*_SECRET|[^"]*_PASSWORD|[^"]*_TOKEN|[^"]*_MAM_ID)"[[:space:]]*:[[:space:]]*")[^"]+"/\1[REDACTED]"/g' \
-    -e 's#(://)[^/@[:space:]"]+@#\1[REDACTED]@#g' \
+    -e 's#(://)[^/?#@[:space:]"]+@#\1[REDACTED]@#g' \
     -e 's#("url"[[:space:]]*:[[:space:]]*"([[:alnum:]+.-]+://)?)[^"]+"#\1[REDACTED]"#g' \
     "$1"
 }

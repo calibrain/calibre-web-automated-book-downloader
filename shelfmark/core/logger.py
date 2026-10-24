@@ -1,7 +1,6 @@
 """Logging configuration and custom logger with error tracing."""
 
 import logging
-import re
 import sys
 from collections.abc import Mapping
 from logging.handlers import RotatingFileHandler
@@ -9,6 +8,7 @@ from threading import Lock
 from typing import TYPE_CHECKING
 
 from shelfmark.config.env import ENABLE_LOGGING, LOG_FILE, LOG_LEVEL
+from shelfmark.core.redaction import redact_secrets
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -16,53 +16,6 @@ if TYPE_CHECKING:
 
 _file_handlers: dict[Path, RotatingFileHandler] = {}
 _file_handlers_lock = Lock()
-
-# Query parameters that carry tracker/indexer credentials. Prowlarr guids are often
-# the download URL itself (apikey included), and they end up in task ids that are
-# logged all over the download pipeline, so mask them at the formatter instead.
-_SECRET_QUERY_PARAM_PATTERN = re.compile(
-    r"(?<=[?&;])"
-    r"([a-z0-9_-]*api[_-]?key|api|apitoken|access_token|token|passkey|authkey|rsskey"
-    r"|torrent_pass|auth|key|password|passwd|pwd|pass|secret|sid|uid)"
-    r"=[^&\s#'\"<>;:,)\]]+",
-    re.IGNORECASE,
-)
-
-
-# Credentials in a URL's userinfo, as in a proxy's socks5://user:pass@host:port. The authority
-# ends at the first "/", "?" or "#" (RFC 3986), so an "@" after one of those is not userinfo.
-_URL_USERINFO_PATTERN = re.compile(r"(://)[^/?#@\s'\"<>]+@")
-
-# A credential carried as a path segment: a tracker passkey (/rss/<key>), or the token in the
-# URL of a chat service's bot or webhook, which notification URLs end up logging. Only segments
-# that name a secret are matched, so ids in our own routes (/api/download/<md5>) stay readable.
-_SECRET_PATH_SEGMENT_PATTERN = re.compile(
-    r"(?<=/)((?:passkey|apikey|api[_-]key|rsskey|authkey|token|secret|rss|torznab)/)"
-    r"[A-Za-z0-9_.~-]{16,}",
-    re.IGNORECASE,
-)
-_CHAT_SERVICE_TOKEN_PATTERNS = (
-    # https://api.telegram.org/bot<id>:<token>/sendMessage
-    re.compile(r"(/bot)\d+:[A-Za-z0-9_-]{20,}"),
-    # https://discord.com/api/webhooks/<id>/<token>
-    re.compile(r"(/webhooks/\d+/)[A-Za-z0-9_-]{20,}"),
-    # https://hooks.slack.com/services/T000/B000/<token>
-    re.compile(r"(/services/[A-Z0-9]+/[A-Z0-9]+/)[A-Za-z0-9]{16,}"),
-)
-
-
-def redact_secrets(text: str) -> str:
-    """Mask credentials in text, keeping the rest of a URL readable.
-
-    Covers credential query parameters, userinfo (``user:pass@host``), path segments that
-    name a secret and the tokens of Telegram, Discord and Slack URLs.
-    """
-    text = _SECRET_QUERY_PARAM_PATTERN.sub(r"\1=(removed)", text)
-    text = _URL_USERINFO_PATTERN.sub(r"\1(removed)@", text)
-    text = _SECRET_PATH_SEGMENT_PATTERN.sub(r"\1(removed)", text)
-    for pattern in _CHAT_SERVICE_TOKEN_PATTERNS:
-        text = pattern.sub(r"\1(removed)", text)
-    return text
 
 
 class RedactingFormatter(logging.Formatter):

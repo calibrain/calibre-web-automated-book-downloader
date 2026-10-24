@@ -19,10 +19,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
-import re
 from pathlib import PurePath
 from typing import TYPE_CHECKING, Any
 
+from shelfmark.core.redaction import strip_links
 from shelfmark.core.request_helpers import normalize_positive_int
 
 if TYPE_CHECKING:
@@ -30,16 +30,6 @@ if TYPE_CHECKING:
 
 PUBLIC_DOWNLOAD_ID_PREFIX = "dl_"
 
-# A client error is stored as the download's status message, and it quotes the request:
-# "401 Client Error: Unauthorized for url: <full url>", or for a refused connection
-# "Max retries exceeded with url: <path and query>" with no scheme. The link can carry an
-# indexer key or a tracker passkey in its query string or path, and a non-admin has no use
-# for it. Schemes are case-insensitive.
-_LINK_IN_MESSAGE_PATTERN = re.compile(
-    r"https?://[^\s'\"<>)\]]+|(?<=url: )/[^\s'\"<>)\]]*",
-    re.IGNORECASE,
-)
-_REMOVED_LINK = "(link removed)"
 
 # Release fields a non-admin's activity cards display. Everything else (source_id,
 # indexer, info and download URLs, torrent attributes) stays server-side.
@@ -124,10 +114,10 @@ def redact_request_row(row: dict[str, Any]) -> dict[str, Any]:
 def redact_status_message(message: str) -> str:
     """Replace every link in a status message, keeping the rest of the text.
 
-    A link is a full http(s) URL, or the scheme-less path after ``url: `` that requests
-    prints for a failed connection.
+    A client error is stored as the download's status message and quotes the request, so it
+    can carry an indexer key or a tracker passkey that a non-admin has no use for.
     """
-    return _LINK_IN_MESSAGE_PATTERN.sub(_REMOVED_LINK, message)
+    return strip_links(message)
 
 
 def redact_download_payload(payload: dict[str, Any], task_id: str | None = None) -> dict[str, Any]:
