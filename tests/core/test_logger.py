@@ -91,6 +91,68 @@ def test_redact_secrets_masks_credential_query_params(text, expected):
     assert logger_module.redact_secrets(text) == expected
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "proxy socks5://alice:p4ss@proxy.example:1080 unreachable",
+            "proxy socks5://(removed)@proxy.example:1080 unreachable",
+        ),
+        (
+            "GET http://admin:secret@qbittorrent:8080/api/v2/torrents/info failed",
+            "GET http://(removed)@qbittorrent:8080/api/v2/torrents/info failed",
+        ),
+        (
+            "fetching https://tracker.example/rss/0123456789abcdef0123456789abcdef",
+            "fetching https://tracker.example/rss/(removed)",
+        ),
+        (
+            "https://tracker.example/passkey/AbCdEfGh01234567/get.torrent",
+            "https://tracker.example/passkey/(removed)/get.torrent",
+        ),
+        (
+            "POST https://api.telegram.org/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/sendMessage",
+            "POST https://api.telegram.org/bot(removed)/sendMessage",
+        ),
+        (
+            "https://discord.com/api/webhooks/123456789012345678/abcDEF_ghi-JKLmno0123456789",
+            "https://discord.com/api/webhooks/123456789012345678/(removed)",
+        ),
+        (
+            "https://hooks.slack.com/services/T0ABC123/B0DEF456/XyZ0123456789abcdefABCDEF",
+            "https://hooks.slack.com/services/T0ABC123/B0DEF456/(removed)",
+        ),
+        # Ids in Shelfmark's own routes and short segments stay readable.
+        (
+            "POST /api/download/0123456789abcdef0123456789abcdef/cancel",
+            "POST /api/download/0123456789abcdef0123456789abcdef/cancel",
+        ),
+        ("https://tracker.example/rss/latest", "https://tracker.example/rss/latest"),
+        ("contact me at a@b.example, ok", "contact me at a@b.example, ok"),
+    ],
+)
+def test_redact_secrets_masks_userinfo_and_path_segment_credentials(text, expected):
+    assert logger_module.redact_secrets(text) == expected
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    ["shelfmark.api.websocket", "shelfmark.download.clients"],
+)
+def test_modules_log_through_the_redacting_formatter(module_name):
+    """A module on a plain logging.getLogger bypassed redaction (S1)."""
+    import importlib
+
+    module = importlib.import_module(module_name)
+    module_logger = getattr(module, "logger", None) or module._logger
+
+    assert module_logger.handlers
+    assert all(
+        isinstance(handler.formatter, logger_module.RedactingFormatter)
+        for handler in module_logger.handlers
+    )
+
+
 def test_setup_logger_redacts_messages_args_and_tracebacks(monkeypatch):
     """Task ids built from Prowlarr guids carry tracker API keys (#1486)."""
     monkeypatch.setattr(logger_module, "ENABLE_LOGGING", False)

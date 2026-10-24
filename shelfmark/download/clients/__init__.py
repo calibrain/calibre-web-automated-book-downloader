@@ -9,7 +9,6 @@ This module provides:
 Clients register themselves via the @register_client decorator.
 """
 
-import logging
 import os
 import random
 import time
@@ -23,10 +22,12 @@ from typing import TYPE_CHECKING, TypeVar, cast
 
 import requests
 
+from shelfmark.core.logger import setup_logger
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-_logger = logging.getLogger(__name__)
+_logger = setup_logger(__name__)
 
 # Type variable for generic return type
 T = TypeVar("T")
