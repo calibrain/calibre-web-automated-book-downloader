@@ -36,12 +36,16 @@ def search_source_releases(
     content_type: str = "ebook",
     source_filters: SearchFilters | None = None,
     user_id: int | None = None,
+    include_error_detail: bool = True,
 ) -> tuple[ReleaseSource | None, list[Release], str | None]:
     """Search a single release source, returning any error instead of raising.
 
     Returns ``(source, releases, error_message)``. On failure ``source`` is ``None``
     and ``error_message`` describes the problem. ``user_id`` lets the search plan
     pick up that user's default languages when no explicit filter is given.
+    ``include_error_detail=False`` keeps the text of an unexpected error out of the returned
+    message, for callers that hand it to a non-admin. It is still logged in full. The message
+    of a ``SourceUnavailableError`` is written for the user and is always kept.
     """
     from shelfmark.release_sources import SourceUnavailableError, get_source
 
@@ -89,6 +93,8 @@ def search_source_releases(
         )
     except (SourceUnavailableError, *_OPERATIONAL_ERRORS) as exc:
         logger.warning("Release search failed for source %s: %s", source_name, exc)
-        return None, [], f"{source_name}: {exc!s}"
+        if include_error_detail or isinstance(exc, SourceUnavailableError):
+            return None, [], f"{source_name}: {exc!s}"
+        return None, [], f"{source_name}: search failed"
     else:
         return source, releases, None

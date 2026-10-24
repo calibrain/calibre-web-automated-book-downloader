@@ -860,6 +860,34 @@ class TestStatusEndpointGuardrails:
         assert observed["user_id"] is None
 
 
+class TestErrorTextStaysOutOfResponses:
+    """A failing status or config read must not hand the exception text to the caller."""
+
+    def test_status_failure_returns_a_fixed_message(self, main_module, client):
+        def boom(user_id=None):
+            msg = "cannot open /srv/shelfmark/queue.db"
+            raise OSError(msg)
+
+        with patch.object(main_module, "get_auth_mode", return_value="none"):
+            with patch.object(main_module.backend, "queue_status", side_effect=boom):
+                resp = client.get("/api/status")
+
+        assert resp.status_code == 500
+        assert resp.get_json() == {"error": "Could not read the download status"}
+
+    def test_config_failure_returns_a_fixed_message(self, main_module, client):
+        def boom(*_args, **_kwargs):
+            msg = "cannot read /config/plugins/general.json"
+            raise OSError(msg)
+
+        with patch.object(main_module, "get_auth_mode", return_value="none"):
+            with patch.object(main_module, "get_session_db_user_id", side_effect=boom):
+                resp = client.get("/api/config")
+
+        assert resp.status_code == 500
+        assert resp.get_json() == {"error": "Could not load the configuration"}
+
+
 class TestQueueManagementEndpointGuardrails:
     def test_non_owner_cannot_set_priority(self, main_module, client):
         owner = _create_user(main_module, prefix="owner")
