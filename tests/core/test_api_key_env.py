@@ -307,7 +307,9 @@ class TestMismatchFallsThrough:
 class TestScopeAndModes:
     def test_health_and_auth_paths_and_root_ignore_key(self, wired):
         client = wired.app.test_client()
-        assert client.get("/api/health", headers=_bearer("s3cret")).status_code == 200
+        # The test app never starts the coordinator, which /api/health reports.
+        with patch.object(wired.backend, "coordinator_running", return_value=True):
+            assert client.get("/api/health", headers=_bearer("s3cret")).status_code == 200
         assert (
             client.get("/api/auth/check", headers=_bearer("s3cret")).get_json()["authenticated"]
             is False
