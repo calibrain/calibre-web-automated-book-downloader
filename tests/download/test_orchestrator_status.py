@@ -97,9 +97,9 @@ def _status_pipeline(monkeypatch):
 
 def test_a_changing_seed_note_is_shown_but_does_not_refresh_the_stall_clock(monkeypatch):
     """The swarm count flaps and the give-up countdown ticks; neither is progress (F1)."""
+    orchestrator, mock_queue, clock = _status_pipeline(monkeypatch)
     from shelfmark.download.clients.base_handler import ExternalClientHandler
 
-    orchestrator, mock_queue, clock = _status_pipeline(monkeypatch)
     note = ExternalClientHandler._seed_note
 
     orchestrator.update_download_status("book", "downloading", f"0%{note(2, None)}")
@@ -115,9 +115,9 @@ def test_a_changing_seed_note_is_shown_but_does_not_refresh_the_stall_clock(monk
 
 
 def test_progress_and_status_changes_still_refresh_the_stall_clock(monkeypatch):
+    orchestrator, _queue, clock = _status_pipeline(monkeypatch)
     from shelfmark.download.clients.base_handler import ExternalClientHandler
 
-    orchestrator, _queue, clock = _status_pipeline(monkeypatch)
     note = ExternalClientHandler._seed_note
 
     orchestrator.update_download_status("book", "downloading", f"0%{note(2, None)}")
