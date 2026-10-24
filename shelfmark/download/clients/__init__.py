@@ -178,6 +178,14 @@ class DownloadStatus:
         return self.state
 
 
+@dataclass(frozen=True)
+class ExpectedFile:
+    """A file the client will have on disk when a download is complete."""
+
+    name: str  # Path relative to the client's save directory, "/" separated
+    size: int  # Final size in bytes
+
+
 class DownloadClient(ABC):
     """Base class for external download clients.
 
@@ -356,6 +364,15 @@ class DownloadClient(ABC):
             File or directory path, or None if not available.
 
         """
+
+    def get_expected_files(self, download_id: str) -> list[ExpectedFile] | None:
+        """The files a finished download holds, or None when the client cannot say.
+
+        Lets the handler tell a folder that has all of its files from one that stopped changing
+        while a sync to this host is still copying them in. Only files the client downloads
+        count: a file the user skipped is not expected. Default: the client cannot say.
+        """
+        return None
 
     def find_existing(
         self, url: str, category: str | None = None

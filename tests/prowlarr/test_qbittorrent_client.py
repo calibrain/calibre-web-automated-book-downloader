@@ -82,6 +82,73 @@ def test_set_category_creates_and_assigns_category():
     )
 
 
+def _client_answering_files(payload, status_code=200):
+    from shelfmark.download.clients.qbittorrent import QBittorrentClient
+
+    client = QBittorrentClient.__new__(QBittorrentClient)
+    client._base_url = "http://localhost:8080"
+    client._api_key = "key"  # a bearer key cannot sign in again, so no retry
+    client._ensure_authenticated = MagicMock()
+    client._client = MagicMock()
+    response = MagicMock(status_code=status_code)
+    response.json.return_value = payload
+    response.raise_for_status = MagicMock()
+    client._client._session.get.return_value = response
+    return client
+
+
+class TestGetExpectedFiles:
+    def test_lists_the_files_with_their_sizes(self):
+        client = _client_answering_files(
+            [
+                {"name": "Book/01.mp3", "size": 100, "priority": 1},
+                {"name": "Book/02.mp3", "size": 200, "priority": 7},
+            ]
+        )
+
+        expected = client.get_expected_files("abc123")
+
+        assert [(f.name, f.size) for f in (expected or [])] == [
+            ("Book/01.mp3", 100),
+            ("Book/02.mp3", 200),
+        ]
+        assert client._client._session.get.call_args.kwargs["params"] == {"hash": "abc123"}
+
+    def test_skips_files_the_client_is_not_downloading_and_padding_files(self):
+        client = _client_answering_files(
+            [
+                {"name": "Book/01.mp3", "size": 100, "priority": 1},
+                {"name": "Book/skipped.jpg", "size": 50, "priority": 0},
+                {"name": "Book/.pad/0", "size": 4096, "priority": 1},
+                {"name": "Book/empty.txt", "size": 0, "priority": 1},
+            ]
+        )
+
+        expected = client.get_expected_files("abc123")
+
+        assert [f.name for f in (expected or [])] == ["Book/01.mp3"]
+
+    def test_normalizes_windows_separators(self):
+        client = _client_answering_files([{"name": "Book\\01.mp3", "size": 100, "priority": 1}])
+
+        assert [f.name for f in (client.get_expected_files("abc123") or [])] == ["Book/01.mp3"]
+
+    @pytest.mark.parametrize(
+        ("payload", "status_code"),
+        [([], 200), ({"error": "x"}, 200), ([{"name": "a", "size": 0}], 200), ([], 404)],
+    )
+    def test_none_when_there_is_nothing_to_go_on(self, payload, status_code):
+        assert _client_answering_files(payload, status_code).get_expected_files("abc123") is None
+
+    def test_none_when_the_client_cannot_be_reached(self):
+        import requests
+
+        client = _client_answering_files([])
+        client._client._session.get.side_effect = requests.ConnectionError("down")
+
+        assert client.get_expected_files("abc123") is None
+
+
 class TestQBittorrentClientIsConfigured:
     """Tests for QBittorrentClient.is_configured()."""
 
