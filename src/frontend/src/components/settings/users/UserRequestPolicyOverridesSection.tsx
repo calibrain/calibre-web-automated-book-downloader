@@ -31,6 +31,7 @@ const REQUEST_POLICY_OVERRIDE_KEYS: Array<keyof PerUserSettings> = [
   'REQUEST_POLICY_RULES',
   'MAX_PENDING_REQUESTS_PER_USER',
   'REQUESTS_ALLOW_NOTES',
+  'REQUESTS_ALLOW_BOOK_REQUEST_WITH_DOWNLOAD',
 ];
 
 const requestPolicyHeading: HeadingFieldConfig = {

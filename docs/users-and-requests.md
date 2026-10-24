@@ -94,6 +94,7 @@ Each content type (ebook, audiobook) has a default mode that sets the baseline:
 | Request Rules | Per-source overrides (see below) | None |
 | Max Pending Requests Per User | Open request limit per user | 20 |
 | Allow Notes on Requests | Let users attach a note when submitting | On |
+| Allow book requests alongside downloads | Let users who can download also request a book without choosing a release, for a book nobody has released yet or one no source has. The request waits for an admin. Admins can always do this | Off |
 
 ### Request Rules
 

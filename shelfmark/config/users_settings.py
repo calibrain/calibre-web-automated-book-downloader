@@ -450,4 +450,16 @@ def users_settings() -> list[SettingsField]:
             user_overridable=True,
             show_when={"field": "REQUESTS_ENABLED", "value": True},
         ),
+        CheckboxField(
+            key="REQUESTS_ALLOW_BOOK_REQUEST_WITH_DOWNLOAD",
+            label="Allow book requests alongside downloads",
+            description=(
+                "Let users who can download also request a book without choosing a release, for "
+                "a book nobody has released yet or one no source has. The request waits for an "
+                "admin. Admins can always do this."
+            ),
+            default=False,
+            user_overridable=True,
+            show_when={"field": "REQUESTS_ENABLED", "value": True},
+        ),
     ]

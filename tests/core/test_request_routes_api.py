@@ -48,9 +48,11 @@ def _policy(
     default_audiobook: str = "download",
     max_pending_requests_per_user: int = 20,
     requests_allow_notes: bool = True,
+    allow_book_request_with_download: bool = False,
     rules: list[dict] | None = None,
 ) -> dict:
     return {
+        "REQUESTS_ALLOW_BOOK_REQUEST_WITH_DOWNLOAD": allow_book_request_with_download,
         "REQUESTS_ENABLED": requests_enabled,
         "REQUEST_POLICY_DEFAULT_EBOOK": default_ebook,
         "REQUEST_POLICY_DEFAULT_AUDIOBOOK": default_audiobook,
@@ -2125,6 +2127,112 @@ class TestRequestCreationEdgeCases:
         assert resp.json["required_mode"] == "download"
         mock_queue_release.assert_not_called()
         assert main_module.user_db.list_requests(user_id=user["id"]) == []
+
+    @staticmethod
+    def _book_level_request_payload() -> dict:
+        return {
+            "book_data": {
+                "title": "Not Released Yet",
+                "author": "Shelfmark",
+                "content_type": "ebook",
+                "provider": "openlibrary",
+                "provider_id": "not-released-yet",
+            },
+            "context": {"source": "*", "content_type": "ebook", "request_level": "book"},
+        }
+
+    def _post_book_request(self, main_module, client, policy):
+        with patch.object(main_module, "get_auth_mode", return_value="builtin"):
+            with patch.object(
+                main_module, "load_users_request_policy_settings", return_value=policy
+            ):
+                with patch(
+                    "shelfmark.core.request_routes.load_users_request_policy_settings",
+                    return_value=policy,
+                ):
+                    with patch.object(main_module.backend, "queue_release") as mock_queue_release:
+                        resp = client.post("/api/requests", json=self._book_level_request_payload())
+        return resp, mock_queue_release
+
+    def test_a_book_request_is_kept_in_download_mode_when_the_setting_allows_it(
+        self, main_module, client
+    ):
+        """Download mode left no way to ask for a book nobody has released yet (#995, #1019)."""
+        user = _create_user(main_module, prefix="reader")
+        _set_session(client, user_id=user["username"], db_user_id=user["id"], is_admin=False)
+        policy = _policy(default_ebook="download", allow_book_request_with_download=True)
+
+        resp, mock_queue_release = self._post_book_request(main_module, client, policy)
+
+        assert resp.status_code == 201
+        assert resp.json["status"] == "pending"
+        assert resp.json["policy_mode"] == "request_book"
+        assert resp.json["request_level"] == "book"
+        mock_queue_release.assert_not_called()
+        assert len(main_module.user_db.list_requests(user_id=user["id"])) == 1
+
+    def test_an_admin_can_request_a_book_in_download_mode_without_the_setting(
+        self, main_module, client
+    ):
+        admin = _create_user(main_module, prefix="admin", role="admin")
+        _set_session(client, user_id=admin["username"], db_user_id=admin["id"], is_admin=True)
+        policy = _policy(default_ebook="download", allow_book_request_with_download=False)
+
+        resp, mock_queue_release = self._post_book_request(main_module, client, policy)
+
+        assert resp.status_code == 201
+        assert resp.json["policy_mode"] == "request_book"
+        mock_queue_release.assert_not_called()
+
+    def test_the_setting_does_not_turn_a_release_request_into_a_book_request(
+        self, main_module, client
+    ):
+        user = _create_user(main_module, prefix="reader")
+        _set_session(client, user_id=user["username"], db_user_id=user["id"], is_admin=False)
+        policy = _policy(default_ebook="download", allow_book_request_with_download=True)
+        payload = self._book_level_request_payload()
+        payload["release_data"] = {"source": "direct_download", "source_id": "abc", "title": "T"}
+        payload["context"] = {
+            "source": "direct_download",
+            "content_type": "ebook",
+            "request_level": "release",
+        }
+
+        with patch.object(main_module, "get_auth_mode", return_value="builtin"):
+            with patch.object(
+                main_module, "load_users_request_policy_settings", return_value=policy
+            ):
+                with patch(
+                    "shelfmark.core.request_routes.load_users_request_policy_settings",
+                    return_value=policy,
+                ):
+                    with patch.object(
+                        main_module.backend, "queue_release", return_value=(True, None)
+                    ) as mock_queue_release:
+                        resp = client.post("/api/requests", json=payload)
+
+        assert resp.status_code == 200
+        assert resp.json["kind"] == "download"
+        mock_queue_release.assert_called_once()
+        assert main_module.user_db.list_requests(user_id=user["id"]) == []
+
+    @pytest.mark.parametrize("allowed", [True, False])
+    def test_policy_endpoint_reports_the_book_request_setting(self, main_module, client, allowed):
+        user = _create_user(main_module, prefix="reader")
+        _set_session(client, user_id=user["username"], db_user_id=user["id"], is_admin=False)
+        policy = _policy(default_ebook="download", allow_book_request_with_download=allowed)
+
+        with patch.object(main_module, "get_auth_mode", return_value="builtin"):
+            with patch.object(
+                main_module, "load_users_request_policy_settings", return_value=policy
+            ):
+                with patch(
+                    "shelfmark.core.request_routes.load_users_request_policy_settings",
+                    return_value=policy,
+                ):
+                    resp = client.get("/api/request-policy")
+
+        assert resp.json["allow_book_request_with_download"] is allowed
 
     def test_blocked_policy_returns_403(self, main_module, client):
         user = _create_user(main_module, prefix="reader")
