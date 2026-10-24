@@ -14,6 +14,8 @@ Metadata providers allow searching for books and retrieving detailed metadata (t
 | **Open Library** | No | Free, open-source library catalog from the Internet Archive. Rate limited to ~100 requests/minute |
 | **Google Books** | Yes (API key) | Google's book database with broad coverage and a free API key option |
 | **DNB** | No | Deutsche Nationalbibliothek, the German national library catalog. Best coverage for German-language editions |
+| **Databáze knih** | No | Czech and Slovak book catalog. It has no public API, so Shelfmark reads the web pages |
+| **Moly.hu** | No | Hungarian book catalog, read from the web pages. No API key required |
 
 
 ## Core Components
@@ -314,7 +316,7 @@ def make_request(self):
 
 ## Configuration
 
-Provider settings are stored in `CONFIG_DIR/plugins/<provider_name>.json` and managed via the Settings UI. See [Plugin Settings Guide](../../docs/plugin-settings.md) for detailed documentation on adding settings to your provider.
+Provider settings are stored in `CONFIG_DIR/plugins/<provider_name>.json` and managed via the Settings UI. See [Plugin Settings Guide](../../docs/dev/plugin-settings.md) for detailed documentation on adding settings to your provider.
 
 ## Environment Variables
 

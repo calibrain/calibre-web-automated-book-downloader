@@ -54,12 +54,12 @@ This separation allows:
 ### Plugin Lifecycle
 
 1. **Registration** (import time): Decorators register your classes in the global registry
-2. **Discovery**: `list_available_sources()` checks `is_available()` on each source
-3. **Search**: User selects source, `search(book_metadata)` returns releases
+2. **Discovery**: `list_available_sources()` lists every registered source and reports `enabled` from its `is_available()`
+3. **Search**: User selects source, `search(book, plan, ...)` returns releases
 4. **Queue**: User selects release, it becomes a `DownloadTask` in the queue
 5. **Download**: Orchestrator calls `handler.download()` with callbacks
 6. **Progress**: Handler reports via `progress_callback` and `status_callback`
-7. **Completion**: Handler returns file path or `None` on failure
+7. **Completion**: Handler returns a file path (or a `HandoffResult` for an external handoff) and `None` on failure
 
 ### Source vs Handler
 
@@ -85,6 +85,7 @@ from typing import Callable, List, Optional
 from threading import Event
 
 from shelfmark.release_sources import (
+    HandoffResult,
     Release,
     ReleaseSource,
     DownloadHandler,
@@ -93,6 +94,7 @@ from shelfmark.release_sources import (
 )
 from shelfmark.metadata_providers import BookMetadata
 from shelfmark.core.models import DownloadTask
+from shelfmark.core.search_plan import ReleaseSearchPlan
 
 
 @register_source("my_source")
@@ -100,7 +102,14 @@ class MySource(ReleaseSource):
     name = "my_source"
     display_name = "My Source"
 
-    def search(self, book: BookMetadata) -> List[Release]:
+    def search(
+        self,
+        book: BookMetadata,
+        plan: ReleaseSearchPlan,
+        *,
+        expand_search: bool = False,
+        content_type: str = "ebook",
+    ) -> List[Release]:
         # Your search logic here
         return []
 
@@ -116,7 +125,7 @@ class MyHandler(DownloadHandler):
         cancel_flag: Event,
         progress_callback: Callable[[float], None],
         status_callback: Callable[[str, Optional[str]], None],
-    ) -> Optional[str]:
+    ) -> str | HandoffResult | None:
         # Your download logic here
         return None  # Return file path on success
 
@@ -124,12 +133,17 @@ class MyHandler(DownloadHandler):
         return False  # Cancellation via cancel_flag
 ```
 
-Register the import in `shelfmark/release_sources/__init__.py`:
+Add the module to `_BUILTIN_SOURCE_MODULES` in `shelfmark/release_sources/__init__.py`:
 
 ```python
-# At the bottom of the file
-from shelfmark.release_sources import my_source  # noqa: F401, E402
+_BUILTIN_SOURCE_MODULES = (
+    "shelfmark.release_sources.audiobookbay",
+    # ...
+    "shelfmark.release_sources.my_source",
+)
 ```
+
+The built-in sources are packages (`jackett/`, `webshare/`, `slskd/` and so on) with the source, handler and settings in separate modules that the package `__init__.py` imports. A single module is fine for a small source.
 
 ---
 
@@ -139,7 +153,8 @@ The `ReleaseSource` abstract base class defines the search interface:
 
 ```python
 from abc import ABC, abstractmethod
-from typing import List
+from typing import ClassVar, List
+from shelfmark.core.search_plan import ReleaseSearchPlan
 from shelfmark.metadata_providers import BookMetadata
 from shelfmark.release_sources import Release, ReleaseColumnConfig
 
@@ -149,18 +164,29 @@ class ReleaseSource(ABC):
 
     name: str  # Internal identifier: "direct_download", "prowlarr"
     display_name: str  # User-facing name: "Direct Download", "Prowlarr"
+    supported_content_types: ClassVar[list[str]] = ["ebook", "audiobook"]
+    can_be_default: bool = True  # Whether it can be picked as the default source in settings
 
     @abstractmethod
-    def search(self, book: BookMetadata) -> List[Release]:
+    def search(
+        self,
+        book: BookMetadata,
+        plan: ReleaseSearchPlan,
+        *,
+        expand_search: bool = False,
+        content_type: str = "ebook",
+    ) -> List[Release]:
         """Search for releases of a book.
 
         Args:
             book: Book metadata including title, authors, ISBN, language
+            plan: Pre-computed search inputs shared by all sources (see below)
+            expand_search: True when the user asked for a wider search
+            content_type: "ebook" or "audiobook"
 
         Returns:
             List of Release objects found from this source
         """
-        pass
 
     @abstractmethod
     def is_available(self) -> bool:
@@ -169,10 +195,8 @@ class ReleaseSource(ABC):
         Returns:
             True if source can be used for searching
         """
-        pass
 
-    @classmethod
-    def get_column_config(cls) -> ReleaseColumnConfig:
+    def get_column_config(self) -> ReleaseColumnConfig:
         """Get the column configuration for this source's release list UI.
 
         Override to customize how releases are displayed in the modal.
@@ -181,17 +205,39 @@ class ReleaseSource(ABC):
         return _default_column_config()
 ```
 
+Optional hooks, all with working defaults:
+
+| Method | Purpose |
+|--------|---------|
+| `search_results_are_releases()` | Return `True` when the source's browse results are already concrete releases. Request policy then treats "request book" as "request release" for it |
+| `get_record(record_id, *, fetch_download_count=True)` | Resolve a source-native record for browse flows. Raises `NotImplementedError` by default |
+| `get_destination_override(task)` | Return a source-specific destination `Path` for a queued download, or `None` |
+
+### The search plan
+
+`plan` is a `ReleaseSearchPlan` (`shelfmark/core/search_plan.py`) that Shelfmark builds once per search, so each source does not redo the same work:
+
+| Field | Description |
+|-------|-------------|
+| `languages` | Language codes to filter by, or `None` |
+| `isbn_candidates` | ISBNs to try, best first |
+| `author` | Author string to search with |
+| `title_variants`, `grouped_title_variants` | Title queries, best first. `plan.primary_query` is the first one |
+| `manual_query` | Text the user typed into the search box, when they did |
+| `indexers` | Indexer names for indexer-based sources |
+| `source_filters` | Filters from the source's own search form |
+
 ### Search Method
 
-The `search` method receives complete book metadata and returns standardized releases:
+The `search` method receives the book metadata and the search plan, and returns standardized releases:
 
 ```python
-def search(self, book: BookMetadata) -> List[Release]:
+def search(self, book, plan, *, expand_search=False, content_type="ebook") -> List[Release]:
     results = []
 
     # Strategy 1: Search by ISBN (most accurate)
-    if book.isbn_13:
-        api_results = self.api.search_isbn(book.isbn_13)
+    if plan.isbn_candidates:
+        api_results = self.api.search_isbn(plan.isbn_candidates[0])
         for r in api_results:
             results.append(
                 Release(
@@ -204,9 +250,9 @@ def search(self, book: BookMetadata) -> List[Release]:
                 )
             )
 
-    # Strategy 2: Fallback to title + author search
+    # Strategy 2: Fallback to the planned title query
     if not results:
-        query = f"{book.title} {book.authors[0] if book.authors else ''}"
+        query = plan.manual_query or plan.primary_query
         api_results = self.api.search_text(query)
         for r in api_results:
             results.append(Release(...))
@@ -242,6 +288,7 @@ from abc import ABC, abstractmethod
 from typing import Callable, Optional
 from threading import Event
 from shelfmark.core.models import DownloadTask
+from shelfmark.release_sources import HandoffResult
 
 
 class DownloadHandler(ABC):
@@ -254,7 +301,7 @@ class DownloadHandler(ABC):
         cancel_flag: Event,
         progress_callback: Callable[[float], None],
         status_callback: Callable[[str, Optional[str]], None],
-    ) -> Optional[str]:
+    ) -> str | HandoffResult | None:
         """Execute download and return path to downloaded file.
 
         Args:
@@ -264,7 +311,9 @@ class DownloadHandler(ABC):
             status_callback: Call with (status, optional_message)
 
         Returns:
-            Absolute path to downloaded file, or None if failed/cancelled
+            Absolute path to downloaded file, a HandoffResult when the download
+            was handed to an external client and finished without a book payload,
+            or None if failed/cancelled
         """
         pass
 
@@ -303,6 +352,15 @@ def list_files(self, release_data: dict[str, Any]) -> list[PackFile] | None:
 Prowlarr parses the `.torrent` it already fetches (magnet-only releases return
 `None`), and AudiobookBay reads the file table off its detail page.
 
+### Optional: Other Handler Hooks
+
+| Method | Purpose |
+|--------|---------|
+| `post_process_cleanup(task, *, success)` | Runs after Shelfmark has post-processed the download. External clients use it to clean up on their side only once the files are safely imported |
+| `build_retry_resolution_fields(release_data)` | Return private queue-time fields the handler needs to retry after a restart |
+| `list_authors(release_data)` | Return authors read from a source page, for sources whose search results can leave the author out. `None` when there is nothing more to say |
+| `seed_complaints(release_data)` | How many comments on the release's page say nobody is seeding it, for sources with no seeder count of their own. `None` when there is no such signal |
+
 ### Download Method Parameters
 
 | Parameter | Type | Description |
@@ -318,12 +376,13 @@ Prowlarr parses the `.torrent` it already fetches (magnet-only releases return
 |--------|-------------|-------------|
 | `"queued"` | Waiting in queue | Set by orchestrator, rarely needed in handler |
 | `"resolving"` | Pre-download phase | Fetching metadata, extracting URLs, connecting |
+| `"locating"` | Waiting for the finished files to show up | Set by the handler with `status_callback` once an external client or peer reports done, as the torrent, usenet and Soulseek handlers do |
 | `"downloading"` | Active download | File transfer in progress |
 | `"complete"` | Successfully finished | Set by orchestrator when handler returns a file path |
 | `"error"` | Failed | Any unrecoverable error (handler should set this) |
 | `"cancelled"` | User cancelled | Set by orchestrator when `cancel_flag` is triggered |
 
-**Note**: The orchestrator automatically sets `"complete"` when your handler returns a valid file path, and `"cancelled"` when cancellation is detected. Your handler should primarily use `"resolving"`, `"downloading"`, and `"error"`.
+**Note**: The orchestrator automatically sets `"complete"` when your handler returns a valid file path, and `"cancelled"` when cancellation is detected. Your handler should primarily use `"resolving"`, `"downloading"`, and `"error"`, plus `"locating"` if it waits on an external client.
 
 ### Typical Download Flow
 
@@ -391,18 +450,31 @@ class Release:
     title: str  # Display title
 
     format: Optional[str] = None  # File format: "epub", "mobi", "pdf"
+    language: Optional[str] = None  # ISO 639-1 code: "en", "de", "fr"
     size: Optional[str] = None  # Human-readable: "5.2 MB"
     size_bytes: Optional[int] = None  # For sorting
 
     download_url: Optional[str] = None  # Direct download URL if available
     info_url: Optional[str] = None  # Link to tracker/info page
 
-    protocol: Optional[str] = None  # "http", "torrent", "usenet"
+    protocol: Optional[ReleaseProtocol] = None  # See below
     indexer: Optional[str] = None  # Display name: "Direct Download", "My Indexer"
     seeders: Optional[int] = None  # For torrents
+    peers: Optional[str] = None  # For torrents: "seeders/leechers" display string
+    content_type: Optional[str] = None  # "ebook" or "audiobook", kept from the search
 
     extra: Dict = field(default_factory=dict)  # Source-specific metadata
 ```
+
+`ReleaseProtocol` is a string enum:
+
+| Member | Value | Used for |
+|--------|-------|----------|
+| `HTTP` | `"http"` | Direct HTTP download |
+| `TORRENT` | `"torrent"` | BitTorrent |
+| `NZB` | `"nzb"` | Usenet NZB |
+| `DCC` | `"dcc"` | IRC DCC |
+| `SOULSEEK` | `"soulseek"` | Soulseek peer transfer (via slskd) |
 
 #### Using the `extra` Field
 
@@ -440,22 +512,36 @@ class DownloadTask:
 
     # Display info (from Release.extra or Release fields)
     author: Optional[str] = None
+    year: Optional[str] = None
     format: Optional[str] = None
     size: Optional[str] = None
     preview: Optional[str] = None  # Cover image URL
+    content_type: Optional[str] = None
+    source_url: Optional[str] = None  # Original release URL, for source-specific handlers
+
+    # Library naming templates
+    series_name: Optional[str] = None
+    series_position: Optional[float] = None
+    subtitle: Optional[str] = None
+    narrator: Optional[str] = None
+    language: Optional[str] = None
 
     # Runtime state (managed by orchestrator)
     priority: int = 0
     added_time: float = field(default_factory=time.time)
     progress: float = 0.0
-    status: str = "queued"
+    status: QueueStatus = QueueStatus.QUEUED
     status_message: Optional[str] = None
     download_path: Optional[str] = None
+
+    # ... plus retry fields (retry_*), the output selection (output_mode, output_args),
+    # multi-book pack fields (multi_book, book_plan, ignored_files) and user fields
+    # (user_id, username, request_id). See shelfmark/core/models.py for the full class.
 ```
 
 ### BookMetadata
 
-Book information passed to `search()`:
+Book information passed to `search()` (the class lives in `shelfmark/metadata_providers/__init__.py`):
 
 ```python
 @dataclass
@@ -475,7 +561,20 @@ class BookMetadata:
     language: Optional[str] = None  # ISO 639-1 code: "en", "de", "fr"
     genres: List[str] = field(default_factory=list)
     source_url: Optional[str] = None
+    subtitle: Optional[str] = None
+    search_title: Optional[str] = None  # Cleaner title for search queries, when the provider has one
+    search_author: Optional[str] = None  # Cleaner author for search queries
+    cover_aspect: Optional[str] = None  # "portrait" or "square"
     display_fields: List[DisplayField] = field(default_factory=list)
+
+    # Series info, when the book is part of a series
+    series_id: Optional[str] = None
+    series_name: Optional[str] = None
+    series_position: Optional[float] = None  # 3, or 1.5 for a novella
+    series_count: Optional[int] = None
+
+    # Localized titles for searches in other languages: {"de": "Der Titel"}
+    titles_by_language: Dict[str, str] = field(default_factory=dict)
 ```
 
 ---
@@ -507,34 +606,39 @@ from shelfmark.release_sources import (
 
 # Get a source instance by name
 source = get_source("my_source")
-releases = source.search(book_metadata)
+releases = source.search(book_metadata, plan, expand_search=False, content_type="ebook")
 
 # Get a handler instance by name
 handler = get_handler("my_source")
 file_path = handler.download(task, cancel_flag, progress_cb, status_cb)
 
-# List all sources where is_available() returns True
-available = list_available_sources()
-# Returns: [{"name": "direct_download", "display_name": "Direct Download"}, ...]
+# List every registered source, with an `enabled` flag taken from is_available()
+sources = list_available_sources()
+# Returns: [{"name": "direct_download", "display_name": "Direct Download", "enabled": True,
+#            "supported_content_types": ["ebook", "audiobook"],
+#            "browse_results_are_releases": False, "can_be_default": True}, ...]
 ```
 
 ### Import Registration
 
-**Critical**: Your plugin must be imported at module load time. Add to `release_sources/__init__.py`:
+**Critical**: Your plugin must be imported for its decorators to run. Built-in sources are listed in `_BUILTIN_SOURCE_MODULES` in `release_sources/__init__.py`, and `_ensure_builtin_sources_registered()` imports each one the first time a source or handler is looked up:
 
 ```python
-# At the bottom of __init__.py
-from shelfmark.release_sources import direct_download  # noqa: F401, E402
-from shelfmark.release_sources import my_source  # noqa: F401, E402
+_BUILTIN_SOURCE_MODULES = (
+    "shelfmark.release_sources.audiobookbay",
+    "shelfmark.release_sources.direct_download",
+    # ...
+    "shelfmark.release_sources.my_source",  # add your module here
+)
 ```
 
-The `noqa` comments suppress linter warnings about unused imports.
+Use the dotted path of the module (or package) that imports your source, handler and settings.
 
 ---
 
 ## Settings Integration
 
-Register plugin settings using the settings registry decorator:
+Register plugin settings using the settings registry decorator. The decorator calls your function as soon as the module is imported, so define anything the fields refer to, such as a button callback, above it:
 
 ```python
 from shelfmark.core.settings_registry import (
@@ -551,12 +655,39 @@ from shelfmark.core.settings_registry import (
 )
 
 
+def test_my_source_connection(current_values: dict):
+    """Test connection callback - returns result dict.
+
+    `current_values` holds the form's unsaved values, so the button tests what the user just
+    typed. A password the user has not touched may not be sent, so fall back to the saved one.
+    """
+    try:
+        api_key = current_values.get("MY_SOURCE_API_KEY") or get_setting_value(
+            PasswordField(key="MY_SOURCE_API_KEY", label=""), "my_source"
+        )
+
+        if not api_key:
+            return {"success": False, "message": "API key not configured"}
+
+        # Test the connection
+        response = requests.get(
+            "https://api.mysource.com/ping", headers={"Authorization": f"Bearer {api_key}"}
+        )
+
+        if response.status_code == 200:
+            return {"success": True, "message": "Connected successfully!"}
+        else:
+            return {"success": False, "message": f"API returned {response.status_code}"}
+
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
 @register_settings(
     name="my_source",  # Unique identifier
     display_name="My Source",  # Shown in settings UI
     icon="globe",  # Icon name (optional)
     order=60,  # Sort order in sidebar
-    group="sources",  # Grouping in sidebar
 )
 def my_source_settings():
     """Register settings for My Source plugin."""
@@ -600,30 +731,9 @@ def my_source_settings():
             style="primary",
         ),
     ]
-
-
-def test_my_source_connection():
-    """Test connection callback - returns result dict."""
-    try:
-        # Get current API key
-        api_key = get_setting_value(PasswordField(key="MY_SOURCE_API_KEY", label=""), "my_source")
-
-        if not api_key:
-            return {"success": False, "message": "API key not configured"}
-
-        # Test the connection
-        response = requests.get(
-            "https://api.mysource.com/ping", headers={"Authorization": f"Bearer {api_key}"}
-        )
-
-        if response.status_code == 200:
-            return {"success": True, "message": "Connected successfully!"}
-        else:
-            return {"success": False, "message": f"API returned {response.status_code}"}
-
-    except Exception as e:
-        return {"success": False, "message": str(e)}
 ```
+
+A source's settings tab is normally top level, as Jackett and Webshare.cz are. The optional `group=` argument files a tab under a sidebar group registered with `register_group()`. The only groups today are `direct_download` and `metadata_providers`.
 
 ### Field Types Reference
 
@@ -688,8 +798,7 @@ from shelfmark.release_sources import (
 )
 
 
-@classmethod
-def get_column_config(cls) -> ReleaseColumnConfig:
+def get_column_config(self) -> ReleaseColumnConfig:
     return ReleaseColumnConfig(
         columns=[
             ColumnSchema(
@@ -724,7 +833,7 @@ def get_column_config(cls) -> ReleaseColumnConfig:
             ColumnSchema(
                 key="seeders",
                 label="Seeders",
-                render_type=ColumnRenderType.SEEDERS,
+                render_type=ColumnRenderType.NUMBER,
                 align=ColumnAlign.CENTER,
                 width="60px",
                 hide_mobile=True,
@@ -744,13 +853,28 @@ def get_column_config(cls) -> ReleaseColumnConfig:
 |----------|------|-------------|
 | `key` | `str` | Data path: `"format"`, `"extra.language"`, `"extra.seeders"` |
 | `label` | `str` | Accessibility label |
-| `render_type` | `ColumnRenderType` | `TEXT`, `BADGE`, `SIZE`, `NUMBER`, `SEEDERS` |
+| `render_type` | `ColumnRenderType` | `TEXT`, `BADGE`, `TAGS`, `SIZE`, `NUMBER`, `PEERS`, `INDEXER_PROTOCOL`, `FLAG_ICON`, `FORMAT_CONTENT_TYPE` |
 | `align` | `ColumnAlign` | `LEFT`, `CENTER`, `RIGHT` |
 | `width` | `str` | CSS width: `"80px"`, `"minmax(0, 2fr)"` |
 | `hide_mobile` | `bool` | Hide on small screens |
 | `color_hint` | `ColumnColorHint` | For `BADGE` type coloring |
 | `fallback` | `str` | Shown when data missing (default: `"-"`) |
 | `uppercase` | `bool` | Force uppercase text |
+| `sortable` | `bool` | Offer this column in the sort dropdown (opt-in) |
+| `sort_key` | `str` | Field to sort by, defaults to `key` |
+| `setting_key` | `str` | Name of a boolean setting that shows or hides the column |
+| `content_types` | `tuple[str, ...]` | Only show the column for these content types (`"ebook"`, `"audiobook"`) |
+
+`ReleaseColumnConfig` takes more than `columns`, `grid_template` and `leading_cell`:
+
+| Property | Description |
+|----------|-------------|
+| `supported_filters` | Which filters the source supports: `["format", "language", "indexer"]` |
+| `extra_sort_options` | `SortOption(label, sort_key, default_direction)` entries for sorts not tied to a column |
+| `action_button` | `SourceActionButton(label, action)` that replaces the default "expand search" button |
+| `cache_ttl_seconds` | How long results are cached (default 5 minutes) |
+| `online_servers` | IRC: nicks of the servers currently online |
+| `available_indexers`, `default_indexers` | Indexer sources: every enabled indexer, and the ones selected in settings |
 
 ### Color Hints
 
@@ -841,16 +965,20 @@ error           → "All download sources failed"
 
 ### In Search Methods
 
-Return empty list on errors, log for debugging:
+Return an empty list when the search simply found nothing or failed in a way the user cannot act on, and log for debugging. When the source is configured but unreachable, raise `SourceUnavailableError` with a message written for the user, so the UI can say why there are no results instead of showing an empty list:
 
 ```python
-def search(self, book: BookMetadata) -> List[Release]:
+from shelfmark.release_sources import SourceUnavailableError
+
+
+def search(self, book, plan, *, expand_search=False, content_type="ebook") -> List[Release]:
     try:
-        results = self.api.search(book.title)
+        results = self.api.search(plan.primary_query)
         return [self._to_release(r) for r in results]
     except ConnectionError as e:
         logger.warning(f"Connection error searching {self.name}: {e}")
-        return []
+        msg = f"{self.display_name} is not reachable"
+        raise SourceUnavailableError(msg) from e
     except AuthenticationError:
         logger.error(f"{self.name} API key invalid")
         return []
@@ -928,6 +1056,7 @@ from typing import Callable, Dict, List, Optional
 from threading import Event
 
 from shelfmark.release_sources import (
+    HandoffResult,
     Release,
     ReleaseSource,
     DownloadHandler,
@@ -943,6 +1072,7 @@ from shelfmark.release_sources import (
 )
 from shelfmark.metadata_providers import BookMetadata
 from shelfmark.core.models import DownloadTask
+from shelfmark.core.search_plan import ReleaseSearchPlan
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.settings_registry import (
     register_settings,
@@ -963,12 +1093,48 @@ logger = setup_logger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _test_booknet_connection(current_values: Dict) -> Dict:
+    """Test BookNet API connection using the form's unsaved values, then the saved ones."""
+    try:
+        saved = load_config_file("booknet")
+        api_key = current_values.get("BOOKNET_API_KEY") or saved.get("BOOKNET_API_KEY")
+        base_url = (
+            current_values.get("BOOKNET_BASE_URL")
+            or saved.get("BOOKNET_BASE_URL")
+            or "https://api.booknet.example.com"
+        )
+
+        if not api_key:
+            return {"success": False, "message": "API key not configured"}
+
+        response = requests.get(
+            f"{base_url}/v1/ping",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "success": True,
+                "message": f"Connected! {data.get('books_available', 0):,} books available",
+            }
+        elif response.status_code == 401:
+            return {"success": False, "message": "Invalid API key"}
+        else:
+            return {"success": False, "message": f"API error: {response.status_code}"}
+
+    except requests.Timeout:
+        return {"success": False, "message": "Connection timeout"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
 @register_settings(
     name="booknet",
     display_name="BookNet",
     icon="book",
     order=55,
-    group="sources",
 )
 def booknet_settings():
     """Register BookNet settings."""
@@ -1016,39 +1182,6 @@ def booknet_settings():
     ]
 
 
-def _test_booknet_connection() -> Dict:
-    """Test BookNet API connection."""
-    try:
-        config = load_config_file("booknet")
-        api_key = config.get("BOOKNET_API_KEY")
-        base_url = config.get("BOOKNET_BASE_URL", "https://api.booknet.example.com")
-
-        if not api_key:
-            return {"success": False, "message": "API key not configured"}
-
-        response = requests.get(
-            f"{base_url}/v1/ping",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=10,
-        )
-
-        if response.status_code == 200:
-            data = response.json()
-            return {
-                "success": True,
-                "message": f"Connected! {data.get('books_available', 0):,} books available",
-            }
-        elif response.status_code == 401:
-            return {"success": False, "message": "Invalid API key"}
-        else:
-            return {"success": False, "message": f"API error: {response.status_code}"}
-
-    except requests.Timeout:
-        return {"success": False, "message": "Connection timeout"}
-    except Exception as e:
-        return {"success": False, "message": str(e)}
-
-
 # ---------------------------------------------------------------------------
 # Release Source Implementation
 # ---------------------------------------------------------------------------
@@ -1068,7 +1201,14 @@ class BookNetSource(ReleaseSource):
         self.timeout = config.get("BOOKNET_TIMEOUT", 30)
         self.prefer_epub = config.get("BOOKNET_PREFER_EPUB", True)
 
-    def search(self, book: BookMetadata) -> List[Release]:
+    def search(
+        self,
+        book: BookMetadata,
+        plan: ReleaseSearchPlan,
+        *,
+        expand_search: bool = False,
+        content_type: str = "ebook",
+    ) -> List[Release]:
         """Search BookNet for releases."""
         if not self.is_available():
             return []
@@ -1077,8 +1217,8 @@ class BookNetSource(ReleaseSource):
 
         try:
             # Strategy 1: Search by ISBN (most accurate)
-            if book.isbn_13:
-                releases = self._search_isbn(book.isbn_13)
+            if plan.isbn_candidates:
+                releases = self._search_isbn(plan.isbn_candidates[0])
 
             # Strategy 2: Fallback to title + author
             if not releases:
@@ -1149,8 +1289,7 @@ class BookNetSource(ReleaseSource):
         """Check if BookNet is configured."""
         return bool(self.api_key)
 
-    @classmethod
-    def get_column_config(cls) -> ReleaseColumnConfig:
+    def get_column_config(self) -> ReleaseColumnConfig:
         """Custom column layout for BookNet releases."""
         return ReleaseColumnConfig(
             columns=[
@@ -1217,7 +1356,7 @@ class BookNetHandler(DownloadHandler):
         cancel_flag: Event,
         progress_callback: Callable[[float], None],
         status_callback: Callable[[str, Optional[str]], None],
-    ) -> Optional[str]:
+    ) -> str | HandoffResult | None:
         """Execute download from BookNet."""
         try:
             # Phase 1: Get download URL
@@ -1364,10 +1503,10 @@ def is_available(self) -> bool:
         return False
 
 
-def search(self, book: BookMetadata) -> List[Release]:
-    """Return empty list on errors, don't raise."""
+def search(self, book, plan, *, expand_search=False, content_type="ebook") -> List[Release]:
+    """Return empty list on errors, don't raise (SourceUnavailableError aside)."""
     try:
-        return self._do_search(book)
+        return self._do_search(book, plan)
     except Exception as e:
         logger.warning(f"Search failed: {e}")
         return []
@@ -1459,14 +1598,11 @@ logger.error("Failures")  # Unrecoverable errors
 
 When creating a new plugin:
 
-1. Create `shelfmark/release_sources/my_plugin.py`
+1. Create `shelfmark/release_sources/my_plugin.py` (or a `my_plugin/` package, as the built-in sources are)
 2. Implement `ReleaseSource` subclass with `@register_source("my_plugin")`
 3. Implement `DownloadHandler` subclass with `@register_handler("my_plugin")`
 4. Add settings with `@register_settings("my_plugin", ...)`
-5. Add import to `shelfmark/release_sources/__init__.py`:
-   ```python
-   from shelfmark.release_sources import my_plugin  # noqa: F401, E402
-   ```
+5. Add `"shelfmark.release_sources.my_plugin"` to `_BUILTIN_SOURCE_MODULES` in `shelfmark/release_sources/__init__.py`
 6. Test `is_available()` returns `True` when configured
 7. Test search returns valid `Release` objects
 8. Test download handles cancellation and errors gracefully
