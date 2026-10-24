@@ -1,5 +1,6 @@
 """Archive extraction utilities for downloaded book archives."""
 
+import re
 import shutil
 import tempfile
 import zipfile
@@ -69,6 +70,23 @@ def is_archive(file_path: Path) -> bool:
     """Check if file is a supported archive format."""
     suffix = file_path.suffix.lower().lstrip(".")
     return suffix in ("zip", "rar")
+
+
+_RAR_VOLUME_RE = re.compile(r"\.r\d{2}$", re.IGNORECASE)
+_LATER_RAR_PART_RE = re.compile(r"\.part0*(\d+)\.rar$", re.IGNORECASE)
+
+
+def is_archive_volume(file_path: Path) -> bool:
+    """An archive, or a volume of a split RAR (``.r00``, ``.r01``, ...)."""
+    return is_archive(file_path) or bool(_RAR_VOLUME_RE.search(file_path.name))
+
+
+def is_first_volume(file_path: Path) -> bool:
+    """An archive to open: a ZIP, a RAR, or the first part of ``name.partN.rar``."""
+    if not is_archive(file_path):
+        return False
+    part = _LATER_RAR_PART_RE.search(file_path.name)
+    return part is None or int(part.group(1)) == 1
 
 
 def _is_supported_file(file_path: Path, content_type: str | None = None) -> bool:
@@ -157,10 +175,15 @@ def extract_archive(
             f"Skipped {len(rejected_files)} {file_type_label}(s) with unsupported format: {', '.join(rejected_exts)}"
         )
 
-    # Delete other files (images, html, etc)
+    # Keep archive volumes for a nested pass (some downloads ship RARs inside ZIPs);
+    # delete other files (images, html, etc)
+    nested_volumes = [f for f in other_files if is_archive_volume(f)]
+    other_files = [f for f in other_files if not is_archive_volume(f)]
     for other_file in other_files:
         _delete_file_with_logging(other_file, file_type_label, rejected=False)
 
+    if nested_volumes:
+        warnings.append(f"Kept {len(nested_volumes)} nested archive volume(s)")
     if other_files:
         warnings.append(f"Skipped {len(other_files)} non-{file_type_label} file(s)")
 

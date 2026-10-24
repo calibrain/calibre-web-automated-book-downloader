@@ -9,7 +9,13 @@ from typing import TYPE_CHECKING
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.utils import AUDIOBOOK_FORMATS
 from shelfmark.core.utils import is_audiobook as check_audiobook
-from shelfmark.download.archive import ArchiveExtractionError, extract_archive, is_archive
+from shelfmark.download.archive import (
+    ArchiveExtractionError,
+    extract_archive,
+    is_archive,
+    is_archive_volume,
+    is_first_volume,
+)
 from shelfmark.download.fs import run_blocking_io
 from shelfmark.download.permissions_debug import log_path_permission_context
 from shelfmark.download.postprocess.policy import (
@@ -127,6 +133,69 @@ def extract_archive_files(
     )
 
     return extracted_files, rejected_files, cleanup_paths, None
+
+
+def extract_nested_archives(
+    extract_dirs: list[Path],
+    task: DownloadTask,
+) -> tuple[list[Path], list[Path], list[Path], str | None]:
+    """Extract archives found inside extracted archives, one level deep.
+
+    Some ebook downloads ship one ZIP per part, each holding volumes of a single RAR
+    (``name.rar`` in the first ZIP, ``name.r00`` in the next). The volumes are gathered
+    into one directory so the RAR is complete, then each first volume is extracted.
+    """
+
+    def _gather() -> list[Path]:
+        return [
+            path
+            for directory in extract_dirs
+            if directory.is_dir()
+            for path in sorted(directory.iterdir())
+            if path.is_file() and is_archive_volume(path)
+        ]
+
+    volumes = run_blocking_io(_gather)
+    if not volumes:
+        return [], [], [], None
+
+    nested_dir = build_staging_dir("extract", task.task_id)
+
+    def _move_together() -> list[Path]:
+        moved: list[Path] = []
+        for volume in volumes:
+            target = nested_dir / volume.name
+            if target.exists():
+                logger.warning(
+                    "Task %s: skipping nested archive %s, a file of that name is already gathered",
+                    task.task_id,
+                    volume.name,
+                )
+                continue
+            moved.append(volume.rename(target))
+        return moved
+
+    moved = run_blocking_io(_move_together)
+    logger.info("Task %s: extracting %d nested archive volume(s)", task.task_id, len(moved))
+
+    files: list[Path] = []
+    rejected: list[Path] = []
+    errors: list[str] = []
+    for archive in (path for path in moved if is_first_volume(path)):
+        extracted, archive_rejected, _cleanup, error = extract_archive_files(
+            archive_path=archive,
+            output_dir=nested_dir,
+            task=task,
+            cleanup_archive=True,
+        )
+        files.extend(extracted)
+        rejected.extend(archive_rejected)
+        if error:
+            errors.append(f"{archive.name}: {error}")
+
+    if files:
+        return files, rejected, [nested_dir], None
+    return [], rejected, [nested_dir], "; ".join(errors) or None
 
 
 def scan_directory_tree(
@@ -297,6 +366,17 @@ def collect_directory_files(
             if archive_cleanup:
                 cleanup_paths.extend(archive_cleanup)
 
+        if not all_files:
+            nested_files, nested_rejected, nested_cleanup, nested_error = extract_nested_archives(
+                cleanup_paths, task
+            )
+            rejected_files.extend(nested_rejected)
+            cleanup_paths.extend(nested_cleanup)
+            if nested_files:
+                all_files = nested_files
+            elif nested_error:
+                all_errors.append(nested_error)
+
         if all_files:
             logger.info(
                 "Task %s: extracted %d file(s) from %d archive(s)",
@@ -358,6 +438,17 @@ def collect_staged_files(
             task=task,
             cleanup_archive=cleanup_archives,
         )
+
+        if not extracted_files:
+            nested_files, nested_rejected, nested_cleanup, nested_error = extract_nested_archives(
+                cleanup_paths, task
+            )
+            rejected_files = [*rejected_files, *nested_rejected]
+            cleanup_paths = [*cleanup_paths, *nested_cleanup]
+            if nested_files:
+                extracted_files, error = nested_files, None
+            else:
+                error = "; ".join(e for e in (error, nested_error) if e) or None
 
         if extracted_files:
             logger.info(
