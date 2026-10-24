@@ -13,17 +13,17 @@ def _task(task_id="webshare:abc123", fmt="epub"):
     return DownloadTask(task_id=task_id, source="webshare", title="Krysar", format=fmt)
 
 
-def _http_response(body: bytes):
+def _http_response(body: bytes, *, content_length=True):
     response = MagicMock()
     response.__enter__.return_value = response
     response.__exit__.return_value = False
-    response.headers = {"Content-Length": str(len(body))}
+    response.headers = {"Content-Length": str(len(body))} if content_length else {}
     response.raise_for_status.return_value = None
     response.iter_content.return_value = [body[i : i + 4096] for i in range(0, len(body), 4096)]
     return response
 
 
-def _run(tmp_path, *, file_link, body=b"x" * 20000, cancel=None, task=None):
+def _run(tmp_path, *, file_link, body=b"x" * 20000, cancel=None, task=None, content_length=True):
     status = MagicMock()
     progress = MagicMock()
     cancel = cancel or threading.Event()
@@ -36,7 +36,11 @@ def _run(tmp_path, *, file_link, body=b"x" * 20000, cancel=None, task=None):
         ),
         patch.object(webshare_handler, "get_credentials", return_value=("user", "pw")),
         patch.object(webshare_handler.WebshareClient, "file_link", side_effect=file_link),
-        patch.object(webshare_handler.requests, "get", return_value=_http_response(body)),
+        patch.object(
+            webshare_handler.requests,
+            "get",
+            return_value=_http_response(body, content_length=content_length),
+        ),
     ):
         result = WebshareHandler().download(task or _task(), cancel, progress, status)
     return result, status, progress
@@ -56,6 +60,27 @@ def test_download_streams_file_named_after_link(tmp_path):
     assert expected.read_bytes() == b"x" * 20000
     assert idents == ["abc123"]
     progress.assert_called_with(100.0)
+
+
+def test_downloading_status_clears_resolving_message(tmp_path):
+    _, status, _ = _run(tmp_path, file_link=lambda ident: "https://dl.webshare.cz/f.epub")
+
+    # None would keep "Resolving Webshare link" on screen for the whole download.
+    status.assert_any_call("downloading", "")
+
+
+def test_progress_uses_release_size_without_content_length(tmp_path):
+    task = _task()
+    task.size = "40 KB"
+    _, _, progress = _run(
+        tmp_path,
+        file_link=lambda ident: "https://dl.webshare.cz/f.epub",
+        body=b"x" * 20480,
+        task=task,
+        content_length=False,
+    )
+
+    progress.assert_any_call(50.0)
 
 
 def test_too_small_file_is_rejected_and_removed(tmp_path):

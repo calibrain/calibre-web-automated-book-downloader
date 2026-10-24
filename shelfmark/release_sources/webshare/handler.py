@@ -68,8 +68,10 @@ class WebshareHandler(DownloadHandler):
             link = WebshareClient(*get_credentials()).file_link(ident)
 
             book_path = _target_path(task, ident, link)
-            status_callback("downloading", None)
-            if not self._stream(link, book_path, cancel_flag, progress_callback):
+            # An empty message clears "Resolving..."; None would leave it on screen.
+            status_callback("downloading", "")
+            expected_size = downloader.parse_size_string(task.size or "") or 0
+            if not self._stream(link, book_path, cancel_flag, progress_callback, expected_size):
                 book_path.unlink(missing_ok=True)
                 status_callback("cancelled", "Cancelled")
                 return None
@@ -95,8 +97,13 @@ class WebshareHandler(DownloadHandler):
         book_path: Path,
         cancel_flag: Event,
         progress_callback: Callable[[float], None],
+        expected_size: float = 0,
     ) -> bool:
-        """Stream ``link`` into ``book_path``; return False if cancelled midway."""
+        """Stream ``link`` into ``book_path``; return False if cancelled midway.
+
+        Without a Content-Length the search result's size drives progress, so the
+        orchestrator's stall detection still sees the download moving.
+        """
         with requests.get(
             link,
             headers=downloader.DOWNLOAD_HEADERS,
@@ -106,7 +113,7 @@ class WebshareHandler(DownloadHandler):
             verify=network.get_ssl_verify(link),
         ) as response:
             response.raise_for_status()
-            total = int(response.headers.get("Content-Length") or 0)
+            total = int(response.headers.get("Content-Length") or 0) or expected_size
             written = 0
             with book_path.open("wb") as file:
                 for chunk in response.iter_content(chunk_size=_CHUNK_SIZE):
