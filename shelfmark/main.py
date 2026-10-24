@@ -1488,7 +1488,7 @@ def api_config() -> Response | tuple[Response, int]:
         return jsonify(config)
     except _IMPORT_OPERATIONAL_ERRORS as e:
         logger.error_trace(f"Config error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Could not load the configuration"}), 500
 
 
 @app.route("/api/stats", methods=["GET"])
@@ -1932,7 +1932,7 @@ def api_status() -> Response | tuple[Response, int]:
         return jsonify(status if is_admin else redact_status(status))
     except _OPERATIONAL_ERRORS as e:
         logger.error_trace(f"Status error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Could not read the download status"}), 500
 
 
 def _attachment_filename_options(download_name: str) -> dict[str, str]:
@@ -3289,6 +3289,7 @@ def api_releases() -> Response | tuple[Response, int]:
                 content_type=content_type,
                 source_filters=source_query_filters,
                 user_id=db_user_id,
+                include_error_detail=_resolve_status_scope(require_authenticated=False)[0],
             )
 
         provider = request.args.get("provider", "").strip()

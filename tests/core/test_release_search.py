@@ -68,6 +68,30 @@ def test_source_failures_become_messages(monkeypatch: pytest.MonkeyPatch, exc: E
     assert error == f"s: {exc!s}"
 
 
+def test_error_detail_can_be_withheld(monkeypatch: pytest.MonkeyPatch) -> None:
+    src = _Source(error=OSError("connect to http://10.0.0.5:9117 refused"))
+    monkeypatch.setattr("shelfmark.release_sources.get_source", lambda _name: src)
+
+    _source, _releases, error = release_search.search_source_releases(
+        "s", _book(), include_error_detail=False
+    )
+
+    assert error == "s: search failed"
+
+
+def test_unavailable_message_is_kept_when_detail_is_withheld(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = _Source(error=SourceUnavailableError("Anna's Archive is not reachable"))
+    monkeypatch.setattr("shelfmark.release_sources.get_source", lambda _name: src)
+
+    _source, _releases, error = release_search.search_source_releases(
+        "s", _book(), include_error_detail=False
+    )
+
+    assert error == "s: Anna's Archive is not reachable"
+
+
 def test_success_returns_source_and_forwards_search_kwargs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
