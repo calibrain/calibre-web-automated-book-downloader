@@ -129,6 +129,15 @@ def test_redact_secrets_masks_credential_query_params(text, expected):
         ),
         ("https://tracker.example/rss/latest", "https://tracker.example/rss/latest"),
         ("contact me at a@b.example, ok", "contact me at a@b.example, ok"),
+        # The authority ends at "?" or "#", so an address after one is not userinfo.
+        (
+            "https://tracker.example?contact=ops@tracker.example",
+            "https://tracker.example?contact=ops@tracker.example",
+        ),
+        (
+            "https://tracker.example#reach-us@tracker.example",
+            "https://tracker.example#reach-us@tracker.example",
+        ),
     ],
 )
 def test_redact_secrets_masks_userinfo_and_path_segment_credentials(text, expected):

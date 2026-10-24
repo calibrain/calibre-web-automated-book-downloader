@@ -29,8 +29,9 @@ _SECRET_QUERY_PARAM_PATTERN = re.compile(
 )
 
 
-# Credentials in a URL's userinfo, as in a proxy's socks5://user:pass@host:port.
-_URL_USERINFO_PATTERN = re.compile(r"(://)[^/@\s'\"<>]+@")
+# Credentials in a URL's userinfo, as in a proxy's socks5://user:pass@host:port. The authority
+# ends at the first "/", "?" or "#" (RFC 3986), so an "@" after one of those is not userinfo.
+_URL_USERINFO_PATTERN = re.compile(r"(://)[^/?#@\s'\"<>]+@")
 
 # A credential carried as a path segment: a tracker passkey (/rss/<key>), or the token in the
 # URL of a chat service's bot or webhook, which notification URLs end up logging. Only segments
