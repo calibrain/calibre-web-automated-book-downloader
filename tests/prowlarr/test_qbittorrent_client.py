@@ -471,6 +471,50 @@ class TestQBittorrentClientGetStatus:
             assert status.state_value == "complete"
             assert status.file_path == "/downloads/completed.epub"
 
+    @pytest.mark.parametrize(
+        ("torrent_state", "expected_state", "expected_message"),
+        [
+            ("pausedDL", "paused", "Paused"),
+            ("pausedUP", "paused", "Paused"),
+            ("stoppedDL", "paused", "Paused"),
+            ("stoppedUP", "paused", "Paused"),
+            ("forcedMetaDL", "downloading", "Fetching metadata"),
+        ],
+    )
+    def test_get_status_maps_paused_stopped_and_forced_metadata_states(
+        self, monkeypatch, torrent_state, expected_state, expected_message
+    ):
+        """qBittorrent 5 reports "stopped" where 4.x said "paused"; neither may read as unknown."""
+        config_values = {
+            "QBITTORRENT_URL": "http://localhost:8080",
+            "QBITTORRENT_USERNAME": "admin",
+            "QBITTORRENT_CATEGORY": "test",
+        }
+        monkeypatch.setattr(
+            "shelfmark.download.clients.qbittorrent.config.get",
+            lambda key, default="": config_values.get(key, default),
+        )
+
+        mock_torrent = MockTorrent(progress=0.3, state=torrent_state)
+        mock_client_instance = MagicMock()
+        mock_client_instance._session.get.return_value = create_mock_session_response(
+            [mock_torrent], status_code=200
+        )
+        mock_client_class = MagicMock(return_value=mock_client_instance)
+
+        with patch.dict("sys.modules", {"qbittorrentapi": MagicMock(Client=mock_client_class)}):
+            import importlib
+
+            import shelfmark.download.clients.qbittorrent as qb_module
+
+            importlib.reload(qb_module)
+
+            status = qb_module.QBittorrentClient().get_status("abc123")
+
+        assert status.state_value == expected_state
+        assert status.message == expected_message
+        assert status.complete is False
+
     def test_get_status_full_progress_still_downloading_not_complete(self, monkeypatch):
         """rdt-client reports progress 1.0 while still finalising (state stays "downloading").
 
