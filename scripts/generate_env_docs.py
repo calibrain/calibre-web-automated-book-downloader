@@ -16,6 +16,7 @@ The generated documentation includes:
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -119,6 +120,11 @@ def get_select_options(field: Any) -> list[str] | None:
     return result
 
 
+def _anchor(title: str) -> str:
+    """Heading anchor the way GitHub builds it: lowercase, punctuation dropped, spaces to hyphens."""
+    return re.sub(r"[^\w\- ]", "", title.lower()).replace(" ", "-")
+
+
 def _generate_bootstrap_env_docs() -> list[str]:
     """Generate documentation for bootstrap environment variables from env.py."""
     # These are environment variables defined in env.py that are used before
@@ -197,10 +203,22 @@ def _generate_bootstrap_env_docs() -> list[str]:
             "default": "unset",
         },
         {
+            "name": "SHELFMARK_API_KEY_READONLY",
+            "description": "Optional second API key for dashboards and monitors. Send it like SHELFMARK_API_KEY. It can only GET /api/stats (counters only, no titles or user names). Every other request, and any write, is refused with 403, and it never gets a session. Unset = off.",
+            "type": "string",
+            "default": "unset",
+        },
+        {
             "name": "OIDC_AUTO_REDIRECT",
             "description": "Automatically redirect to the OIDC provider instead of showing the login page.",
             "type": "boolean",
             "default": "false",
+        },
+        {
+            "name": "UMASK",
+            "description": "File creation mask for the app process, read by entrypoint.sh. The default 0022 gives files 644 and directories 755.",
+            "type": "string (octal)",
+            "default": "0022",
         },
         {
             "name": "DOCKERMODE",
@@ -321,12 +339,24 @@ def _generate_egress_env_docs() -> list[str]:
             "type": "number",
             "default": "180",
         },
+        {
+            "name": "TOR_CHECK_INTERVAL",
+            "description": "Seconds between Tor watchdog probes. The watchdog resets the container when Tor stops being usable, so the restart policy rebuilds the Tor setup.",
+            "type": "integer (seconds)",
+            "default": "30",
+        },
+        {
+            "name": "TOR_MAX_FAILURES",
+            "description": "Consecutive failed Tor watchdog probes before the container is reset. 2 tolerates one failed probe.",
+            "type": "integer",
+            "default": "2",
+        },
     ]
 
     lines = [
         "## Egress / VPN Routing",
         "",
-        "These startup-only variables are consumed by `entrypoint.sh` / `wireguard.sh` to select and configure the WireGuard transparent-egress kill-switch. `USING_WIREGUARD` and [`USING_TOR`](#using_tor) (documented under Network) are mutually exclusive; both require root startup.",
+        "These startup-only variables are consumed by `entrypoint.sh` / `wireguard.sh` to select and configure the WireGuard transparent-egress kill-switch. `USING_WIREGUARD` and [`USING_TOR`](#using_tor) (documented under Network) are mutually exclusive; both require root startup. `TOR_CHECK_INTERVAL` and `TOR_MAX_FAILURES` tune the Tor watchdog in `tor.sh`.",
         "",
         "| Variable | Description | Type | Default |",
         "|----------|-------------|------|---------|",
@@ -407,17 +437,17 @@ def generate_env_docs() -> str:
 
     # Ungrouped tabs first
     for tab in grouped_tabs.get(None, []):
-        anchor = tab.display_name.lower().replace(" ", "-")
+        anchor = _anchor(tab.display_name)
         toc_entries.append(f"- [{tab.display_name}](#{anchor})")
 
     # Then grouped tabs
     for group_name, group in groups.items():
         group_tabs = grouped_tabs.get(group_name, [])
         if group_tabs:
-            anchor = group.display_name.lower().replace(" ", "-")
+            anchor = _anchor(group.display_name)
             toc_entries.append(f"- [{group.display_name}](#{anchor})")
             for tab in group_tabs:
-                sub_anchor = f"{group.display_name}-{tab.display_name}".lower().replace(" ", "-")
+                sub_anchor = _anchor(f"{group.display_name}-{tab.display_name}")
                 toc_entries.append(f"  - [{tab.display_name}](#{sub_anchor})")
 
     lines.extend(toc_entries)
