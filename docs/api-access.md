@@ -75,7 +75,7 @@ curl -s -H "Authorization: Bearer $SHELFMARK_API_KEY" https://shelfmark.example.
 
 Set `SHELFMARK_API_KEY_READONLY` to a second secret for dashboards and monitors. It can read one endpoint,
 `GET /api/stats`, and nothing else. Writes and every other path return 403, and the key never gets a session.
-The admin key reaches `/api/stats` too.
+The admin key reaches `/api/stats` too, and so does a browser session signed in as an admin. A refused request gets `{"error": "This API key is read-only"}`.
 
 ```bash
 curl -s -H "X-Api-Key: $SHELFMARK_API_KEY_READONLY" https://shelfmark.example.com/api/stats
