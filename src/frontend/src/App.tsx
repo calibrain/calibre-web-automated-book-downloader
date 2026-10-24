@@ -109,6 +109,7 @@ import {
 import {
   applyDirectPolicyModeToButtonState,
   applyUniversalPolicyModeToButtonState,
+  canRequestBookFromReleaseModal,
 } from './utils/requestPolicyUi';
 import { getSearchByPreference, setSearchByPreference } from './utils/searchByPreference';
 import { buildUrlSearchHash } from './utils/urlSearchHash';
@@ -322,6 +323,7 @@ function App() {
     getSourceMode,
     requestsEnabled: requestsPolicyEnabled,
     allowNotes: allowRequestNotes,
+    allowBookRequestWithDownload,
     refresh: refreshRequestPolicy,
   } = useRequestPolicy({
     enabled: isAuthenticated,
@@ -2671,7 +2673,14 @@ function App() {
               onDownload={isBrowseFulfilMode ? handleBrowseFulfilDownload : handleReleaseDownload}
               onRequestRelease={isBrowseFulfilMode ? undefined : handleReleaseRequest}
               onRequestBook={
-                isBrowseFulfilMode || !requestRoleIsAdmin ? undefined : handleReleaseBookRequest
+                canRequestBookFromReleaseModal({
+                  isBrowseFulfilMode,
+                  isAdmin: requestRoleIsAdmin,
+                  requestsEnabled: requestsPolicyEnabled,
+                  allowBookRequestWithDownload,
+                })
+                  ? handleReleaseBookRequest
+                  : undefined
               }
               getPolicyModeForSource={
                 isBrowseFulfilMode ? () => 'download' : (source, ct) => getSourceMode(source, ct)

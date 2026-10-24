@@ -404,6 +404,21 @@ def _prepare_request_create_arguments(
         )
 
     requested_level = str(request_level).strip().lower() if isinstance(request_level, str) else ""
+    if (
+        resolved_mode == PolicyMode.DOWNLOAD
+        and requested_level == "book"
+        and release_data is None
+        and (
+            bool(session.get("is_admin", False))
+            or coerce_bool(
+                effective.get("REQUESTS_ALLOW_BOOK_REQUEST_WITH_DOWNLOAD"), default=False
+            )
+        )
+    ):
+        # Everything can be downloaded here, but the user asked for the book itself (nothing to
+        # download yet, or no source has it): leave it for an admin instead of refusing it.
+        resolved_mode = PolicyMode.REQUEST_BOOK
+
     if resolved_mode == PolicyMode.REQUEST_BOOK and requested_level != "book":
         msg = "Policy requires book-level requests"
         raise RequestServiceError(
@@ -624,6 +639,9 @@ def register_request_routes(
                 "requests_enabled": requests_enabled,
                 "is_admin": is_admin,
                 "allow_notes": coerce_bool(effective.get("REQUESTS_ALLOW_NOTES"), default=True),
+                "allow_book_request_with_download": coerce_bool(
+                    effective.get("REQUESTS_ALLOW_BOOK_REQUEST_WITH_DOWNLOAD"), default=False
+                ),
                 "defaults": {
                     "ebook": (
                         default_ebook_mode.value

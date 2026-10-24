@@ -22,6 +22,7 @@ export interface PerUserSettings {
   REQUEST_POLICY_RULES?: Array<Record<string, unknown>>;
   MAX_PENDING_REQUESTS_PER_USER?: number;
   REQUESTS_ALLOW_NOTES?: boolean;
+  REQUESTS_ALLOW_BOOK_REQUEST_WITH_DOWNLOAD?: boolean;
 }
 
 export interface CreateUserFormState {
