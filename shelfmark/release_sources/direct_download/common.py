@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from bs4 import BeautifulSoup, Tag
 
-from shelfmark.core.config import config
+from shelfmark.core.formats import get_supported_formats as _configured_book_formats
 from shelfmark.core.languages import language_alias_map
 from shelfmark.release_sources import BrowseRecord, SourceUnavailableError
 
@@ -40,7 +40,7 @@ def coerce_str_list(value: object) -> list[str]:
 
 def get_supported_formats() -> list[str]:
     """Return configured supported formats as a clean string list."""
-    return coerce_str_list(config.SUPPORTED_FORMATS)
+    return _configured_book_formats()
 
 
 def html_response_text(response: str | tuple[str, str]) -> str:

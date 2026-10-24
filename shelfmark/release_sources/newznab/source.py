@@ -38,7 +38,7 @@ from shelfmark.release_sources.prowlarr.source import (
 # Re-use the Prowlarr source helpers — they operate on generic result dicts.
 from shelfmark.release_sources.prowlarr.source import (
     _detect_content_type_from_categories,
-    _parse_size,
+    parse_size,
 )
 
 logger = setup_logger(__name__)
@@ -246,7 +246,7 @@ def _newznab_result_to_release(
         title=raw_title,
         format=None,
         language=None,
-        size=_parse_size(size_bytes),
+        size=parse_size(size_bytes),
         size_bytes=size_bytes,
         download_url=None,
         info_url=info_url,

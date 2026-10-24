@@ -123,7 +123,7 @@ class _CompletedPathResolution:
     retryable: bool
 
 
-def _coerce_completed_path_timeout_seconds(value: object, default: float) -> float:
+def coerce_completed_path_timeout_seconds(value: object, default: float) -> float:
     if isinstance(value, bool) or value is None:
         return default
     if isinstance(value, (int, float)):
@@ -332,7 +332,7 @@ class ExternalClientHandler(DownloadHandler, ABC):
         """Total time to wait for completed files to appear on disk."""
         fallback = self._completed_path_retry_interval() * self._completed_path_max_attempts()
         configured = config.get(COMPLETED_PATH_TIMEOUT_SETTING, fallback)
-        return _coerce_completed_path_timeout_seconds(configured, fallback)
+        return coerce_completed_path_timeout_seconds(configured, fallback)
 
     def _refresh_download_request_after_add_failure(
         self,

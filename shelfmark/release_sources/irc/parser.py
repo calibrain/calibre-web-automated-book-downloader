@@ -8,14 +8,9 @@ import zipfile
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from shelfmark.core.config import config
+from shelfmark.core.formats import get_supported_formats_for
 from shelfmark.core.logger import setup_logger
-from shelfmark.core.utils import (
-    ARCHIVE_FORMATS,
-    AUDIOBOOK_FORMATS,
-    DEFAULT_EBOOK_FORMATS,
-    normalize_format_list,
-)
+from shelfmark.core.utils import ARCHIVE_FORMATS, AUDIOBOOK_FORMATS
 from shelfmark.core.utils import is_audiobook as check_audiobook
 
 if TYPE_CHECKING:
@@ -58,10 +53,7 @@ ALL_RECOGNIZED_FORMATS = tuple(
 
 def _get_supported_formats(content_type: str | None = None) -> set[str]:
     """Get the supported formats for the requested content type."""
-    if check_audiobook(content_type):
-        formats = config.get("SUPPORTED_AUDIOBOOK_FORMATS", None)
-        return set(normalize_format_list(formats, ["m4b", "mp3"]))
-    return set(normalize_format_list(config.get("SUPPORTED_FORMATS", None), DEFAULT_EBOOK_FORMATS))
+    return set(get_supported_formats_for(content_type))
 
 
 # Regex to parse result lines

@@ -36,7 +36,12 @@ from shelfmark.core.settings_registry import (
     register_on_save,
     register_settings,
 )
-from shelfmark.core.utils import ARCHIVE_FORMATS, AUDIOBOOK_FORMATS, DEFAULT_EBOOK_FORMATS
+from shelfmark.core.utils import (
+    ARCHIVE_FORMATS,
+    AUDIOBOOK_FORMATS,
+    DEFAULT_AUDIOBOOK_FORMATS,
+    DEFAULT_EBOOK_FORMATS,
+)
 
 _DOWNLOAD_CLIENT_COMPLETED_PATH_TIMEOUT_DEFAULT = 60
 _DOWNLOAD_CLIENT_COMPLETED_PATH_TIMEOUT_MAX = 3600
@@ -503,7 +508,7 @@ def general_settings() -> list[SettingsField]:
             label="Supported Audiobook Formats",
             description="Audiobook formats to include in search results. ZIP/RAR archives are extracted automatically and audiobook files are used if found.",
             options=_AUDIOBOOK_FORMAT_OPTIONS,
-            default=[*AUDIOBOOK_FORMATS, *ARCHIVE_FORMATS],
+            default=list(DEFAULT_AUDIOBOOK_FORMATS),
         ),
     ]
 

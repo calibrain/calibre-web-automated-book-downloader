@@ -1,5 +1,6 @@
 import pytest
 
+from shelfmark.core.config import config
 from shelfmark.core.utils import ARCHIVE_FORMATS, AUDIOBOOK_FORMATS
 from shelfmark.release_sources.irc import parser
 
@@ -13,9 +14,7 @@ _DEFAULT_CONFIG = {
 @pytest.fixture
 def default_formats(monkeypatch):
     """Filter with the shipped default format lists."""
-    monkeypatch.setattr(
-        parser.config, "get", lambda key, default=None: _DEFAULT_CONFIG.get(key, default)
-    )
+    monkeypatch.setattr(config, "get", lambda key, default=None: _DEFAULT_CONFIG.get(key, default))
 
 
 def test_audiobook_archives_are_found_with_default_settings(default_formats):
@@ -98,7 +97,7 @@ def test_parse_results_file_uses_audiobook_format_settings(monkeypatch):
         "SUPPORTED_AUDIOBOOK_FORMATS": ["zip", "mp3"],
     }
 
-    monkeypatch.setattr(parser.config, "get", lambda key, default=None: values.get(key, default))
+    monkeypatch.setattr(config, "get", lambda key, default=None: values.get(key, default))
 
     content = "\n".join(
         [
@@ -119,7 +118,7 @@ def test_parse_results_file_uses_book_format_settings_for_ebooks(monkeypatch):
         "SUPPORTED_AUDIOBOOK_FORMATS": ["zip", "mp3"],
     }
 
-    monkeypatch.setattr(parser.config, "get", lambda key, default=None: values.get(key, default))
+    monkeypatch.setattr(config, "get", lambda key, default=None: values.get(key, default))
 
     content = "\n".join(
         [

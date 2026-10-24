@@ -35,7 +35,7 @@ from shelfmark.download.clients.base_handler import (
 )
 from shelfmark.download.clients.base_handler import (
     COMPLETED_PATH_TIMEOUT_SETTING,
-    _coerce_completed_path_timeout_seconds,
+    coerce_completed_path_timeout_seconds,
 )
 from shelfmark.download.fs import run_blocking_io
 from shelfmark.download.postprocess.packs import PackFile
@@ -426,7 +426,7 @@ class SlskdHandler(DownloadHandler):
 
     def _completed_path_timeout_seconds(self) -> float:
         fallback = self._completed_path_retry_interval() * COMPLETED_PATH_MAX_ATTEMPTS
-        return _coerce_completed_path_timeout_seconds(
+        return coerce_completed_path_timeout_seconds(
             config.get(COMPLETED_PATH_TIMEOUT_SETTING, fallback), fallback
         )
 
