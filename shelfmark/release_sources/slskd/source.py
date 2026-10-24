@@ -18,12 +18,10 @@ if TYPE_CHECKING:
     from shelfmark.metadata_providers import BookMetadata
 
 from shelfmark.core.config import config
+from shelfmark.core.formats import get_supported_formats_for
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.utils import (
     ARCHIVE_FORMATS,
-    AUDIOBOOK_FORMATS,
-    DEFAULT_EBOOK_FORMATS,
-    normalize_format_list,
     normalize_http_url,
 )
 from shelfmark.core.utils import is_audiobook as check_audiobook
@@ -43,7 +41,7 @@ from shelfmark.release_sources import (
     SourceUnavailableError,
     register_source,
 )
-from shelfmark.release_sources.prowlarr.source import _parse_size
+from shelfmark.release_sources.prowlarr.source import parse_size
 from shelfmark.release_sources.slskd.api import SlskdClient
 
 logger = setup_logger(__name__)
@@ -60,7 +58,6 @@ MAX_QUERY_VARIANTS = 3
 
 # Whole-book audio files: one file holds the entire book, unlike chapter files.
 CONTAINER_FORMATS = frozenset({"m4b", "m4a"})
-_DEFAULT_AUDIOBOOK_FORMATS = [*AUDIOBOOK_FORMATS, *ARCHIVE_FORMATS]
 
 
 @dataclass(frozen=True)
@@ -133,13 +130,7 @@ def make_source_id(username: str, remote_path: str) -> str:
 
 def get_supported_formats(content_type: str | None) -> set[str]:
     """Return the configured formats for the requested content type."""
-    if check_audiobook(content_type):
-        return set(
-            normalize_format_list(
-                config.get("SUPPORTED_AUDIOBOOK_FORMATS", None), _DEFAULT_AUDIOBOOK_FORMATS
-            )
-        )
-    return set(normalize_format_list(config.get("SUPPORTED_FORMATS", None), DEFAULT_EBOOK_FORMATS))
+    return set(get_supported_formats_for(content_type))
 
 
 def _coerce_int(value: object) -> int:
@@ -232,7 +223,7 @@ def file_release(peer_file: PeerFile, response: dict[str, Any], content_type: st
         title=_strip_extension(peer_file.basename),
         format=peer_file.extension or None,
         language=None,
-        size=_parse_size(peer_file.size),
+        size=parse_size(peer_file.size),
         size_bytes=peer_file.size or None,
         download_url=None,
         info_url=None,
@@ -272,7 +263,7 @@ def directory_release(
         title=f"{directory_name} ({len(files)} files)",
         format=formats[0] if formats else None,
         language=None,
-        size=_parse_size(total_size),
+        size=parse_size(total_size),
         size_bytes=total_size or None,
         download_url=None,
         info_url=None,

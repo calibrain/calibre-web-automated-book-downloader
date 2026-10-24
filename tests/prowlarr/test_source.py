@@ -22,11 +22,11 @@ from shelfmark.release_sources.prowlarr.source import (
     _extract_mam_language,
     _fetch_indexer_seed_settings,
     _last_known_seed_settings,
-    _parse_size,
     _release_identity,
     _result_dedup_key,
     _search_budget_seconds,
     _unsupported_title_extension,
+    parse_size,
 )
 from shelfmark.release_sources.prowlarr.utils import (
     build_source_id,
@@ -50,45 +50,45 @@ def source_available_by_default(monkeypatch):
 
 
 class TestParseSize:
-    """Tests for the _parse_size function."""
+    """Tests for the parse_size function."""
 
     def test_parse_size_bytes(self):
         """Test parsing small byte sizes."""
-        assert _parse_size(100) == "100 B"
-        assert _parse_size(512) == "512 B"
+        assert parse_size(100) == "100 B"
+        assert parse_size(512) == "512 B"
 
     def test_parse_size_kilobytes(self):
         """Test parsing kilobyte sizes."""
-        assert _parse_size(1024) == "1.0 KB"
-        assert _parse_size(2048) == "2.0 KB"
-        assert _parse_size(1536) == "1.5 KB"
+        assert parse_size(1024) == "1.0 KB"
+        assert parse_size(2048) == "2.0 KB"
+        assert parse_size(1536) == "1.5 KB"
 
     def test_parse_size_megabytes(self):
         """Test parsing megabyte sizes."""
-        assert _parse_size(1048576) == "1.0 MB"
-        assert _parse_size(5242880) == "5.0 MB"
-        assert _parse_size(1572864) == "1.5 MB"
+        assert parse_size(1048576) == "1.0 MB"
+        assert parse_size(5242880) == "5.0 MB"
+        assert parse_size(1572864) == "1.5 MB"
 
     def test_parse_size_gigabytes(self):
         """Test parsing gigabyte sizes."""
-        assert _parse_size(1073741824) == "1.0 GB"
-        assert _parse_size(2147483648) == "2.0 GB"
+        assert parse_size(1073741824) == "1.0 GB"
+        assert parse_size(2147483648) == "2.0 GB"
 
     def test_parse_size_terabytes(self):
         """Test parsing terabyte sizes."""
-        assert _parse_size(1099511627776) == "1.0 TB"
+        assert parse_size(1099511627776) == "1.0 TB"
 
     def test_parse_size_none(self):
         """Test that None returns None."""
-        assert _parse_size(None) is None
+        assert parse_size(None) is None
 
     def test_parse_size_zero(self):
         """Test that zero returns None."""
-        assert _parse_size(0) is None
+        assert parse_size(0) is None
 
     def test_parse_size_negative(self):
         """Test that negative values return None."""
-        assert _parse_size(-100) is None
+        assert parse_size(-100) is None
 
 
 class TestExtractFormat:

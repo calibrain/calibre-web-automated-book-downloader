@@ -3,7 +3,12 @@
 import pytest
 
 from shelfmark.config import settings as app_settings
-from shelfmark.core.utils import DEFAULT_EBOOK_FORMATS, normalize_format_list
+from shelfmark.core.formats import get_supported_formats_for
+from shelfmark.core.utils import (
+    DEFAULT_AUDIOBOOK_FORMATS,
+    DEFAULT_EBOOK_FORMATS,
+    normalize_format_list,
+)
 from shelfmark.download.postprocess import policy
 
 DEFAULT = ["epub", "mobi"]
@@ -44,3 +49,49 @@ def test_post_processing_falls_back_to_the_shared_default(monkeypatch):
     monkeypatch.setattr("shelfmark.core.config.config", _Config())
 
     assert policy.get_supported_formats() == list(DEFAULT_EBOOK_FORMATS)
+
+
+def test_the_audiobook_registry_default_is_the_shared_default():
+    field = next(
+        f
+        for f in app_settings.general_settings()
+        if getattr(f, "key", "") == "SUPPORTED_AUDIOBOOK_FORMATS"
+    )
+
+    assert field.default == list(DEFAULT_AUDIOBOOK_FORMATS)
+
+
+class TestEveryReaderFallsBackToTheSameDefaults:
+    """Post-processing and the sources each read the formats; none may keep its own default."""
+
+    @pytest.fixture(autouse=True)
+    def unset_config(self, monkeypatch):
+        class _Config:
+            def get(self, key, default=None, user_id=None):
+                return default
+
+        monkeypatch.setattr("shelfmark.core.config.config", _Config())
+
+    def test_post_processing(self):
+        assert policy.get_supported_formats() == list(DEFAULT_EBOOK_FORMATS)
+        assert policy.get_supported_audiobook_formats() == list(DEFAULT_AUDIOBOOK_FORMATS)
+
+    @pytest.mark.parametrize(
+        ("content_type", "expected"),
+        [
+            (None, DEFAULT_EBOOK_FORMATS),
+            ("book (fiction)", DEFAULT_EBOOK_FORMATS),
+            ("audiobook", DEFAULT_AUDIOBOOK_FORMATS),
+        ],
+    )
+    def test_the_lookup_follows_the_content_type(self, content_type, expected):
+        assert get_supported_formats_for(content_type) == list(expected)
+
+    def test_irc_and_slskd(self):
+        from shelfmark.release_sources.irc.parser import _get_supported_formats
+        from shelfmark.release_sources.slskd.source import get_supported_formats
+
+        assert _get_supported_formats("audiobook") == set(DEFAULT_AUDIOBOOK_FORMATS)
+        assert get_supported_formats("audiobook") == set(DEFAULT_AUDIOBOOK_FORMATS)
+        assert _get_supported_formats("ebook") == set(DEFAULT_EBOOK_FORMATS)
+        assert get_supported_formats("ebook") == set(DEFAULT_EBOOK_FORMATS)

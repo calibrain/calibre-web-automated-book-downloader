@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import zipfile
 
+from shelfmark.core import formats as formats_mod
 from shelfmark.core.models import DownloadTask
-from shelfmark.core.utils import ARCHIVE_FORMATS, AUDIOBOOK_FORMATS
+from shelfmark.core.utils import DEFAULT_AUDIOBOOK_FORMATS
 from shelfmark.download import archive as archive_mod
 from shelfmark.download.postprocess import scan as scan_mod
 
 # The shipped default for SUPPORTED_AUDIOBOOK_FORMATS, which includes archives.
-_DEFAULT_AUDIOBOOK_FORMATS = [*AUDIOBOOK_FORMATS, *ARCHIVE_FORMATS]
+_DEFAULT_AUDIOBOOK_FORMATS = list(DEFAULT_AUDIOBOOK_FORMATS)
 
 
 def _audiobook_task() -> DownloadTask:
@@ -17,7 +18,7 @@ def _audiobook_task() -> DownloadTask:
 
 def _use_default_audiobook_formats(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
-        scan_mod, "get_supported_audiobook_formats", lambda: list(_DEFAULT_AUDIOBOOK_FORMATS)
+        formats_mod, "get_supported_audiobook_formats", lambda: list(_DEFAULT_AUDIOBOOK_FORMATS)
     )
     monkeypatch.setattr(
         archive_mod, "get_supported_audiobook_formats", lambda: list(_DEFAULT_AUDIOBOOK_FORMATS)

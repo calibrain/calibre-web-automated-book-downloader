@@ -15,12 +15,13 @@ if TYPE_CHECKING:
 
 from shelfmark.core.author_match import AUTHOR_UNKNOWN, author_affinity
 from shelfmark.core.config import config
+from shelfmark.core.formats import get_supported_formats
 from shelfmark.core.languages import normalize_language
 from shelfmark.core.logger import setup_logger
 from shelfmark.core.request_helpers import coerce_int, normalize_optional_text
 from shelfmark.core.search_plan import ReleaseSearchVariant
 from shelfmark.core.utils import AUDIOBOOK_FORMATS as CORE_AUDIOBOOK_FORMATS
-from shelfmark.core.utils import DEFAULT_EBOOK_FORMATS, normalize_format_list, normalize_http_url
+from shelfmark.core.utils import normalize_http_url
 from shelfmark.release_sources import (
     ColumnAlign,
     ColumnColorHint,
@@ -309,7 +310,7 @@ def _is_over_size(result: dict, max_bytes: int | None) -> bool:
     return size > max_bytes
 
 
-def _parse_size(size_bytes: int | None) -> str | None:
+def parse_size(size_bytes: int | None) -> str | None:
     """Convert bytes to human-readable size string."""
     if size_bytes is None or size_bytes <= 0:
         return None
@@ -395,8 +396,7 @@ def _unsupported_title_extension(title: str, content_type: str) -> str | None:
     extension = match.group(1)
     if extension not in _KNOWN_FILE_EXTENSIONS:
         return None
-    supported = normalize_format_list(config.get("SUPPORTED_FORMATS", None), DEFAULT_EBOOK_FORMATS)
-    if extension in supported:
+    if extension in get_supported_formats():
         return None
     return extension
 
@@ -720,7 +720,7 @@ def _prowlarr_result_to_release(
         title=title,
         format=format_detected,
         language=language_detected,
-        size=_parse_size(size_bytes),
+        size=parse_size(size_bytes),
         size_bytes=size_bytes,
         download_url=None,
         info_url=result.get("infoUrl") or result.get("guid"),

@@ -13,10 +13,7 @@ from shelfmark.download.archive import ArchiveExtractionError, extract_archive, 
 from shelfmark.download.fs import run_blocking_io
 from shelfmark.download.permissions_debug import log_path_permission_context
 from shelfmark.download.postprocess.policy import (
-    get_supported_audiobook_formats,
-)
-from shelfmark.download.postprocess.policy import (
-    get_supported_formats as get_book_formats,
+    get_supported_formats_for as get_supported_formats,
 )
 from shelfmark.download.staging import build_staging_dir
 
@@ -26,13 +23,6 @@ if TYPE_CHECKING:
     from shelfmark.core.models import DownloadTask
 
 logger = setup_logger("shelfmark.download.postprocess.pipeline")
-
-
-def get_supported_formats(content_type: str | None = None) -> list[str]:
-    """Return supported file extensions for the requested content type."""
-    if check_audiobook(content_type):
-        return get_supported_audiobook_formats()
-    return get_book_formats()
 
 
 def _format_not_supported_error(rejected_files: list[Path], task: DownloadTask) -> str:

@@ -146,6 +146,10 @@ ARCHIVE_FORMATS = ("zip", "rar")
 # registry, post-processing and every release source fall back to this one list.
 DEFAULT_EBOOK_FORMATS = ("epub", "mobi", "azw3", "fb2", "djvu", "cbz", "cbr")
 
+# What the Supported Audiobook Formats setting holds until someone changes it: every audio
+# format, and the archives a multi-file audiobook usually comes in. Same rule as above.
+DEFAULT_AUDIOBOOK_FORMATS = (*AUDIOBOOK_FORMATS, *ARCHIVE_FORMATS)
+
 
 def normalize_format_list(value: object, default: tuple[str, ...] | list[str]) -> list[str]:
     """Read a configured format list, or a comma or space separated string of them.
