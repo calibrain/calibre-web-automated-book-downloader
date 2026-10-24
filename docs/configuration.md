@@ -95,6 +95,11 @@ If the files are copied or synced into Shelfmark on a delay, increase **Complete
 in Settings -> Advanced. The default is 60 seconds; seedbox or remote-sync setups may need a value
 longer than the sync interval.
 
+With qBittorrent, Shelfmark also reads the torrent's own file list and imports only once every file
+the torrent downloads is there at its full size, so a sync that copies files in batches and pauses
+between them does not cause a partial import. The same wait applies, and files the torrent skips
+are not counted.
+
 ## File Processing Options
 
 ### Hardlink Torrents (Torrent / Usenet Only)

@@ -20,6 +20,7 @@ from shelfmark.download.clients import (
     DownloadClient,
     DownloadState,
     DownloadStatus,
+    ExpectedFile,
     get_client,
     list_configured_clients,
 )
@@ -34,7 +35,7 @@ from shelfmark.download.permissions_debug import log_path_permission_context
 from shelfmark.release_sources import DownloadHandler, HandoffResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from threading import Event
 
     from shelfmark.core.models import DownloadTask
@@ -249,6 +250,42 @@ def _completed_file_signature(
         return None
 
     return tuple(sorted(signature)) or None
+
+
+def _count_expected_files_present(path: Path, expected: Sequence[ExpectedFile]) -> int:
+    """How many of the client's files are at ``path`` with their final size.
+
+    ``path`` is the completed download: the torrent's top-level folder, or the file itself for a
+    single-file torrent. The client names files relative to its save directory, so they start
+    with that top-level folder, and the folder is tried with and without it.
+    """
+    try:
+        if path.is_file():
+            local = {path.name: path.stat().st_size}
+        elif path.is_dir():
+            local = {}
+            for candidate in path.rglob("*"):
+                try:
+                    if candidate.is_file():
+                        local[candidate.relative_to(path).as_posix()] = candidate.stat().st_size
+                except OSError:
+                    continue
+        else:
+            return 0
+    except OSError:
+        return 0
+
+    single_file = path.is_file()
+    present = 0
+    for item in expected:
+        names = [item.name]
+        if "/" in item.name:
+            names.append(item.name.split("/", 1)[1])
+            if single_file:
+                names.append(item.name.rsplit("/", 1)[1])
+        if any(local.get(name) == item.size for name in names):
+            present += 1
+    return present
 
 
 class ExternalClientHandler(DownloadHandler, ABC):
@@ -864,9 +901,16 @@ class ExternalClientHandler(DownloadHandler, ABC):
         status_callback: Callable[[str, str | None], None],
         content_type: str | None = None,
     ) -> tuple[Path | None, str | None]:
-        """Wait for supported files to appear and stop changing on disk."""
+        """Wait for supported files to appear and stop changing on disk.
+
+        When the client can list the files of the download, every one of them must also be
+        present at its final size. A sync that copies the files in batches can pause long
+        enough for two samples to match while most of the files are still missing.
+        """
         last_error: str | None = None
         previous_signature: tuple[tuple[str, int, int], ...] | None = None
+        expected_files: list[ExpectedFile] | None = None
+        expected_files_asked = False
         retry_interval = self._completed_path_retry_interval()
         timeout_seconds = self._completed_path_timeout_seconds()
         if retry_interval <= 0 or timeout_seconds <= 0:
@@ -885,18 +929,38 @@ class ExternalClientHandler(DownloadHandler, ABC):
                 log_details=log_details,
             )
             if result.path:
-                if run_blocking_io(result.path.is_file):
-                    return result.path, None
-                signature = run_blocking_io(
-                    _completed_file_signature,
-                    result.path,
-                    content_type,
+                if not expected_files_asked:
+                    expected_files = self._expected_files(client, download_id)
+                    expected_files_asked = True
+                files_on_disk = (
+                    run_blocking_io(_count_expected_files_present, result.path, expected_files)
+                    if expected_files
+                    else None
                 )
-                # With no wait configured there is no second sample to compare against.
-                if signature is not None and (signature == previous_signature or max_attempts == 1):
-                    return result.path, None
-                previous_signature = signature
-                last_error = "Completed download has no stable supported files yet."
+                if (
+                    expected_files
+                    and files_on_disk is not None
+                    and files_on_disk < len(expected_files)
+                ):
+                    last_error = (
+                        "Completed download is not fully on disk yet "
+                        f"({files_on_disk} of {len(expected_files)} files)."
+                    )
+                else:
+                    if run_blocking_io(result.path.is_file):
+                        return result.path, None
+                    signature = run_blocking_io(
+                        _completed_file_signature,
+                        result.path,
+                        content_type,
+                    )
+                    # With no wait configured there is no second sample to compare against.
+                    if signature is not None and (
+                        signature == previous_signature or max_attempts == 1
+                    ):
+                        return result.path, None
+                    previous_signature = signature
+                    last_error = "Completed download has no stable supported files yet."
                 if attempt < max_attempts:
                     status_callback("locating", "Waiting for completed files...")
                     logger.debug(
@@ -942,6 +1006,18 @@ class ExternalClientHandler(DownloadHandler, ABC):
                     time.sleep(retry_interval)
 
         return None, last_error
+
+    @staticmethod
+    def _expected_files(client: DownloadClient, download_id: str) -> list[ExpectedFile] | None:
+        """The client's list of files for this download, or None when it has none to give."""
+        try:
+            expected = client.get_expected_files(download_id)
+        except _CLIENT_CLEANUP_ERRORS:
+            logger.debug("Could not read the file list of %s from %s", download_id, client.name)
+            return None
+        if not isinstance(expected, list) or not expected:
+            return None
+        return [item for item in expected if isinstance(item, ExpectedFile)] or None
 
     @staticmethod
     def _seed_note(seeds: int | None, give_up_in: float | None) -> str:

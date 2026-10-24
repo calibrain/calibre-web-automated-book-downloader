@@ -16,6 +16,7 @@ from shelfmark.core.logger import setup_logger
 from shelfmark.download.clients import (
     DownloadClient,
     DownloadStatus,
+    ExpectedFile,
     register_client,
 )
 from shelfmark.download.clients._coercion import (
@@ -800,6 +801,52 @@ class QBittorrentClient(DownloadClient):
             getattr(torrent, "name", ""),
         )
 
+    def _get_with_auth(self, url: str, params: dict[str, str]) -> requests.Response:
+        """GET a Web API endpoint, signing in again once if the session was dropped."""
+        self._ensure_authenticated()
+        resp = self._client._session.get(url, params=params, timeout=10)
+        if resp.status_code == _HTTP_STATUS_FORBIDDEN and self._can_reauthenticate:
+            logger.debug("qBittorrent returned 403; re-authenticating and retrying")
+            self._ensure_authenticated()
+            resp = self._client._session.get(url, params=params, timeout=10)
+        return resp
+
+    def get_expected_files(self, download_id: str) -> list[ExpectedFile] | None:
+        """The files this torrent holds when finished, from `/api/v2/torrents/files`.
+
+        Files with priority 0 are not downloaded and BEP 47 padding files are not real, so
+        neither is expected. None when the client does not answer or lists nothing.
+        """
+        try:
+            resp = self._get_with_auth(
+                f"{self._base_url}/api/v2/torrents/files", {"hash": download_id}
+            )
+            if resp.status_code == _HTTP_STATUS_NOT_FOUND:
+                return None
+            resp.raise_for_status()
+            payload = resp.json()
+        except _QBITTORRENT_CLIENT_ERRORS as e:
+            self._log_error("get_expected_files", e, level="debug")
+            return None
+        if not isinstance(payload, list):
+            return None
+
+        expected: list[ExpectedFile] = []
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            size = entry.get("size")
+            if not isinstance(name, str) or not name or isinstance(size, bool):
+                continue
+            if not isinstance(size, int) or size <= 0 or entry.get("priority") == 0:
+                continue
+            normalized = name.replace("\\", "/")
+            if ".pad" in normalized.split("/")[:-1]:
+                continue
+            expected.append(ExpectedFile(normalized, size))
+        return expected or None
+
     def _derive_download_path_from_files(
         self, download_id: str
     ) -> str | _UnsafeQBittorrentPath | None:
@@ -810,20 +857,11 @@ class QBittorrentClient(DownloadClient):
         """
         import os
 
-        def get_with_auth(url: str, params: dict[str, str]) -> requests.Response:
-            self._ensure_authenticated()
-            resp = self._client._session.get(url, params=params, timeout=10)
-            if resp.status_code == _HTTP_STATUS_FORBIDDEN and self._can_reauthenticate:
-                logger.debug("qBittorrent returned 403; re-authenticating and retrying")
-                self._ensure_authenticated()
-                resp = self._client._session.get(url, params=params, timeout=10)
-            return resp
-
         try:
             properties_url = f"{self._base_url}/api/v2/torrents/properties"
             files_url = f"{self._base_url}/api/v2/torrents/files"
 
-            props_resp = get_with_auth(properties_url, {"hash": download_id})
+            props_resp = self._get_with_auth(properties_url, {"hash": download_id})
             if props_resp.status_code == _HTTP_STATUS_NOT_FOUND:
                 return None
             props_resp.raise_for_status()
@@ -833,7 +871,7 @@ class QBittorrentClient(DownloadClient):
             if not isinstance(save_path, str) or not save_path:
                 return None
 
-            files_resp = get_with_auth(files_url, {"hash": download_id})
+            files_resp = self._get_with_auth(files_url, {"hash": download_id})
             if files_resp.status_code == _HTTP_STATUS_NOT_FOUND:
                 return None
             files_resp.raise_for_status()
