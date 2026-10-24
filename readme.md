@@ -288,6 +288,8 @@ healthcheck:
   retries: 3
 ```
 
+The endpoint answers 503 when the download coordinator, the part that picks queued downloads up, is not running. Without it every download stays queued, so a container that reports unhealthy for this reason needs a restart.
+
 ## Logging
 
 Logs are available via:
